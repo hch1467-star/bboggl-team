@@ -1,0 +1,96 @@
+/* ============================================
+   로그인 / 회원가입 페이지
+   ============================================ */
+
+.login-page{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+
+.login-card{
+  width:100%;
+  max-width:380px;
+  padding:32px 28px;
+  text-align:center;
+}
+
+.login-logo{
+  font-size:26px;
+  font-weight:800;
+  margin-bottom:6px;
+}
+
+.login-sub{
+  font-size:13px;
+  color:var(--sub);
+  margin-bottom:24px;
+}
+
+.login-tabs{
+  display:flex;
+  background:var(--bg);
+  border-radius:999px;
+  padding:4px;
+  margin-bottom:20px;
+}
+
+.login-tab{
+  flex:1;
+  border:none;
+  background:none;
+  padding:8px 0;
+  border-radius:999px;
+  font-weight:700;
+  font-size:13px;
+  color:var(--sub);
+  cursor:pointer;
+  font-family:inherit;
+  transition:.15s;
+}
+.login-tab.active{
+  background:var(--surface);
+  color:var(--text);
+  box-shadow:var(--shadow-card);
+}
+
+#auth-form{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  text-align:left;
+}
+
+.login-label{
+  font-size:12px;
+  font-weight:700;
+  color:var(--sub);
+  margin-top:10px;
+}
+
+.login-input{
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px 14px;
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text);
+  outline:none;
+}
+.login-input:focus{ border-color:var(--primary); }
+
+.login-message{
+  min-height:18px;
+  font-size:12px;
+  color:var(--ok);
+  margin-top:8px;
+}
+.login-message.error{ color:var(--wt); }
+
+.login-submit{
+  width:100%;
+  justify-content:center;
+  margin-top:14px;
+}

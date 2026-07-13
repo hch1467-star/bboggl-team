@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마이페이지 · Bboggl</title>
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/mypage.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-logo"><span class="grad-text">Bboggl</span></div>
+
+  <nav class="header-nav">
+    <a href="index.html" class="nav-link">캘린더</a>
+    <a href="mypage.html" class="nav-link active">마이페이지</a>
+  </nav>
+
+  <div class="header-right">
+    <div class="header-search-wrap">
+      <div class="header-search">
+        <span id="search-icon"></span>
+        <input type="text" placeholder="고객명 또는 편명 검색" disabled>
+      </div>
+    </div>
+    <span class="current-user-email" id="current-user-email"></span>
+    <button class="btn btn-outline btn-sm" id="logout-btn" type="button">로그아웃</button>
+  </div>
+</header>
+
+<div class="loading-overlay" id="loading-overlay">일정을 불러오는 중...</div>
+
+<main class="app-main mypage-main">
+
+  <section class="card profile-card">
+    <div class="profile-avatar">뽀</div>
+    <div class="profile-info">
+      <h2 id="profile-name">내 계정</h2>
+      <p class="profile-sub" id="profile-email">-</p>
+    </div>
+  </section>
+
+  <section class="stat-grid">
+    <div class="card stat-card">
+      <span class="stat-label">등록 고객 수</span>
+      <span class="stat-value" id="stat-customers">0</span>
+    </div>
+    <div class="card stat-card">
+      <span class="stat-label">등록된 항공편 일정</span>
+      <span class="stat-value" id="stat-events">0</span>
+    </div>
+    <div class="card stat-card">
+      <span class="stat-label">확약(OK) 일정</span>
+      <span class="stat-value" id="stat-ok">0</span>
+    </div>
+  </section>
+
+  <section class="card activity-card">
+    <h3>최근 활동 내역</h3>
+    <div id="activity-list" class="activity-list"></div>
+  </section>
+
+</main>
+
+<nav class="bottom-tabbar">
+  <a href="index.html">캘린더</a>
+  <a href="mypage.html" class="active">마이페이지</a>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/parseSchedule.js"></script>
+<script src="js/data.js"></script>
+<script src="js/mypage.js"></script>
+<script>
+  document.getElementById("search-icon").innerHTML = Icons.search;
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+/* ============================================
+   마이페이지 — 로그인한 사용자 정보·통계
+   ============================================ */
+
+.mypage-main{
+  max-width:760px;
+}
+
+.profile-card{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:20px;
+  margin-bottom:16px;
+}
+
+.profile-avatar{
+  width:56px;
+  height:56px;
+  border-radius:999px;
+  background:var(--grad);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:800;
+  font-size:18px;
+  flex-shrink:0;
+}
+
+.profile-info{
+  flex:1;
+}
+.profile-info h2{
+  font-size:17px;
+  margin-bottom:2px;
+}
+.profile-sub{
+  font-size:13px;
+  color:var(--sub);
+}
+
+.stat-grid{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:12px;
+  margin-bottom:16px;
+}
+
+.stat-card{
+  padding:16px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.stat-label{
+  font-size:12px;
+  color:var(--sub);
+  font-weight:700;
+}
+.stat-value{
+  font-size:24px;
+  font-weight:800;
+}
+
+.activity-card{
+  padding:20px;
+}
+.activity-card h3{
+  font-size:15px;
+  margin-bottom:12px;
+}
+
+.activity-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.activity-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 12px;
+  border-radius:10px;
+  background:var(--bg);
+  font-size:13px;
+}
+.activity-row .activity-name{font-weight:700}
+.activity-row .activity-meta{color:var(--sub); font-size:12px}
+
+@media (max-width: 600px){
+  .stat-grid{grid-template-columns:1fr}
+}

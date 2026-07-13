@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bboggl · VIP 고객 일정 달력</title>
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/calendar.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-logo"><span class="grad-text">Bboggl</span></div>
+
+  <nav class="header-nav">
+    <a href="index.html" class="nav-link active">캘린더</a>
+    <a href="mypage.html" class="nav-link">마이페이지</a>
+  </nav>
+
+  <div class="header-right">
+    <div class="header-search-wrap">
+      <div class="header-search">
+        <span aria-hidden="true"></span>
+        <span id="search-icon"></span>
+        <input id="search-input" type="text" placeholder="고객명 또는 편명 검색">
+      </div>
+      <div id="search-results" class="search-results hidden"></div>
+    </div>
+    <span class="current-user-email" id="current-user-email"></span>
+    <button class="btn btn-outline btn-sm" id="logout-btn" type="button">로그아웃</button>
+  </div>
+</header>
+
+<div class="loading-overlay" id="loading-overlay">일정을 불러오는 중...</div>
+
+<main class="app-main">
+  <div class="calendar-page">
+    <section class="card calendar-card">
+      <div class="calendar-toolbar">
+        <h2 class="month-label" id="month-label">2026년 7월</h2>
+        <div class="month-nav">
+          <button id="prev-month-btn" aria-label="이전 달"></button>
+          <button id="next-month-btn" aria-label="다음 달"></button>
+        </div>
+      </div>
+      <div class="calendar-legend">
+        <button class="legend-item legend-btn active" type="button" data-direction="">
+          <span class="legend-dot legend-dot-all"></span>전체
+        </button>
+        <button class="legend-item legend-btn" type="button" data-direction="입국">
+          <span class="legend-dot legend-dot-arrival"></span>입국편만
+        </button>
+        <button class="legend-item legend-btn" type="button" data-direction="출국">
+          <span class="legend-dot legend-dot-departure"></span>출국편만
+        </button>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+    </section>
+
+    <aside class="card detail-panel">
+      <h3 class="detail-panel-title" id="detail-panel-title">방문 일정</h3>
+      <div id="detail-panel-body"></div>
+    </aside>
+  </div>
+</main>
+
+<nav class="bottom-tabbar">
+  <a href="index.html" class="active">캘린더</a>
+  <a href="mypage.html">마이페이지</a>
+</nav>
+
+<button class="fab" id="fab-add" aria-label="일정 추가"></button>
+
+<div class="modal-overlay hidden" id="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>카톡 일정 붙여넣기</h3>
+      <button class="modal-close" id="modal-close-btn" aria-label="닫기"></button>
+    </div>
+
+    <textarea
+      id="modal-textarea"
+      class="modal-textarea"
+      placeholder="예)&#10;SMITH/JOHN MR&#10;7/24 KE724 1235-1425 COK&#10;7/26 KE725 1505-1705 COK (창가석)&#10;&#10;일행이 여러 명이면 이름을 여러 줄로 이어 적어주세요:&#10;BROWN/DAVID MR&#10;BROWN/EMILY MS&#10;7/18 OZ1035 2005-2225 YOK"
+    ></textarea>
+    <p class="modal-hint">
+      맨 위에 @담당자이름을 적으면 담당자로 인식돼요 (선택) · 그다음: 고객명(+호칭) — 일행이 있으면 여러 줄로 이어서 작성 · 이후: 월/일 편명 출발-도착 [C/Y][OK/WT] (메모)<br>
+      C=비즈니스, Y=이코노미 · OK=확약, WT=취소대기 · 대표 고객 1명 기준으로 캘린더에 표시되고, 상세보기에서 일행 전체가 보여요 · "&gt;"로 시작하는 인용/답장 줄은 자동으로 무시돼요
+    </p>
+
+    <div class="modal-preview">
+      <div class="modal-preview-title">미리보기</div>
+      <div id="modal-preview-body"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="modal-close-btn-2" onclick="ScheduleModal.close()">취소</button>
+      <button class="btn btn-gradient" id="modal-add-btn" disabled>캘린더에 추가</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/parseSchedule.js"></script>
+<script src="js/data.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/search.js"></script>
+<script src="js/modal.js"></script>
+<script src="js/main.js"></script>
+<script>
+  document.getElementById("prev-month-btn").innerHTML = Icons.chevronLeft;
+  document.getElementById("next-month-btn").innerHTML = Icons.chevronRight;
+  document.getElementById("search-icon").innerHTML = Icons.search;
+  document.getElementById("fab-add").innerHTML = Icons.plus;
+  document.getElementById("modal-close-btn").innerHTML = Icons.close;
+</script>
+</body>
+</html>

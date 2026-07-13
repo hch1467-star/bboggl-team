@@ -1,0 +1,162 @@
+/* ============================================
+   디자인 시스템 — Bboggl (VIP 고객 일정 달력)
+   색 조합: 인스타 그라데이션 / 버튼: 둥근 알약 / 폰트: Inter / 아이콘: 라인
+   ============================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap');
+
+:root{
+  /* 색 조합: 인스타 · 그라데이션 */
+  --primary:#0095F6;
+  --grad:linear-gradient(45deg,#F58529,#DD2A7B,#8134AF,#515BD4);
+  --text:#262626;
+  --sub:#8E8E8E;
+  --bg:#FAFAFA;
+  --surface:#FFFFFF;
+  --border:#DBDBDB;
+
+  /* 상태 색상 (OK / WT) */
+  --ok:#00A86B;
+  --ok-bg:#E6F8F0;
+  --wt:#E1306C;
+  --wt-bg:#FDEAF1;
+
+  /* 레이아웃 */
+  --header-height:64px;
+  --radius-card:16px;
+  --shadow-card:0 2px 12px rgba(38,38,38,0.06);
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font-family:'Inter',sans-serif;
+  letter-spacing:-0.01em;
+  color:var(--text);
+  background:var(--bg);
+}
+
+h1,h2,h3{font-weight:800; margin:0}
+h4,h5,h6{font-weight:700; margin:0}
+p{margin:0}
+
+/* 버튼 모양: 둥근 알약 */
+.btn{
+  border-radius:999px;
+  padding:12px 22px;
+  font-weight:700;
+  background:var(--primary);
+  color:#fff;
+  border:none;
+  cursor:pointer;
+  transition:.15s;
+  font-family:inherit;
+  font-size:14px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.btn:hover{filter:brightness(.95)}
+.btn:active{filter:brightness(.9)}
+
+.btn-outline{
+  background:var(--surface);
+  color:var(--text);
+  border:1px solid var(--border);
+}
+.btn-outline:hover{background:#F5F5F5; filter:none}
+
+.btn-gradient{
+  background:var(--grad);
+  color:#fff;
+}
+
+.btn-sm{padding:8px 16px; font-size:13px}
+
+/* 아이콘: 라인 (외곽선) */
+.icon{
+  width:24px;
+  height:24px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.icon-sm{width:18px; height:18px}
+
+/* 공용 카드 */
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-card);
+  box-shadow:var(--shadow-card);
+}
+
+/* 그라데이션 텍스트(강조 요소 전용) */
+.grad-text{
+  background:var(--grad);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+
+/* 뱃지: 확약(OK) / 대기(WT) */
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:3px 10px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:0;
+}
+.badge-ok{background:var(--ok-bg); color:var(--ok)}
+.badge-wt{background:var(--wt-bg); color:var(--wt)}
+
+/* 뱃지: 좌석 클래스 */
+.badge-class{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  background:#F0F0F0;
+  color:var(--sub);
+}
+
+/* 뱃지: 담당자 */
+.badge-assignee{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+  background:#E7F5FF;
+  color:var(--primary);
+}
+
+/* 뱃지: 입국편 / 출국편 */
+.badge-direction{
+  display:inline-flex;
+  align-items:center;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:700;
+}
+.badge-arrival{background:#E7F5FF; color:var(--primary)}
+.badge-departure{background:#FFF1E0; color:#C2661C}
+.badge-direction-conflict{outline:2px solid var(--wt); outline-offset:1px; cursor:help}
+
+.sr-only{
+  position:absolute;
+  width:1px;height:1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+}

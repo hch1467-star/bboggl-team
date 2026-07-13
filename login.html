@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>로그인 · Bboggl</title>
+<link rel="stylesheet" href="css/design-system.css">
+<link rel="stylesheet" href="css/login.css">
+</head>
+<body>
+
+<main class="login-page">
+  <div class="card login-card">
+    <div class="login-logo"><span class="grad-text">Bboggl</span></div>
+    <p class="login-sub">사무실 팀원 전용 · 각자 담당 고객 일정만 보여요</p>
+
+    <div class="login-tabs">
+      <button class="login-tab active" id="tab-login" type="button">로그인</button>
+      <button class="login-tab" id="tab-signup" type="button">회원가입</button>
+    </div>
+
+    <form id="auth-form">
+      <label class="login-label" for="email-input">이메일</label>
+      <input class="login-input" id="email-input" type="email" required autocomplete="email" placeholder="you@example.com">
+
+      <label class="login-label" for="password-input">비밀번호</label>
+      <input class="login-input" id="password-input" type="password" required autocomplete="current-password" minlength="6" placeholder="6자 이상">
+
+      <div id="auth-message" class="login-message"></div>
+
+      <button class="btn btn-gradient login-submit" id="submit-btn" type="submit">로그인</button>
+    </form>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script>
+  let mode = "login"; // "login" | "signup"
+
+  const tabLogin = document.getElementById("tab-login");
+  const tabSignup = document.getElementById("tab-signup");
+  const submitBtn = document.getElementById("submit-btn");
+  const messageEl = document.getElementById("auth-message");
+  const form = document.getElementById("auth-form");
+
+  function setMode(newMode) {
+    mode = newMode;
+    tabLogin.classList.toggle("active", mode === "login");
+    tabSignup.classList.toggle("active", mode === "signup");
+    submitBtn.textContent = mode === "login" ? "로그인" : "회원가입";
+  }
+
+  tabLogin.addEventListener("click", () => {
+    setMode("login");
+    messageEl.textContent = "";
+  });
+  tabSignup.addEventListener("click", () => {
+    setMode("signup");
+    messageEl.textContent = "";
+  });
+
+  // 이미 로그인되어 있으면 바로 메인으로
+  (async () => {
+    if (!supabaseClient) {
+      messageEl.textContent = "Supabase 연동이 아직 설정되지 않았어요 (js/supabaseClient.js 확인).";
+      messageEl.classList.add("error");
+      return;
+    }
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) window.location.href = "index.html";
+  })();
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!supabaseClient) return;
+
+    const email = document.getElementById("email-input").value.trim();
+    const password = document.getElementById("password-input").value;
+
+    submitBtn.disabled = true;
+    messageEl.textContent = "";
+    messageEl.classList.remove("error");
+
+    try {
+      if (mode === "signup") {
+        const { error } = await supabaseClient.auth.signUp({ email, password });
+        if (error) throw error;
+        messageEl.textContent = "가입되었어요. 바로 로그인해주세요.";
+        setMode("login");
+      } else {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        window.location.href = "index.html";
+      }
+    } catch (err) {
+      messageEl.textContent = err.message || "문제가 발생했어요. 다시 시도해주세요.";
+      messageEl.classList.add("error");
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
