@@ -108,10 +108,23 @@ const CalendarView = {
       // 같은 일행(그룹)의 항공편이 하루에 여러 건이어도 캘린더에는 그룹당 칩 1개만
       const dayGroups = uniqueGroupsForDate(visiblePairs, dateStr);
 
+      const dayOfWeek = cellDate.getDay(); // 0=일 ... 6=토
+      const holidayName = getJapanHolidays(cellDate.getFullYear()).get(dateStr);
+
       const numberEl = document.createElement("div");
       numberEl.className = "day-number";
+      if (dayOfWeek === 0 || holidayName) numberEl.classList.add("text-sunday");
+      else if (dayOfWeek === 6) numberEl.classList.add("text-saturday");
       numberEl.textContent = cellDate.getDate();
       cell.appendChild(numberEl);
+
+      if (holidayName) {
+        const holidayEl = document.createElement("div");
+        holidayEl.className = "day-holiday-label";
+        holidayEl.textContent = holidayName;
+        holidayEl.title = `일본 공휴일: ${holidayName}`;
+        cell.appendChild(holidayEl);
+      }
 
       const eventsWrap = document.createElement("div");
       eventsWrap.className = "day-events";

@@ -113,6 +113,18 @@
   font-size:13px;
   font-weight:700;
 }
+.day-number.text-sunday{ color:var(--wt); }
+.day-number.text-saturday{ color:var(--primary); }
+
+.day-holiday-label{
+  font-size:9px;
+  font-weight:700;
+  color:var(--wt);
+  line-height:1.2;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 
 .day-events{
   display:flex;
@@ -402,6 +414,9 @@
   }
   .day-number{
     font-size:12px;
+  }
+  .day-holiday-label{
+    display:none;
   }
   .day-events{
     flex-direction:row;
