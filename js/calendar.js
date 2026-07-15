@@ -222,6 +222,7 @@ const CalendarView = {
 
       const item = document.createElement("div");
       item.className = "detail-item";
+      item.style.borderLeft = `4px solid ${colorForGroup(group.id)}`;
 
       const primary = group.travelers[0];
       const showTravelerLabel = group.travelers.length > 1;
