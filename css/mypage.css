@@ -84,13 +84,65 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap:8px;
+  width:100%;
   padding:10px 12px;
+  border:none;
   border-radius:10px;
   background:var(--bg);
   font-size:13px;
+  font-family:inherit;
+  text-align:left;
+  cursor:pointer;
+  transition:.15s;
 }
+.activity-row:hover{background:#EFEFEF}
 .activity-row .activity-name{font-weight:700}
 .activity-row .activity-meta{color:var(--sub); font-size:12px}
+
+.activity-row-meta{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
+}
+.activity-chevron{
+  display:flex;
+  color:var(--sub);
+  flex-shrink:0;
+  transition:transform .15s;
+}
+.activity-row[aria-expanded="true"] .activity-chevron{
+  transform:rotate(90deg);
+}
+
+.activity-item{
+  display:flex;
+  flex-direction:column;
+}
+
+.activity-detail{
+  padding:12px 14px;
+  border-radius:0 0 10px 10px;
+  background:var(--bg);
+  flex-direction:column;
+  gap:8px;
+}
+.activity-detail:not([hidden]){
+  display:flex;
+}
+.activity-detail-row{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:13px;
+  color:var(--text);
+}
+.activity-detail-companions,
+.activity-detail-memo{
+  font-size:12px;
+  color:var(--sub);
+}
 
 @media (max-width: 600px){
   .stat-grid{grid-template-columns:1fr}
