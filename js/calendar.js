@@ -245,6 +245,9 @@ const CalendarView = {
           ${entries.map((entry) => renderEntryRowHtml(entry, showTravelerLabel, directionMap.get(entry))).join("")}
         </div>
         ${renderRosterHtml(group.travelers)}
+        <div class="group-memo-section">
+          <textarea class="group-memo-input" placeholder="메모 추가 (예: 공항 픽업 필요)">${escapeHtml(group.memo || "")}</textarea>
+        </div>
       `;
 
       const deleteBtn = item.querySelector(".delete-group-btn");
@@ -257,6 +260,17 @@ const CalendarView = {
           this.render();
         } catch (err) {
           alert("삭제하지 못했어요: " + (err.message || err));
+        }
+      });
+
+      const memoInput = item.querySelector(".group-memo-input");
+      memoInput.addEventListener("blur", async () => {
+        const newMemo = memoInput.value;
+        if (newMemo === (group.memo || "")) return;
+        try {
+          await Store.updateGroupMemo(group.id, newMemo);
+        } catch (err) {
+          alert("메모를 저장하지 못했어요: " + (err.message || err));
         }
       });
 

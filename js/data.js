@@ -68,6 +68,7 @@ const Store = {
       travelers: travelersByGroup.get(g.id) || [],
       entries: entriesByGroup.get(g.id) || [],
       assignee: g.assignee || "",
+      memo: g.memo || "",
     }));
   },
 
@@ -137,6 +138,7 @@ const Store = {
       travelers: insertedTravelers.map(toTraveler),
       entries: insertedEntries,
       assignee: groupRow.assignee || "",
+      memo: groupRow.memo || "",
     };
     this.groups.push(group);
     return { group, added: group.entries };
@@ -147,6 +149,14 @@ const Store = {
     const { error } = await supabaseClient.from("groups").delete().eq("id", groupId);
     if (error) throw error;
     this.groups = this.groups.filter((g) => g.id !== groupId);
+  },
+
+  // 예약(그룹)에 자유롭게 적는 메모 저장
+  async updateGroupMemo(groupId, memo) {
+    const { error } = await supabaseClient.from("groups").update({ memo }).eq("id", groupId);
+    if (error) throw error;
+    const group = this.groups.find((g) => g.id === groupId);
+    if (group) group.memo = memo;
   },
 
   // {group, entry} 쌍으로 평탄화한 목록 — 캘린더/검색에서 공통으로 사용
@@ -209,7 +219,8 @@ async function maybeImportLocalData() {
       })),
       assignee: g.assignee || "",
     };
-    await Store.addFromParsed(parsed);
+    const { group: importedGroup } = await Store.addFromParsed(parsed);
+    if (g.memo) await Store.updateGroupMemo(importedGroup.id, g.memo);
   }
 
   try {
