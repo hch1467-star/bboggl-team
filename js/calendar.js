@@ -4,6 +4,27 @@
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 예약(그룹)마다 고유한 색을 배정 — 같은 그룹은 항상 같은 색 (id를 해시해서 팔레트에서 선택)
+const STAY_COLOR_PALETTE = [
+  "#0095F6", // 파랑
+  "#8134AF", // 보라
+  "#C2185B", // 마젠타
+  "#E67E22", // 주황
+  "#00897B", // 청록
+  "#43A047", // 초록
+  "#5C6BC0", // 남색
+  "#8D6E63", // 브라운
+];
+
+function colorForGroup(groupId) {
+  const str = String(groupId);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return STAY_COLOR_PALETTE[hash % STAY_COLOR_PALETTE.length];
+}
+
 const CalendarView = {
   viewYear: new Date().getFullYear(),
   viewMonth: new Date().getMonth(),
@@ -149,6 +170,7 @@ const CalendarView = {
           const isEnd = dateStr === active.end;
           const bar = document.createElement("div");
           bar.className = "stay-bar";
+          bar.style.background = colorForGroup(group.id);
           if (isStart || dayOfWeek === 0) bar.classList.add("bar-round-left");
           if (isEnd || dayOfWeek === 6) bar.classList.add("bar-round-right");
           if (isStart || dayOfWeek === 0) bar.textContent = groupLabel(group);
