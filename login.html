@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>로그인 · Bboggl</title>
-<link rel="stylesheet" href="css/design-system.css?v=8">
-<link rel="stylesheet" href="css/login.css?v=8">
+<link rel="stylesheet" href="css/design-system.css?v=9">
+<link rel="stylesheet" href="css/login.css?v=9">
 </head>
 <body>
 
@@ -34,7 +34,8 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=8"></script>
+<script src="js/supabaseClient.js?v=9"></script>
+<script src="js/auth.js?v=9"></script>
 <script>
   let mode = "login"; // "login" | "signup"
 
@@ -68,7 +69,10 @@
       return;
     }
     const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session) window.location.href = "index.html";
+    if (session) {
+      const isAdmin = await checkIsAdmin(session.user.id);
+      window.location.href = isAdmin ? "admin.html" : "index.html";
+    }
   })();
 
   form.addEventListener("submit", async (e) => {
@@ -89,9 +93,10 @@
         messageEl.textContent = "가입되었어요. 바로 로그인해주세요.";
         setMode("login");
       } else {
-        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        window.location.href = "index.html";
+        const isAdmin = await checkIsAdmin(data.user.id);
+        window.location.href = isAdmin ? "admin.html" : "index.html";
       }
     } catch (err) {
       messageEl.textContent = err.message || "문제가 발생했어요. 다시 시도해주세요.";

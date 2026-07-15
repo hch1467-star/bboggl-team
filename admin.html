@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>관리자 · Bboggl</title>
+<link rel="stylesheet" href="css/design-system.css?v=9">
+<link rel="stylesheet" href="css/layout.css?v=9">
+<link rel="stylesheet" href="css/calendar.css?v=9">
+<link rel="stylesheet" href="css/admin.css?v=9">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-logo"><span class="grad-text">Bboggl</span></div>
+
+  <nav class="header-nav">
+    <span class="nav-link active">관리자 · 전체 조회</span>
+  </nav>
+
+  <div class="header-right">
+    <span class="current-user-email" id="current-user-email"></span>
+    <button class="btn btn-outline btn-sm" id="logout-btn" type="button">로그아웃</button>
+  </div>
+</header>
+
+<div class="loading-overlay" id="loading-overlay">확인하는 중...</div>
+
+<main class="app-main">
+
+  <section class="card employee-picker-card">
+    <h3>직원 선택 <span class="employee-picker-hint">(중복 선택 가능 — 체크한 직원들의 일정이 아래에 함께 표시돼요)</span></h3>
+    <div id="employee-checkbox-list" class="employee-checkbox-list"></div>
+  </section>
+
+  <div class="calendar-page">
+    <section class="card calendar-card">
+      <div class="calendar-toolbar">
+        <h2 class="month-label" id="month-label">2026년 7월</h2>
+        <div class="month-nav">
+          <button id="prev-month-btn" aria-label="이전 달"></button>
+          <button id="next-month-btn" aria-label="다음 달"></button>
+        </div>
+      </div>
+      <div class="calendar-legend">
+        <button class="legend-item legend-btn active" type="button" data-direction="">
+          <span class="legend-dot legend-dot-all"></span>전체
+        </button>
+        <button class="legend-item legend-btn" type="button" data-direction="입국">
+          <span class="legend-dot legend-dot-arrival"></span>입국편만
+        </button>
+        <button class="legend-item legend-btn" type="button" data-direction="출국">
+          <span class="legend-dot legend-dot-departure"></span>출국편만
+        </button>
+      </div>
+      <div class="calendar-grid" id="calendar-grid"></div>
+    </section>
+
+    <aside class="card detail-panel">
+      <h3 class="detail-panel-title" id="detail-panel-title">방문 일정</h3>
+      <div id="detail-panel-body"></div>
+    </aside>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js?v=9"></script>
+<script src="js/auth.js?v=9"></script>
+<script src="js/icons.js?v=9"></script>
+<script src="js/parseSchedule.js?v=9"></script>
+<script src="js/flightDirections.js?v=9"></script>
+<script src="js/japanHolidays.js?v=9"></script>
+<script src="js/data.js?v=9"></script>
+<script src="js/calendar.js?v=9"></script>
+<script src="js/admin.js?v=9"></script>
+<script>
+  document.getElementById("prev-month-btn").innerHTML = Icons.chevronLeft;
+  document.getElementById("next-month-btn").innerHTML = Icons.chevronRight;
+</script>
+</body>
+</html>

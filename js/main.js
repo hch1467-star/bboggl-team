@@ -6,6 +6,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   const session = await requireSession();
   if (!session) return; // login.html로 이동 중
 
+  if (await checkIsAdmin(CurrentUser.id)) {
+    window.location.href = "admin.html";
+    return;
+  }
+
   const loadingEl = document.getElementById("loading-overlay");
 
   try {

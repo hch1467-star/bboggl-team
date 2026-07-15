@@ -181,6 +181,54 @@ const Store = {
   },
 };
 
+// 관리자 전용 — 선택한 여러 사용자의 데이터를 한 번에 불러와 그룹마다 소유자 이메일을 붙여서 반환
+// (RLS의 is_admin() 예외 덕분에 관리자 계정은 본인 것이 아닌 user_id도 조회 가능)
+async function loadGroupsForUsers(userIds, emailById) {
+  if (userIds.length === 0) return [];
+
+  const [groupsRes, travelersRes, entriesRes, entryTravelersRes] = await Promise.all([
+    supabaseClient.from("groups").select("*").in("user_id", userIds).order("created_at"),
+    supabaseClient.from("travelers").select("*").in("user_id", userIds).order("sort_order"),
+    supabaseClient.from("entries").select("*").in("user_id", userIds),
+    supabaseClient.from("entry_travelers").select("*").in("user_id", userIds),
+  ]);
+
+  for (const res of [groupsRes, travelersRes, entriesRes, entryTravelersRes]) {
+    if (res.error) throw res.error;
+  }
+
+  const travelerById = new Map(travelersRes.data.map((t) => [t.id, toTraveler(t)]));
+
+  const travelersByGroup = new Map();
+  travelersRes.data.forEach((t) => {
+    if (!travelersByGroup.has(t.group_id)) travelersByGroup.set(t.group_id, []);
+    travelersByGroup.get(t.group_id).push(travelerById.get(t.id));
+  });
+
+  const travelersByEntry = new Map();
+  entryTravelersRes.data.forEach((et) => {
+    if (!travelersByEntry.has(et.entry_id)) travelersByEntry.set(et.entry_id, []);
+    const traveler = travelerById.get(et.traveler_id);
+    if (traveler) travelersByEntry.get(et.entry_id).push(traveler);
+  });
+
+  const entriesByGroup = new Map();
+  entriesRes.data.forEach((e) => {
+    const entry = toEntry(e, travelersByEntry.get(e.id));
+    if (!entriesByGroup.has(e.group_id)) entriesByGroup.set(e.group_id, []);
+    entriesByGroup.get(e.group_id).push(entry);
+  });
+
+  return groupsRes.data.map((g) => ({
+    id: g.id,
+    travelers: travelersByGroup.get(g.id) || [],
+    entries: entriesByGroup.get(g.id) || [],
+    assignee: g.assignee || "",
+    memo: g.memo || "",
+    ownerEmail: emailById.get(g.user_id) || "",
+  }));
+}
+
 // 예전 개인용 버전에서 쓰던 localStorage에 데이터가 남아있으면(같은 브라우저 출처인 경우) 계정으로 옮길지 물어봄
 async function maybeImportLocalData() {
   let raw;

@@ -24,6 +24,15 @@ async function requireSession() {
   return session;
 }
 
+async function checkIsAdmin(userId) {
+  const { data, error } = await supabaseClient.from("profiles").select("is_admin").eq("id", userId).maybeSingle();
+  if (error) {
+    console.warn("관리자 여부를 확인하지 못했어요:", error);
+    return false;
+  }
+  return !!(data && data.is_admin);
+}
+
 async function logout() {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();

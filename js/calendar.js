@@ -233,6 +233,18 @@ const CalendarView = {
       const showTravelerLabel = group.travelers.length > 1;
       // 입국/출국 판단은 이 그룹의 전체 항공편(다른 날짜 포함)을 기준으로 해야 정확함
       const directionMap = classifyDirections(group.entries);
+      const readOnly = !!Store.readOnly; // 관리자 화면(admin.html)에서는 조회만 가능, 수정/삭제 UI 자체를 숨김
+
+      const ownerBadge = group.ownerEmail
+        ? `<span class="badge-assignee">담당자 ${escapeHtml(group.ownerEmail)}</span>`
+        : "";
+      const memoSectionHtml = readOnly
+        ? group.memo
+          ? `<div class="group-memo-section"><div class="detail-memo">메모: ${escapeHtml(group.memo)}</div></div>`
+          : ""
+        : `<div class="group-memo-section">
+             <textarea class="group-memo-input" placeholder="메모 추가 (예: 공항 픽업 필요)">${escapeHtml(group.memo || "")}</textarea>
+           </div>`;
 
       item.innerHTML = `
         <div class="detail-item-header">
@@ -241,43 +253,44 @@ const CalendarView = {
             <span class="detail-customer-title">${escapeHtml(primary.title || "")}</span>
           </span>
           <span class="header-badges">
+            ${ownerBadge}
             ${group.assignee ? `<span class="badge-assignee">담당 ${escapeHtml(group.assignee)}</span>` : ""}
             ${group.travelers.length > 1 ? `<span class="badge-class">일행 ${group.travelers.length}명</span>` : ""}
-            <button class="delete-group-btn" type="button" aria-label="일정 삭제" title="일정 삭제">${Icons.trash}</button>
+            ${readOnly ? "" : `<button class="delete-group-btn" type="button" aria-label="일정 삭제" title="일정 삭제">${Icons.trash}</button>`}
           </span>
         </div>
         <div class="entry-list">
           ${entries.map((entry) => renderEntryRowHtml(entry, showTravelerLabel, directionMap.get(entry))).join("")}
         </div>
         ${renderRosterHtml(group.travelers)}
-        <div class="group-memo-section">
-          <textarea class="group-memo-input" placeholder="메모 추가 (예: 공항 픽업 필요)">${escapeHtml(group.memo || "")}</textarea>
-        </div>
+        ${memoSectionHtml}
       `;
 
-      const deleteBtn = item.querySelector(".delete-group-btn");
-      deleteBtn.addEventListener("click", async () => {
-        const label = groupLabel(group);
-        const ok = confirm(`${label} 일정을 삭제할까요?\n이 일행의 모든 항공편 일정이 삭제되고, 되돌릴 수 없어요.`);
-        if (!ok) return;
-        try {
-          await Store.removeGroup(group.id);
-          this.render();
-        } catch (err) {
-          alert("삭제하지 못했어요: " + (err.message || err));
-        }
-      });
+      if (!readOnly) {
+        const deleteBtn = item.querySelector(".delete-group-btn");
+        deleteBtn.addEventListener("click", async () => {
+          const label = groupLabel(group);
+          const ok = confirm(`${label} 일정을 삭제할까요?\n이 일행의 모든 항공편 일정이 삭제되고, 되돌릴 수 없어요.`);
+          if (!ok) return;
+          try {
+            await Store.removeGroup(group.id);
+            this.render();
+          } catch (err) {
+            alert("삭제하지 못했어요: " + (err.message || err));
+          }
+        });
 
-      const memoInput = item.querySelector(".group-memo-input");
-      memoInput.addEventListener("blur", async () => {
-        const newMemo = memoInput.value;
-        if (newMemo === (group.memo || "")) return;
-        try {
-          await Store.updateGroupMemo(group.id, newMemo);
-        } catch (err) {
-          alert("메모를 저장하지 못했어요: " + (err.message || err));
-        }
-      });
+        const memoInput = item.querySelector(".group-memo-input");
+        memoInput.addEventListener("blur", async () => {
+          const newMemo = memoInput.value;
+          if (newMemo === (group.memo || "")) return;
+          try {
+            await Store.updateGroupMemo(group.id, newMemo);
+          } catch (err) {
+            alert("메모를 저장하지 못했어요: " + (err.message || err));
+          }
+        });
+      }
 
       panel.appendChild(item);
     });

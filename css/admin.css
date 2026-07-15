@@ -1,0 +1,46 @@
+/* ============================================
+   관리자 화면 — 직원 선택 체크박스 목록
+   ============================================ */
+
+.employee-picker-card{
+  padding:20px;
+  margin-bottom:20px;
+}
+.employee-picker-card h3{
+  font-size:15px;
+  margin-bottom:12px;
+}
+.employee-picker-hint{
+  font-size:12px;
+  font-weight:500;
+  color:var(--sub);
+}
+
+.employee-checkbox-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.employee-checkbox-item{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:8px 14px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  font-size:13px;
+  cursor:pointer;
+  transition:.15s;
+}
+.employee-checkbox-item:hover{background:#F5F5F5}
+.employee-checkbox-item:has(.employee-checkbox:checked){
+  background:#E7F5FF;
+  border-color:var(--primary);
+  color:var(--primary);
+  font-weight:700;
+}
+
+.employee-checkbox{
+  cursor:pointer;
+}
