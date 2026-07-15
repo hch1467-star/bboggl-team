@@ -27,6 +27,7 @@ function toTraveler(row) {
 
 const Store = {
   groups: [],
+  events: [], // 직원 전체가 공통으로 보는 이벤트(주말 행사 등) — user_id로 분리하지 않음
 
   // 로그인 직후 이 사용자의 데이터를 전부 불러와 메모리에 재구성
   async init(userId) {
@@ -157,6 +158,31 @@ const Store = {
     if (error) throw error;
     const group = this.groups.find((g) => g.id === groupId);
     if (group) group.memo = memo;
+  },
+
+  // 이벤트(주말 행사 등) — 직원 전체 공통, 매달 수동으로 등록
+  async loadEvents() {
+    const { data, error } = await supabaseClient.from("events").select("*").order("date");
+    if (error) throw error;
+    this.events = data.map((e) => ({ id: e.id, date: e.date, title: e.title, memo: e.memo || "" }));
+  },
+
+  async addEvent({ date, title, memo }) {
+    const { data, error } = await supabaseClient
+      .from("events")
+      .insert({ date, title, memo: memo || "" })
+      .select()
+      .single();
+    if (error) throw error;
+    const event = { id: data.id, date: data.date, title: data.title, memo: data.memo || "" };
+    this.events.push(event);
+    return event;
+  },
+
+  async removeEvent(eventId) {
+    const { error } = await supabaseClient.from("events").delete().eq("id", eventId);
+    if (error) throw error;
+    this.events = this.events.filter((e) => e.id !== eventId);
   },
 
   // {group, entry} 쌍으로 평탄화한 목록 — 캘린더/검색에서 공통으로 사용

@@ -20,10 +20,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     alert("일정을 불러오지 못했어요: " + (err.message || err));
   }
 
+  try {
+    await Store.loadEvents();
+  } catch (err) {
+    console.warn("이벤트를 불러오지 못했어요:", err);
+  }
+
   if (loadingEl) loadingEl.remove();
 
   CalendarView.init();
   SearchBox.init();
   ScheduleModal.init();
+  EventModal.init();
   wireLogoutButton();
 });

@@ -25,8 +25,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     alert("직원 목록을 불러오지 못했어요: " + (err.message || err));
   }
 
+  try {
+    await Store.loadEvents();
+  } catch (err) {
+    console.warn("이벤트를 불러오지 못했어요:", err);
+  }
+
   if (loadingEl) loadingEl.remove();
   wireLogoutButton();
+  EventModal.init();
 
   const emailById = new Map(profiles.map((p) => [p.id, p.email]));
   const listEl = document.getElementById("employee-checkbox-list");

@@ -72,6 +72,9 @@ const CalendarView = {
   },
 
   getVisiblePairs() {
+    // "이벤트" 탭은 고객 일정이 아니라 이벤트만 보여주는 탭이라 고객 일정 자체를 숨김
+    if (this.directionFilter === "이벤트") return [];
+
     let pairs = Store.flatEntries();
     if (this.searchFilterFn) pairs = this.searchFilterFn(pairs);
 
@@ -152,6 +155,17 @@ const CalendarView = {
         cell.appendChild(holidayEl);
       }
 
+      // 이벤트(주말 행사 등) — 공휴일 라벨처럼 항상 작게 표시 (직원 전체 공통 정보)
+      (Store.events || [])
+        .filter((ev) => ev.date === dateStr)
+        .forEach((ev) => {
+          const eventEl = document.createElement("div");
+          eventEl.className = "day-event-label";
+          eventEl.textContent = ev.title;
+          eventEl.title = ev.memo ? `${ev.title} — ${ev.memo}` : ev.title;
+          cell.appendChild(eventEl);
+        });
+
       // 체류 기간(입국~출국)을 이어지는 막대로 표시, 겹치면 레인으로 쌓임 (모바일은 얇은 선으로 축소 표시)
       const lanesWrap = document.createElement("div");
       lanesWrap.className = "day-lanes";
@@ -202,6 +216,13 @@ const CalendarView = {
     const panel = document.getElementById("detail-panel-body");
     const titleEl = document.getElementById("detail-panel-title");
     const [y, m, d] = this.selectedDate.split("-").map(Number);
+
+    if (this.directionFilter === "이벤트") {
+      titleEl.textContent = `${m}월 ${d}일 이벤트`;
+      renderEventDetailPanel(panel, this.selectedDate);
+      return;
+    }
+
     titleEl.textContent = `${m}월 ${d}일 방문 일정`;
 
     const dayPairs = this.getVisiblePairs().filter((p) => p.entry.date === this.selectedDate);
@@ -296,6 +317,52 @@ const CalendarView = {
     });
   },
 };
+
+// "이벤트" 탭에서 선택한 날짜의 상세 패널 — 이벤트 목록(제목/메모) + 삭제 + 그 날짜에 추가 버튼
+function renderEventDetailPanel(panel, dateStr) {
+  panel.innerHTML = "";
+  const dayEvents = (Store.events || []).filter((ev) => ev.date === dateStr);
+
+  if (dayEvents.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "detail-empty";
+    empty.textContent = "이 날짜에 등록된 이벤트가 없어요.";
+    panel.appendChild(empty);
+  } else {
+    dayEvents.forEach((ev) => {
+      const item = document.createElement("div");
+      item.className = "detail-item";
+      item.innerHTML = `
+        <div class="detail-item-header">
+          <span class="detail-customer-name">${escapeHtml(ev.title)}</span>
+          <button class="delete-group-btn" type="button" aria-label="이벤트 삭제" title="이벤트 삭제">${Icons.trash}</button>
+        </div>
+        ${ev.memo ? `<div class="detail-memo">${escapeHtml(ev.memo)}</div>` : ""}
+      `;
+      const deleteBtn = item.querySelector(".delete-group-btn");
+      deleteBtn.addEventListener("click", async () => {
+        const ok = confirm(`"${ev.title}" 이벤트를 삭제할까요?`);
+        if (!ok) return;
+        try {
+          await Store.removeEvent(ev.id);
+          CalendarView.render();
+        } catch (err) {
+          alert("삭제하지 못했어요: " + (err.message || err));
+        }
+      });
+      panel.appendChild(item);
+    });
+  }
+
+  if (typeof EventModal !== "undefined") {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-outline btn-sm add-event-inline-btn";
+    addBtn.textContent = "+ 이 날짜에 이벤트 추가";
+    addBtn.addEventListener("click", () => EventModal.open(dateStr));
+    panel.appendChild(addBtn);
+  }
+}
 
 // 필터링된 {group,entry} 쌍 전체에서 그룹당 1개씩 중복 없이 반환 (날짜 무관)
 function uniqueGroupsFromPairs(pairs) {

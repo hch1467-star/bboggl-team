@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bboggl · VIP 고객 일정 달력</title>
-<link rel="stylesheet" href="css/design-system.css?v=9">
-<link rel="stylesheet" href="css/layout.css?v=9">
-<link rel="stylesheet" href="css/calendar.css?v=9">
+<link rel="stylesheet" href="css/design-system.css?v=10">
+<link rel="stylesheet" href="css/layout.css?v=10">
+<link rel="stylesheet" href="css/calendar.css?v=10">
 </head>
 <body>
 
@@ -54,6 +54,10 @@
         <button class="legend-item legend-btn" type="button" data-direction="출국">
           <span class="legend-dot legend-dot-departure"></span>출국편만
         </button>
+        <button class="legend-item legend-btn" type="button" data-direction="이벤트">
+          <span class="legend-dot legend-dot-event"></span>이벤트
+        </button>
+        <button class="btn btn-outline btn-sm add-event-btn" id="add-event-btn" type="button">+ 이벤트</button>
       </div>
       <div class="calendar-grid" id="calendar-grid"></div>
     </section>
@@ -101,18 +105,42 @@
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="event-modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>이벤트 추가</h3>
+      <button class="modal-close" id="event-modal-close-btn" aria-label="닫기"></button>
+    </div>
+
+    <label class="event-form-label" for="event-date-input">날짜</label>
+    <input class="event-form-input" id="event-date-input" type="date">
+
+    <label class="event-form-label" for="event-title-input">제목</label>
+    <input class="event-form-input" id="event-title-input" type="text" placeholder="예) 나리타공항 불꽃축제">
+
+    <label class="event-form-label" for="event-memo-input">메모 (선택)</label>
+    <textarea class="modal-textarea event-memo-textarea" id="event-memo-input" placeholder="메모"></textarea>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="event-modal-cancel-btn" type="button">취소</button>
+      <button class="btn btn-gradient" id="event-modal-save-btn" type="button">저장</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=9"></script>
-<script src="js/auth.js?v=9"></script>
-<script src="js/icons.js?v=9"></script>
-<script src="js/parseSchedule.js?v=9"></script>
-<script src="js/flightDirections.js?v=9"></script>
-<script src="js/japanHolidays.js?v=9"></script>
-<script src="js/data.js?v=9"></script>
-<script src="js/calendar.js?v=9"></script>
-<script src="js/search.js?v=9"></script>
-<script src="js/modal.js?v=9"></script>
-<script src="js/main.js?v=9"></script>
+<script src="js/supabaseClient.js?v=10"></script>
+<script src="js/auth.js?v=10"></script>
+<script src="js/icons.js?v=10"></script>
+<script src="js/parseSchedule.js?v=10"></script>
+<script src="js/flightDirections.js?v=10"></script>
+<script src="js/japanHolidays.js?v=10"></script>
+<script src="js/data.js?v=10"></script>
+<script src="js/calendar.js?v=10"></script>
+<script src="js/search.js?v=10"></script>
+<script src="js/modal.js?v=10"></script>
+<script src="js/eventModal.js?v=10"></script>
+<script src="js/main.js?v=10"></script>
 <script>
   document.getElementById("prev-month-btn").innerHTML = Icons.chevronLeft;
   document.getElementById("next-month-btn").innerHTML = Icons.chevronRight;

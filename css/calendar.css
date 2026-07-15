@@ -44,6 +44,8 @@
 
 .calendar-legend{
   display:flex;
+  align-items:center;
+  flex-wrap:wrap;
   gap:14px;
   margin-bottom:12px;
 }
@@ -64,6 +66,7 @@
 .legend-dot-all{ background:#C4C4C4; }
 .legend-dot-arrival{ background:var(--primary); }
 .legend-dot-departure{ background:#F58529; }
+.legend-dot-event{ background:#8134AF; }
 
 .legend-btn{
   border:none;
@@ -78,6 +81,50 @@
 .legend-btn.active{ color:var(--text); font-weight:700; background:#F0F0F0; }
 .legend-btn.active[data-direction="입국"]{ background:#E7F5FF; color:var(--primary); }
 .legend-btn.active[data-direction="출국"]{ background:#FFF1E0; color:#C2661C; }
+.legend-btn.active[data-direction="이벤트"]{ background:#F5E9FB; color:#8134AF; }
+
+.add-event-btn{
+  margin-left:auto;
+}
+
+.day-event-label{
+  font-size:9px;
+  font-weight:700;
+  color:#8134AF;
+  line-height:1.2;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.event-form-label{
+  display:block;
+  font-size:12px;
+  font-weight:700;
+  color:var(--sub);
+  margin-top:10px;
+  margin-bottom:6px;
+}
+.event-form-input{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px 14px;
+  font-family:inherit;
+  font-size:14px;
+  color:var(--text);
+  outline:none;
+}
+.event-form-input:focus{ border-color:var(--primary); }
+.event-memo-textarea{
+  min-height:80px;
+}
+
+.add-event-inline-btn{
+  margin-top:10px;
+  width:100%;
+  justify-content:center;
+}
 
 .calendar-grid{
   display:grid;
@@ -448,6 +495,9 @@
     font-size:12px;
   }
   .day-holiday-label{
+    display:none;
+  }
+  .day-event-label{
     display:none;
   }
   .calendar-grid{
