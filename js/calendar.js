@@ -92,6 +92,9 @@ const CalendarView = {
 
     const todayStr = formatDateStr(new Date());
     const visiblePairs = this.getVisiblePairs();
+    const visibleGroups = uniqueGroupsFromPairs(visiblePairs);
+    const laneAssignment = assignStayLanes(visibleGroups);
+    const MAX_VISIBLE_LANES = 3;
 
     for (let i = 0; i < totalCells; i++) {
       const dayNum = i - startOffset + 1;
@@ -143,6 +146,46 @@ const CalendarView = {
         eventsWrap.appendChild(more);
       }
       cell.appendChild(eventsWrap);
+
+      // 데스크탑 전용: 체류 기간(입국~출국)을 이어지는 막대로 표시, 겹치면 레인으로 쌓임
+      const lanesWrap = document.createElement("div");
+      lanesWrap.className = "day-lanes";
+
+      const activeToday = [];
+      laneAssignment.forEach((info, groupId) => {
+        if (dateStr >= info.start && dateStr <= info.end) {
+          activeToday.push({ groupId, ...info });
+        }
+      });
+      activeToday.sort((a, b) => a.lane - b.lane);
+
+      const maxLane = activeToday.length ? Math.max(...activeToday.map((a) => a.lane)) : -1;
+      for (let laneIdx = 0; laneIdx <= Math.min(maxLane, MAX_VISIBLE_LANES - 1); laneIdx++) {
+        const active = activeToday.find((a) => a.lane === laneIdx);
+        const laneRow = document.createElement("div");
+        laneRow.className = "day-lane-row";
+        if (active) {
+          const group = visibleGroups.find((g) => g.id === active.groupId);
+          const isStart = dateStr === active.start;
+          const isEnd = dateStr === active.end;
+          const bar = document.createElement("div");
+          bar.className = "stay-bar";
+          if (isStart || dayOfWeek === 0) bar.classList.add("bar-round-left");
+          if (isEnd || dayOfWeek === 6) bar.classList.add("bar-round-right");
+          if (isStart || dayOfWeek === 0) bar.textContent = groupLabel(group);
+          bar.title = `${groupLabel(group)} (${active.start} ~ ${active.end})`;
+          laneRow.appendChild(bar);
+        }
+        lanesWrap.appendChild(laneRow);
+      }
+      const laneOverflow = activeToday.length - MAX_VISIBLE_LANES;
+      if (laneOverflow > 0) {
+        const more = document.createElement("div");
+        more.className = "day-lane-more";
+        more.textContent = `+${laneOverflow}`;
+        lanesWrap.appendChild(more);
+      }
+      cell.appendChild(lanesWrap);
 
       cell.addEventListener("click", () => this.selectDate(dateStr));
       grid.appendChild(cell);
@@ -229,6 +272,50 @@ function uniqueGroupsForDate(pairs, dateStr) {
       if (!seen.has(group.id)) seen.set(group.id, group);
     });
   return Array.from(seen.values());
+}
+
+// 필터링된 {group,entry} 쌍 전체에서 그룹당 1개씩 중복 없이 반환 (날짜 무관)
+function uniqueGroupsFromPairs(pairs) {
+  const seen = new Map();
+  pairs.forEach(({ group }) => {
+    if (!seen.has(group.id)) seen.set(group.id, group);
+  });
+  return Array.from(seen.values());
+}
+
+// 그룹의 체류 기간(가장 이른 항공편 ~ 가장 늦은 항공편). 항공편이 없으면 null.
+function groupStayRange(group) {
+  if (!group.entries.length) return null;
+  const dates = group.entries.map((e) => e.date).sort();
+  return { start: dates[0], end: dates[dates.length - 1] };
+}
+
+/**
+ * 겹치는 체류 기간끼리 레인(줄)을 나눠 배정. 겹치지 않으면 같은 레인 재사용.
+ * @param {object[]} groups
+ * @returns {Map} group.id -> { lane, start, end }
+ */
+function assignStayLanes(groups) {
+  const withRange = groups
+    .map((group) => ({ group, range: groupStayRange(group) }))
+    .filter((g) => g.range)
+    .sort((a, b) => a.range.start.localeCompare(b.range.start) || b.range.end.localeCompare(a.range.end));
+
+  const laneEnds = []; // laneEnds[i] = 그 레인에서 마지막으로 점유된 날짜
+  const assignment = new Map();
+
+  withRange.forEach(({ group, range }) => {
+    let laneIdx = laneEnds.findIndex((end) => end < range.start);
+    if (laneIdx === -1) {
+      laneIdx = laneEnds.length;
+      laneEnds.push(range.end);
+    } else {
+      laneEnds[laneIdx] = range.end;
+    }
+    assignment.set(group.id, { lane: laneIdx, start: range.start, end: range.end });
+  });
+
+  return assignment;
 }
 
 function groupLabel(group) {

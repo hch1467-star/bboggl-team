@@ -126,10 +126,9 @@
   white-space:nowrap;
 }
 
+/* 데스크탑에서는 .day-lanes(체류 막대)를 쓰고, 모바일에서만 점(dot)으로 전환 */
 .day-events{
-  display:flex;
-  flex-direction:column;
-  gap:3px;
+  display:none;
 }
 
 .day-event-chip{
@@ -153,6 +152,41 @@
   color:var(--sub);
   font-weight:700;
   padding-left:2px;
+}
+
+/* 체류 기간(입국~출국)을 이어지는 막대로 표시 — 겹치면 레인(줄)을 나눠 쌓임 */
+.day-lanes{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  margin:2px -8px 0;
+}
+
+.day-lane-row{
+  height:16px;
+}
+
+.stay-bar{
+  height:16px;
+  line-height:16px;
+  background:var(--grad);
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+  padding:0 6px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  cursor:pointer;
+}
+.stay-bar.bar-round-left{ border-top-left-radius:8px; border-bottom-left-radius:8px; margin-left:8px; }
+.stay-bar.bar-round-right{ border-top-right-radius:8px; border-bottom-right-radius:8px; margin-right:8px; }
+
+.day-lane-more{
+  font-size:10px;
+  color:var(--sub);
+  font-weight:700;
+  padding-left:8px;
 }
 
 /* 상세 패널 (데스크탑: 우측 고정 / 모바일: 하단 시트) */
@@ -418,7 +452,11 @@
   .day-holiday-label{
     display:none;
   }
+  .day-lanes{
+    display:none;
+  }
   .day-events{
+    display:flex;
     flex-direction:row;
     flex-wrap:wrap;
     gap:3px;
