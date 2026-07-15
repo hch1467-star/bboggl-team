@@ -39,6 +39,7 @@ returns boolean as $$
 $$ language sql security definer stable;
 
 -- profiles: 본인 행만 보임 + 관리자는 전체 조회 가능. 수정은 대시보드에서 직접(관리자 지정용).
+drop policy if exists "profiles_select_own_or_admin" on profiles;
 create policy "profiles_select_own_or_admin" on profiles for select
   using (auth.uid() = id or public.is_admin());
 
