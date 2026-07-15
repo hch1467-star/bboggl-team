@@ -504,11 +504,14 @@
   .day-number{
     font-size:12px;
   }
+  .day-number-row{
+    gap:2px;
+  }
   .day-holiday-label{
     display:none;
   }
   .day-event-label{
-    display:none;
+    font-size:8px;
   }
   .calendar-grid{
     column-gap:1px;
