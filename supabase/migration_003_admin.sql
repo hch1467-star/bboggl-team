@@ -46,18 +46,22 @@ create policy "profiles_select_own_or_admin" on profiles for select
 -- groups/travelers/entries/entry_travelers: 기존 "본인 것만" select 정책에 관리자 예외 추가
 -- (조회만 허용 — 다른 직원 데이터를 수정/삭제하는 건 여전히 막혀 있음)
 drop policy if exists "groups_select_own" on groups;
+drop policy if exists "groups_select_own_or_admin" on groups;
 create policy "groups_select_own_or_admin" on groups for select
   using (auth.uid() = user_id or public.is_admin());
 
 drop policy if exists "travelers_select_own" on travelers;
+drop policy if exists "travelers_select_own_or_admin" on travelers;
 create policy "travelers_select_own_or_admin" on travelers for select
   using (auth.uid() = user_id or public.is_admin());
 
 drop policy if exists "entries_select_own" on entries;
+drop policy if exists "entries_select_own_or_admin" on entries;
 create policy "entries_select_own_or_admin" on entries for select
   using (auth.uid() = user_id or public.is_admin());
 
 drop policy if exists "entry_travelers_select_own" on entry_travelers;
+drop policy if exists "entry_travelers_select_own_or_admin" on entry_travelers;
 create policy "entry_travelers_select_own_or_admin" on entry_travelers for select
   using (auth.uid() = user_id or public.is_admin());
 
