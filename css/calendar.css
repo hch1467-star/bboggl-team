@@ -126,35 +126,8 @@
   white-space:nowrap;
 }
 
-/* 데스크탑에서는 .day-lanes(체류 막대)를 쓰고, 모바일에서만 점(dot)으로 전환 */
-.day-events{
-  display:none;
-}
-
-.day-event-chip{
-  font-size:11px;
-  font-weight:700;
-  padding:2px 6px;
-  border-radius:6px;
-  background:var(--grad);
-  color:#fff;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-
-/* 방향이 확실할 때만 입국(파랑)/출국(주황)으로 구분. 섞여있거나 모르면 기본 그라데이션 유지 */
-.day-event-chip.chip-arrival{ background:var(--primary); }
-.day-event-chip.chip-departure{ background:#F58529; }
-
-.day-event-more{
-  font-size:11px;
-  color:var(--sub);
-  font-weight:700;
-  padding-left:2px;
-}
-
-/* 체류 기간(입국~출국)을 이어지는 막대로 표시 — 겹치면 레인(줄)을 나눠 쌓임 */
+/* 체류 기간(입국~출국)을 이어지는 막대로 표시 — 겹치면 레인(줄)을 나눠 쌓임.
+   데스크탑은 이름이 보이는 막대, 모바일은 얇은 색선(텍스트 없음)으로 축소 표시 */
 .day-lanes{
   display:flex;
   flex-direction:column;
@@ -439,12 +412,12 @@
     max-height:none;
   }
 
-  /* 좁은 화면에서는 칸마다 이름을 넣을 자리가 없으므로 점(도트)으로만 표시하고,
+  /* 좁은 화면에서는 이름을 넣을 자리가 없으므로 얇은 색선으로만 체류 기간을 표시하고,
      실제 이름·상세는 날짜를 탭했을 때 아래 상세 패널에서 확인 */
   .day-cell{
     min-height:56px;
     padding:6px 4px;
-    gap:4px;
+    gap:3px;
   }
   .day-number{
     font-size:12px;
@@ -453,27 +426,30 @@
     display:none;
   }
   .day-lanes{
-    display:none;
+    gap:1px;
+    margin:1px -4px 0;
   }
-  .day-events{
-    display:flex;
-    flex-direction:row;
-    flex-wrap:wrap;
-    gap:3px;
-    justify-content:center;
+  .day-lane-row{
+    height:4px;
   }
-  .day-event-chip{
-    width:7px;
-    height:7px;
-    min-width:0;
-    padding:0;
-    border-radius:50%;
+  .stay-bar{
+    height:4px;
+    line-height:4px;
     font-size:0;
-    overflow:hidden;
+    padding:0;
   }
-  .day-event-more{
-    font-size:9px;
-    line-height:7px;
-    padding-left:1px;
+  .stay-bar.bar-round-left{
+    border-top-left-radius:2px;
+    border-bottom-left-radius:2px;
+    margin-left:4px;
+  }
+  .stay-bar.bar-round-right{
+    border-top-right-radius:2px;
+    border-bottom-right-radius:2px;
+    margin-right:4px;
+  }
+  .day-lane-more{
+    font-size:8px;
+    padding-left:4px;
   }
 }

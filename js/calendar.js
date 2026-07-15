@@ -108,9 +108,6 @@ const CalendarView = {
       if (dateStr === todayStr) cell.classList.add("today");
       if (dateStr === this.selectedDate) cell.classList.add("selected");
 
-      // 같은 일행(그룹)의 항공편이 하루에 여러 건이어도 캘린더에는 그룹당 칩 1개만
-      const dayGroups = uniqueGroupsForDate(visiblePairs, dateStr);
-
       const dayOfWeek = cellDate.getDay(); // 0=일 ... 6=토
       const holidayName = getJapanHolidays(cellDate.getFullYear()).get(dateStr);
 
@@ -129,25 +126,7 @@ const CalendarView = {
         cell.appendChild(holidayEl);
       }
 
-      const eventsWrap = document.createElement("div");
-      eventsWrap.className = "day-events";
-      dayGroups.slice(0, 2).forEach((group) => {
-        const chip = document.createElement("div");
-        const direction = chipDirectionForDate(group, dateStr);
-        chip.className =
-          "day-event-chip" + (direction === "입국" ? " chip-arrival" : direction === "출국" ? " chip-departure" : "");
-        chip.textContent = groupLabel(group);
-        eventsWrap.appendChild(chip);
-      });
-      if (dayGroups.length > 2) {
-        const more = document.createElement("div");
-        more.className = "day-event-more";
-        more.textContent = `+${dayGroups.length - 2}`;
-        eventsWrap.appendChild(more);
-      }
-      cell.appendChild(eventsWrap);
-
-      // 데스크탑 전용: 체류 기간(입국~출국)을 이어지는 막대로 표시, 겹치면 레인으로 쌓임
+      // 체류 기간(입국~출국)을 이어지는 막대로 표시, 겹치면 레인으로 쌓임 (모바일은 얇은 선으로 축소 표시)
       const lanesWrap = document.createElement("div");
       lanesWrap.className = "day-lanes";
 
@@ -263,17 +242,6 @@ const CalendarView = {
   },
 };
 
-// 특정 날짜에 항공편이 있는 그룹들을 그룹당 1개씩 중복 없이 반환
-function uniqueGroupsForDate(pairs, dateStr) {
-  const seen = new Map();
-  pairs
-    .filter((p) => p.entry.date === dateStr)
-    .forEach(({ group }) => {
-      if (!seen.has(group.id)) seen.set(group.id, group);
-    });
-  return Array.from(seen.values());
-}
-
 // 필터링된 {group,entry} 쌍 전체에서 그룹당 1개씩 중복 없이 반환 (날짜 무관)
 function uniqueGroupsFromPairs(pairs) {
   const seen = new Map();
@@ -381,16 +349,6 @@ function classifyDirections(entries) {
   });
 
   return result;
-}
-
-// 이 그룹이 특정 날짜에 가진 항공편(들)의 방향이 하나로 통일되면 그 방향, 섞여있거나 판단 불가면 null
-function chipDirectionForDate(group, dateStr) {
-  const directionMap = classifyDirections(group.entries);
-  const dateEntries = group.entries.filter((e) => e.date === dateStr);
-  const directions = new Set(
-    dateEntries.map((e) => directionMap.get(e)?.direction).filter(Boolean)
-  );
-  return directions.size === 1 ? [...directions][0] : null;
 }
 
 // 항공편 한 건 렌더링 — showTravelerLabel이 true면 이 항공편에 누가 타는지 표시
