@@ -114,8 +114,12 @@ const CalendarView = {
 
     const todayStr = formatDateStr(new Date());
     const visiblePairs = this.getVisiblePairs();
-    const visibleGroups = uniqueGroupsFromPairs(visiblePairs);
-    const laneAssignment = assignStayLanes(visibleGroups);
+    // 입국/출국 필터가 켜져 있으면 "체류 기간 막대"가 아니라 그 날짜 하루짜리 점(알약)으로 표시
+    // (필터는 특정 날짜의 항공편만 골라내는 거라, 기간 막대를 그대로 쓰면 화면이 안 맞음)
+    const items = this.directionFilter
+      ? filteredDayItems(visiblePairs)
+      : groupStayItems(uniqueGroupsFromPairs(visiblePairs));
+    const laneAssignment = assignLanesForItems(items);
     const MAX_VISIBLE_LANES = 3;
 
     for (let i = 0; i < totalCells; i++) {
@@ -153,9 +157,9 @@ const CalendarView = {
       lanesWrap.className = "day-lanes";
 
       const activeToday = [];
-      laneAssignment.forEach((info, groupId) => {
+      laneAssignment.forEach((info) => {
         if (dateStr >= info.start && dateStr <= info.end) {
-          activeToday.push({ groupId, ...info });
+          activeToday.push(info);
         }
       });
       activeToday.sort((a, b) => a.lane - b.lane);
@@ -166,7 +170,7 @@ const CalendarView = {
         const laneRow = document.createElement("div");
         laneRow.className = "day-lane-row";
         if (active) {
-          const group = visibleGroups.find((g) => g.id === active.groupId);
+          const group = active.group;
           const isStart = dateStr === active.start;
           const isEnd = dateStr === active.end;
           const bar = document.createElement("div");
@@ -296,29 +300,49 @@ function groupStayRange(group) {
   return { start: dates[0], end: dates[dates.length - 1] };
 }
 
+// 전체 보기: 그룹별로 체류 시작~끝 전체 기간을 하나의 아이템으로
+function groupStayItems(groups) {
+  return groups
+    .map((group) => {
+      const range = groupStayRange(group);
+      return range ? { key: String(group.id), group, start: range.start, end: range.end } : null;
+    })
+    .filter(Boolean);
+}
+
+// 입국/출국 필터 보기: 필터링된 항공편이 실제로 있는 날짜만 하루짜리 아이템으로
+// (체류 기간 막대를 그대로 쓰면 필터와 안 맞아 화면이 깨지므로 점으로 표시)
+function filteredDayItems(visiblePairs) {
+  const map = new Map();
+  visiblePairs.forEach(({ group, entry }) => {
+    const key = `${group.id}__${entry.date}`;
+    if (!map.has(key)) map.set(key, { key, group, start: entry.date, end: entry.date });
+  });
+  return Array.from(map.values());
+}
+
 /**
- * 겹치는 체류 기간끼리 레인(줄)을 나눠 배정. 겹치지 않으면 같은 레인 재사용.
- * @param {object[]} groups
- * @returns {Map} group.id -> { lane, start, end }
+ * 겹치는 기간끼리 레인(줄)을 나눠 배정. 겹치지 않으면 같은 레인 재사용.
+ * @param {object[]} items - { key, group, start, end }
+ * @returns {Map} item.key -> { group, lane, start, end }
  */
-function assignStayLanes(groups) {
-  const withRange = groups
-    .map((group) => ({ group, range: groupStayRange(group) }))
-    .filter((g) => g.range)
-    .sort((a, b) => a.range.start.localeCompare(b.range.start) || b.range.end.localeCompare(a.range.end));
+function assignLanesForItems(items) {
+  const sorted = [...items].sort(
+    (a, b) => a.start.localeCompare(b.start) || b.end.localeCompare(a.end)
+  );
 
   const laneEnds = []; // laneEnds[i] = 그 레인에서 마지막으로 점유된 날짜
   const assignment = new Map();
 
-  withRange.forEach(({ group, range }) => {
-    let laneIdx = laneEnds.findIndex((end) => end < range.start);
+  sorted.forEach((item) => {
+    let laneIdx = laneEnds.findIndex((end) => end < item.start);
     if (laneIdx === -1) {
       laneIdx = laneEnds.length;
-      laneEnds.push(range.end);
+      laneEnds.push(item.end);
     } else {
-      laneEnds[laneIdx] = range.end;
+      laneEnds[laneIdx] = item.end;
     }
-    assignment.set(group.id, { lane: laneIdx, start: range.start, end: range.end });
+    assignment.set(item.key, { group: item.group, lane: laneIdx, start: item.start, end: item.end });
   });
 
   return assignment;
