@@ -145,7 +145,22 @@ const CalendarView = {
       if (dayOfWeek === 0 || holidayName) numberEl.classList.add("text-sunday");
       else if (dayOfWeek === 6) numberEl.classList.add("text-saturday");
       numberEl.textContent = cellDate.getDate();
-      cell.appendChild(numberEl);
+
+      const numberRow = document.createElement("div");
+      numberRow.className = "day-number-row";
+      numberRow.appendChild(numberEl);
+
+      // 이벤트(주말 행사 등) — 날짜 숫자 옆에 작게 표시 (직원 전체 공통 정보)
+      const dayEvents = (Store.events || []).filter((ev) => ev.date === dateStr);
+      if (dayEvents.length > 0) {
+        const eventEl = document.createElement("span");
+        eventEl.className = "day-event-label";
+        eventEl.textContent = dayEvents.map((ev) => ev.title).join(" · ");
+        eventEl.title = dayEvents.map((ev) => (ev.memo ? `${ev.title} — ${ev.memo}` : ev.title)).join("\n");
+        numberRow.appendChild(eventEl);
+      }
+
+      cell.appendChild(numberRow);
 
       if (holidayName) {
         const holidayEl = document.createElement("div");
@@ -154,17 +169,6 @@ const CalendarView = {
         holidayEl.title = `일본 공휴일: ${holidayName}`;
         cell.appendChild(holidayEl);
       }
-
-      // 이벤트(주말 행사 등) — 공휴일 라벨처럼 항상 작게 표시 (직원 전체 공통 정보)
-      (Store.events || [])
-        .filter((ev) => ev.date === dateStr)
-        .forEach((ev) => {
-          const eventEl = document.createElement("div");
-          eventEl.className = "day-event-label";
-          eventEl.textContent = ev.title;
-          eventEl.title = ev.memo ? `${ev.title} — ${ev.memo}` : ev.title;
-          cell.appendChild(eventEl);
-        });
 
       // 체류 기간(입국~출국)을 이어지는 막대로 표시, 겹치면 레인으로 쌓임 (모바일은 얇은 선으로 축소 표시)
       const lanesWrap = document.createElement("div");

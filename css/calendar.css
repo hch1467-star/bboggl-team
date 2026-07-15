@@ -88,6 +88,8 @@
 }
 
 .day-event-label{
+  flex:1;
+  min-width:0;
   font-size:9px;
   font-weight:700;
   color:#8134AF;
@@ -157,9 +159,17 @@
 .day-cell.today{border-color:var(--primary)}
 .day-cell.selected{background:#E7F5FF; border-color:var(--primary)}
 
+.day-number-row{
+  display:flex;
+  align-items:baseline;
+  gap:4px;
+  min-width:0;
+}
+
 .day-number{
   font-size:13px;
   font-weight:700;
+  flex-shrink:0;
 }
 .day-number.text-sunday{ color:var(--wt); }
 .day-number.text-saturday{ color:var(--primary); }
