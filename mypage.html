@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>마이페이지 · Bboggl</title>
-<link rel="stylesheet" href="css/design-system.css?v=5">
-<link rel="stylesheet" href="css/layout.css?v=5">
-<link rel="stylesheet" href="css/mypage.css?v=5">
+<link rel="stylesheet" href="css/design-system.css?v=6">
+<link rel="stylesheet" href="css/layout.css?v=6">
+<link rel="stylesheet" href="css/mypage.css?v=6">
 </head>
 <body>
 
@@ -55,11 +55,20 @@
       <span class="stat-label">확약(OK) 일정</span>
       <span class="stat-value" id="stat-ok">0</span>
     </div>
+    <div class="card stat-card">
+      <span class="stat-label">대기(WT) 일정</span>
+      <span class="stat-value stat-wt-value" id="stat-wt">0</span>
+    </div>
   </section>
 
   <section class="card activity-card">
     <h3>최근 활동 내역</h3>
     <div id="activity-list" class="activity-list"></div>
+  </section>
+
+  <section class="card activity-card">
+    <h3>확인 필요한 대기(WT) 일정</h3>
+    <div id="wt-list" class="activity-list"></div>
   </section>
 
 </main>
@@ -70,12 +79,12 @@
 </nav>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=5"></script>
-<script src="js/auth.js?v=5"></script>
-<script src="js/icons.js?v=5"></script>
-<script src="js/parseSchedule.js?v=5"></script>
-<script src="js/data.js?v=5"></script>
-<script src="js/mypage.js?v=5"></script>
+<script src="js/supabaseClient.js?v=6"></script>
+<script src="js/auth.js?v=6"></script>
+<script src="js/icons.js?v=6"></script>
+<script src="js/parseSchedule.js?v=6"></script>
+<script src="js/data.js?v=6"></script>
+<script src="js/mypage.js?v=6"></script>
 <script>
   document.getElementById("search-icon").innerHTML = Icons.search;
 </script>
