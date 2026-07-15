@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>마이페이지 · Bboggl</title>
-<link rel="stylesheet" href="css/design-system.css?v=7">
-<link rel="stylesheet" href="css/layout.css?v=7">
-<link rel="stylesheet" href="css/mypage.css?v=7">
+<link rel="stylesheet" href="css/design-system.css?v=8">
+<link rel="stylesheet" href="css/layout.css?v=8">
+<link rel="stylesheet" href="css/mypage.css?v=8">
 </head>
 <body>
 
@@ -51,24 +51,19 @@
       <span class="stat-label">등록된 항공편 일정</span>
       <span class="stat-value" id="stat-events">0</span>
     </div>
-    <div class="card stat-card">
+    <button type="button" class="card stat-card stat-card-btn stat-ok-btn" id="stat-ok-btn">
       <span class="stat-label">확약(OK) 일정</span>
       <span class="stat-value" id="stat-ok">0</span>
-    </div>
-    <div class="card stat-card">
+    </button>
+    <button type="button" class="card stat-card stat-card-btn stat-wt-btn" id="stat-wt-btn">
       <span class="stat-label">대기(WT) 일정</span>
       <span class="stat-value stat-wt-value" id="stat-wt">0</span>
-    </div>
+    </button>
   </section>
 
   <section class="card activity-card">
-    <h3>최근 활동 내역</h3>
+    <h3 id="activity-list-title">최근 활동 내역</h3>
     <div id="activity-list" class="activity-list"></div>
-  </section>
-
-  <section class="card activity-card">
-    <h3>확인 필요한 대기(WT) 일정</h3>
-    <div id="wt-list" class="activity-list"></div>
   </section>
 
 </main>
@@ -79,12 +74,12 @@
 </nav>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=7"></script>
-<script src="js/auth.js?v=7"></script>
-<script src="js/icons.js?v=7"></script>
-<script src="js/parseSchedule.js?v=7"></script>
-<script src="js/data.js?v=7"></script>
-<script src="js/mypage.js?v=7"></script>
+<script src="js/supabaseClient.js?v=8"></script>
+<script src="js/auth.js?v=8"></script>
+<script src="js/icons.js?v=8"></script>
+<script src="js/parseSchedule.js?v=8"></script>
+<script src="js/data.js?v=8"></script>
+<script src="js/mypage.js?v=8"></script>
 <script>
   document.getElementById("search-icon").innerHTML = Icons.search;
 </script>

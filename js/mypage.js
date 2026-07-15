@@ -2,6 +2,8 @@
    마이페이지 — 로그인한 사용자의 실제 통계·활동 내역
    ============================================ */
 
+let mypageActiveTab = "recent"; // "recent" | "OK" | "WT" — 확약/대기 탭 토글 상태
+
 document.addEventListener("DOMContentLoaded", async () => {
   const session = await requireSession();
   if (!session) return; // login.html로 이동 중
@@ -22,36 +24,59 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("stat-customers").textContent = Store.totalTravelers();
   document.getElementById("stat-events").textContent = Store.totalEntries();
   document.getElementById("stat-ok").textContent = Store.totalOkEntries();
+  document.getElementById("stat-wt").textContent = Store.flatEntries().filter((p) => p.entry.status === "WT").length;
 
-  const allPairs = Store.flatEntries();
-  const wtPairs = allPairs.filter((p) => p.entry.status === "WT");
-  document.getElementById("stat-wt").textContent = wtPairs.length;
+  renderActivitySection();
+  wireExpandableRows(document.getElementById("activity-list"));
 
-  const listEl = document.getElementById("activity-list");
-  const recent = [...allPairs].sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt)).slice(0, 8);
-
-  if (recent.length === 0) {
-    listEl.innerHTML = `<div class="detail-empty">아직 활동 내역이 없어요.</div>`;
-  } else {
-    listEl.innerHTML = recent.map((pair) => renderMypageRowHtml(pair)).join("");
-  }
-  wireExpandableRows(listEl);
-
-  const wtListEl = document.getElementById("wt-list");
-  // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서
-  const sortedWt = [...wtPairs].sort(
-    (a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime)
-  );
-
-  if (sortedWt.length === 0) {
-    wtListEl.innerHTML = `<div class="detail-empty">확인이 필요한 대기 일정이 없어요.</div>`;
-  } else {
-    wtListEl.innerHTML = sortedWt.map((pair) => renderMypageRowHtml(pair)).join("");
-  }
-  wireExpandableRows(wtListEl);
+  document.getElementById("stat-ok-btn").addEventListener("click", () => {
+    mypageActiveTab = mypageActiveTab === "OK" ? "recent" : "OK";
+    renderActivitySection();
+  });
+  document.getElementById("stat-wt-btn").addEventListener("click", () => {
+    mypageActiveTab = mypageActiveTab === "WT" ? "recent" : "WT";
+    renderActivitySection();
+  });
 });
 
+// 상단 확약/대기 탭 상태에 따라 활동 목록 섹션의 제목·내용을 다시 그림
+function renderActivitySection() {
+  document.getElementById("stat-ok-btn").classList.toggle("active", mypageActiveTab === "OK");
+  document.getElementById("stat-wt-btn").classList.toggle("active", mypageActiveTab === "WT");
+
+  const titleEl = document.getElementById("activity-list-title");
+  const listEl = document.getElementById("activity-list");
+  const allPairs = Store.flatEntries();
+
+  let pairs;
+  let emptyMessage;
+  if (mypageActiveTab === "OK") {
+    titleEl.textContent = "확약(OK) 일정";
+    pairs = allPairs
+      .filter((p) => p.entry.status === "OK")
+      .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
+    emptyMessage = "확약된 일정이 없어요.";
+  } else if (mypageActiveTab === "WT") {
+    titleEl.textContent = "확인 필요한 대기(WT) 일정";
+    // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서
+    pairs = allPairs
+      .filter((p) => p.entry.status === "WT")
+      .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
+    emptyMessage = "확인이 필요한 대기 일정이 없어요.";
+  } else {
+    titleEl.textContent = "최근 활동 내역";
+    pairs = [...allPairs].sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt)).slice(0, 8);
+    emptyMessage = "아직 활동 내역이 없어요.";
+  }
+
+  listEl.innerHTML =
+    pairs.length === 0
+      ? `<div class="detail-empty">${emptyMessage}</div>`
+      : pairs.map((pair) => renderMypageRowHtml(pair)).join("");
+}
+
 // 목록 안에서 버튼(.activity-row)을 누르면 바로 아래 상세(.activity-detail)를 펼치고/접음
+// (목록 컨테이너는 재렌더링돼도 그대로 유지되므로 리스너는 한 번만 등록)
 function wireExpandableRows(containerEl) {
   containerEl.addEventListener("click", (e) => {
     const btn = e.target.closest(".activity-row");

@@ -66,6 +66,16 @@
   color:var(--wt);
 }
 
+.stat-card-btn{
+  cursor:pointer;
+  font-family:inherit;
+  text-align:left;
+  transition:.15s;
+}
+.stat-card-btn:hover{ background:#F5F5F5; }
+.stat-ok-btn.active{ background:var(--ok-bg); }
+.stat-wt-btn.active{ background:var(--wt-bg); }
+
 .activity-card{
   padding:20px;
 }
