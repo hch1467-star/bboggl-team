@@ -28,6 +28,7 @@ function toTraveler(row) {
 const Store = {
   groups: [],
   events: [], // 직원 전체가 공통으로 보는 이벤트(주말 행사 등) — user_id로 분리하지 않음
+  staffDirectory: [], // 담당자 사번/전화번호 — 개인정보라 DB(staff_directory 테이블)에서만 불러옴, git에는 저장 안 함
 
   // 로그인 직후 이 사용자의 데이터를 전부 불러와 메모리에 재구성
   async init(userId) {
@@ -183,6 +184,18 @@ const Store = {
     const { error } = await supabaseClient.from("events").delete().eq("id", eventId);
     if (error) throw error;
     this.events = this.events.filter((e) => e.id !== eventId);
+  },
+
+  // 담당자 사번/전화번호 디렉터리 — 개인정보라 DB에서만 불러옴 (예약 텍스트의 BILLING/HOST에 사용)
+  async loadStaffDirectory() {
+    const { data, error } = await supabaseClient.from("staff_directory").select("*").order("name");
+    if (error) throw error;
+    this.staffDirectory = data.map((s) => ({
+      name: s.name,
+      nickname: s.nickname,
+      employeeId: s.employee_id,
+      phone: s.phone,
+    }));
   },
 
   // {group, entry} 쌍으로 평탄화한 목록 — 캘린더/검색에서 공통으로 사용

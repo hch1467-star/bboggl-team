@@ -11,9 +11,39 @@ const ROOM_FIXED_DEFAULTS = {
   waiveDeposit: "Y",
 };
 
-// 담당자별 사번/전화번호 — 데이터가 준비되는 대로 이름을 key로 추가해주세요.
-// 예: "박희채": { employeeId: "12345", phone: "010-0000-0000" },
-const STAFF_DIRECTORY = {};
+// 담당자 사번/전화번호는 개인정보라 이 저장소(공개 GitHub)에는 저장하지 않고
+// Supabase의 staff_directory 테이블에서 불러와 Store.staffDirectory에 담아 씀 (js/data.js의 loadStaffDirectory 참고)
+
+// 담당자 표기(assignee)가 어떤 형태로 적혀도(이름만/닉네임만/붙여쓰기 등) 최대한 찾아봄
+// "이름(닉네임)" / 닉네임 단독 표기는 항상 고유하게 매칭, 이름만 적었을 땐 동명이인이 없을 때만 매칭
+function findStaff(assigneeRaw) {
+  const directory = (typeof Store !== "undefined" && Store.staffDirectory) || [];
+  const trimmed = (assigneeRaw || "").trim();
+  if (!trimmed || directory.length === 0) return { record: null, ambiguous: false };
+
+  const byKey = {};
+  const byName = {};
+  const nameCounts = {};
+  directory.forEach((s) => {
+    nameCounts[s.name] = (nameCounts[s.name] || 0) + 1;
+  });
+  directory.forEach((s) => {
+    byKey[`${s.name}(${s.nickname})`] = s;
+    byKey[s.nickname.toUpperCase()] = s;
+    if (nameCounts[s.name] === 1) byName[s.name] = s;
+  });
+
+  if (byKey[trimmed]) return { record: byKey[trimmed], ambiguous: false };
+  if (byKey[trimmed.toUpperCase()]) return { record: byKey[trimmed.toUpperCase()], ambiguous: false };
+  if (byName[trimmed]) return { record: byName[trimmed], ambiguous: false };
+
+  // "김훈huny"처럼 이름+닉네임이 붙어서 적힌 경우, 포함 관계로 찾기
+  const upper = trimmed.toUpperCase();
+  const matches = directory.filter((s) => trimmed.includes(s.name) || upper.includes(s.nickname.toUpperCase()));
+  if (matches.length === 1) return { record: matches[0], ambiguous: false };
+  if (matches.length > 1) return { record: null, ambiguous: true };
+  return { record: null, ambiguous: false };
+}
 
 function formatMD(dateStr) {
   const [, m, d] = dateStr.split("-");
@@ -39,13 +69,21 @@ function buildRoomReservationText(parsed) {
     [...sorted].reverse().find((e) => directionMap.get(e)?.direction === "출국") || sorted[sorted.length - 1];
 
   const assignee = parsed.assignee || "";
-  const staff = STAFF_DIRECTORY[assignee];
+  const { record: staff, ambiguous } = findStaff(assignee);
   const billingTail = !assignee
     ? "(담당자 미지정)"
+    : ambiguous
+    ? `${assignee}(동명이인 있음-확인필요)`
     : staff
-    ? `${assignee}/${staff.employeeId}`
+    ? `${staff.name}(${staff.nickname})/${staff.employeeId}`
     : `${assignee}(사번 미등록)`;
-  const hostTail = !assignee ? "(담당자 미지정)" : staff ? `${assignee} ${staff.phone}` : `${assignee}(전화번호 미등록)`;
+  const hostTail = !assignee
+    ? "(담당자 미지정)"
+    : ambiguous
+    ? `${assignee}(동명이인 있음-확인필요)`
+    : staff
+    ? `${staff.name}(${staff.nickname}) ${staff.phone}`
+    : `${assignee}(전화번호 미등록)`;
 
   return [
     `MMID : `,

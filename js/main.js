@@ -26,6 +26,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("이벤트를 불러오지 못했어요:", err);
   }
 
+  try {
+    await Store.loadStaffDirectory();
+  } catch (err) {
+    console.warn("담당자 디렉터리를 불러오지 못했어요:", err);
+  }
+
   if (loadingEl) loadingEl.remove();
 
   CalendarView.init();
