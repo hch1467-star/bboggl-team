@@ -467,11 +467,31 @@
   font-size:13px;
   font-weight:700;
   margin-bottom:10px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
 }
 .modal-preview-empty{
   font-size:12px;
   color:var(--sub);
 }
+
+.modal-reservation-section{
+  margin-top:16px;
+  border-top:1px solid var(--border);
+  padding-top:16px;
+}
+.reservation-textarea{
+  min-height:110px;
+  font-family:'Menlo','Consolas',monospace;
+  font-size:12px;
+  white-space:pre;
+}
+.copy-btn{
+  padding:3px 12px;
+  font-size:11px;
+}
+
 .modal-preview-warning{
   font-size:12px;
   color:var(--wt);

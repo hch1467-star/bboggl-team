@@ -14,6 +14,10 @@ const ScheduleModal = {
     this.textareaEl = document.getElementById("modal-textarea");
     this.previewEl = document.getElementById("modal-preview-body");
     this.addBtn = document.getElementById("modal-add-btn");
+    this.roomSectionEl = document.getElementById("room-reservation-section");
+    this.limoSectionEl = document.getElementById("limo-reservation-section");
+    this.roomTextEl = document.getElementById("room-reservation-text");
+    this.limoTextEl = document.getElementById("limo-reservation-text");
 
     document.getElementById("fab-add").addEventListener("click", () => this.open());
     document.getElementById("modal-close-btn").addEventListener("click", () => this.close());
@@ -22,6 +26,15 @@ const ScheduleModal = {
     });
     this.textareaEl.addEventListener("input", () => this.updatePreview());
     this.addBtn.addEventListener("click", () => this.commit());
+    document.getElementById("copy-room-btn").addEventListener("click", () => this.copyText(this.roomTextEl));
+    document.getElementById("copy-limo-btn").addEventListener("click", () => this.copyText(this.limoTextEl));
+  },
+
+  copyText(textareaEl) {
+    navigator.clipboard.writeText(textareaEl.value).catch(() => {
+      textareaEl.select();
+      document.execCommand("copy");
+    });
   },
 
   open() {
@@ -41,6 +54,8 @@ const ScheduleModal = {
       this.lastParsed = null;
       this.previewEl.innerHTML = `<div class="modal-preview-empty">카톡에서 복사한 일정 텍스트를 붙여넣으면 여기에 미리보기가 표시돼요.</div>`;
       this.addBtn.disabled = true;
+      this.roomSectionEl.classList.add("hidden");
+      this.limoSectionEl.classList.add("hidden");
       return;
     }
 
@@ -50,6 +65,8 @@ const ScheduleModal = {
     if (parsed.travelers.length === 0 || parsed.entries.length === 0) {
       this.previewEl.innerHTML = `<div class="modal-preview-empty">인식된 동행자·항공편 일정이 없어요. 형식을 확인해주세요.<br>예: 7/24 KE724 1235-1425 COK</div>`;
       this.addBtn.disabled = true;
+      this.roomSectionEl.classList.add("hidden");
+      this.limoSectionEl.classList.add("hidden");
       return;
     }
 
@@ -88,6 +105,11 @@ const ScheduleModal = {
 
     this.previewEl.innerHTML = card + warning;
     this.addBtn.disabled = false;
+
+    this.roomTextEl.value = buildRoomReservationText(parsed);
+    this.limoTextEl.value = buildLimoReservationText(parsed);
+    this.roomSectionEl.classList.remove("hidden");
+    this.limoSectionEl.classList.remove("hidden");
   },
 
   currentYear() {

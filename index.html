@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bboggl · VIP 고객 일정 달력</title>
-<link rel="stylesheet" href="css/design-system.css?v=12">
-<link rel="stylesheet" href="css/layout.css?v=12">
-<link rel="stylesheet" href="css/calendar.css?v=12">
+<link rel="stylesheet" href="css/design-system.css?v=13">
+<link rel="stylesheet" href="css/layout.css?v=13">
+<link rel="stylesheet" href="css/calendar.css?v=13">
 </head>
 <body>
 
@@ -98,6 +98,22 @@
       <div id="modal-preview-body"></div>
     </div>
 
+    <div class="modal-reservation-section hidden" id="room-reservation-section">
+      <div class="modal-preview-title">
+        객실 예약 텍스트
+        <button type="button" class="btn btn-outline btn-sm copy-btn" id="copy-room-btn">복사</button>
+      </div>
+      <textarea class="modal-textarea reservation-textarea" id="room-reservation-text"></textarea>
+    </div>
+
+    <div class="modal-reservation-section hidden" id="limo-reservation-section">
+      <div class="modal-preview-title">
+        리무진 예약 텍스트
+        <button type="button" class="btn btn-outline btn-sm copy-btn" id="copy-limo-btn">복사</button>
+      </div>
+      <textarea class="modal-textarea reservation-textarea" id="limo-reservation-text"></textarea>
+    </div>
+
     <div class="modal-actions">
       <button class="btn btn-outline" id="modal-close-btn-2" onclick="ScheduleModal.close()">취소</button>
       <button class="btn btn-gradient" id="modal-add-btn" disabled>캘린더에 추가</button>
@@ -129,18 +145,20 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=12"></script>
-<script src="js/auth.js?v=12"></script>
-<script src="js/icons.js?v=12"></script>
-<script src="js/parseSchedule.js?v=12"></script>
-<script src="js/flightDirections.js?v=12"></script>
-<script src="js/japanHolidays.js?v=12"></script>
-<script src="js/data.js?v=12"></script>
-<script src="js/calendar.js?v=12"></script>
-<script src="js/search.js?v=12"></script>
-<script src="js/modal.js?v=12"></script>
-<script src="js/eventModal.js?v=12"></script>
-<script src="js/main.js?v=12"></script>
+<script src="js/supabaseClient.js?v=13"></script>
+<script src="js/auth.js?v=13"></script>
+<script src="js/icons.js?v=13"></script>
+<script src="js/parseSchedule.js?v=13"></script>
+<script src="js/flightDirections.js?v=13"></script>
+<script src="js/flightAirports.js?v=13"></script>
+<script src="js/japanHolidays.js?v=13"></script>
+<script src="js/reservationText.js?v=13"></script>
+<script src="js/data.js?v=13"></script>
+<script src="js/calendar.js?v=13"></script>
+<script src="js/search.js?v=13"></script>
+<script src="js/modal.js?v=13"></script>
+<script src="js/eventModal.js?v=13"></script>
+<script src="js/main.js?v=13"></script>
 <script>
   document.getElementById("prev-month-btn").innerHTML = Icons.chevronLeft;
   document.getElementById("next-month-btn").innerHTML = Icons.chevronRight;
