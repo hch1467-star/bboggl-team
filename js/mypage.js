@@ -2,7 +2,12 @@
    마이페이지 — 로그인한 사용자의 실제 통계·활동 내역
    ============================================ */
 
-let mypageActiveTab = "recent"; // "recent" | "OK" | "WT" — 확약/대기 탭 토글 상태
+let mypageActiveTab = "upcoming"; // "upcoming" | "OK" | "WT" — 확약/대기 탭 토글 상태
+
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   const session = await requireSession();
@@ -36,11 +41,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireMonthGroups(document.getElementById("activity-list"));
 
   document.getElementById("stat-ok-btn").addEventListener("click", () => {
-    mypageActiveTab = mypageActiveTab === "OK" ? "recent" : "OK";
+    mypageActiveTab = mypageActiveTab === "OK" ? "upcoming" : "OK";
     renderActivitySection();
   });
   document.getElementById("stat-wt-btn").addEventListener("click", () => {
-    mypageActiveTab = mypageActiveTab === "WT" ? "recent" : "WT";
+    mypageActiveTab = mypageActiveTab === "WT" ? "upcoming" : "WT";
     renderActivitySection();
   });
 });
@@ -74,9 +79,17 @@ function renderActivitySection() {
       pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
     return;
   } else {
-    titleEl.textContent = "최근 활동 내역";
-    pairs = [...allPairs].sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt)).slice(0, 8);
-    emptyMessage = "아직 활동 내역이 없어요.";
+    titleEl.textContent = "다가오는 일정";
+    // 오늘 이후 일정을 날짜 가까운 순으로 — 실제로 누가 오는지, 무슨 액션이 필요한지 한눈에
+    const today = todayDateStr();
+    pairs = allPairs
+      .filter((p) => p.entry.date >= today)
+      .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
+    emptyMessage = "다가오는 일정이 없어요.";
+
+    listEl.innerHTML =
+      pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
+    return;
   }
 
   listEl.innerHTML =
