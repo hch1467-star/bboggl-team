@@ -32,6 +32,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("담당자 디렉터리를 불러오지 못했어요:", err);
   }
 
+  try {
+    await Store.loadCustomerMmid();
+  } catch (err) {
+    console.warn("고객 MMID 디렉터리를 불러오지 못했어요:", err);
+  }
+
   if (loadingEl) loadingEl.remove();
 
   CalendarView.init();

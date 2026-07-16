@@ -45,6 +45,30 @@ function findStaff(assigneeRaw) {
   return { record: null, ambiguous: false };
 }
 
+// 고객명은 개인정보라 이 저장소(공개 GitHub)에는 저장하지 않고
+// Supabase의 customer_mmid 테이블에서 불러와 Store.customerMmid에 담아 씀 (js/data.js의 loadCustomerMmid 참고)
+
+// "NAKATANI/KAZUHIRO" -> "NAKATANI KAZUHIRO" (엑셀 쪽 "성 이름" 표기와 비교하기 위해 통일)
+function normalizeCustomerName(name) {
+  return (name || "")
+    .replace(/[/\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+// 동명 고객이 있으면(같은 이름, 다른 MMID) 잘못 채우지 않고 "동명 고객" 표시로 남김
+function findCustomerMmid(rawName) {
+  const directory = (typeof Store !== "undefined" && Store.customerMmid) || [];
+  const target = normalizeCustomerName(rawName);
+  if (!target || directory.length === 0) return { mmid: null, ambiguous: false };
+
+  const matches = directory.filter((c) => normalizeCustomerName(c.name) === target);
+  if (matches.length === 1) return { mmid: matches[0].mmid, ambiguous: false };
+  if (matches.length > 1) return { mmid: null, ambiguous: true };
+  return { mmid: null, ambiguous: false };
+}
+
 function formatMD(dateStr) {
   const [, m, d] = dateStr.split("-");
   return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
@@ -85,8 +109,11 @@ function buildRoomReservationText(parsed) {
     ? `${staff.name}(${staff.nickname}) ${staff.phone}`
     : `${assignee}(전화번호 미등록)`;
 
+  const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(primary.name);
+  const mmidValue = mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : "");
+
   return [
-    `MMID : `,
+    `MMID : ${mmidValue}`,
     `NAME : ${nameLabel}`,
     `CASINO TIER : ${ROOM_FIXED_DEFAULTS.casinoTier}`,
     `CI DATE : ${formatMD(arrivalEntry.date)}`,

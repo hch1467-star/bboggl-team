@@ -29,6 +29,7 @@ const Store = {
   groups: [],
   events: [], // 직원 전체가 공통으로 보는 이벤트(주말 행사 등) — user_id로 분리하지 않음
   staffDirectory: [], // 담당자 사번/전화번호 — 개인정보라 DB(staff_directory 테이블)에서만 불러옴, git에는 저장 안 함
+  customerMmid: [], // 고객명 ↔ MMID(고객번호) — 개인정보라 DB(customer_mmid 테이블)에서만 불러옴, git에는 저장 안 함
 
   // 로그인 직후 이 사용자의 데이터를 전부 불러와 메모리에 재구성
   async init(userId) {
@@ -196,6 +197,24 @@ const Store = {
       employeeId: s.employee_id,
       phone: s.phone,
     }));
+  },
+
+  // 고객명 ↔ MMID(고객번호) — 개인정보라 DB에서만 불러옴 (예약 텍스트의 MMID에 사용). 건수가 많아 1000건씩 나눠서 전부 가져옴
+  async loadCustomerMmid() {
+    const rows = [];
+    const batchSize = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await supabaseClient
+        .from("customer_mmid")
+        .select("name, mmid")
+        .range(offset, offset + batchSize - 1);
+      if (error) throw error;
+      rows.push(...data);
+      if (data.length < batchSize) break;
+      offset += batchSize;
+    }
+    this.customerMmid = rows;
   },
 
   // {group, entry} 쌍으로 평탄화한 목록 — 캘린더/검색에서 공통으로 사용
