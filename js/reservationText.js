@@ -127,3 +127,11 @@ function buildLimoReservationText(parsed) {
 
   return lines.join("\n");
 }
+
+// 객실 예약 텍스트 아래에 리무진 예약 텍스트를 이어붙이고 마무리 멘트를 고정으로 붙임
+// (같은 곳에 같이 요청하는 거라 두 텍스트를 하나로 합쳐서 복사)
+function buildCombinedReservationText(parsed) {
+  const room = buildRoomReservationText(parsed);
+  const limo = buildLimoReservationText(parsed);
+  return `${room}\n\n\n${limo}\n\n객실 예약 및 리모 예약 같이 부탁드립니다.`;
+}
