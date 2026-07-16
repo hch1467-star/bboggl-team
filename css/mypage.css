@@ -154,6 +154,52 @@
   color:var(--sub);
 }
 
+.month-group{
+  display:flex;
+  flex-direction:column;
+}
+
+.month-group-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  width:100%;
+  padding:10px 12px;
+  border:none;
+  border-radius:10px;
+  background:#F0F0F0;
+  font-family:inherit;
+  font-weight:700;
+  font-size:13px;
+  text-align:left;
+  cursor:pointer;
+  transition:.15s;
+}
+.month-group-header:hover{ background:#E8E8E8; }
+.month-group-count{
+  font-weight:500;
+  color:var(--sub);
+  font-size:12px;
+}
+.month-group-chevron{
+  display:flex;
+  color:var(--sub);
+  transition:transform .15s;
+}
+.month-group-header[aria-expanded="true"] .month-group-chevron{
+  transform:rotate(90deg);
+}
+
+.month-group-body{
+  flex-direction:column;
+  gap:8px;
+  margin-top:8px;
+  margin-bottom:8px;
+}
+.month-group-body:not([hidden]){
+  display:flex;
+}
+
 @media (max-width: 600px){
   .stat-grid{grid-template-columns:1fr}
 }

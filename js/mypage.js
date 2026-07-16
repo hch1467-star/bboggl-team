@@ -33,6 +33,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   renderActivitySection();
   wireExpandableRows(document.getElementById("activity-list"));
+  wireMonthGroups(document.getElementById("activity-list"));
 
   document.getElementById("stat-ok-btn").addEventListener("click", () => {
     mypageActiveTab = mypageActiveTab === "OK" ? "recent" : "OK";
@@ -68,6 +69,10 @@ function renderActivitySection() {
       .filter((p) => p.entry.status === "WT")
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
     emptyMessage = "확인이 필요한 대기 일정이 없어요.";
+
+    listEl.innerHTML =
+      pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
+    return;
   } else {
     titleEl.textContent = "최근 활동 내역";
     pairs = [...allPairs].sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt)).slice(0, 8);
@@ -90,6 +95,54 @@ function wireExpandableRows(containerEl) {
     const expanded = btn.getAttribute("aria-expanded") === "true";
     btn.setAttribute("aria-expanded", String(!expanded));
     detail.hidden = expanded;
+  });
+}
+
+// 대기(WT) 목록을 월별로 묶어서 아코디언으로 표시 — 모바일에서 스크롤을 줄이려고
+// 가장 가까운 달(첫 그룹)만 기본으로 펼침, 나머지는 접어서 필요할 때만 탭해서 열어봄
+function groupPairsByMonth(pairs) {
+  const groups = new Map();
+  pairs.forEach((pair) => {
+    const monthKey = pair.entry.date.slice(0, 7); // "YYYY-MM"
+    if (!groups.has(monthKey)) groups.set(monthKey, []);
+    groups.get(monthKey).push(pair);
+  });
+  return Array.from(groups.entries()).map(([monthKey, groupPairs]) => ({ monthKey, pairs: groupPairs }));
+}
+
+function monthGroupLabel(monthKey) {
+  const [, m] = monthKey.split("-");
+  return `${parseInt(m, 10)}월`;
+}
+
+function renderMonthGroupedHtml(pairsSortedByDate) {
+  const groups = groupPairsByMonth(pairsSortedByDate);
+  return groups
+    .map((g, idx) => {
+      const expanded = idx === 0;
+      return `
+        <div class="month-group">
+          <button type="button" class="month-group-header" aria-expanded="${expanded}">
+            <span>${monthGroupLabel(g.monthKey)} <span class="month-group-count">${g.pairs.length}건</span></span>
+            <span class="month-group-chevron">${Icons.chevronRight}</span>
+          </button>
+          <div class="month-group-body"${expanded ? "" : " hidden"}>
+            ${g.pairs.map((pair) => renderMypageRowHtml(pair)).join("")}
+          </div>
+        </div>`;
+    })
+    .join("");
+}
+
+// 월 그룹 헤더를 누르면 그 달의 목록을 펼치고/접음 (역시 리스너는 한 번만 등록)
+function wireMonthGroups(containerEl) {
+  containerEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".month-group-header");
+    if (!btn) return;
+    const body = btn.nextElementSibling;
+    const expanded = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", String(!expanded));
+    body.hidden = expanded;
   });
 }
 
