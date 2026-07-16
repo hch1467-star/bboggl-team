@@ -2,7 +2,7 @@
    마이페이지 — 로그인한 사용자의 실제 통계·활동 내역
    ============================================ */
 
-let mypageActiveTab = "upcoming"; // "upcoming" | "OK" | "WT" — 확약/대기 탭 토글 상태
+let mypageActiveTab = "upcoming"; // "upcoming" | "WT"
 
 function todayDateStr() {
   const d = new Date();
@@ -31,71 +31,49 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("profile-email").textContent = CurrentUser.email;
 
-  document.getElementById("stat-customers").textContent = Store.totalTravelers();
-  document.getElementById("stat-events").textContent = Store.totalEntries();
-  document.getElementById("stat-ok").textContent = Store.totalOkEntries();
-  document.getElementById("stat-wt").textContent = Store.flatEntries().filter((p) => p.entry.status === "WT").length;
+  document.getElementById("tab-wt-count").textContent = Store.flatEntries().filter((p) => p.entry.status === "WT").length;
 
   renderActivitySection();
   wireExpandableRows(document.getElementById("activity-list"));
   wireMonthGroups(document.getElementById("activity-list"));
 
-  document.getElementById("stat-ok-btn").addEventListener("click", () => {
-    mypageActiveTab = mypageActiveTab === "OK" ? "upcoming" : "OK";
+  document.getElementById("tab-upcoming-btn").addEventListener("click", () => {
+    mypageActiveTab = "upcoming";
     renderActivitySection();
   });
-  document.getElementById("stat-wt-btn").addEventListener("click", () => {
-    mypageActiveTab = mypageActiveTab === "WT" ? "upcoming" : "WT";
+  document.getElementById("tab-wt-btn").addEventListener("click", () => {
+    mypageActiveTab = "WT";
     renderActivitySection();
   });
 });
 
-// 상단 확약/대기 탭 상태에 따라 활동 목록 섹션의 제목·내용을 다시 그림
+// 다가오는 일정 / 대기(WT) 탭 상태에 따라 활동 목록을 다시 그림
 function renderActivitySection() {
-  document.getElementById("stat-ok-btn").classList.toggle("active", mypageActiveTab === "OK");
-  document.getElementById("stat-wt-btn").classList.toggle("active", mypageActiveTab === "WT");
+  document.getElementById("tab-upcoming-btn").classList.toggle("active", mypageActiveTab === "upcoming");
+  document.getElementById("tab-wt-btn").classList.toggle("active", mypageActiveTab === "WT");
 
-  const titleEl = document.getElementById("activity-list-title");
   const listEl = document.getElementById("activity-list");
   const allPairs = Store.flatEntries();
 
   let pairs;
   let emptyMessage;
-  if (mypageActiveTab === "OK") {
-    titleEl.textContent = "확약(OK) 일정";
-    pairs = allPairs
-      .filter((p) => p.entry.status === "OK")
-      .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
-    emptyMessage = "확약된 일정이 없어요.";
-  } else if (mypageActiveTab === "WT") {
-    titleEl.textContent = "확인 필요한 대기(WT) 일정";
+  if (mypageActiveTab === "WT") {
     // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서
     pairs = allPairs
       .filter((p) => p.entry.status === "WT")
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
     emptyMessage = "확인이 필요한 대기 일정이 없어요.";
-
-    listEl.innerHTML =
-      pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
-    return;
   } else {
-    titleEl.textContent = "다가오는 일정";
     // 오늘 이후 일정을 날짜 가까운 순으로 — 실제로 누가 오는지, 무슨 액션이 필요한지 한눈에
     const today = todayDateStr();
     pairs = allPairs
       .filter((p) => p.entry.date >= today)
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
     emptyMessage = "다가오는 일정이 없어요.";
-
-    listEl.innerHTML =
-      pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
-    return;
   }
 
   listEl.innerHTML =
-    pairs.length === 0
-      ? `<div class="detail-empty">${emptyMessage}</div>`
-      : pairs.map((pair) => renderMypageRowHtml(pair)).join("");
+    pairs.length === 0 ? `<div class="detail-empty">${emptyMessage}</div>` : renderMonthGroupedHtml(pairs);
 }
 
 // 목록 안에서 버튼(.activity-row)을 누르면 바로 아래 상세(.activity-detail)를 펼치고/접음

@@ -40,48 +40,46 @@
   color:var(--sub);
 }
 
-.stat-grid{
-  display:grid;
-  grid-template-columns:repeat(4, 1fr);
-  gap:12px;
-  margin-bottom:16px;
-}
-
-.stat-card{
-  padding:16px;
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-.stat-label{
-  font-size:12px;
-  color:var(--sub);
-  font-weight:700;
-}
-.stat-value{
-  font-size:24px;
-  font-weight:800;
-}
-.stat-wt-value{
-  color:var(--wt);
-}
-
-.stat-card-btn{
-  cursor:pointer;
-  font-family:inherit;
-  text-align:left;
-  transition:.15s;
-}
-.stat-card-btn:hover{ background:#F5F5F5; }
-.stat-ok-btn.active{ background:var(--ok-bg); }
-.stat-wt-btn.active{ background:var(--wt-bg); }
-
 .activity-card{
   padding:20px;
 }
-.activity-card h3{
-  font-size:15px;
-  margin-bottom:12px;
+
+.mypage-tabs{
+  display:flex;
+  background:var(--bg);
+  border-radius:999px;
+  padding:4px;
+  margin-bottom:16px;
+}
+.mypage-tab{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  border:none;
+  background:none;
+  padding:8px 0;
+  border-radius:999px;
+  font-weight:700;
+  font-size:13px;
+  color:var(--sub);
+  cursor:pointer;
+  font-family:inherit;
+  transition:.15s;
+}
+.mypage-tab.active{
+  background:var(--surface);
+  color:var(--text);
+  box-shadow:var(--shadow-card);
+}
+.mypage-tab-count{
+  background:var(--wt-bg);
+  color:var(--wt);
+  border-radius:999px;
+  padding:1px 7px;
+  font-size:11px;
+  font-weight:700;
 }
 
 .activity-list{
@@ -198,8 +196,4 @@
 }
 .month-group-body:not([hidden]){
   display:flex;
-}
-
-@media (max-width: 600px){
-  .stat-grid{grid-template-columns:1fr}
 }

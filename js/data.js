@@ -226,17 +226,6 @@ const Store = {
     return list;
   },
 
-  totalTravelers() {
-    return this.groups.reduce((sum, g) => sum + g.travelers.length, 0);
-  },
-
-  totalEntries() {
-    return this.groups.reduce((sum, g) => sum + g.entries.length, 0);
-  },
-
-  totalOkEntries() {
-    return this.flatEntries().filter((p) => p.entry.status === "OK").length;
-  },
 };
 
 // 관리자 전용 — 선택한 여러 사용자의 데이터를 한 번에 불러와 그룹마다 소유자 이메일을 붙여서 반환
