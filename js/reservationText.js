@@ -112,8 +112,10 @@ function buildLimoReservationText(parsed) {
   sorted.forEach((entry) => {
     const direction = directionMap.get(entry)?.direction;
     const airport = FLIGHT_AIRPORT_MAP[entry.flightNo.toUpperCase()] || null;
-    // 김포는 터미널 구분이 없어서 공항명만, 인천은 터미널(T1/T2) 확인이 필요해서 표시만 남겨둠
-    const location = airport === "김포" ? "김포공항" : airport === "인천" ? "(터미널확인)" : "(공항/터미널확인)";
+    // 김포는 터미널 구분이 없어서 공항명만, 인천은 항공사별 터미널(T1/T2)을 자동 매핑
+    const terminal = airport === "인천" ? terminalForFlight(entry.flightNo) : null;
+    const location =
+      airport === "김포" ? "김포공항" : terminal ? terminal : airport === "인천" ? "(터미널확인)" : "(공항/터미널확인)";
     const md = formatMD(entry.date);
     if (direction === "출국") {
       const pickupTime = subtractHours(entry.depTime, 2);

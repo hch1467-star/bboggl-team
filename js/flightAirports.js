@@ -69,3 +69,34 @@ Object.entries(FLIGHT_AIRPORT_RAW).forEach(([airport, list]) => {
     });
   });
 });
+
+/* ============================================
+   인천공항 터미널(T1/T2) — 항공사별 매핑
+   인천국제공항공사 공공데이터(여객편 운항 현황 API, data.go.kr)로 확인한 실제 배정.
+   대한항공 그룹(대한항공/아시아나/진에어/에어서울)은 제2터미널, 그 외 저비용항공사는 제1터미널.
+   김포공항은 터미널 구분이 없어서 이 표에 없음.
+   ============================================ */
+const AIRLINE_TERMINAL_MAP = {
+  KE: "T2", // 대한항공
+  OZ: "T2", // 아시아나항공
+  LJ: "T2", // 진에어
+  RS: "T2", // 에어서울
+  BX: "T2", // 에어부산
+  JL: "T2", // 일본항공 (KE/OZ 코드셰어 노선 기준)
+  NH: "T2", // 전일본공수 (KE/OZ 코드셰어 노선 기준)
+  "7C": "T1", // 제주항공
+  TW: "T1", // 티웨이항공
+  ZE: "T1", // 이스타항공
+  YP: "T1", // 에어프레미아
+  RF: "T1", // 에어로케이항공
+  WE: "T1", // 파라타항공
+};
+
+// "KE724" -> "KE", "7C1396" -> "7C" (IATA 항공사 코드는 2자리)
+function airlineCodeOf(flightNo) {
+  return (flightNo || "").toUpperCase().slice(0, 2);
+}
+
+function terminalForFlight(flightNo) {
+  return AIRLINE_TERMINAL_MAP[airlineCodeOf(flightNo)] || null;
+}

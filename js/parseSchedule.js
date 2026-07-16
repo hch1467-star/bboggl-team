@@ -55,7 +55,7 @@ function parseTravelerLine(line) {
 const STATUS_TOKEN_RE = /^([CY])(\d*)(OK|WT)$/i;
 const STATUS_FIELD_PART = "[CY]\\d*(?:OK|WT)(?:\\s*,\\s*[CY]\\d*(?:OK|WT))*";
 const FLIGHT_LINE_RE = new RegExp(
-  `^(\\d{1,2})\\/(\\d{1,2})\\s+([A-Z]{1,2}\\d{2,4})\\s+(\\d{3,4})-(\\d{3,4})\\s+(${STATUS_FIELD_PART})(?:\\s*\\(([^)]+)\\)|\\s+(.+))?\\s*$`,
+  `^(\\d{1,2})\\/(\\d{1,2})\\s+([A-Z0-9]{2}\\d{2,4})\\s+(\\d{3,4})-(\\d{3,4})\\s+(${STATUS_FIELD_PART})(?:\\s*\\(([^)]+)\\)|\\s+(.+))?\\s*$`,
   "i"
 );
 
