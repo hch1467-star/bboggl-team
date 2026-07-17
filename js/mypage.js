@@ -138,17 +138,20 @@ function wireMonthGroups(containerEl) {
 }
 
 function renderMypageRowHtml({ group, entry }) {
-  const primary = group.travelers[0];
+  // 한 그룹(예약) 안에서도 항공편마다 실제로 타는 사람이 다를 수 있어서(예: 리더는 비즈니스, 나머지는 이코노미로 같은 편명이 따로 등록된 경우)
+  // 그룹 전체 인원이 아니라 이 항공편(entry)에 배정된 인원만 이름표에 써야 서로 다른 예약이 "중복"처럼 보이지 않는다
+  const entryTravelers = entry.travelers && entry.travelers.length > 0 ? entry.travelers : group.travelers;
+  const primary = entryTravelers[0];
   const nameLabel =
-    group.travelers.length > 1 ? `${primary.name} 외 ${group.travelers.length - 1}명` : primary.name;
+    entryTravelers.length > 1 ? `${primary.name} 외 ${entryTravelers.length - 1}명` : primary.name;
   const [, m, d] = entry.date.split("-");
   const classLabel = entry.seatClass === "C" ? "비즈니스" : "이코노미";
   const statusLabel = entry.status === "OK" ? "확약 OK" : "대기 WT";
   const statusClass = entry.status === "OK" ? "badge-ok" : "badge-wt";
 
   const companionsHtml =
-    group.travelers.length > 1
-      ? `<div class="activity-detail-companions">일행: ${group.travelers.map((t) => escapeHtml(t.name)).join(", ")}</div>`
+    entryTravelers.length > 1
+      ? `<div class="activity-detail-companions">일행: ${entryTravelers.map((t) => escapeHtml(t.name)).join(", ")}</div>`
       : "";
   const assigneeHtml = group.assignee
     ? `<span class="badge-assignee">담당 ${escapeHtml(group.assignee)}</span>`
@@ -162,7 +165,7 @@ function renderMypageRowHtml({ group, entry }) {
       <button type="button" class="activity-row" aria-expanded="false">
         <span class="activity-name">${escapeHtml(nameLabel)}</span>
         <span class="activity-row-meta">
-          <span class="activity-meta">${m}/${d} · ${escapeHtml(entry.flightNo)} · ${entry.status === "OK" ? "확약" : "대기"}</span>
+          <span class="activity-meta">${m}/${d} · ${escapeHtml(entry.flightNo)} · ${classLabel} · ${entry.status === "OK" ? "확약" : "대기"}</span>
           <span class="activity-chevron">${Icons.chevronRight}</span>
         </span>
       </button>
