@@ -58,17 +58,15 @@ const FLIGHT_LINE_RE = new RegExp(
   `^(\\d{1,2})\\/(\\d{1,2})\\s+([A-Z0-9]{2}\\d{2,4})\\s+(\\d{3,4})-(\\d{3,4})\\s+(${STATUS_FIELD_PART})(?:\\s*\\(([^)]+)\\)|\\s+(.+))?\\s*$`,
   "i"
 );
+// 출발-도착 시간 없이 "월/일 편명 [C/Y][OK/WT]"만 쓴 줄 — js/flightSchedule.js의 저장된 시간표에서 시간을 찾아 채움
+const FLIGHT_LINE_SHORT_RE = new RegExp(
+  `^(\\d{1,2})\\/(\\d{1,2})\\s+([A-Z0-9]{2}\\d{2,4})\\s+(${STATUS_FIELD_PART})(?:\\s*\\(([^)]+)\\)|\\s+(.+))?\\s*$`,
+  "i"
+);
 
-function buildEntry(match, year, travelers) {
-  const [, month, day, flightNo, depRaw, arrRaw, statusField, parenMemo, freeMemo] = match;
-  const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+// 좌석등급/상태 토큰(들)과 동행자 배정까지 처리하는 공통 로직 — 출발-도착 시간(base)만 호출부에서 다르게 넘겨줌
+function buildEntryFromBase(base, statusField, parenMemo, freeMemo, travelers) {
   const memo = (parenMemo || freeMemo || "").trim();
-  const base = {
-    date,
-    flightNo: flightNo.toUpperCase(),
-    depTime: formatTime(depRaw),
-    arrTime: formatTime(arrRaw),
-  };
 
   const tokens = statusField.split(",").map((s) => s.trim());
   const parsedTokens = tokens.map((tok) => {
@@ -101,6 +99,29 @@ function buildEntry(match, year, travelers) {
   return [{ ...base, seatClass: only.seatClass, status: only.status, memo, travelers: [...travelers] }];
 }
 
+function buildEntry(match, year, travelers) {
+  const [, month, day, flightNo, depRaw, arrRaw, statusField, parenMemo, freeMemo] = match;
+  const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const base = {
+    date,
+    flightNo: flightNo.toUpperCase(),
+    depTime: formatTime(depRaw),
+    arrTime: formatTime(arrRaw),
+  };
+  return buildEntryFromBase(base, statusField, parenMemo, freeMemo, travelers);
+}
+
+// 편명만 있고 시간이 없는 줄 — 저장된 시간표(FLIGHT_TIME_MAP)에서 출발-도착 시간을 찾아 채움. 시간표에 없는 편명이면 null(호출부에서 invalidLines 처리)
+function buildEntryFromFlightSchedule(match, year, travelers) {
+  const [, month, day, flightNo, statusField, parenMemo, freeMemo] = match;
+  const timeRange = typeof timeRangeForFlight === "function" ? timeRangeForFlight(flightNo) : null;
+  if (!timeRange) return null;
+  const [depTime, arrTime] = timeRange.split("-");
+  const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const base = { date, flightNo: flightNo.toUpperCase(), depTime, arrTime };
+  return buildEntryFromBase(base, statusField, parenMemo, freeMemo, travelers);
+}
+
 // 빈 줄로 구분된 하나의 블록(동행자 N명 + 그들의 항공편) 파싱
 function parseBlock(lines, year) {
   const travelers = [];
@@ -124,7 +145,19 @@ function parseBlock(lines, year) {
       const built = buildEntry(m, year, travelers);
       if (built) entries.push(...built);
       else invalidLines.push(line);
-    } else if (!flightsStarted) {
+      return;
+    }
+
+    const shortMatch = line.match(FLIGHT_LINE_SHORT_RE);
+    if (shortMatch) {
+      flightsStarted = true;
+      const built = buildEntryFromFlightSchedule(shortMatch, year, travelers);
+      if (built) entries.push(...built);
+      else invalidLines.push(line);
+      return;
+    }
+
+    if (!flightsStarted) {
       travelers.push(parseTravelerLine(line));
     } else {
       invalidLines.push(line);
