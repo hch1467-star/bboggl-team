@@ -162,6 +162,32 @@ function renderMypageRowHtml({ group, entry }) {
   // 캘린더 상세패널에서 "방 예약" 버튼을 눌러 활성화한 경우에만 표시 (예약/그룹 전체가 공유하는 상태)
   const roomBookedBadge = group.roomBooked ? `<span class="badge badge-room">방예약</span>` : "";
 
+  // 항공편 없이 셀인/셀아웃만 등록한 일정 — 편명/좌석/확약 정보 없이 날짜+방향만 표시
+  if (entry.noFlight) {
+    const noFlightLabel = entry.direction === "입국" ? "셀인" : "셀아웃";
+    return `
+      <div class="activity-item">
+        <button type="button" class="activity-row" aria-expanded="false">
+          <span class="activity-name">${escapeHtml(nameLabel)}</span>
+          <span class="activity-row-meta">
+            ${roomBookedBadge}
+            <span class="activity-meta">${m}/${d} · ${noFlightLabel}</span>
+            <span class="activity-chevron">${Icons.chevronRight}</span>
+          </span>
+        </button>
+        <div class="activity-detail" hidden>
+          <div class="activity-detail-row">
+            ${Icons.calendar}
+            <span>${noFlightLabel}</span>
+            ${group.roomBooked ? `<span class="badge badge-room">방예약 완료</span>` : ""}
+            ${assigneeHtml}
+          </div>
+          ${companionsHtml}
+          ${memoHtml}
+        </div>
+      </div>`;
+  }
+
   return `
     <div class="activity-item">
       <button type="button" class="activity-row" aria-expanded="false">

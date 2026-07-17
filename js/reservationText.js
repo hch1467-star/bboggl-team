@@ -131,7 +131,9 @@ function buildLimoReservationText(parsed) {
   const primary = parsed.travelers[0];
   const nameLabel = `${primary.name}${primary.title ? " " + primary.title : ""}`;
   const directionMap = classifyDirections(parsed.entries);
-  const sorted = [...parsed.entries].sort(
+  // 셀인/셀아웃(항공편 없음) 일정은 리무진 대상이 아니므로 제외
+  const flightEntries = parsed.entries.filter((e) => !e.noFlight);
+  const sorted = [...flightEntries].sort(
     (a, b) => a.date.localeCompare(b.date) || a.depTime.localeCompare(b.depTime)
   );
 
@@ -157,8 +159,11 @@ function buildLimoReservationText(parsed) {
 
 // 객실 예약 텍스트 아래에 리무진 예약 텍스트를 이어붙이고 마무리 멘트를 고정으로 붙임
 // (같은 곳에 같이 요청하는 거라 두 텍스트를 하나로 합쳐서 복사)
+// 셀인/셀아웃만 있는(항공편이 아예 없는) 고객은 리무진이 필요 없으니 객실 예약만 생성
 function buildCombinedReservationText(parsed) {
   const room = buildRoomReservationText(parsed);
+  const hasFlight = parsed.entries.some((e) => !e.noFlight);
+  if (!hasFlight) return room;
   const limo = buildLimoReservationText(parsed);
   return `${room}\n\n\n${limo}\n\n객실 예약 및 리모 예약 같이 부탁드립니다.`;
 }

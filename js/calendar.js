@@ -487,6 +487,12 @@ function classifyDirections(entries) {
       (a, b) => a.date.localeCompare(b.date) || a.depTime.localeCompare(b.depTime)
     );
     sorted.forEach((entry, idx) => {
+      // 항공편 없이 셀인/셀아웃만 등록한 일정 — 사용자가 직접 지정한 방향을 그대로 사용 (추론 불필요)
+      if (entry.noFlight) {
+        result.set(entry, { direction: entry.direction, conflict: false });
+        return;
+      }
+
       // 1순위: 실제 노선표 기반 매핑 (flightDirections.js) — 있으면 그대로 확정, 순서/패턴 추론 안 씀
       const known = FLIGHT_DIRECTION_MAP[entry.flightNo];
       if (known) {
@@ -538,6 +544,30 @@ function renderEntryRowHtml(entry, showTravelerLabel, directionInfo, group, read
     directionBadge = `<span class="badge-direction ${dirClass}${conflictClass}"${titleAttr}>${directionInfo.direction}편${
       directionInfo.conflict ? " ⚠" : ""
     }</span>`;
+  }
+
+  // 항공편 없이 셀인/셀아웃만 등록한 일정 — 항공편 정보 없이 날짜+방향만 표시, 리무진과 무관하니 "방 예약" 버튼만 의미 있음
+  if (entry.noFlight) {
+    const noFlightLabel = entry.direction === "입국" ? "셀인 (체크인)" : "셀아웃 (체크아웃)";
+    const noFlightDirClass = entry.direction === "입국" ? "badge-arrival" : "badge-departure";
+    return `
+      <div class="entry-row">
+        ${travelerLabel}
+        <div class="detail-item-header">
+          <span class="header-badges">
+            <span class="badge-direction ${noFlightDirClass}">${entry.direction}</span>
+            <span class="detail-flight-time">${m}/${d}</span>
+          </span>
+          <span class="header-badges">
+            ${roomBookedBtn}
+          </span>
+        </div>
+        <div class="detail-flight-row">
+          ${Icons.calendar}
+          <span class="detail-flight-no">${noFlightLabel}</span>
+        </div>
+        ${entry.memo ? `<div class="detail-memo">메모: ${escapeHtml(entry.memo)}</div>` : ""}
+      </div>`;
   }
 
   return `

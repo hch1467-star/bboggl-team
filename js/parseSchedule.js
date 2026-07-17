@@ -122,6 +122,31 @@ function buildEntryFromFlightSchedule(match, year, travelers) {
   return buildEntryFromBase(base, statusField, parenMemo, freeMemo, travelers);
 }
 
+// 항공편 없이 일정(체크인/체크아웃)만 등록하는 고객용 — "월/일 SELIN|SELOUT" 또는 "월/일 셀인|셀아웃"
+const NO_FLIGHT_LINE_RE = new RegExp(
+  `^(\\d{1,2})\\/(\\d{1,2})\\s+(SELIN|SELOUT|셀인|셀아웃)(?:\\s*\\(([^)]+)\\)|\\s+(.+))?\\s*$`,
+  "i"
+);
+
+function buildNoFlightEntry(match, year, travelers) {
+  const [, month, day, keyword, parenMemo, freeMemo] = match;
+  const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const memo = (parenMemo || freeMemo || "").trim();
+  const direction = /^(SELIN|셀인)$/i.test(keyword) ? "입국" : "출국";
+  return [{
+    date,
+    flightNo: "",
+    depTime: "",
+    arrTime: "",
+    seatClass: "",
+    status: "OK",
+    memo,
+    travelers: [...travelers],
+    noFlight: true,
+    direction,
+  }];
+}
+
 // 빈 줄로 구분된 하나의 블록(동행자 N명 + 그들의 항공편) 파싱
 function parseBlock(lines, year) {
   const travelers = [];
@@ -154,6 +179,13 @@ function parseBlock(lines, year) {
       const built = buildEntryFromFlightSchedule(shortMatch, year, travelers);
       if (built) entries.push(...built);
       else invalidLines.push(line);
+      return;
+    }
+
+    const noFlightMatch = line.match(NO_FLIGHT_LINE_RE);
+    if (noFlightMatch) {
+      flightsStarted = true;
+      entries.push(...buildNoFlightEntry(noFlightMatch, year, travelers));
       return;
     }
 
