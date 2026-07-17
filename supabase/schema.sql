@@ -10,6 +10,7 @@ create table if not exists groups (
   user_id uuid not null references auth.users(id) on delete cascade,
   assignee text default '',
   memo text default '',
+  room_booked boolean not null default false,
   created_at timestamptz not null default now()
 );
 

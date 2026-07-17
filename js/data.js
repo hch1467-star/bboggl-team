@@ -72,6 +72,7 @@ const Store = {
       entries: entriesByGroup.get(g.id) || [],
       assignee: g.assignee || "",
       memo: g.memo || "",
+      roomBooked: !!g.room_booked,
     }));
   },
 
@@ -142,6 +143,7 @@ const Store = {
       entries: insertedEntries,
       assignee: groupRow.assignee || "",
       memo: groupRow.memo || "",
+      roomBooked: !!groupRow.room_booked,
     };
     this.groups.push(group);
     return { group, added: group.entries };
@@ -160,6 +162,16 @@ const Store = {
     if (error) throw error;
     const group = this.groups.find((g) => g.id === groupId);
     if (group) group.memo = memo;
+  },
+
+  // 객실(방) 예약 완료 여부 토글 — 예약(그룹) 전체에 하나로 관리 (항공편별이 아님)
+  async toggleRoomBooked(groupId) {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const newValue = !group.roomBooked;
+    const { error } = await supabaseClient.from("groups").update({ room_booked: newValue }).eq("id", groupId);
+    if (error) throw error;
+    group.roomBooked = newValue;
   },
 
   // 이벤트(주말 행사 등) — 직원 전체 공통, 매달 수동으로 등록
@@ -272,6 +284,7 @@ async function loadGroupsForUsers(userIds, emailById) {
     entries: entriesByGroup.get(g.id) || [],
     assignee: g.assignee || "",
     memo: g.memo || "",
+    roomBooked: !!g.room_booked,
     ownerEmail: emailById.get(g.user_id) || "",
   }));
 }

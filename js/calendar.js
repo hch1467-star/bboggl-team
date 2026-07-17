@@ -285,7 +285,7 @@ const CalendarView = {
           </span>
         </div>
         <div class="entry-list">
-          ${entries.map((entry) => renderEntryRowHtml(entry, showTravelerLabel, directionMap.get(entry))).join("")}
+          ${entries.map((entry) => renderEntryRowHtml(entry, showTravelerLabel, directionMap.get(entry), group, readOnly)).join("")}
         </div>
         ${renderRosterHtml(group.travelers)}
         ${memoSectionHtml}
@@ -314,6 +314,17 @@ const CalendarView = {
           } catch (err) {
             alert("메모를 저장하지 못했어요: " + (err.message || err));
           }
+        });
+
+        item.querySelectorAll(".room-booked-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            try {
+              await Store.toggleRoomBooked(group.id);
+              this.render();
+            } catch (err) {
+              alert("방 예약 상태를 저장하지 못했어요: " + (err.message || err));
+            }
+          });
         });
       }
 
@@ -498,12 +509,19 @@ function classifyDirections(entries) {
 }
 
 // 항공편 한 건 렌더링 — showTravelerLabel이 true면 이 항공편에 누가 타는지 표시
-function renderEntryRowHtml(entry, showTravelerLabel, directionInfo) {
+// group이 전달되면(캘린더 상세패널) 확약/대기 뱃지 왼쪽에 "방 예약" 토글 버튼을 붙임 — 예약(그룹) 전체가 공유하는 상태라 항공편이 여러 건이어도 같은 값
+// readOnly면(관리자 화면) 버튼을 비활성화해서 상태만 보이고 못 바꾸게 함
+function renderEntryRowHtml(entry, showTravelerLabel, directionInfo, group, readOnly) {
   const classLabel = entry.seatClass === "C" ? "비즈니스" : "이코노미";
   const statusBadge =
     entry.status === "OK"
       ? `<span class="badge badge-ok">확약 OK</span>`
       : `<span class="badge badge-wt">대기 WT</span>`;
+  const roomBookedBtn = group
+    ? `<button type="button" class="room-booked-btn${group.roomBooked ? " active" : ""}" data-group-id="${group.id}"${
+        readOnly ? " disabled" : ""
+      }>방 예약</button>`
+    : "";
   const [, m, d] = entry.date.split("-");
   const travelerLabel =
     showTravelerLabel && entry.travelers && entry.travelers.length > 0
@@ -530,7 +548,10 @@ function renderEntryRowHtml(entry, showTravelerLabel, directionInfo) {
           ${directionBadge}
           <span class="detail-flight-time">${m}/${d}</span>
         </span>
-        ${statusBadge}
+        <span class="header-badges">
+          ${roomBookedBtn}
+          ${statusBadge}
+        </span>
       </div>
       <div class="detail-flight-row">
         ${Icons.plane}

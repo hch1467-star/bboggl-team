@@ -159,12 +159,15 @@ function renderMypageRowHtml({ group, entry }) {
   const memoHtml = group.memo
     ? `<div class="activity-detail-memo">메모: ${escapeHtml(group.memo)}</div>`
     : "";
+  // 캘린더 상세패널에서 "방 예약" 버튼을 눌러 활성화한 경우에만 표시 (예약/그룹 전체가 공유하는 상태)
+  const roomBookedBadge = group.roomBooked ? `<span class="badge badge-room">방예약</span>` : "";
 
   return `
     <div class="activity-item">
       <button type="button" class="activity-row" aria-expanded="false">
         <span class="activity-name">${escapeHtml(nameLabel)}</span>
         <span class="activity-row-meta">
+          ${roomBookedBadge}
           <span class="activity-meta">${m}/${d} · ${escapeHtml(entry.flightNo)} · ${classLabel} · ${entry.status === "OK" ? "확약" : "대기"}</span>
           <span class="activity-chevron">${Icons.chevronRight}</span>
         </span>
@@ -176,6 +179,7 @@ function renderMypageRowHtml({ group, entry }) {
           <span>${entry.depTime} - ${entry.arrTime}</span>
           <span class="badge-class">${classLabel}</span>
           <span class="badge ${statusClass}">${statusLabel}</span>
+          ${group.roomBooked ? `<span class="badge badge-room">방예약 완료</span>` : ""}
           ${assigneeHtml}
         </div>
         ${companionsHtml}
