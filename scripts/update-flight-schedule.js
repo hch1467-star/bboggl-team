@@ -77,21 +77,66 @@ const INCHEON_ROUTES = [
   },
 ];
 
-// 김포 노선 — 한국공항공사 API 미연동 상태라 수동으로 확인한 값을 그대로 고정 사용 (편명그룹 -> "HH:MM-HH:MM")
-const GIMPO_FIXED = {
-  "OZ1135/NH6957": "11:10-12:55", "KE2118/JL5247": "11:25-13:20", "7C1328": "16:30-18:25",
-  "OZ1155/NH6979": "17:40-19:20", "KE2120/JL5151": "19:35-21:25",
-  "OZ1145/NH6958": "8:10-10:00", "KE2117/JL5246": "9:15-11:05", "7C1327": "13:55-15:50",
-  "KE2119/JL5150": "15:30-17:40", "OZ1165/NH6980": "17:40-19:20",
-  "JL091/KE5708": "8:20-10:40", "NH861/OZ9101": "8:40-11:05", "OZ1055/NH6983": "9:00-11:20",
-  "KE2106/JL5245": "9:20-11:45", "JL093/KE5710": "12:05-14:25", "NH865/OZ9103": "12:35-14:55",
-  "JL095/KE5712": "18:55-21:15", "KE2104/JL5237": "19:55-21:30", "NH867/OZ9127": "20:05-22:20",
-  "OZ1035/NH6969": "20:05-22:25",
-  "NH862/OZ9128": "7:40-9:50", "JL090/KE5711": "8:00-10:15", "OZ1085/NH6968": "8:40-10:45",
-  "KE2101/JL5234": "9:00-11:20", "JL092/KE5707": "12:05-14:20", "NH864/OZ9102": "12:40-14:55",
-  "JL094/KE5709": "16:20-18:35", "KE2103/JL5236": "16:40-18:55", "OZ1065/NH6984": "17:40-20:00",
-  "KE2105/JL5244": "19:50-22:15", "NH868/OZ9104": "19:50-22:15",
-};
+// 김포 노선 — 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터, api.odcloud.kr) 자동 조회 대상 편명 그룹
+// 이 데이터셋은 인천 API와 달리 출발/도착 시간을 한 번에 다 주기 때문에 반대편 시간을 따로 계산할 필요 없음.
+const GIMPO_ROUTE_ENTRIES = [
+  "OZ1135/NH6957", "KE2118/JL5247", "7C1328", "OZ1155/NH6979", "KE2120/JL5151",
+  "OZ1145/NH6958", "KE2117/JL5246", "7C1327", "KE2119/JL5150", "OZ1165/NH6980",
+  "JL091/KE5708", "NH861/OZ9101", "OZ1055/NH6983", "KE2106/JL5245",
+  "JL093/KE5710", "NH865/OZ9103", "JL095/KE5712", "KE2104/JL5237",
+  "NH867/OZ9127", "OZ1035/NH6969",
+  "NH862/OZ9128", "JL090/KE5711", "OZ1085/NH6968", "KE2101/JL5234",
+  "JL092/KE5707", "NH864/OZ9102", "JL094/KE5709", "KE2103/JL5236",
+  "OZ1065/NH6984", "KE2105/JL5244", "NH868/OZ9104",
+];
+const GIMPO_ODCLOUD_NAMESPACE = "15003087"; // 한국공항공사_국제선 항공기스케줄
+
+// odcloud는 파일을 새로 올릴 때마다 새 경로(uddi)가 생기는 방식이라, Swagger 문서에서 날짜가 가장 최신인 경로를 매번 찾아야 함
+async function fetchOdcloudLatestPath(namespaceId) {
+  const res = await fetch(`https://infuser.odcloud.kr/oas/docs?namespace=${namespaceId}/v1`);
+  const spec = await res.json();
+  let latestPath = null;
+  let latestDate = "";
+  for (const [p, def] of Object.entries(spec.paths || {})) {
+    const summary = def?.get?.summary || "";
+    const m = summary.match(/_(\d{8})$/);
+    if (m && m[1] > latestDate) {
+      latestDate = m[1];
+      latestPath = p;
+    }
+  }
+  return latestPath;
+}
+
+async function fetchOdcloudAllRecords(fullPath, serviceKey) {
+  const perPage = 5000;
+  let page = 1;
+  let all = [];
+  while (true) {
+    const url = `https://api.odcloud.kr${fullPath}?page=${page}&perPage=${perPage}&serviceKey=${serviceKey}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const data = json.data || [];
+    all = all.concat(data);
+    if (data.length < perPage) break;
+    page++;
+  }
+  return all;
+}
+
+async function fetchGimpoTimeLookup(serviceKey) {
+  const latestPath = await fetchOdcloudLatestPath(GIMPO_ODCLOUD_NAMESPACE);
+  if (!latestPath) return {};
+  const records = await fetchOdcloudAllRecords(latestPath, serviceKey);
+  const map = {};
+  for (const rec of records) {
+    if (rec.출발공항 !== "GMP" && rec.도착공항 !== "GMP") continue;
+    if (!map[rec.운항편명]) {
+      map[rec.운항편명] = `${rec.출발시간}-${rec.도착시간}`;
+    }
+  }
+  return map;
+}
 
 function getCodes(entry) {
   const stripped = entry.replace(/\([^)]*\)/g, "");
@@ -143,9 +188,13 @@ function resolveGroupTime(codes, lookup) {
 
 async function main() {
   const existingMap = readExistingMap();
-  const [arrByFlight, depByFlight] = await Promise.all([
+  const [arrByFlight, depByFlight, gimpoTimeMap] = await Promise.all([
     fetchFlights("getPassengerArrivalsDSOdp"),
     fetchFlights("getPassengerDeparturesDSOdp"),
+    fetchGimpoTimeLookup(SERVICE_KEY).catch((err) => {
+      console.error("김포 노선 API 조회 실패, 기존 값 유지:", err.message || err);
+      return {};
+    }),
   ]);
 
   const finalMap = {};
@@ -193,8 +242,21 @@ async function main() {
     }
   }
 
-  for (const [entry, range] of Object.entries(GIMPO_FIXED)) {
-    getCodes(entry).forEach((c) => { finalMap[c] = range; });
+  for (const entry of GIMPO_ROUTE_ENTRIES) {
+    const codes = getCodes(entry);
+    const label = codes.join("/");
+    const range = resolveGroupTime(codes, gimpoTimeMap);
+    if (range) {
+      codes.forEach((c) => { finalMap[c] = range; });
+    } else {
+      const fallback = codes.map((c) => existingMap[c]).find(Boolean);
+      if (fallback) {
+        codes.forEach((c) => { finalMap[c] = fallback; });
+        warnings.push(`${label} (김포): API 매칭 안됨 — 기존 값 유지`);
+      } else {
+        warnings.push(`${label} (김포): API 매칭 안됨, 기존 값도 없음 — 수동 확인 필요`);
+      }
+    }
   }
 
   if (warnings.length > 0) {
@@ -208,8 +270,9 @@ async function main() {
     "/* ============================================",
     "   항공편 번호 -> 출발-도착 시간 (자동 생성 파일 — 직접 수정하지 마세요)",
     "   인천 노선: 인천국제공항공사 공공데이터(여객편 운항현황)에서 인천 쪽 실제 시간을 매달 자동으로 가져오고,",
-    "   반대편(일본 공항) 시간은 노선별 평균 비행시간으로 계산해서 채움 (scripts/update-flight-schedule.js, GitHub Actions 매달 1일 자동 실행).",
-    "   김포 노선은 아직 API 연동 전이라 수동 확인한 값을 고정으로 사용.",
+    "   반대편(일본 공항) 시간은 노선별 평균 비행시간으로 계산해서 채움.",
+    "   김포 노선: 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터)에서 출발-도착 시간을 그대로 가져옴.",
+    "   둘 다 scripts/update-flight-schedule.js에서 GitHub Actions로 매달 1일 자동 실행.",
     `   마지막 갱신: ${today}`,
     "   ============================================ */",
     "",
