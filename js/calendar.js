@@ -230,15 +230,24 @@ const CalendarView = {
     titleEl.textContent = `${m}월 ${d}일 방문 일정`;
 
     const dayPairs = this.getVisiblePairs().filter((p) => p.entry.date === this.selectedDate);
+    // 필터가 "이벤트"가 아니어도 그 날짜에 이벤트가 있으면 같이 보여주고 삭제할 수 있게 함
+    // (전에는 "이벤트" 필터로 바꿔야만 삭제 버튼이 보여서 찾기 어려웠음)
+    const dayEvents = (Store.events || []).filter((ev) => ev.date === this.selectedDate);
     panel.innerHTML = "";
 
-    if (dayPairs.length === 0) {
+    if (dayPairs.length === 0 && dayEvents.length === 0) {
       const empty = document.createElement("div");
       empty.className = "detail-empty";
       empty.textContent = "이 날짜에 예정된 일정이 없어요.";
       panel.appendChild(empty);
       return;
     }
+
+    if (dayEvents.length > 0) {
+      appendEventItems(panel, dayEvents);
+    }
+
+    if (dayPairs.length === 0) return; // 이벤트만 있고 방문 고객은 없는 날
 
     // 그룹(일행)별로 묶어서 카드 1개 = 파티 1개로 표시
     const byGroup = new Map();
@@ -333,6 +342,33 @@ const CalendarView = {
   },
 };
 
+// 이벤트 카드(제목/메모 + 삭제 버튼)를 만들어 패널에 붙임 — 방문 일정 상세패널과 "이벤트" 탭 전용 패널 양쪽에서 재사용
+function appendEventItems(panel, events) {
+  events.forEach((ev) => {
+    const item = document.createElement("div");
+    item.className = "detail-item";
+    item.innerHTML = `
+      <div class="detail-item-header">
+        <span class="detail-customer-name">${escapeHtml(ev.title)}</span>
+        <button class="delete-group-btn" type="button" aria-label="이벤트 삭제" title="이벤트 삭제">${Icons.trash}</button>
+      </div>
+      ${ev.memo ? `<div class="detail-memo">${escapeHtml(ev.memo)}</div>` : ""}
+    `;
+    const deleteBtn = item.querySelector(".delete-group-btn");
+    deleteBtn.addEventListener("click", async () => {
+      const ok = confirm(`"${ev.title}" 이벤트를 삭제할까요?`);
+      if (!ok) return;
+      try {
+        await Store.removeEvent(ev.id);
+        CalendarView.render();
+      } catch (err) {
+        alert("삭제하지 못했어요: " + (err.message || err));
+      }
+    });
+    panel.appendChild(item);
+  });
+}
+
 // "이벤트" 탭에서 선택한 날짜의 상세 패널 — 이벤트 목록(제목/메모) + 삭제 + 그 날짜에 추가 버튼
 function renderEventDetailPanel(panel, dateStr) {
   panel.innerHTML = "";
@@ -344,29 +380,7 @@ function renderEventDetailPanel(panel, dateStr) {
     empty.textContent = "이 날짜에 등록된 이벤트가 없어요.";
     panel.appendChild(empty);
   } else {
-    dayEvents.forEach((ev) => {
-      const item = document.createElement("div");
-      item.className = "detail-item";
-      item.innerHTML = `
-        <div class="detail-item-header">
-          <span class="detail-customer-name">${escapeHtml(ev.title)}</span>
-          <button class="delete-group-btn" type="button" aria-label="이벤트 삭제" title="이벤트 삭제">${Icons.trash}</button>
-        </div>
-        ${ev.memo ? `<div class="detail-memo">${escapeHtml(ev.memo)}</div>` : ""}
-      `;
-      const deleteBtn = item.querySelector(".delete-group-btn");
-      deleteBtn.addEventListener("click", async () => {
-        const ok = confirm(`"${ev.title}" 이벤트를 삭제할까요?`);
-        if (!ok) return;
-        try {
-          await Store.removeEvent(ev.id);
-          CalendarView.render();
-        } catch (err) {
-          alert("삭제하지 못했어요: " + (err.message || err));
-        }
-      });
-      panel.appendChild(item);
-    });
+    appendEventItems(panel, dayEvents);
   }
 
   if (typeof EventModal !== "undefined") {
