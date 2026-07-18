@@ -2,7 +2,7 @@
    마이페이지 — 로그인한 사용자의 실제 통계·활동 내역
    ============================================ */
 
-let mypageActiveTab = "입국"; // "입국" | "출국" | "WT"
+let mypageActiveTab = "입국"; // "입국" | "출국" | "입국대기" | "출국대기"
 
 function todayDateStr() {
   const d = new Date();
@@ -38,7 +38,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("profile-email").textContent = CurrentUser.email;
 
-  document.getElementById("tab-wt-count").textContent = Store.flatEntries().filter((p) => p.entry.status === "WT").length;
+  updateWtCounts();
 
   renderActivitySection();
   wireExpandableRows(document.getElementById("activity-list"));
@@ -52,35 +52,54 @@ document.addEventListener("DOMContentLoaded", async () => {
     mypageActiveTab = "출국";
     renderActivitySection();
   });
-  document.getElementById("tab-wt-btn").addEventListener("click", () => {
-    mypageActiveTab = "WT";
+  document.getElementById("tab-arrival-wt-btn").addEventListener("click", () => {
+    mypageActiveTab = "입국대기";
+    renderActivitySection();
+  });
+  document.getElementById("tab-departure-wt-btn").addEventListener("click", () => {
+    mypageActiveTab = "출국대기";
     renderActivitySection();
   });
 });
 
-// 입국편 / 출국편 / 대기(WT) 탭 상태에 따라 활동 목록을 다시 그림
+// 탭 옆에 표시할 입국대기/출국대기 건수를 계산
+function updateWtCounts() {
+  const directionCache = new Map();
+  const wtPairs = Store.flatEntries().filter((p) => p.entry.status === "WT");
+  document.getElementById("tab-arrival-wt-count").textContent =
+    wtPairs.filter((p) => directionForPair(p, directionCache) === "입국").length;
+  document.getElementById("tab-departure-wt-count").textContent =
+    wtPairs.filter((p) => directionForPair(p, directionCache) === "출국").length;
+}
+
+// 입국편 / 출국편 / 입국대기 / 출국대기 탭 상태에 따라 활동 목록을 다시 그림
 function renderActivitySection() {
   document.getElementById("tab-arrival-btn").classList.toggle("active", mypageActiveTab === "입국");
   document.getElementById("tab-departure-btn").classList.toggle("active", mypageActiveTab === "출국");
-  document.getElementById("tab-wt-btn").classList.toggle("active", mypageActiveTab === "WT");
+  document.getElementById("tab-arrival-wt-btn").classList.toggle("active", mypageActiveTab === "입국대기");
+  document.getElementById("tab-departure-wt-btn").classList.toggle("active", mypageActiveTab === "출국대기");
 
   const listEl = document.getElementById("activity-list");
   const allPairs = Store.flatEntries();
+  const directionCache = new Map();
 
   let pairs;
   let emptyMessage;
-  if (mypageActiveTab === "WT") {
-    // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서 (입국/출국 구분 없이 전부)
+  if (mypageActiveTab === "입국대기" || mypageActiveTab === "출국대기") {
+    // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서 (지난 날짜도 확인이 안 됐으면 계속 보여야 하므로 오늘 이후로 거르지 않음)
+    const wantDirection = mypageActiveTab === "입국대기" ? "입국" : "출국";
     pairs = allPairs
-      .filter((p) => p.entry.status === "WT")
+      .filter((p) => p.entry.status === "WT" && directionForPair(p, directionCache) === wantDirection)
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
-    emptyMessage = "확인이 필요한 대기 일정이 없어요.";
+    emptyMessage = mypageActiveTab === "입국대기" ? "확인이 필요한 입국 대기 일정이 없어요." : "확인이 필요한 출국 대기 일정이 없어요.";
   } else {
-    // 오늘 이후 일정을 날짜 가까운 순으로, 입국/출국 중 선택한 방향만 — 실제로 누가 오는지 한눈에
+    // 오늘 이후 확약된 일정을 날짜 가까운 순으로, 입국/출국 중 선택한 방향만 — 실제로 누가 오는지 한눈에 (대기는 별도 탭에서 확인)
     const today = todayDateStr();
-    const directionCache = new Map();
     pairs = allPairs
-      .filter((p) => p.entry.date >= today && directionForPair(p, directionCache) === mypageActiveTab)
+      .filter(
+        (p) =>
+          p.entry.status === "OK" && p.entry.date >= today && directionForPair(p, directionCache) === mypageActiveTab
+      )
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
     emptyMessage = mypageActiveTab === "입국" ? "다가오는 입국 일정이 없어요." : "다가오는 출국 일정이 없어요.";
   }

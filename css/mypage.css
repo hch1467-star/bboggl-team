@@ -45,14 +45,15 @@
 }
 
 .mypage-tabs{
-  display:flex;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:4px;
   background:var(--bg);
-  border-radius:999px;
+  border-radius:14px;
   padding:4px;
   margin-bottom:16px;
 }
 .mypage-tab{
-  flex:1;
   display:flex;
   align-items:center;
   justify-content:center;
@@ -60,7 +61,7 @@
   border:none;
   background:none;
   padding:8px 0;
-  border-radius:999px;
+  border-radius:10px;
   font-weight:700;
   font-size:13px;
   color:var(--sub);
