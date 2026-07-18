@@ -2,11 +2,18 @@
    마이페이지 — 로그인한 사용자의 실제 통계·활동 내역
    ============================================ */
 
-let mypageActiveTab = "upcoming"; // "upcoming" | "WT"
+let mypageActiveTab = "입국"; // "입국" | "출국" | "WT"
 
 function todayDateStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// {group,entry} 쌍의 입국/출국 방향을 구함 — 그룹별로 한 번만 계산해서 재사용(캐시)
+function directionForPair({ group, entry }, cache) {
+  if (entry.noFlight) return entry.direction;
+  if (!cache.has(group.id)) cache.set(group.id, classifyDirections(group.entries));
+  return cache.get(group.id).get(entry)?.direction || null;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -37,8 +44,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireExpandableRows(document.getElementById("activity-list"));
   wireMonthGroups(document.getElementById("activity-list"));
 
-  document.getElementById("tab-upcoming-btn").addEventListener("click", () => {
-    mypageActiveTab = "upcoming";
+  document.getElementById("tab-arrival-btn").addEventListener("click", () => {
+    mypageActiveTab = "입국";
+    renderActivitySection();
+  });
+  document.getElementById("tab-departure-btn").addEventListener("click", () => {
+    mypageActiveTab = "출국";
     renderActivitySection();
   });
   document.getElementById("tab-wt-btn").addEventListener("click", () => {
@@ -47,9 +58,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 });
 
-// 다가오는 일정 / 대기(WT) 탭 상태에 따라 활동 목록을 다시 그림
+// 입국편 / 출국편 / 대기(WT) 탭 상태에 따라 활동 목록을 다시 그림
 function renderActivitySection() {
-  document.getElementById("tab-upcoming-btn").classList.toggle("active", mypageActiveTab === "upcoming");
+  document.getElementById("tab-arrival-btn").classList.toggle("active", mypageActiveTab === "입국");
+  document.getElementById("tab-departure-btn").classList.toggle("active", mypageActiveTab === "출국");
   document.getElementById("tab-wt-btn").classList.toggle("active", mypageActiveTab === "WT");
 
   const listEl = document.getElementById("activity-list");
@@ -58,18 +70,19 @@ function renderActivitySection() {
   let pairs;
   let emptyMessage;
   if (mypageActiveTab === "WT") {
-    // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서
+    // 날짜가 가까운 것부터 — 확인·컨펌이 급한 순서 (입국/출국 구분 없이 전부)
     pairs = allPairs
       .filter((p) => p.entry.status === "WT")
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
     emptyMessage = "확인이 필요한 대기 일정이 없어요.";
   } else {
-    // 오늘 이후 일정을 날짜 가까운 순으로 — 실제로 누가 오는지, 무슨 액션이 필요한지 한눈에
+    // 오늘 이후 일정을 날짜 가까운 순으로, 입국/출국 중 선택한 방향만 — 실제로 누가 오는지 한눈에
     const today = todayDateStr();
+    const directionCache = new Map();
     pairs = allPairs
-      .filter((p) => p.entry.date >= today)
+      .filter((p) => p.entry.date >= today && directionForPair(p, directionCache) === mypageActiveTab)
       .sort((a, b) => a.entry.date.localeCompare(b.entry.date) || a.entry.depTime.localeCompare(b.entry.depTime));
-    emptyMessage = "다가오는 일정이 없어요.";
+    emptyMessage = mypageActiveTab === "입국" ? "다가오는 입국 일정이 없어요." : "다가오는 출국 일정이 없어요.";
   }
 
   listEl.innerHTML =
