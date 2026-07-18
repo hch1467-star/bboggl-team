@@ -8,6 +8,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const session = await requireSession();
   if (!session) return; // login.html로 이동 중
 
+  const loadingEl = document.getElementById("loading-overlay");
+  if (loadingEl) loadingEl.remove();
   wireLogoutButton();
 
   const fromSelect = document.getElementById("from-airport-select");
