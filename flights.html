@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>항공검색 · JM 비밀노트</title>
+<link rel="manifest" href="manifest.json?v=31">
+<link rel="icon" href="icons/favicon.png?v=31">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=31">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FOR BD">
+<meta name="theme-color" content="#8134AF">
+<link rel="stylesheet" href="css/design-system.css?v=31">
+<link rel="stylesheet" href="css/layout.css?v=31">
+<link rel="stylesheet" href="css/flights.css?v=31">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-logo"><span class="grad-text">JM 비밀노트</span></div>
+
+  <nav class="header-nav">
+    <a href="index.html" class="nav-link">캘린더</a>
+    <a href="mypage.html" class="nav-link">마이페이지</a>
+    <a href="flights.html" class="nav-link active">항공검색</a>
+  </nav>
+
+  <div class="header-right">
+    <span class="current-user-email" id="current-user-email"></span>
+    <button class="btn btn-outline btn-sm" id="logout-btn" type="button">로그아웃</button>
+  </div>
+</header>
+
+<div class="loading-overlay" id="loading-overlay">확인하는 중...</div>
+
+<main class="app-main flights-main">
+
+  <section class="card flight-search-card">
+    <div class="flight-search-row">
+      <div class="flight-airport-field">
+        <label for="from-airport-select">출발공항</label>
+        <select class="flight-airport-select" id="from-airport-select"></select>
+      </div>
+      <button type="button" class="flight-swap-btn" id="swap-airports-btn" aria-label="출발/도착 바꾸기" title="출발/도착 바꾸기">⇄</button>
+      <div class="flight-airport-field">
+        <label for="to-airport-select">도착공항</label>
+        <select class="flight-airport-select" id="to-airport-select"></select>
+      </div>
+    </div>
+  </section>
+
+  <section class="card flight-results-card">
+    <div class="flight-results-title" id="flight-results-title">노선을 선택해주세요</div>
+    <div id="flight-results"></div>
+  </section>
+
+</main>
+
+<nav class="bottom-tabbar">
+  <a href="index.html">캘린더</a>
+  <a href="mypage.html">마이페이지</a>
+  <a href="flights.html" class="active">항공검색</a>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/supabaseClient.js?v=31"></script>
+<script src="js/auth.js?v=31"></script>
+<script src="js/flightSchedule.js?v=31"></script>
+<script src="js/flightRoutes.js?v=31"></script>
+<script src="js/flights.js?v=31"></script>
+</body>
+</html>

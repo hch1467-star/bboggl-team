@@ -1,0 +1,90 @@
+/* ============================================
+   항공검색 — 출발/도착 공항으로 노선별 편명·시간 조회
+   ============================================ */
+
+.flights-main{
+  max-width:640px;
+}
+
+.flight-search-card{
+  padding:20px;
+  margin-bottom:16px;
+}
+
+.flight-search-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.flight-airport-field{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.flight-airport-field label{
+  font-size:11px;
+  font-weight:700;
+  color:var(--sub);
+}
+.flight-airport-select{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface);
+  color:var(--text);
+  font-family:inherit;
+  font-size:14px;
+  font-weight:600;
+  outline:none;
+}
+.flight-airport-select:focus{ border-color:var(--primary); }
+
+.flight-swap-btn{
+  flex-shrink:0;
+  width:36px;
+  height:36px;
+  margin-top:17px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:var(--surface);
+  color:var(--sub);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  transition:.15s;
+}
+.flight-swap-btn:hover{ border-color:var(--primary); color:var(--primary); }
+
+.flight-results-card{
+  padding:20px;
+}
+.flight-results-title{
+  font-size:13px;
+  font-weight:700;
+  color:var(--sub);
+  margin-bottom:12px;
+}
+
+.flight-result-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:10px 12px;
+  border-radius:10px;
+  background:var(--bg);
+  font-size:13px;
+  margin-bottom:8px;
+}
+.flight-result-row:last-child{ margin-bottom:0; }
+.flight-result-code{
+  font-weight:700;
+  color:var(--text);
+}
+.flight-result-time{
+  color:var(--sub);
+  font-variant-numeric:tabular-nums;
+}
