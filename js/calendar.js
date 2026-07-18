@@ -342,9 +342,10 @@ const CalendarView = {
   },
 };
 
-// 이벤트 카드(제목/메모 + 삭제 버튼)를 만들어 패널에 붙임 — 방문 일정 상세패널과 "이벤트" 탭 전용 패널 양쪽에서 재사용
+// 이벤트 카드(제목/공용메모 + 내 개인메모 + 삭제 버튼)를 만들어 패널에 붙임 — 방문 일정 상세패널과 "이벤트" 탭 전용 패널 양쪽에서 재사용
 function appendEventItems(panel, events) {
   events.forEach((ev) => {
+    const myNote = (Store.eventNotes && Store.eventNotes.get(ev.id)) || "";
     const item = document.createElement("div");
     item.className = "detail-item";
     item.innerHTML = `
@@ -353,6 +354,10 @@ function appendEventItems(panel, events) {
         <button class="delete-group-btn" type="button" aria-label="이벤트 삭제" title="이벤트 삭제">${Icons.trash}</button>
       </div>
       ${ev.memo ? `<div class="detail-memo">${escapeHtml(ev.memo)}</div>` : ""}
+      <div class="group-memo-section">
+        <label class="event-note-label">내 메모 (나한테만 보여요)</label>
+        <textarea class="event-note-input" placeholder="개인 메모 추가">${escapeHtml(myNote)}</textarea>
+      </div>
     `;
     const deleteBtn = item.querySelector(".delete-group-btn");
     deleteBtn.addEventListener("click", async () => {
@@ -365,6 +370,18 @@ function appendEventItems(panel, events) {
         alert("삭제하지 못했어요: " + (err.message || err));
       }
     });
+
+    const noteInput = item.querySelector(".event-note-input");
+    noteInput.addEventListener("blur", async () => {
+      const newNote = noteInput.value;
+      if (newNote === myNote) return;
+      try {
+        await Store.saveEventNote(ev.id, newNote);
+      } catch (err) {
+        alert("메모를 저장하지 못했어요: " + (err.message || err));
+      }
+    });
+
     panel.appendChild(item);
   });
 }

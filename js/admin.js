@@ -31,6 +31,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("이벤트를 불러오지 못했어요:", err);
   }
 
+  try {
+    await Store.loadEventNotes();
+  } catch (err) {
+    console.warn("이벤트 개인 메모를 불러오지 못했어요:", err);
+  }
+
   if (loadingEl) loadingEl.remove();
   wireLogoutButton();
   EventModal.init();

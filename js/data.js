@@ -28,6 +28,7 @@ function toTraveler(row) {
 const Store = {
   groups: [],
   events: [], // 직원 전체가 공통으로 보는 이벤트(주말 행사 등) — user_id로 분리하지 않음
+  eventNotes: new Map(), // 이벤트에 남기는 계정별 개인 메모(eventId -> memo) — RLS로 내 것만 불러와짐
   staffDirectory: [], // 담당자 사번/전화번호 — 개인정보라 DB(staff_directory 테이블)에서만 불러옴, git에는 저장 안 함
   customerMmid: [], // 고객명 ↔ MMID(고객번호) — 개인정보라 DB(customer_mmid 테이블)에서만 불러옴, git에는 저장 안 함
 
@@ -197,6 +198,22 @@ const Store = {
     const { error } = await supabaseClient.from("events").delete().eq("id", eventId);
     if (error) throw error;
     this.events = this.events.filter((e) => e.id !== eventId);
+  },
+
+  // 이벤트에 남기는 계정별 개인 메모 — 나만 보임(다른 직원 메모는 RLS로 안 보임). eventId -> memo 문자열 맵으로 보관
+  async loadEventNotes() {
+    const { data, error } = await supabaseClient.from("event_notes").select("event_id, memo");
+    if (error) throw error;
+    this.eventNotes = new Map(data.map((n) => [n.event_id, n.memo || ""]));
+  },
+
+  async saveEventNote(eventId, memo) {
+    const userId = CurrentUser.id;
+    const { error } = await supabaseClient
+      .from("event_notes")
+      .upsert({ event_id: eventId, user_id: userId, memo }, { onConflict: "event_id,user_id" });
+    if (error) throw error;
+    this.eventNotes.set(eventId, memo);
   },
 
   // 담당자 사번/전화번호 디렉터리 — 개인정보라 DB에서만 불러옴 (예약 텍스트의 BILLING/HOST에 사용)

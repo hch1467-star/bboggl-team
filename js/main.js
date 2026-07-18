@@ -27,6 +27,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   try {
+    await Store.loadEventNotes();
+  } catch (err) {
+    console.warn("이벤트 개인 메모를 불러오지 못했어요:", err);
+  }
+
+  try {
     await Store.loadStaffDirectory();
   } catch (err) {
     console.warn("담당자 디렉터리를 불러오지 못했어요:", err);

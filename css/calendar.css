@@ -379,6 +379,28 @@
 .group-memo-input:focus{ border-color:var(--primary); }
 .group-memo-input::placeholder{ color:var(--sub); }
 
+.event-note-label{
+  display:block;
+  font-size:11px;
+  font-weight:700;
+  color:var(--sub);
+  margin-bottom:6px;
+}
+.event-note-input{
+  width:100%;
+  min-height:44px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:8px 10px;
+  font-family:inherit;
+  font-size:12px;
+  color:var(--text);
+  resize:vertical;
+  outline:none;
+}
+.event-note-input:focus{ border-color:var(--primary); }
+.event-note-input::placeholder{ color:var(--sub); }
+
 /* 파티(일행) 카드 안에서 항공편이 서로 다를 때 항공편별 목록 */
 .entry-list{
   display:flex;
