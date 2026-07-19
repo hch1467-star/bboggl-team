@@ -182,7 +182,8 @@ const CalendarView = {
       });
       activeToday.sort((a, b) => a.lane - b.lane);
 
-      const maxLane = activeToday.length ? Math.max(...activeToday.map((a) => a.lane)) : -1;
+      // 예약이 없는 날도 레인 1칸은 항상 확보해서 같은 주(週)의 빈 날짜와 예약 있는 날짜의 칸 높이가 들쭉날쭉하지 않게 함
+      const maxLane = activeToday.length ? Math.max(...activeToday.map((a) => a.lane)) : 0;
       for (let laneIdx = 0; laneIdx <= Math.min(maxLane, MAX_VISIBLE_LANES - 1); laneIdx++) {
         const active = activeToday.find((a) => a.lane === laneIdx);
         const laneRow = document.createElement("div");
