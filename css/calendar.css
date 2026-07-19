@@ -145,6 +145,7 @@
 
 .day-cell{
   min-height:92px;
+  min-width:0; /* 그리드 트랙(1fr)이 칸 안의 긴 이름(white-space:nowrap) 때문에 넓어지지 않게 함 — 없으면 그 칸만 폭이 커져서 열 너비가 들쭉날쭉해짐 */
   border-radius:12px;
   border:1px solid transparent;
   padding:8px;
