@@ -590,13 +590,13 @@
     margin-top:1px;
   }
   .day-lane-row{
-    height:4px;
+    height:12px;
   }
   .stay-bar{
-    height:4px;
-    line-height:4px;
-    font-size:0;
-    padding:0;
+    height:12px;
+    line-height:12px;
+    font-size:7px;
+    padding:0 3px;
     margin-left:-10px;
     margin-right:-10px;
   }
