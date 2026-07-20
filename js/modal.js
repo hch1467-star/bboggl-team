@@ -114,9 +114,20 @@ const ScheduleModal = {
   async commit() {
     if (!this.lastParsed || this.lastParsed.travelers.length === 0 || this.lastParsed.entries.length === 0) return;
 
+    const duplicate = findDuplicateGroup(this.lastParsed);
+    if (duplicate) {
+      const ok = confirm(
+        `${groupLabel(duplicate)}님의 기존 일정이 있어요. 최신 내용으로 갱신할까요?\n(기존 일정은 삭제되고 새로 입력한 내용으로 바뀌어요)`
+      );
+      if (!ok) return;
+    }
+
     this.addBtn.disabled = true;
     this.addBtn.textContent = "저장 중...";
     try {
+      if (duplicate) {
+        await Store.removeGroup(duplicate.id);
+      }
       const { added } = await Store.addFromParsed(this.lastParsed);
       this.close();
       if (added.length > 0) {
@@ -133,3 +144,16 @@ const ScheduleModal = {
     }
   },
 };
+
+// 같은 대표 고객 + 같은 날짜(1건 이상 겹침)의 기존 예약을 찾음 — WT->OK 확정 등으로 재입력할 때 중복 대신 갱신 여부를 물어보기 위함
+function findDuplicateGroup(parsed) {
+  const primaryName = parsed.travelers[0]?.name;
+  if (!primaryName) return null;
+  const newDates = new Set(parsed.entries.map((e) => e.date));
+  return (
+    Store.groups.find((g) => {
+      if (!g.travelers[0] || g.travelers[0].name !== primaryName) return false;
+      return g.entries.some((e) => newDates.has(e.date));
+    }) || null
+  );
+}
