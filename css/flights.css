@@ -88,3 +88,20 @@
   color:var(--sub);
   font-variant-numeric:tabular-nums;
 }
+
+/* CY(비즈니스 좌석 있음) / Y(이코노미 전용) — 편명 옆에 작게 표시 */
+.flight-class-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:1px 6px;
+  border-radius:999px;
+  font-size:10px;
+  font-weight:700;
+  background:#F0F0F0;
+  color:var(--sub);
+  vertical-align:middle;
+}
+.flight-class-badge.flight-class-cy{
+  background:var(--ok-bg);
+  color:var(--ok);
+}

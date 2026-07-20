@@ -1,12 +1,24 @@
 /* ============================================
    항공편 검색용 — 한국 공항 ⇄ 일본 공항 노선별 편명 그룹
    js/flightSchedule.js의 FLIGHT_TIME_MAP과 같은 원본 노선표에서 가져온 편명 목록.
-   고베는 검색 대상 공항 목록(인천/김포, 도쿄/나고야/오사카/후쿠오카/삿포로)에 없어서 제외.
    삿포로는 아직 시간표 데이터가 없어서 나중에 추가 예정.
    ============================================ */
 
 const KOREA_AIRPORTS = ["인천", "김포"];
-const JAPAN_AIRPORTS = ["나리타", "하네다", "나고야", "오사카", "후쿠오카"]; // 삿포로는 데이터 없어서 아직 제외
+const JAPAN_AIRPORTS = ["나리타", "하네다", "나고야", "오사카", "고베", "후쿠오카"]; // 삿포로는 데이터 없어서 아직 제외
+
+// 대형항공사(FSC) — 이 노선들에서 일반적으로 비즈니스 좌석을 운영. 그 외(LCC/하이브리드)는 이코노미 전용으로 취급.
+// 실제 기종/시기별로 달라질 수 있어 참고용입니다 (공식 API가 아니라 항공사 등급 기준의 추정치).
+const BUSINESS_CLASS_AIRLINES = new Set(["KE", "OZ", "NH", "JL"]);
+
+function airlineCodeOfFlight(flightNo) {
+  return (flightNo || "").toUpperCase().slice(0, 2);
+}
+
+// 코드셰어 그룹(예: "KE738/JL5269") 중 하나라도 대형항공사면 비즈니스 좌석 있음으로 판단
+function hasBusinessClass(entryLabel) {
+  return entryLabel.split("/").some((code) => BUSINESS_CLASS_AIRLINES.has(airlineCodeOfFlight(code)));
+}
 
 const FLIGHT_ROUTES = [
   {
@@ -25,6 +37,12 @@ const FLIGHT_ROUTES = [
       "KE725/JL5212", "ZE613", "RS715", "LJ239", "OZ114", "KE721/JL5214",
       "OZ116/NH6956", "OZ118",
     ],
+  },
+  {
+    korea: "인천",
+    japan: "고베",
+    inbound: ["KE2172", "7C1622", "KE2174"],
+    outbound: ["KE2171", "7C1621", "KE2173"],
   },
   {
     korea: "인천",
@@ -102,7 +120,8 @@ function findFlightsForRoute(fromAirport, toAirport) {
     .map((entry) => {
       const primary = entry.split("/")[0];
       const range = typeof timeRangeForFlight === "function" ? timeRangeForFlight(primary) : null;
-      return { label: entry, range };
+      const classLabel = hasBusinessClass(entry) ? "CY" : "Y";
+      return { label: entry, range, classLabel };
     })
     .filter((r) => r.range)
     .sort((a, b) => a.range.localeCompare(b.range));

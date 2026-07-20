@@ -56,7 +56,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       .map(
         (f) => `
       <div class="flight-result-row">
-        <span class="flight-result-code">${escapeHtml(f.label)}</span>
+        <span class="flight-result-code">${escapeHtml(f.label)} <span class="flight-class-badge${
+          f.classLabel === "CY" ? " flight-class-cy" : ""
+        }">${f.classLabel}</span></span>
         <span class="flight-result-time">${f.range.replace("-", " - ")}</span>
       </div>`
       )
