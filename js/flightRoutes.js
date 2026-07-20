@@ -7,9 +7,11 @@
 const KOREA_AIRPORTS = ["인천", "김포"];
 const JAPAN_AIRPORTS = ["나리타", "하네다", "나고야", "오사카", "고베", "후쿠오카"]; // 삿포로는 데이터 없어서 아직 제외
 
-// 대형항공사(FSC) — 이 노선들에서 일반적으로 비즈니스 좌석을 운영. 그 외(LCC/하이브리드)는 이코노미 전용으로 취급.
-// 실제 기종/시기별로 달라질 수 있어 참고용입니다 (공식 API가 아니라 항공사 등급 기준의 추정치).
-const BUSINESS_CLASS_AIRLINES = new Set(["KE", "OZ", "NH", "JL"]);
+// 비즈니스석을 운영하는 항공사. 대형항공사(KE/OZ/NH/JL) 외에
+// 제주항공(7C, "비즈니스 라이트")과 진에어(LJ, 보유 기종 전체)도 비즈니스석을 운영해서 포함.
+// 그 외(에어부산/에어서울/티웨이/에어프레미아/이스타/에어로케이/파라타 등)는 확인 결과 비즈니스석이 없거나
+// 확인이 안 돼서 이코노미 전용으로 취급 (실제 기종/시기별로 달라질 수 있어 참고용입니다).
+const BUSINESS_CLASS_AIRLINES = new Set(["KE", "OZ", "NH", "JL", "7C", "LJ"]);
 
 function airlineCodeOfFlight(flightNo) {
   return (flightNo || "").toUpperCase().slice(0, 2);
