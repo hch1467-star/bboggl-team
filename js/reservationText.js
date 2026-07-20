@@ -112,7 +112,7 @@ function buildRoomReservationText(parsed) {
   const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(primary.name);
   const mmidValue = mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : "");
 
-  return [
+  const lines = [
     `MMID : ${mmidValue}`,
     `NAME : ${nameLabel}`,
     `CASINO TIER : ${ROOM_FIXED_DEFAULTS.casinoTier}`,
@@ -124,7 +124,20 @@ function buildRoomReservationText(parsed) {
     `ROOM POST : ${ROOM_FIXED_DEFAULTS.roomPost}`,
     `WAIVE DEPOSIT : ${ROOM_FIXED_DEFAULTS.waiveDeposit}`,
     `HOST : ${hostTail}`,
-  ].join("\n");
+  ];
+
+  // 리무진 픽업/샌딩 시간 기준 얼리체크인(ECI)/레이트체크아웃(LCO) 자동 안내
+  // 입국편 도착이 13시 이전이면 ECI, 출국편 리무진 출발(항공편 출발 2시간 전)이 12시 이후면 LCO
+  const hasEarlyArrival = parsed.entries.some(
+    (e) => !e.noFlight && directionMap.get(e)?.direction === "입국" && e.arrTime < "13:00"
+  );
+  const hasLateDeparture = parsed.entries.some(
+    (e) => !e.noFlight && directionMap.get(e)?.direction === "출국" && subtractHours(e.depTime, 2) >= "12:00"
+  );
+  if (hasEarlyArrival) lines.push("얼리체크인 ECI를 12시로 예약 부탁드립니다.");
+  if (hasLateDeparture) lines.push("LCO 16시로 예약 부탁드립니다.");
+
+  return lines.join("\n");
 }
 
 function buildLimoReservationText(parsed) {
