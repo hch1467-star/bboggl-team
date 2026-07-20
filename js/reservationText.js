@@ -134,7 +134,7 @@ function buildRoomReservationText(parsed) {
   const hasLateDeparture = parsed.entries.some(
     (e) => !e.noFlight && directionMap.get(e)?.direction === "출국" && subtractHours(e.depTime, 2) >= "12:00"
   );
-  if (hasEarlyArrival) lines.push("얼리체크인 ECI를 12시로 예약 부탁드립니다.");
+  if (hasEarlyArrival) lines.push("ECI 12시로 예약부탁드립니다");
   if (hasLateDeparture) lines.push("LCO 16시로 예약 부탁드립니다.");
 
   return lines.join("\n");
