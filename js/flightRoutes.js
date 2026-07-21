@@ -48,9 +48,10 @@ const FLIGHT_ROUTES = [
     japan: "오사카",
     inbound: [
       "OZ117", "KE738/JL5269", "RF315", "7C1396", "KE722/JL5211", "OZ115/NH6955",
-      "RS712", "7C1302", "OZ111/NH6951", "7C1392", "LJ242", "TW302",
-      "RS714", "7C1304", "ZE612", "7C1306", "JL234", "LJ237",
-      "KE724/JL5213", "LJ238", "ZE614", "KE726/JL5215", "OZ113",
+      "RS712", "7C1302", "OZ111/NH6951", "7C1392", "BX171/OZ9567", "LJ242",
+      "TW302", "TW304", "RS714", "7C1304", "ZE612", "BX173/OZ9569", "7C1306",
+      "LJ237", "WE512", "KE724/JL5213", "RS716", "LJ238", "ZE614",
+      "KE726/JL5215", "OZ113",
     ],
     outbound: [
       "RF316", "OZ112/NH6952", "7C1301", "RS711", "LJ231/KE5071", "7C1391",
@@ -83,15 +84,15 @@ const FLIGHT_ROUTES = [
     japan: "나리타",
     inbound: [
       "OZ107/NH6977", "KE706/JL5201", "LJ204", "YP732",
-      "OZ101/NH6971", "YP734", "KE704/JL5205", "OZ103/NH6973",
+      "OZ101/NH6971", "YP734", "WE502", "KE704/JL5205", "OZ103/NH6973",
       "KE712/JL5251", "YP736", "LJ210/KE5094", "KE708", "LJ212",
       "OZ105/NH6975", "ET673", "KE714/JL5253",
     ],
     outbound: [
       "LJ203", "OZ102/NH6972", "YP731", "YP733", "WE501",
       "KE703/JL5202", "OZ104/NH6974", "KE711/JL5250", "YP735",
-      "LJ209/KE5093", "KE707", "OZ106/NH6976", "ET672", "KE713/JL5252",
-      "OZ108/NH6978", "KE705/JL5206",
+      "LJ209/KE5093", "KE707", "LJ211", "OZ106/NH6976", "ET672",
+      "KE713/JL5252", "OZ108/NH6978", "KE705/JL5206",
     ],
   },
   {
@@ -134,56 +135,18 @@ function findFlightsForRoute(fromAirport, toAirport) {
 
   const korea = isFromKorea ? fromAirport : toAirport;
   const japan = isFromKorea ? toAirport : fromAirport;
-  const direction = isFromKorea ? "출국" : "입국";
   const route = FLIGHT_ROUTES.find((r) => r.korea === korea && r.japan === japan);
-  // 위 노선표에 없는 조합(예: 김포-나리타)은 실제로 취급하는 정기 노선이 아니다.
-  // API에는 전세기가 한두 편 잡히기도 하는데, 그것만으로 노선을 새로 만들지는 않는다.
   if (!route) return [];
 
+  // 목록은 위 FLIGHT_ROUTES만 쓴다.
+  // 전에는 API에서 찾은 편을 자동으로 덧붙였는데, 코드셰어 판매용 편명과 전세기가 섞여 들어오고
+  // 한쪽 방향만 추가돼서 출국/입국 편수가 어긋나는 문제가 있었다.
+  // (인천-오사카는 왕복 노선이라 양방향 편수가 항상 같아야 함)
+  // API 자료는 편명 -> 공항/입출국을 찾는 데만 쓰고(js/flightAirports.js·flightDirections.js),
+  // 검색 목록에 새 편을 넣을 때는 실제 운항을 확인한 뒤 위 표에 직접 적는다.
   const groups = isFromKorea ? route.outbound : route.inbound;
 
-  const rangeOf = (entry) =>
-    typeof timeRangeForFlight === "function" ? timeRangeForFlight(entry.split("/")[0]) : null;
-
-  // 손으로 적어둔 목록에 이미 들어있는 편명과 시간대를 기억해둔다
-  const covered = new Set();
-  const coveredRanges = new Set();
-  groups.forEach((entry) => {
-    entry.split("/").forEach((c) => covered.add(flightKey(c)));
-    const r = rangeOf(entry);
-    if (r) coveredRanges.add(r);
-  });
-
-  // 자동 갱신되는 FLIGHT_ROUTE_INFO에서 목록에 없는 편을 찾아 보완한다.
-  // 다만 그대로 넣으면 같은 비행기의 코드셰어 편명이 우수수 딸려와 목록이 지저분해지므로,
-  // 출발-도착 시간이 같은 것끼리 한 줄로 묶고 아래 경우는 아예 뺀다.
-  const bySlot = new Map();
-  if (typeof FLIGHT_ROUTE_INFO !== "undefined") {
-    for (const [code, info] of Object.entries(FLIGHT_ROUTE_INFO)) {
-      if (info.korea !== korea || info.japan !== japan || info.direction !== direction) continue;
-      if (covered.has(flightKey(code))) continue; // 이미 목록에 있는 편 (JL090/JL90 같은 표기 차이 포함)
-      // "JL95A"처럼 편명 뒤에 문자가 붙은 건 전세기·페리 같은 부정기편이라 예약에 쓰이지 않음
-      if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue;
-      if (KOREA_AIRPORTS.includes(info.japan)) continue; // 김포↔인천 같은 국내 이동편 제외
-      // 인천 자료만 자동으로 넣는다. 인천은 공항 실시간 API(D+0~D+6)라 지금 뜨는 편만 나오지만,
-      // 김포는 1년에 한 번 올라오는 스케줄 파일이라 이미 없어진 편·전세기가 섞여 있어 믿고 쓸 수 없다.
-      // 김포 편은 확인된 것만 위 FLIGHT_ROUTES에 직접 적어 넣는다.
-      if (info.korea !== "인천") continue;
-      const r = timeRangeForFlight(code);
-      if (!r || coveredRanges.has(r)) continue; // 기존 편과 같은 시간대 = 같은 비행기의 코드셰어
-      if (!bySlot.has(r)) bySlot.set(r, []);
-      bySlot.get(r).push(code);
-    }
-  }
-
-  const extras = [];
-  for (const codes of bySlot.values()) {
-    // 그 시간대에 LCC가 하나라도 끼어 있으면 LCC가 운항하는 편 — 새로 추가하지 않는다
-    if (codes.some((c) => LCC_AIRLINES.has(airlineCodeOfFlight(c)))) continue;
-    extras.push(codes.sort().join("/")); // 같은 비행기의 코드셰어들은 한 줄로
-  }
-
-  return [...groups, ...extras]
+  return groups
     .map((entry) => {
       const primary = entry.split("/")[0];
       const range = typeof timeRangeForFlight === "function" ? timeRangeForFlight(primary) : null;
