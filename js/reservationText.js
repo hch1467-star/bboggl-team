@@ -83,14 +83,67 @@ function subtractHours(timeStr, hours) {
   return `${String(newH).padStart(2, "0")}:${String(newM).padStart(2, "0")}`;
 }
 
+// 객실 배정 규칙 — MR은 각자 방을 쓰고, MS/MRS/MISS/CHD/INF·호칭 없는 동행자는 바로 앞 MR과 합방.
+// 맨 앞이 MR이 아닌 일행(예: MS 단독 고객)은 첫 사람이 그대로 방 주인이 됨.
+function groupTravelersIntoRooms(travelers) {
+  const rooms = [];
+  travelers.forEach((t) => {
+    const isRoomHolder = (t.title || "").toUpperCase() === "MR";
+    if (isRoomHolder || rooms.length === 0) rooms.push({ members: [t] });
+    else rooms[rooms.length - 1].members.push(t);
+  });
+  return rooms;
+}
+
+// 그 방에 묵는 사람이 실제로 타는 항공편만 추림 (일행끼리 편명이 갈리면 방마다 체크인/아웃 날짜가 달라짐).
+// 배정 정보가 없거나 매칭이 하나도 안 되면 안전하게 전체 일정을 그대로 사용.
+function entriesForRoom(room, allEntries) {
+  const names = new Set(room.members.map((m) => m.name));
+  const matched = allEntries.filter(
+    (e) => !e.travelers || e.travelers.length === 0 || e.travelers.some((t) => names.has(t.name))
+  );
+  return matched.length ? matched : allEntries;
+}
+
+function travelerLabel(t) {
+  return `${t.name}${t.title ? " " + t.title : ""}`;
+}
+
+// MMID/NAME 항목은 방 개수만큼 여러 줄이 될 수 있어서, 둘째 줄부터는 라벨 길이만큼 들여씀
+const MMID_FIELD_PREFIX = "MMID : ";
+const NAME_FIELD_PREFIX = "NAME : ";
+
+function labelledLines(prefix, values) {
+  return values.map((v, i) => (i === 0 ? `${prefix}${v}` : `${" ".repeat(prefix.length)}${v}`));
+}
+
+function renderRoomBlock(roomLabels, info, billingTail, hostTail) {
+  // 일부만 조회된 경우 못 찾은 자리는 "-"로 채워서 NAME 줄과 순서가 어긋나 보이지 않게 함
+  // (하나도 못 찾았으면 예전처럼 빈 칸 한 줄만)
+  const mmids = roomLabels.map((r) => r.mmidValue);
+  const lines = [
+    ...(mmids.some((v) => v) ? labelledLines(MMID_FIELD_PREFIX, mmids.map((v) => v || "-")) : [MMID_FIELD_PREFIX]),
+    ...labelledLines(NAME_FIELD_PREFIX, roomLabels.map((r) => r.nameLabel)),
+    `CASINO TIER : ${ROOM_FIXED_DEFAULTS.casinoTier}`,
+    `CI DATE : ${info.ci}`,
+    `CO DATE : ${info.co}`,
+    `HOTEL TOWER : ${ROOM_FIXED_DEFAULTS.hotelTower}`,
+    `ROOM TYPE : ${ROOM_FIXED_DEFAULTS.roomType}`,
+    `BILLING : RM-CASINO BD(${billingTail})`,
+    `ROOM POST : ${ROOM_FIXED_DEFAULTS.roomPost}`,
+    `WAIVE DEPOSIT : ${ROOM_FIXED_DEFAULTS.waiveDeposit}`,
+    `HOST : ${hostTail}`,
+  ];
+
+  if (info.hasEarlyArrival) lines.push("ECI 12시로 예약부탁드립니다");
+  if (info.hasLateDeparture) lines.push("LCO 16시로 예약 부탁드립니다.");
+
+  return lines.join("\n");
+}
+
 function buildRoomReservationText(parsed) {
-  const primary = parsed.travelers[0];
-  const nameLabel = `${primary.name}${primary.title ? " " + primary.title : ""}`;
   const directionMap = classifyDirections(parsed.entries);
-  const sorted = [...parsed.entries].sort((a, b) => a.date.localeCompare(b.date));
-  const arrivalEntry = sorted.find((e) => directionMap.get(e)?.direction === "입국") || sorted[0];
-  const departureEntry =
-    [...sorted].reverse().find((e) => directionMap.get(e)?.direction === "출국") || sorted[sorted.length - 1];
+  const rooms = groupTravelersIntoRooms(parsed.travelers);
 
   const assignee = parsed.assignee || "";
   const { record: staff, ambiguous } = findStaff(assignee);
@@ -109,40 +162,51 @@ function buildRoomReservationText(parsed) {
     ? `${staff.name}(${staff.nickname}) ${staff.phone}`
     : `${assignee}(전화번호 미등록)`;
 
-  const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(primary.name);
-  const mmidValue = mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : "");
+  const roomInfos = rooms.map((room) => {
+    const roomEntries = entriesForRoom(room, parsed.entries);
+    const sorted = [...roomEntries].sort((a, b) => a.date.localeCompare(b.date));
+    const arrivalEntry = sorted.find((e) => directionMap.get(e)?.direction === "입국") || sorted[0];
+    const departureEntry =
+      [...sorted].reverse().find((e) => directionMap.get(e)?.direction === "출국") || sorted[sorted.length - 1];
 
-  const lines = [
-    `MMID : ${mmidValue}`,
-    `NAME : ${nameLabel}`,
-    `CASINO TIER : ${ROOM_FIXED_DEFAULTS.casinoTier}`,
-    `CI DATE : ${formatMD(arrivalEntry.date)}`,
-    `CO DATE : ${formatMD(departureEntry.date)}`,
-    `HOTEL TOWER : ${ROOM_FIXED_DEFAULTS.hotelTower}`,
-    `ROOM TYPE : ${ROOM_FIXED_DEFAULTS.roomType}`,
-    `BILLING : RM-CASINO BD(${billingTail})`,
-    `ROOM POST : ${ROOM_FIXED_DEFAULTS.roomPost}`,
-    `WAIVE DEPOSIT : ${ROOM_FIXED_DEFAULTS.waiveDeposit}`,
-    `HOST : ${hostTail}`,
-  ];
+    // MMID는 방 주인(첫 사람) 기준으로 조회 — 방마다 투숙객이 달라 각각 다른 값이 나올 수 있음
+    const holder = room.members[0];
+    const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(holder.name);
 
-  // 리무진 픽업/샌딩 시간 기준 얼리체크인(ECI)/레이트체크아웃(LCO) 자동 안내
-  // 입국편 도착이 13시 이전이면 ECI, 출국편 리무진 출발(항공편 출발 2시간 전)이 12시 이후면 LCO
-  const hasEarlyArrival = parsed.entries.some(
-    (e) => !e.noFlight && directionMap.get(e)?.direction === "입국" && e.arrTime < "13:00"
+    // 리무진 픽업/샌딩 시간 기준 얼리체크인(ECI)/레이트체크아웃(LCO) 자동 안내
+    // 입국편 도착이 13시 이전이면 ECI, 출국편 리무진 출발(항공편 출발 2시간 전)이 12시 이후면 LCO
+    return {
+      nameLabel: room.members.map(travelerLabel).join(", "),
+      mmidValue: mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : ""),
+      ci: formatMD(arrivalEntry.date),
+      co: formatMD(departureEntry.date),
+      hasEarlyArrival: roomEntries.some(
+        (e) => !e.noFlight && directionMap.get(e)?.direction === "입국" && e.arrTime < "13:00"
+      ),
+      hasLateDeparture: roomEntries.some(
+        (e) => !e.noFlight && directionMap.get(e)?.direction === "출국" && subtractHours(e.depTime, 2) >= "12:00"
+      ),
+    };
+  });
+
+  // 방마다 날짜·안내문구가 전부 같으면(대부분의 경우) MMID/NAME만 여러 줄인 한 덩어리로,
+  // 일행끼리 편명이 갈려 방마다 날짜가 다르면 그 방들만 따로 떼어 여러 덩어리로 만듦
+  const first = roomInfos[0];
+  const allSame = roomInfos.every(
+    (r) =>
+      r.ci === first.ci &&
+      r.co === first.co &&
+      r.hasEarlyArrival === first.hasEarlyArrival &&
+      r.hasLateDeparture === first.hasLateDeparture
   );
-  const hasLateDeparture = parsed.entries.some(
-    (e) => !e.noFlight && directionMap.get(e)?.direction === "출국" && subtractHours(e.depTime, 2) >= "12:00"
-  );
-  if (hasEarlyArrival) lines.push("ECI 12시로 예약부탁드립니다");
-  if (hasLateDeparture) lines.push("LCO 16시로 예약 부탁드립니다.");
 
-  return lines.join("\n");
+  if (allSame) return renderRoomBlock(roomInfos, first, billingTail, hostTail);
+  return roomInfos.map((r) => renderRoomBlock([r], r, billingTail, hostTail)).join("\n\n");
 }
 
+// 리무진은 같은 편명이면 대표(리더) 고객 이름 하나로 묶어서 예약
 function buildLimoReservationText(parsed) {
-  const primary = parsed.travelers[0];
-  const nameLabel = `${primary.name}${primary.title ? " " + primary.title : ""}`;
+  const nameLabel = travelerLabel(parsed.travelers[0]);
   const directionMap = classifyDirections(parsed.entries);
   // 셀인/셀아웃(항공편 없음) 일정은 리무진 대상이 아니므로 제외
   const flightEntries = parsed.entries.filter((e) => !e.noFlight);
@@ -151,7 +215,13 @@ function buildLimoReservationText(parsed) {
   );
 
   const lines = [nameLabel];
+  const seen = new Set();
   sorted.forEach((entry) => {
+    // 일행이 같은 편에 개별 배정되면 항목이 사람 수만큼 생기는데, 리무진은 편당 한 대라 같은 날짜+편명은 한 줄만
+    const key = `${entry.date}|${entry.flightNo.toUpperCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
     const direction = directionMap.get(entry)?.direction;
     const airport = FLIGHT_AIRPORT_MAP[entry.flightNo.toUpperCase()] || null;
     // 김포는 터미널 구분이 없어서 공항명만, 인천은 항공사별 터미널(T1/T2)을 자동 매핑
