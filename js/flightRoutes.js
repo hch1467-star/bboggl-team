@@ -116,7 +116,7 @@ const FLIGHT_ROUTES = [
     ],
     outbound: [
       "NH862/OZ9128", "JL090/KE5711", "OZ1085/NH6968", "KE2101/JL5234",
-      "JL092/KE5707", "NH864/OZ9102", "JL094/KE5709", "KE2103/JL5236",
+      "JL092/KE5707", "NH864/OZ9102", "OZ1045", "JL094/KE5709", "KE2103/JL5236",
       "OZ1065/NH6984", "KE2105/JL5244", "NH868/OZ9104",
     ],
   },
@@ -165,6 +165,10 @@ function findFlightsForRoute(fromAirport, toAirport) {
       // "JL95A"처럼 편명 뒤에 문자가 붙은 건 전세기·페리 같은 부정기편이라 예약에 쓰이지 않음
       if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue;
       if (KOREA_AIRPORTS.includes(info.japan)) continue; // 김포↔인천 같은 국내 이동편 제외
+      // 인천 자료만 자동으로 넣는다. 인천은 공항 실시간 API(D+0~D+6)라 지금 뜨는 편만 나오지만,
+      // 김포는 1년에 한 번 올라오는 스케줄 파일이라 이미 없어진 편·전세기가 섞여 있어 믿고 쓸 수 없다.
+      // 김포 편은 확인된 것만 위 FLIGHT_ROUTES에 직접 적어 넣는다.
+      if (info.korea !== "인천") continue;
       const r = timeRangeForFlight(code);
       if (!r || coveredRanges.has(r)) continue; // 기존 편과 같은 시간대 = 같은 비행기의 코드셰어
       if (!bySlot.has(r)) bySlot.set(r, []);
