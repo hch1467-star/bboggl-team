@@ -107,10 +107,13 @@ const GIMPO_EXPECTED_ENTRIES = [
 ];
 const GIMPO_ODCLOUD_NAMESPACE = "15003087"; // 한국공항공사_국제선 항공기스케줄
 
-// odcloud는 파일을 새로 올릴 때마다 새 경로(uddi)가 생기는 방식이라, Swagger 문서에서 날짜가 가장 최신인 경로를 매번 찾아야 함
+// odcloud는 파일을 새로 올릴 때마다 새 경로(uddi)가 생기는 방식이라, Swagger 문서에서 날짜가 가장 최신인 경로를 매번 찾아야 함.
+// 주의: Swagger의 paths에는 basePath("/api")가 빠져 있어서 그대로 쓰면 404가 난다. 반드시 basePath를 앞에 붙여야 함.
 async function fetchOdcloudLatestPath(namespaceId) {
   const res = await fetch(`https://infuser.odcloud.kr/oas/docs?namespace=${namespaceId}/v1`);
+  if (!res.ok) throw new Error(`Swagger 조회 실패 (HTTP ${res.status})`);
   const spec = await res.json();
+  const basePath = spec.basePath || "";
   let latestPath = null;
   let latestDate = "";
   for (const [p, def] of Object.entries(spec.paths || {})) {
@@ -121,7 +124,9 @@ async function fetchOdcloudLatestPath(namespaceId) {
       latestPath = p;
     }
   }
-  return latestPath;
+  if (!latestPath) return null;
+  console.log(`김포 데이터셋: ${latestDate}자 파일 사용`);
+  return `${basePath}${latestPath}`;
 }
 
 async function fetchOdcloudAllRecords(fullPath, serviceKey) {
@@ -131,6 +136,12 @@ async function fetchOdcloudAllRecords(fullPath, serviceKey) {
   while (true) {
     const url = `https://api.odcloud.kr${fullPath}?page=${page}&perPage=${perPage}&serviceKey=${serviceKey}`;
     const res = await fetch(url);
+    // 예전엔 404/401이 나도 그냥 빈 배열로 넘어가서, 김포가 통째로 안 채워지는 걸 몇 달간 못 알아챘음.
+    // 이제는 실패하면 확실히 멈추고 로그에 남긴다.
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`김포 데이터 조회 실패 (HTTP ${res.status}) ${url.replace(serviceKey, "***")} ${body.slice(0, 200)}`);
+    }
     const json = await res.json();
     const data = json.data || [];
     all = all.concat(data);
@@ -144,6 +155,7 @@ async function fetchGimpoTimeLookup(serviceKey) {
   const latestPath = await fetchOdcloudLatestPath(GIMPO_ODCLOUD_NAMESPACE);
   if (!latestPath) return {};
   const records = await fetchOdcloudAllRecords(latestPath, serviceKey);
+  console.log(`김포 API 응답 ${records.length}건`);
   const map = {};
   for (const rec of records) {
     if (rec.출발공항 !== "GMP" && rec.도착공항 !== "GMP") continue;
