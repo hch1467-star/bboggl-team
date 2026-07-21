@@ -77,9 +77,25 @@ const INCHEON_ROUTES = [
   },
 ];
 
-// 김포 노선 — 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터, api.odcloud.kr) 자동 조회 대상 편명 그룹
+// 인천 노선 중 아래 목록에 없는 편도 놓치지 않도록, 상대 공항 코드별 평균 비행시간을 따로 둔다.
+// (인천 API는 인천 쪽 시간만 주기 때문에 반대편 시간을 계산하려면 비행시간이 필요함)
+const ICN_AIRPORT_DURATION_MIN = {
+  KIX: 110, // 오사카
+  UKB: 110, // 고베
+  NGO: 120, // 나고야
+  FUK: 85,  // 후쿠오카
+  NRT: 150, // 나리타
+  HND: 150, // 하네다
+  CTS: 170, // 삿포로
+};
+
+// 인천 API 응답에서 상대 공항 코드가 담기는 필드명이 문서마다 조금씩 달라서 후보를 순서대로 확인
+const ICN_AIRPORT_FIELDS = ["airportCode", "airport", "airportcode", "arrivedKor", "boardingKor"];
+
+// 김포 노선 — 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터, api.odcloud.kr)
 // 이 데이터셋은 인천 API와 달리 출발/도착 시간을 한 번에 다 주기 때문에 반대편 시간을 따로 계산할 필요 없음.
-const GIMPO_ROUTE_ENTRIES = [
+// API가 주는 김포 국제선은 전부 담고, 아래 목록은 "이건 반드시 있어야 한다"는 확인용으로만 쓴다.
+const GIMPO_EXPECTED_ENTRIES = [
   "OZ1135/NH6957", "KE2118/JL5247", "7C1328", "OZ1155/NH6979", "KE2120/JL5151",
   "OZ1145/NH6958", "KE2117/JL5246", "7C1327", "KE2119/JL5150", "OZ1165/NH6980",
   "JL091/KE5708", "NH861/OZ9101", "OZ1055/NH6983", "KE2106/JL5245",
@@ -131,8 +147,10 @@ async function fetchGimpoTimeLookup(serviceKey) {
   const map = {};
   for (const rec of records) {
     if (rec.출발공항 !== "GMP" && rec.도착공항 !== "GMP") continue;
-    if (!map[rec.운항편명]) {
-      map[rec.운항편명] = `${rec.출발시간}-${rec.도착시간}`;
+    const code = String(rec.운항편명 || "").trim().toUpperCase();
+    if (!code || !rec.출발시간 || !rec.도착시간) continue;
+    if (!map[code]) {
+      map[code] = `${rec.출발시간}-${rec.도착시간}`;
     }
   }
   return map;
@@ -164,6 +182,17 @@ function readExistingMap() {
   return map;
 }
 
+// 응답에서 상대 공항 코드(IATA 3글자)를 찾아본다. 못 찾으면 null (그 편은 자동 추가 대상에서 빠짐)
+function pickAirportCode(item) {
+  for (const field of ICN_AIRPORT_FIELDS) {
+    const raw = item[field];
+    if (typeof raw !== "string") continue;
+    const code = raw.trim().toUpperCase();
+    if (/^[A-Z]{3}$/.test(code)) return code;
+  }
+  return null;
+}
+
 async function fetchFlights(operation) {
   const url = `http://apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp/${operation}?serviceKey=${SERVICE_KEY}&type=json&numOfRows=9999&pageNo=1`;
   const res = await fetch(url);
@@ -171,9 +200,11 @@ async function fetchFlights(operation) {
   const items = data?.response?.body?.items || [];
   const byFlight = {};
   for (const item of items) {
-    if (!byFlight[item.flightId]) {
-      const t = item.scheduleDateTime.slice(8, 12);
-      byFlight[item.flightId] = `${t.slice(0, 2)}:${t.slice(2)}`;
+    const code = String(item.flightId || "").trim().toUpperCase();
+    if (!code || !item.scheduleDateTime) continue;
+    if (!byFlight[code]) {
+      const t = String(item.scheduleDateTime).slice(8, 12);
+      byFlight[code] = { time: `${t.slice(0, 2)}:${t.slice(2)}`, airport: pickAirportCode(item) };
     }
   }
   return byFlight;
@@ -181,7 +212,7 @@ async function fetchFlights(operation) {
 
 function resolveGroupTime(codes, lookup) {
   for (const code of codes) {
-    if (lookup[code]) return lookup[code];
+    if (lookup[code]) return lookup[code].time;
   }
   return null;
 }
@@ -242,22 +273,52 @@ async function main() {
     }
   }
 
-  for (const entry of GIMPO_ROUTE_ENTRIES) {
-    const codes = getCodes(entry);
-    const label = codes.join("/");
-    const range = resolveGroupTime(codes, gimpoTimeMap);
-    if (range) {
-      codes.forEach((c) => { finalMap[c] = range; });
-    } else {
-      const fallback = codes.map((c) => existingMap[c]).find(Boolean);
-      if (fallback) {
-        codes.forEach((c) => { finalMap[c] = fallback; });
-        warnings.push(`${label} (김포): API 매칭 안됨 — 기존 값 유지`);
-      } else {
-        warnings.push(`${label} (김포): API 매칭 안됨, 기존 값도 없음 — 수동 확인 필요`);
-      }
+  // 인천 — 위 노선표에 없는 편이라도 상대 공항 비행시간을 아는 곳이면 자동으로 채운다.
+  // (예전에는 노선표에 적힌 편명만 넣어서, 신규 취항·증편된 편이 통째로 빠졌음)
+  let icnAutoAdded = 0;
+  for (const [source, sign] of [[arrByFlight, -1], [depByFlight, 1]]) {
+    for (const [code, info] of Object.entries(source)) {
+      if (finalMap[code] || !info.airport) continue;
+      const dur = ICN_AIRPORT_DURATION_MIN[info.airport];
+      if (!dur) continue;
+      const other = addMinutesToTime(info.time, sign * dur);
+      finalMap[code] = sign < 0 ? `${other}-${info.time}` : `${info.time}-${other}`;
+      icnAutoAdded++;
     }
   }
+
+  // 김포 — API가 주는 김포 국제선을 전부 담는다 (출발/도착 시간을 둘 다 주기 때문에 그대로 쓰면 됨)
+  let gimpoAdded = 0;
+  for (const [code, range] of Object.entries(gimpoTimeMap)) {
+    if (!finalMap[code]) gimpoAdded++;
+    finalMap[code] = range;
+  }
+
+  // 예전부터 쓰던 김포 편명이 통째로 사라지지 않았는지 확인만 한다
+  for (const entry of GIMPO_EXPECTED_ENTRIES) {
+    const codes = getCodes(entry);
+    if (codes.some((c) => finalMap[c])) continue;
+    const fallback = codes.map((c) => existingMap[c]).find(Boolean);
+    if (fallback) {
+      codes.forEach((c) => { finalMap[c] = fallback; });
+      warnings.push(`${codes.join("/")} (김포): API 매칭 안됨 — 기존 값 유지`);
+    } else {
+      warnings.push(`${codes.join("/")} (김포): API 매칭 안됨, 기존 값도 없음 — 수동 확인 필요`);
+    }
+  }
+
+  // API가 이번에 못 준 편이라도 기존 시간표에 있던 값은 남겨둔다 (조회 실패로 데이터가 줄어드는 걸 방지)
+  let keptFromExisting = 0;
+  for (const [code, range] of Object.entries(existingMap)) {
+    if (!finalMap[code]) {
+      finalMap[code] = range;
+      keptFromExisting++;
+    }
+  }
+
+  console.log(
+    `인천 자동 추가 ${icnAutoAdded}편 / 김포 신규 ${gimpoAdded}편 / 기존 값 유지 ${keptFromExisting}편 / 전체 ${Object.keys(finalMap).length}편`
+  );
 
   if (warnings.length > 0) {
     console.log("=== 경고 ===");
@@ -288,6 +349,37 @@ async function main() {
 
   fs.writeFileSync(OUT_PATH, lines.join("\n"), "utf8");
   console.log(`Saved: ${OUT_PATH}`);
+
+  // 시간표가 실제로 바뀌었으면 HTML의 ?v=숫자도 올려준다.
+  // 이걸 안 올리면 브라우저가 예전에 받아둔 시간표를 계속 써서, 새로 채운 편이 앱에 안 보인다.
+  const changed =
+    Object.keys(finalMap).length !== Object.keys(existingMap).length ||
+    Object.keys(finalMap).some((code) => finalMap[code] !== existingMap[code]);
+  if (changed) bumpAssetVersion();
+  else console.log("시간표 내용 그대로 — 캐시 버전은 올리지 않음");
+}
+
+// index.html 등에 박혀 있는 ?v=숫자를 전부 찾아 가장 큰 값 +1로 맞춘다
+function bumpAssetVersion() {
+  const root = path.join(__dirname, "..");
+  const htmlFiles = fs.readdirSync(root).filter((f) => f.endsWith(".html"));
+  let current = 0;
+  const contents = {};
+  for (const file of htmlFiles) {
+    const text = fs.readFileSync(path.join(root, file), "utf8");
+    contents[file] = text;
+    for (const m of text.matchAll(/\?v=(\d+)/g)) {
+      current = Math.max(current, Number(m[1]));
+    }
+  }
+  if (!current) return;
+
+  const next = current + 1;
+  for (const [file, text] of Object.entries(contents)) {
+    const updated = text.replace(/\?v=\d+/g, `?v=${next}`);
+    if (updated !== text) fs.writeFileSync(path.join(root, file), updated, "utf8");
+  }
+  console.log(`캐시 버전 v=${current} -> v=${next} (HTML ${htmlFiles.length}개)`);
 }
 
 main().catch((err) => {
