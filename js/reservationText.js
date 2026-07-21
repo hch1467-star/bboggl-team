@@ -166,7 +166,8 @@ function buildRoomReservationText(parsed) {
     // 리무진 픽업/샌딩 시간 기준 얼리체크인(ECI)/레이트체크아웃(LCO) 자동 안내
     // 입국편 도착이 13시 이전이면 ECI, 출국편 리무진 출발(항공편 출발 2시간 전)이 12시 이후면 LCO
     return {
-      nameLabel: room.members.map(travelerLabel).join(", "),
+      // 합방하는 동행자(MS 등)는 적지 않고 방 주인 이름만
+      nameLabel: travelerLabel(room.members[0]),
       mmidValue: mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : ""),
       ci: formatMD(arrivalEntry.date),
       co: formatMD(departureEntry.date),
