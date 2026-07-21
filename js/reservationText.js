@@ -203,7 +203,7 @@ function buildLimoReservationText(parsed) {
     seen.add(key);
 
     const direction = directionMap.get(entry)?.direction;
-    const airport = FLIGHT_AIRPORT_MAP[entry.flightNo.toUpperCase()] || null;
+    const airport = airportForFlight(entry.flightNo);
     // 김포는 터미널 구분이 없어서 공항명만, 인천은 항공사별 터미널(T1/T2)을 자동 매핑
     const terminal = airport === "인천" ? terminalForFlight(entry.flightNo) : null;
     const location =

@@ -121,11 +121,28 @@ function findFlightsForRoute(fromAirport, toAirport) {
 
   const korea = isFromKorea ? fromAirport : toAirport;
   const japan = isFromKorea ? toAirport : fromAirport;
+  const direction = isFromKorea ? "출국" : "입국";
   const route = FLIGHT_ROUTES.find((r) => r.korea === korea && r.japan === japan);
-  if (!route) return [];
 
-  const groups = isFromKorea ? route.outbound : route.inbound;
-  return groups
+  const groups = route ? (isFromKorea ? route.outbound : route.inbound) : [];
+
+  // 위 목록은 손으로 정리한 것이라 새로 취항한 편이 빠져 있을 수 있다.
+  // 자동 갱신되는 FLIGHT_ROUTE_INFO에서 같은 노선·같은 방향인데 목록에 없는 편명을 더한다.
+  const covered = new Set();
+  groups.forEach((entry) => entry.split("/").forEach((c) => covered.add(c.replace(/\([^)]*\)/g, "").trim().toUpperCase())));
+
+  const extras = [];
+  if (typeof FLIGHT_ROUTE_INFO !== "undefined") {
+    for (const [code, info] of Object.entries(FLIGHT_ROUTE_INFO)) {
+      if (info.korea !== korea || info.japan !== japan || info.direction !== direction) continue;
+      if (covered.has(code)) continue;
+      extras.push(code);
+    }
+  }
+
+  if (!route && extras.length === 0) return [];
+
+  return [...groups, ...extras]
     .map((entry) => {
       const primary = entry.split("/")[0];
       const range = typeof timeRangeForFlight === "function" ? timeRangeForFlight(primary) : null;

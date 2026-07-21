@@ -86,3 +86,14 @@ Object.entries(FLIGHT_DIRECTION_RAW).forEach(([direction, list]) => {
     });
   });
 });
+
+// 위 수동 표에 없는 편명은 자동 생성 파일(flightSchedule.js)의 FLIGHT_ROUTE_INFO에서 찾는다.
+// 여기서도 못 찾으면 null을 돌려주고, 호출부가 기존처럼 순서·짝홀로 추론한다.
+function knownDirectionForFlight(flightNo) {
+  const code = (flightNo || "").toUpperCase();
+  if (FLIGHT_DIRECTION_MAP[code]) return FLIGHT_DIRECTION_MAP[code];
+  if (typeof FLIGHT_ROUTE_INFO !== "undefined" && FLIGHT_ROUTE_INFO[code]) {
+    return FLIGHT_ROUTE_INFO[code].direction;
+  }
+  return null;
+}

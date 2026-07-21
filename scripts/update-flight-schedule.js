@@ -92,6 +92,19 @@ const ICN_AIRPORT_DURATION_MIN = {
 // 인천 API 응답에서 상대 공항 코드가 담기는 필드명이 문서마다 조금씩 달라서 후보를 순서대로 확인
 const ICN_AIRPORT_FIELDS = ["airportCode", "airport", "airportcode", "arrivedKor", "boardingKor"];
 
+// 공항 코드 -> 앱에서 쓰는 한글 이름 (js/flightRoutes.js의 JAPAN_AIRPORTS와 같은 표기)
+const AIRPORT_NAME = {
+  ICN: "인천",
+  GMP: "김포",
+  NRT: "나리타",
+  HND: "하네다",
+  KIX: "오사카",
+  UKB: "고베",
+  NGO: "나고야",
+  FUK: "후쿠오카",
+  CTS: "삿포로",
+};
+
 // 김포 노선 — 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터, api.odcloud.kr)
 // 이 데이터셋은 인천 API와 달리 출발/도착 시간을 한 번에 다 주기 때문에 반대편 시간을 따로 계산할 필요 없음.
 // API가 주는 김포 국제선은 전부 담고, 아래 목록은 "이건 반드시 있어야 한다"는 확인용으로만 쓴다.
@@ -158,12 +171,20 @@ async function fetchGimpoTimeLookup(serviceKey) {
   console.log(`김포 API 응답 ${records.length}건`);
   const map = {};
   for (const rec of records) {
-    if (rec.출발공항 !== "GMP" && rec.도착공항 !== "GMP") continue;
+    const from = String(rec.출발공항 || "").trim().toUpperCase();
+    const to = String(rec.도착공항 || "").trim().toUpperCase();
+    if (from !== "GMP" && to !== "GMP") continue;
     const code = String(rec.운항편명 || "").trim().toUpperCase();
     if (!code || !rec.출발시간 || !rec.도착시간) continue;
-    if (!map[code]) {
-      map[code] = `${rec.출발시간}-${rec.도착시간}`;
-    }
+    if (map[code]) continue;
+    // 김포 도착이면 입국, 김포 출발이면 출국. 상대편 공항이 곧 일본(또는 해외) 공항.
+    const inbound = to === "GMP";
+    map[code] = {
+      range: `${rec.출발시간}-${rec.도착시간}`,
+      korea: "김포",
+      japan: AIRPORT_NAME[inbound ? from : to] || null,
+      direction: inbound ? "입국" : "출국",
+    };
   }
   return map;
 }
@@ -190,6 +211,25 @@ function readExistingMap() {
   let match;
   while ((match = re.exec(content))) {
     map[match[1]] = match[2];
+  }
+  return map;
+}
+
+// 이전 실행에서 저장해둔 공항/방향 정보 — API가 이번에 못 준 편의 값을 잃지 않도록 읽어둔다
+function readExistingRouteMap() {
+  if (!fs.existsSync(OUT_PATH)) return {};
+  const content = fs.readFileSync(OUT_PATH, "utf8");
+  const section = content.split("const FLIGHT_ROUTE_INFO = {")[1];
+  if (!section) return {};
+  const map = {};
+  const re = /"([A-Z0-9]+)":\s*\{\s*korea:\s*"([^"]*)",\s*japan:\s*(null|"[^"]*"),\s*direction:\s*"([^"]*)"\s*\}/g;
+  let match;
+  while ((match = re.exec(section))) {
+    map[match[1]] = {
+      korea: match[2],
+      japan: match[3] === "null" ? null : match[3].slice(1, -1),
+      direction: match[4],
+    };
   }
   return map;
 }
@@ -231,6 +271,7 @@ function resolveGroupTime(codes, lookup) {
 
 async function main() {
   const existingMap = readExistingMap();
+  const existingRouteMap = readExistingRouteMap();
   const [arrByFlight, depByFlight, gimpoTimeMap] = await Promise.all([
     fetchFlights("getPassengerArrivalsDSOdp"),
     fetchFlights("getPassengerDeparturesDSOdp"),
@@ -241,7 +282,12 @@ async function main() {
   ]);
 
   const finalMap = {};
+  // 편명 -> { korea, japan, direction } — 리무진 텍스트(공항)·캘린더(입출국)·항공검색에서 같이 씀
+  const routeMap = {};
   const warnings = [];
+  const setRoute = (code, korea, japan, direction) => {
+    routeMap[code] = { korea, japan: japan || null, direction };
+  };
 
   for (const routeInfo of INCHEON_ROUTES) {
     const dur = routeInfo.durationMin;
@@ -253,7 +299,7 @@ async function main() {
       if (arrTime) {
         const depTime = addMinutesToTime(arrTime, -dur);
         const range = `${depTime}-${arrTime}`;
-        codes.forEach((c) => { finalMap[c] = range; });
+        codes.forEach((c) => { finalMap[c] = range; setRoute(c, "인천", routeInfo.route, "입국"); });
       } else {
         const fallback = codes.map((c) => existingMap[c]).find(Boolean);
         if (fallback) {
@@ -272,7 +318,7 @@ async function main() {
       if (depTime) {
         const arrTime = addMinutesToTime(depTime, dur);
         const range = `${depTime}-${arrTime}`;
-        codes.forEach((c) => { finalMap[c] = range; });
+        codes.forEach((c) => { finalMap[c] = range; setRoute(c, "인천", routeInfo.route, "출국"); });
       } else {
         const fallback = codes.map((c) => existingMap[c]).find(Boolean);
         if (fallback) {
@@ -295,15 +341,17 @@ async function main() {
       if (!dur) continue;
       const other = addMinutesToTime(info.time, sign * dur);
       finalMap[code] = sign < 0 ? `${other}-${info.time}` : `${info.time}-${other}`;
+      setRoute(code, "인천", AIRPORT_NAME[info.airport], sign < 0 ? "입국" : "출국");
       icnAutoAdded++;
     }
   }
 
   // 김포 — API가 주는 김포 국제선을 전부 담는다 (출발/도착 시간을 둘 다 주기 때문에 그대로 쓰면 됨)
   let gimpoAdded = 0;
-  for (const [code, range] of Object.entries(gimpoTimeMap)) {
+  for (const [code, info] of Object.entries(gimpoTimeMap)) {
     if (!finalMap[code]) gimpoAdded++;
-    finalMap[code] = range;
+    finalMap[code] = info.range;
+    setRoute(code, info.korea, info.japan, info.direction);
   }
 
   // 예전부터 쓰던 김포 편명이 통째로 사라지지 않았는지 확인만 한다
@@ -326,6 +374,9 @@ async function main() {
       finalMap[code] = range;
       keptFromExisting++;
     }
+  }
+  for (const [code, info] of Object.entries(existingRouteMap)) {
+    if (!routeMap[code]) routeMap[code] = info;
   }
 
   console.log(
@@ -357,6 +408,22 @@ async function main() {
     '  return FLIGHT_TIME_MAP[(flightNo || "").toUpperCase()] || null;',
     "}",
     "",
+    "// 편명 -> 어느 한국 공항인지 / 상대 일본 공항 / 입국·출국. API 응답에서 같이 받아온 값.",
+    "// 수동 관리 파일(flightAirports.js·flightDirections.js·flightRoutes.js)에 없는 편을 보완하는 용도.",
+    "const FLIGHT_ROUTE_INFO = {",
+    ...Object.keys(routeMap)
+      .sort()
+      .map((key) => {
+        const r = routeMap[key];
+        const japan = r.japan ? `"${r.japan}"` : "null";
+        return `  "${key}": { korea: "${r.korea}", japan: ${japan}, direction: "${r.direction}" },`;
+      }),
+    "};",
+    "",
+    "function routeInfoForFlight(flightNo) {",
+    '  return FLIGHT_ROUTE_INFO[(flightNo || "").toUpperCase()] || null;',
+    "}",
+    "",
   ];
 
   fs.writeFileSync(OUT_PATH, lines.join("\n"), "utf8");
@@ -364,9 +431,12 @@ async function main() {
 
   // 시간표가 실제로 바뀌었으면 HTML의 ?v=숫자도 올려준다.
   // 이걸 안 올리면 브라우저가 예전에 받아둔 시간표를 계속 써서, 새로 채운 편이 앱에 안 보인다.
+  const sameRoute = (a, b) => a && b && a.korea === b.korea && a.japan === b.japan && a.direction === b.direction;
   const changed =
     Object.keys(finalMap).length !== Object.keys(existingMap).length ||
-    Object.keys(finalMap).some((code) => finalMap[code] !== existingMap[code]);
+    Object.keys(finalMap).some((code) => finalMap[code] !== existingMap[code]) ||
+    Object.keys(routeMap).length !== Object.keys(existingRouteMap).length ||
+    Object.keys(routeMap).some((code) => !sameRoute(routeMap[code], existingRouteMap[code]));
   if (changed) bumpAssetVersion();
   else console.log("시간표 내용 그대로 — 캐시 버전은 올리지 않음");
 }

@@ -48,8 +48,9 @@ function classifyDirections(entries) {
         return;
       }
 
-      // 1순위: 실제 노선표 기반 매핑 (flightDirections.js) — 있으면 그대로 확정, 순서/패턴 추론 안 씀
-      const known = FLIGHT_DIRECTION_MAP[entry.flightNo];
+      // 1순위: 실제 노선표 기반 매핑 (flightDirections.js + 자동 갱신된 FLIGHT_ROUTE_INFO)
+      // — 있으면 그대로 확정, 순서/패턴 추론 안 씀
+      const known = knownDirectionForFlight(entry.flightNo);
       if (known) {
         result.set(entry, { direction: known, conflict: false });
         return;

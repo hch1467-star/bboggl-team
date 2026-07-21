@@ -100,3 +100,14 @@ function airlineCodeOf(flightNo) {
 function terminalForFlight(flightNo) {
   return AIRLINE_TERMINAL_MAP[airlineCodeOf(flightNo)] || null;
 }
+
+// 위 수동 표에 없는 편명은 자동 생성 파일(flightSchedule.js)의 FLIGHT_ROUTE_INFO에서 찾는다.
+// 매달 API로 갱신되므로 새로 취항한 편도 공항이 잡힌다. 손으로 정리한 표가 항상 우선.
+function airportForFlight(flightNo) {
+  const code = (flightNo || "").toUpperCase();
+  if (FLIGHT_AIRPORT_MAP[code]) return FLIGHT_AIRPORT_MAP[code];
+  if (typeof FLIGHT_ROUTE_INFO !== "undefined" && FLIGHT_ROUTE_INFO[code]) {
+    return FLIGHT_ROUTE_INFO[code].korea;
+  }
+  return null;
+}
