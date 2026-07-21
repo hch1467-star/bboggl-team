@@ -169,13 +169,28 @@ async function fetchGimpoTimeLookup(serviceKey) {
   if (!latestPath) return {};
   const records = await fetchOdcloudAllRecords(latestPath, serviceKey);
   console.log(`김포 API 응답 ${records.length}건`);
+  // 이 데이터셋은 정기편·부정기편(전세기/페리)을 한 파일에 같이 담고 있는데 구분 필드가 문서에 안 나와 있음.
+  // 실제로 어떤 항목이 오는지 남겨두면 다음에 정기편만 고르도록 개선할 수 있음.
+  if (records[0]) console.log(`김포 응답 항목: ${Object.keys(records[0]).join(", ")}`);
+
   const map = {};
+  let skippedIrregular = 0;
   for (const rec of records) {
     const from = String(rec.출발공항 || "").trim().toUpperCase();
     const to = String(rec.도착공항 || "").trim().toUpperCase();
     if (from !== "GMP" && to !== "GMP") continue;
     const code = String(rec.운항편명 || "").trim().toUpperCase();
     if (!code || !rec.출발시간 || !rec.도착시간) continue;
+    // "JL95A", "OZ803A"처럼 뒤에 문자가 붙은 건 전세기·페리 같은 부정기편 표기라 예약에 쓰이지 않음
+    if (!/^[A-Z0-9]{2}\d+$/.test(code)) {
+      skippedIrregular++;
+      continue;
+    }
+    // 김포↔인천 같은 국내 이동편은 승객용 노선이 아님
+    if (from === to || (AIRPORT_NAME[from] && AIRPORT_NAME[to] && ["ICN", "GMP"].includes(from) && ["ICN", "GMP"].includes(to))) {
+      skippedIrregular++;
+      continue;
+    }
     if (map[code]) continue;
     // 김포 도착이면 입국, 김포 출발이면 출국. 상대편 공항이 곧 일본(또는 해외) 공항.
     const inbound = to === "GMP";
@@ -186,6 +201,7 @@ async function fetchGimpoTimeLookup(serviceKey) {
       direction: inbound ? "입국" : "출국",
     };
   }
+  if (skippedIrregular) console.log(`김포 부정기편(전세기/페리 등) ${skippedIrregular}건 제외`);
   return map;
 }
 
@@ -337,6 +353,7 @@ async function main() {
   for (const [source, sign] of [[arrByFlight, -1], [depByFlight, 1]]) {
     for (const [code, info] of Object.entries(source)) {
       if (finalMap[code] || !info.airport) continue;
+      if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue; // 뒤에 문자가 붙은 부정기편 표기는 제외
       const dur = ICN_AIRPORT_DURATION_MIN[info.airport];
       if (!dur) continue;
       const other = addMinutesToTime(info.time, sign * dur);

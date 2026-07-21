@@ -136,8 +136,11 @@ function findFlightsForRoute(fromAirport, toAirport) {
   const japan = isFromKorea ? toAirport : fromAirport;
   const direction = isFromKorea ? "출국" : "입국";
   const route = FLIGHT_ROUTES.find((r) => r.korea === korea && r.japan === japan);
+  // 위 노선표에 없는 조합(예: 김포-나리타)은 실제로 취급하는 정기 노선이 아니다.
+  // API에는 전세기가 한두 편 잡히기도 하는데, 그것만으로 노선을 새로 만들지는 않는다.
+  if (!route) return [];
 
-  const groups = route ? (isFromKorea ? route.outbound : route.inbound) : [];
+  const groups = isFromKorea ? route.outbound : route.inbound;
 
   const rangeOf = (entry) =>
     typeof timeRangeForFlight === "function" ? timeRangeForFlight(entry.split("/")[0]) : null;
@@ -159,6 +162,9 @@ function findFlightsForRoute(fromAirport, toAirport) {
     for (const [code, info] of Object.entries(FLIGHT_ROUTE_INFO)) {
       if (info.korea !== korea || info.japan !== japan || info.direction !== direction) continue;
       if (covered.has(flightKey(code))) continue; // 이미 목록에 있는 편 (JL090/JL90 같은 표기 차이 포함)
+      // "JL95A"처럼 편명 뒤에 문자가 붙은 건 전세기·페리 같은 부정기편이라 예약에 쓰이지 않음
+      if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue;
+      if (KOREA_AIRPORTS.includes(info.japan)) continue; // 김포↔인천 같은 국내 이동편 제외
       const r = timeRangeForFlight(code);
       if (!r || coveredRanges.has(r)) continue; // 기존 편과 같은 시간대 = 같은 비행기의 코드셰어
       if (!bySlot.has(r)) bySlot.set(r, []);
@@ -172,8 +178,6 @@ function findFlightsForRoute(fromAirport, toAirport) {
     if (codes.some((c) => LCC_AIRLINES.has(airlineCodeOfFlight(c)))) continue;
     extras.push(codes.sort().join("/")); // 같은 비행기의 코드셰어들은 한 줄로
   }
-
-  if (!route && extras.length === 0) return [];
 
   return [...groups, ...extras]
     .map((entry) => {
