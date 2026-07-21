@@ -109,21 +109,11 @@ function travelerLabel(t) {
   return `${t.name}${t.title ? " " + t.title : ""}`;
 }
 
-// MMID/NAME 항목은 방 개수만큼 여러 줄이 될 수 있어서, 둘째 줄부터는 라벨 길이만큼 들여씀
-const MMID_FIELD_PREFIX = "MMID : ";
-const NAME_FIELD_PREFIX = "NAME : ";
-
-function labelledLines(prefix, values) {
-  return values.map((v, i) => (i === 0 ? `${prefix}${v}` : `${" ".repeat(prefix.length)}${v}`));
-}
-
-function renderRoomBlock(roomLabels, info, billingTail, hostTail) {
-  // 일부만 조회된 경우 못 찾은 자리는 "-"로 채워서 NAME 줄과 순서가 어긋나 보이지 않게 함
-  // (하나도 못 찾았으면 예전처럼 빈 칸 한 줄만)
-  const mmids = roomLabels.map((r) => r.mmidValue);
+// 방 하나당 기존 예약 포맷 한 덩어리 (여러 방이면 이 덩어리를 방 개수만큼 반복해서 이어붙임)
+function renderRoomBlock(info, billingTail, hostTail) {
   const lines = [
-    ...(mmids.some((v) => v) ? labelledLines(MMID_FIELD_PREFIX, mmids.map((v) => v || "-")) : [MMID_FIELD_PREFIX]),
-    ...labelledLines(NAME_FIELD_PREFIX, roomLabels.map((r) => r.nameLabel)),
+    `MMID : ${info.mmidValue}`,
+    `NAME : ${info.nameLabel}`,
     `CASINO TIER : ${ROOM_FIXED_DEFAULTS.casinoTier}`,
     `CI DATE : ${info.ci}`,
     `CO DATE : ${info.co}`,
@@ -189,19 +179,8 @@ function buildRoomReservationText(parsed) {
     };
   });
 
-  // 방마다 날짜·안내문구가 전부 같으면(대부분의 경우) MMID/NAME만 여러 줄인 한 덩어리로,
-  // 일행끼리 편명이 갈려 방마다 날짜가 다르면 그 방들만 따로 떼어 여러 덩어리로 만듦
-  const first = roomInfos[0];
-  const allSame = roomInfos.every(
-    (r) =>
-      r.ci === first.ci &&
-      r.co === first.co &&
-      r.hasEarlyArrival === first.hasEarlyArrival &&
-      r.hasLateDeparture === first.hasLateDeparture
-  );
-
-  if (allSame) return renderRoomBlock(roomInfos, first, billingTail, hostTail);
-  return roomInfos.map((r) => renderRoomBlock([r], r, billingTail, hostTail)).join("\n\n");
+  // 방마다 기존 포맷 한 덩어리씩, 빈 줄로 구분해서 이어붙임
+  return roomInfos.map((r) => renderRoomBlock(r, billingTail, hostTail)).join("\n\n");
 }
 
 // 리무진은 같은 편명이면 대표(리더) 고객 이름 하나로 묶어서 예약
