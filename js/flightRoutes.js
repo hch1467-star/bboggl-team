@@ -24,6 +24,19 @@ function airlineCodeOfFlight(flightNo) {
   return (flightNo || "").toUpperCase().slice(0, 2);
 }
 
+// 저비용항공사(LCC) — 자동으로 새로 발견된 편은 목록에 넣지 않는다.
+// 위 FLIGHT_ROUTES에 손으로 적어둔 LCC 편명은 그대로 표시된다(실제 취급하는 노선이라 넣어둔 것).
+const LCC_AIRLINES = new Set([
+  "7C", "TW", "ZE", "RS", "BX", "LJ", "YP", "RF", "WE", // 국내 LCC
+  "MM", "IT", "ZG", "GK", "JW", "TR", "JD", "9C", "AK", "D7", "VJ", // 해외 LCC
+]);
+
+// "JL090"과 "JL90"은 같은 편 — 편명 숫자의 앞자리 0을 떼서 비교용 키를 만든다
+function flightKey(flightNo) {
+  const code = (flightNo || "").replace(/\([^)]*\)/g, "").trim().toUpperCase();
+  return code.replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2");
+}
+
 // 코드셰어 그룹(예: "KE738/JL5269") 중 하나라도 대형항공사면 비즈니스 좌석 있음으로 판단
 function hasBusinessClass(entryLabel) {
   return entryLabel.split("/").some((code) => BUSINESS_CLASS_AIRLINES.has(airlineCodeOfFlight(code)));
@@ -126,18 +139,38 @@ function findFlightsForRoute(fromAirport, toAirport) {
 
   const groups = route ? (isFromKorea ? route.outbound : route.inbound) : [];
 
-  // 위 목록은 손으로 정리한 것이라 새로 취항한 편이 빠져 있을 수 있다.
-  // 자동 갱신되는 FLIGHT_ROUTE_INFO에서 같은 노선·같은 방향인데 목록에 없는 편명을 더한다.
-  const covered = new Set();
-  groups.forEach((entry) => entry.split("/").forEach((c) => covered.add(c.replace(/\([^)]*\)/g, "").trim().toUpperCase())));
+  const rangeOf = (entry) =>
+    typeof timeRangeForFlight === "function" ? timeRangeForFlight(entry.split("/")[0]) : null;
 
-  const extras = [];
+  // 손으로 적어둔 목록에 이미 들어있는 편명과 시간대를 기억해둔다
+  const covered = new Set();
+  const coveredRanges = new Set();
+  groups.forEach((entry) => {
+    entry.split("/").forEach((c) => covered.add(flightKey(c)));
+    const r = rangeOf(entry);
+    if (r) coveredRanges.add(r);
+  });
+
+  // 자동 갱신되는 FLIGHT_ROUTE_INFO에서 목록에 없는 편을 찾아 보완한다.
+  // 다만 그대로 넣으면 같은 비행기의 코드셰어 편명이 우수수 딸려와 목록이 지저분해지므로,
+  // 출발-도착 시간이 같은 것끼리 한 줄로 묶고 아래 경우는 아예 뺀다.
+  const bySlot = new Map();
   if (typeof FLIGHT_ROUTE_INFO !== "undefined") {
     for (const [code, info] of Object.entries(FLIGHT_ROUTE_INFO)) {
       if (info.korea !== korea || info.japan !== japan || info.direction !== direction) continue;
-      if (covered.has(code)) continue;
-      extras.push(code);
+      if (covered.has(flightKey(code))) continue; // 이미 목록에 있는 편 (JL090/JL90 같은 표기 차이 포함)
+      const r = timeRangeForFlight(code);
+      if (!r || coveredRanges.has(r)) continue; // 기존 편과 같은 시간대 = 같은 비행기의 코드셰어
+      if (!bySlot.has(r)) bySlot.set(r, []);
+      bySlot.get(r).push(code);
     }
+  }
+
+  const extras = [];
+  for (const codes of bySlot.values()) {
+    // 그 시간대에 LCC가 하나라도 끼어 있으면 LCC가 운항하는 편 — 새로 추가하지 않는다
+    if (codes.some((c) => LCC_AIRLINES.has(airlineCodeOfFlight(c)))) continue;
+    extras.push(codes.sort().join("/")); // 같은 비행기의 코드셰어들은 한 줄로
   }
 
   if (!route && extras.length === 0) return [];
