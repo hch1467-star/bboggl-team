@@ -41,6 +41,16 @@ const ScheduleModal = {
     this.textareaEl.value = "";
     this.updatePreview();
     this.textareaEl.focus();
+
+    // 예약 텍스트에 MMID를 채우려면 고객 목록이 필요한데 1만 건이 넘어 받는 데 시간이 걸린다.
+    // 모달을 열자마자 뒤에서 받아두고(카톡 붙여넣는 동안 끝남), 다 받으면 미리보기를 다시 그린다.
+    if (typeof Store !== "undefined" && Store.ensureCustomerMmid) {
+      Store.ensureCustomerMmid()
+        .then(() => {
+          if (!this.overlayEl.classList.contains("hidden")) this.updatePreview();
+        })
+        .catch((err) => console.warn("고객 MMID 디렉터리를 불러오지 못했어요:", err));
+    }
   },
 
   close() {

@@ -228,6 +228,21 @@ const Store = {
     }));
   },
 
+  // 고객이 1만 명이 넘어 한 번에 받으면 1000건씩 열 번 넘게 왕복해야 한다.
+  // 이 목록은 예약 텍스트를 만들 때(붙여넣기 모달)만 쓰이므로 앱을 켤 때가 아니라
+  // 모달을 처음 열 때 딱 한 번 불러온다. 두 번째부터는 받아둔 걸 그대로 쓴다.
+  _customerMmidPromise: null,
+
+  ensureCustomerMmid() {
+    if (!this._customerMmidPromise) {
+      this._customerMmidPromise = this.loadCustomerMmid().catch((err) => {
+        this._customerMmidPromise = null; // 실패하면 다음에 다시 시도할 수 있게
+        throw err;
+      });
+    }
+    return this._customerMmidPromise;
+  },
+
   // 고객명 ↔ MMID(고객번호) — 개인정보라 DB에서만 불러옴 (예약 텍스트의 MMID에 사용). 건수가 많아 1000건씩 나눠서 전부 가져옴
   async loadCustomerMmid() {
     const rows = [];
