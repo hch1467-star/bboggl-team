@@ -286,10 +286,14 @@ async function main() {
     check('정면(+Z)에서 때리면 백어택 아님', (await behind(0, 3)) === false)
     check('등 뒤(-Z)에서 때리면 백어택', (await behind(0, -3)) === true)
     check('옆(+X)에서 때리면 백어택 아님', (await behind(3, 0)) === false)
-    // 후방 부채꼴 120° = 정중앙 뒤에서 좌우 60°까지. 55°는 안, 65°는 밖.
+    // 부채꼴 경계를 검사합니다. 각도를 하드코딩하면 밸런스를 만질 때마다
+    // 테스트가 "거짓으로" 깨집니다(실제로 120°->140°로 넓히자 깨졌습니다).
+    // 그래서 게임이 쓰는 상수를 그대로 읽어 **경계 안/밖**만 확인합니다.
+    const { backArcDeg } = await page.evaluate(() => window.__game.tuning())
+    const half = backArcDeg / 2
     const at = (deg, r = 3) => [Math.sin(((180 - deg) * Math.PI) / 180) * r, Math.cos(((180 - deg) * Math.PI) / 180) * r]
-    check('뒤에서 55° 비껴서도 백어택 (부채꼴 120°)', (await behind(...at(55))) === true)
-    check('뒤에서 65° 비끼면 백어택 아님', (await behind(...at(65))) === false)
+    check(`뒤에서 ${(half - 5).toFixed(0)}° 비껴서도 백어택 (부채꼴 ${backArcDeg}°)`, (await behind(...at(half - 5))) === true)
+    check(`뒤에서 ${(half + 5).toFixed(0)}° 비끼면 백어택 아님`, (await behind(...at(half + 5))) === false)
     // 적이 돌아서면 판정도 같이 돌아야 합니다.
     check('적이 180° 돌면 +Z 쪽이 등 뒤가 됨', (await behind(0, 3, Math.PI)) === true)
 
@@ -448,6 +452,34 @@ async function main() {
       `첫 타 피해 ${back.damageDealt} (보너스 없으면 12)`,
     )
 
+    // ---------- 7.9 등 뒤를 잡을 "여유"가 실제로 있는가 ----------
+    // 플레이 테스트 피드백: **"뒤로 돌아가도 순간적으로 다시 정면을 향해버려서
+    // 백어택 적용이 쉽지가 않네. 조금 여유가 있어야 할 것 같아."**
+    //
+    // 판정이 맞는지(7.8)와 **잡을 시간이 있는지**는 완전히 다른 문제입니다.
+    // 7.8은 적을 얼려놓고 재므로 회전 속도를 아무리 빠르게 해도 통과합니다.
+    // 그래서 여기서는 AI를 **살려두고**, 등 뒤에 선 순간부터 적이 돌아설 때까지
+    // 몇 초가 걸리는지를 잽니다. 이 숫자가 곧 플레이어가 느끼는 "여유"입니다.
+    await setupDummy(0)
+    await page.evaluate(() => window.__game.freezeEnemies(false)) // AI를 깨웁니다
+    const t0 = Date.now()
+    let window0 = 0
+    while (Date.now() - t0 < 6000) {
+      const st = await state()
+      if (st.nearestEnemy?.playerBehind !== true) break
+      window0 = (Date.now() - t0) / 1000
+      await sleep(50)
+    }
+    // 반응 지연 0.5초 + 150°/s로 180° 회전(1.2초) = 이론상 1.7초.
+    // 측정 오차와 프레임률을 감안해 **0.6초 이상**이면 "여유가 생겼다"고 봅니다.
+    // 튜닝 전(회전 420°/s, 지연 없음)에는 0.43초라 사실상 불가능했습니다.
+    check(
+      '등 뒤에 섰을 때 적이 곧바로 돌아서지 않음',
+      window0 >= 0.6,
+      `등 뒤 유지 ${window0.toFixed(2)}초`,
+    )
+    await page.evaluate(() => window.__game.freezeEnemies(true))
+
     // ---------- 8. 레벨 에디터 ----------
     // 에디터로 레벨을 "만들어서" 저장하고, 그 레벨을 게임이 실제로 불러와
     // 플레이되는지까지 한 번에 확인합니다. 두 프로그램의 접점이 여기라서
@@ -603,6 +635,41 @@ async function main() {
     const zoneShot = path.join(SHOTS, '13-zone.png')
     await zone.screenshot({ path: zoneShot })
     check('존 스크린샷 생성', statSync(zoneShot).size > 15000, `${(statSync(zoneShot).size / 1024).toFixed(0)} KB`)
+
+    // ---------- 9.6 길안내 (기둥 4) ----------
+    // 플레이 테스트 피드백: **"어디로 가야 하고, 어디에 뭐가 있는지 목표가 없으니
+    // 그냥 눈앞에 적들만 잡고 말고 있거든."**
+    //
+    // 미니맵을 쓰지 않기로 했으므로(DESIGN.md 기둥 4) 세 가지가 대신 답해야 합니다:
+    // 구역 이름 · 한 줄 목표 · 목표를 가리키는 방향. 셋 다 확인합니다.
+    check('존에 이름 붙은 구역이 있음', zs.regionCount === 8, `${zs.regionCount}곳`)
+    check('시작하자마자 현재 구역이 잡힘', zs.region === '버려진 앞마당', `"${zs.region}"`)
+
+    // 화면에 실제로 글자가 떠 있는지까지 봅니다. 상태값만 맞고 HUD에 안 뜨면
+    // 플레이어에게는 없는 기능입니다.
+    const nav = await zone.evaluate(() => ({
+      region: document.getElementById('regionText')?.textContent ?? '',
+      objective: document.getElementById('objectiveText')?.textContent ?? '',
+    }))
+    check('구역 이름이 HUD에 표시됨', nav.region.includes('버려진 앞마당'), `"${nav.region}"`)
+    check('한 줄 목표가 HUD에 표시됨', /수문장|보물|적/.test(nav.objective), `"${nav.objective}"`)
+
+    // 걸어 들어가면 구역이 실제로 바뀌어야 합니다. 안 바뀌면 "진행하고 있다"는
+    // 감각이 생기지 않습니다 — 피드백의 핵심이 바로 그것이었습니다.
+    await zone.evaluate(() => window.__game.press('KeyD'))
+    await zone.evaluate(() => window.__game.press('KeyS'))
+    let movedRegion = null
+    for (const tStart = Date.now(); Date.now() - tStart < 40000; ) {
+      const st = await zone.evaluate(() => window.__game.state())
+      if (st.region && st.region !== '버려진 앞마당') {
+        movedRegion = st
+        break
+      }
+      await sleep(120)
+    }
+    await zone.evaluate(() => window.__game.release('KeyD'))
+    await zone.evaluate(() => window.__game.release('KeyS'))
+    check('동쪽으로 걸어가면 다음 구역으로 넘어감', movedRegion !== null, movedRegion ? `"${movedRegion.region}"` : '40초 내 미발생')
 
     // ---------- 10. 안정성 ----------
     check('런타임 콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))

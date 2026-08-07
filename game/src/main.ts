@@ -1,9 +1,11 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
-import { KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
+import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
 import {
   Actor,
   ActorState,
+  Enemy,
+  EnemyKind,
   Health,
   Loadout,
   Pickup,
@@ -15,7 +17,7 @@ import {
 import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
 import { debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
-import { loadLevelFromStorage, type LevelData } from './level/format'
+import { loadLevelFromStorage, worldToCell, type LevelData, type LevelRegion } from './level/format'
 import { DEFAULT_LEVEL_ID, loadBundledLevel } from './levels'
 import { Terrain } from './level/terrain'
 import { QuarterViewCamera } from './render/camera'
@@ -45,6 +47,7 @@ import { SkillBar } from './ui/skillbar'
  *  - **아레나 모드** (기본): 웨이브로 적이 몰려오는 전투 시험장
  */
 const pickups = defineQuery(Transform, Pickup)
+const enemyQuery = defineQuery(Transform, Enemy, Health)
 
 class Game {
   private readonly renderer: THREE.WebGLRenderer
@@ -52,6 +55,8 @@ class Game {
   private readonly cursorRing: THREE.Mesh
   private readonly sunTarget: THREE.Object3D
   private readonly arena: THREE.Group
+  private readonly guide: THREE.Group
+  private readonly guideMaterials: THREE.MeshBasicMaterial[]
   private readonly cam: QuarterViewCamera
   private readonly visuals: Visuals
   private readonly vfx: Vfx
@@ -67,6 +72,7 @@ class Game {
   private waveTimer = 0
   private gameOver = false
   private lastFrameMs = 0
+  private paused = false
   private readonly aim = { x: 0, z: 0 }
   private readonly controlCtx: ControlContext
 
@@ -82,6 +88,10 @@ class Game {
   private terrain: Terrain | null = null
   private treasureTotal = 0
   private treasuresFound = 0
+  private regions: LevelRegion[] = []
+  private currentRegion = ''
+  private levelW = 0
+  private levelH = 0
   /** 플레이어가 적중시킨 누적 타격 수/피해량 — 다단히트 같은 것을 검증할 때 씁니다. */
   private hitsDealt = 0
   private damageDealt = 0
@@ -95,6 +105,8 @@ class Game {
     this.cursorRing = bundle.cursorRing
     this.sunTarget = bundle.sunTarget
     this.arena = bundle.arena
+    this.guide = bundle.guide
+    this.guideMaterials = bundle.guideMaterials
 
     this.cam = new QuarterViewCamera(window.innerWidth / window.innerHeight)
     this.visuals = new Visuals(this.scene, this.cam.camera)
@@ -169,6 +181,9 @@ class Game {
     this.critHits = 0
     this.hud.hideBanner()
     setEnemyAiEnabled(true)
+    this.regions = []
+    this.currentRegion = ''
+    this.guide.visible = false
 
     let level: LevelData | null = null
     if (this.source === 'storage') level = loadLevelFromStorage()
@@ -177,6 +192,9 @@ class Game {
 
     if (level) {
       this.levelName = level.name
+      this.regions = level.regions ?? []
+      this.levelW = level.w
+      this.levelH = level.h
       this.terrain = new Terrain(level)
       this.scene.add(this.terrain.group)
       setTerrain(this.terrain)
@@ -238,6 +256,13 @@ class Game {
   }
 
   private frame(nowMs: number): void {
+    // 일시정지는 **검증 도구 전용**입니다. 0.19초짜리 검격 궤적처럼 짧은 순간을
+    // 사진으로 남기려면 그 프레임에서 화면을 멈춰 세우는 수밖에 없습니다.
+    // 시각을 갱신해 두어야 재개할 때 델타가 튀지 않습니다.
+    if (this.paused) {
+      this.lastFrameMs = nowMs
+      return
+    }
     const rawDt = (nowMs - this.lastFrameMs) / 1000
     this.lastFrameMs = nowMs
     tick(rawDt)
@@ -331,6 +356,9 @@ class Game {
       this.waveTimer = WORLD.waveDelay
     }
 
+    // ---- 6.5 길안내 (목표 · 구역 · 방향 화살표) ----
+    if (this.levelMode && playerAlive) this.updateNavigation(p)
+
     // ---- 7. 카메라 & 렌더 ----
     const px = Transform.x[p]
     const pz = Transform.z[p]
@@ -376,6 +404,87 @@ class Game {
     endFrame()
   }
 
+  /**
+   * 길안내 — "어디로 가야 하고 어디에 뭐가 있는가"에 답합니다.
+   *
+   * 플레이 테스트 피드백: "목표가 없으니 그냥 눈앞의 적만 잡고 말게 된다."
+   * 미니맵은 쓰지 않기로 했으므로(DESIGN.md 기둥 4) 세 가지로 대신합니다:
+   *   1) **구역 이름** — 새 장소에 들어서면 이름이 뜹니다 (진행 감각)
+   *   2) **한 줄 목표** — 지금 무엇을 해야 하는지 (HUD)
+   *   3) **지면 화살표** — 목표가 멀 때 발밑에서 그쪽으로 흐릅니다 (방향)
+   * 보물의 위치는 visuals.ts 의 빛기둥이 멀리서도 알려줍니다.
+   */
+  private updateNavigation(p: number): void {
+    const px = Transform.x[p]
+    const pz = Transform.z[p]
+
+    // --- 구역 판정: 가장 작은(= 가장 구체적인) 구역이 이깁니다 ---
+    const { cx, cz } = worldToCell(px, pz, this.levelW, this.levelH)
+    let found: LevelRegion | null = null
+    let foundArea = Infinity
+    for (const r of this.regions) {
+      if (cx < r.x0 || cx > r.x1 || cz < r.z0 || cz > r.z1) continue
+      const area = (r.x1 - r.x0 + 1) * (r.z1 - r.z0 + 1)
+      if (area < foundArea) {
+        found = r
+        foundArea = area
+      }
+    }
+    if (found && found.name !== this.currentRegion) {
+      this.currentRegion = found.name
+      this.hud.showBanner(found.name, found.hint ?? '', 2.2)
+    }
+
+    // --- 목표: 보스 → 남은 보물 → 남은 적 순 ---
+    const objective = this.findObjective(px, pz)
+    this.hud.setNavigation(
+      this.currentRegion,
+      objective ? `목표: ${objective.label} (${objective.dist.toFixed(0)}m)` : '목표: 완료',
+    )
+
+    // --- 지면 화살표: 목표가 멀 때만. 가까우면 눈으로 보이므로 방해만 됩니다. ---
+    const showGuide = objective !== null && objective.dist > 9
+    this.guide.visible = showGuide
+    if (showGuide && objective) {
+      this.guide.position.set(px, Transform.y[p] + 0.06, pz)
+      this.guide.rotation.y = Math.atan2(objective.x - px, objective.z - pz)
+      // 앞으로 흘러가는 파도. 정지한 화살표보다 방향이 훨씬 잘 읽힙니다.
+      for (let i = 0; i < this.guideMaterials.length; i++) {
+        const t = (time.elapsed * 1.25 - i * 0.26) % 1
+        this.guideMaterials[i].opacity = 0.16 + 0.55 * Math.max(0, Math.sin(t * Math.PI))
+      }
+    }
+  }
+
+  private findObjective(px: number, pz: number): { x: number; z: number; label: string; dist: number } | null {
+    const eids = enemyQuery.run()
+    let boss: { x: number; z: number } | null = null
+    let anyEnemy: { x: number; z: number; dist: number } | null = null
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = eids[i]
+      if (Actor.state[e] === ActorState.Dead) continue
+      const d = Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
+      if (Enemy.kind[e] === EnemyKind.Boss) boss = { x: Transform.x[e], z: Transform.z[e] }
+      if (!anyEnemy || d < anyEnemy.dist) anyEnemy = { x: Transform.x[e], z: Transform.z[e], dist: d }
+    }
+    if (boss) {
+      return { ...boss, label: '수문장 처치', dist: Math.hypot(boss.x - px, boss.z - pz) }
+    }
+
+    // 보스를 잡았으면 남은 보물이 목표가 됩니다.
+    const tids = pickups.run()
+    let treasure: { x: number; z: number; dist: number } | null = null
+    for (let i = 0; i < pickups.count; i++) {
+      const e = tids[i]
+      if (Pickup.taken[e] === 1) continue
+      const d = Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
+      if (!treasure || d < treasure.dist) treasure = { x: Transform.x[e], z: Transform.z[e], dist: d }
+    }
+    if (treasure) return { ...treasure, label: '남은 보물' }
+    if (anyEnemy) return { ...anyEnemy, label: '남은 적' }
+    return null
+  }
+
   /** 플레이어와 가까운 보물을 회수합니다. */
   private collectTreasures(p: number): void {
     const px = Transform.x[p]
@@ -418,6 +527,14 @@ class Game {
    * 전투 중 스크린샷은 여러 이펙트가 겹쳐 있어서, 어느 것이 잘못 그려지는지
    * 구분할 수가 없습니다. 하나씩 떼어놓고 봐야 원인이 특정됩니다.
    */
+  debugSetPaused(paused: boolean): void {
+    this.paused = paused
+  }
+
+  debugSwingVisible(): boolean {
+    return this.vfx.hasActiveSwing()
+  }
+
   debugClearEnemies(): void {
     for (let e = 0; e < 4096; e++) {
       if (!isAlive(e) || e === this.playerEntity) continue
@@ -585,6 +702,9 @@ class Game {
         stamina: Number(Stamina.value[p].toFixed(1)),
         state: Actor.state[p],
         comboIndex: Actor.comboIndex[p],
+        // 0=선행동작 1=판정 2=후딜. 검증 도구가 "판정이 뜬 그 프레임"을 정확히
+        // 집어낼 수 있어야 합니다. 벽시계로 기다리면 프레임률에 따라 어긋납니다.
+        phase: Actor.phase[p],
         terrainLevel: this.terrain ? this.terrain.levelAtWorld(Transform.x[p], Transform.z[p]) : null,
       },
       aim: { x: Number(this.aim.x.toFixed(3)), z: Number(this.aim.z.toFixed(3)) },
@@ -615,6 +735,8 @@ class Game {
       source: this.source,
       treasuresFound: this.treasuresFound,
       treasureTotal: this.treasureTotal,
+      region: this.currentRegion,
+      regionCount: this.regions.length,
     }
   }
 }
@@ -639,6 +761,12 @@ declare global {
       getSample: () => ReturnType<Game['getSample']>
       clearEnemies: () => void
       testBehind: (ax: number, az: number, tx: number, tz: number, trot: number) => boolean
+      /** 검증 스크립트가 수치를 하드코딩하지 않도록 튜닝 상수를 그대로 내보냅니다. */
+      tuning: () => { backArcDeg: number }
+      /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
+      setPaused: (paused: boolean) => void
+      /** 지금 검격 궤적이 떠 있는가 — 캡처 타이밍을 페이지 안에서 잡기 위한 것. */
+      swingVisible: () => boolean
       spawnTestEnemy: (x: number, z: number, rotY?: number) => number
       freezeEnemies: (frozen: boolean) => void
       spawnVfx: (kind: 'spark' | 'damage' | 'swing') => void
@@ -658,6 +786,9 @@ window.__game = {
   clearEnemies: () => game.debugClearEnemies(),
   // 등 뒤 판정은 순수 기하 계산이라 엔티티 없이 그대로 검증할 수 있습니다.
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
+  tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
+  setPaused: (paused) => game.debugSetPaused(paused),
+  swingVisible: () => game.debugSwingVisible(),
   spawnTestEnemy: (x, z, rotY) => game.debugSpawnTestEnemy(x, z, rotY),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),

@@ -23,6 +23,8 @@ export class Hud {
   private readonly levelNameText = el<HTMLElement>('levelNameText')
   private readonly levelEnemyText = el<HTMLElement>('levelEnemyText')
   private readonly treasureText = el<HTMLElement>('treasureText')
+  private readonly regionText = el<HTMLElement>('regionText')
+  private readonly objectiveText = el<HTMLElement>('objectiveText')
   private readonly waveText = el<HTMLElement>('waveText')
   private readonly enemyText = el<HTMLElement>('enemyText')
   private readonly killText = el<HTMLElement>('killText')
@@ -66,6 +68,17 @@ export class Hud {
     this.levelNameText.textContent = name
     this.levelEnemyText.textContent = String(enemiesLeft)
     this.treasureText.textContent = `${found} / ${total}`
+  }
+
+  /**
+   * 지금 있는 곳과 다음 목표.
+   *
+   * 플레이 테스트 피드백: "어디로 가야 하고 어디에 뭐가 있는지 목표가 없으니
+   * 그냥 눈앞의 적만 잡게 된다." 미니맵 대신 **한 줄 목표**로 답합니다.
+   */
+  setNavigation(region: string, objective: string): void {
+    if (this.regionText.textContent !== region) this.regionText.textContent = region
+    if (this.objectiveText.textContent !== objective) this.objectiveText.textContent = objective
   }
 
   setProgress(wave: number, enemiesLeft: number, kills: number): void {

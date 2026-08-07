@@ -56,6 +56,25 @@ export interface LevelEntity {
   rotY: number
 }
 
+/**
+ * 이름 붙은 구역.
+ *
+ * 미니맵을 쓰지 않기로 했으므로(DESIGN.md 기둥 4), **장소에 이름을 주는 것**이
+ * 길을 알려주는 주된 수단입니다. 새 구역에 들어서면 이름이 뜨고,
+ * "성문 통로를 지났다 → 이제 폐허다"라는 진행 감각이 생깁니다.
+ * 소울라이크와 오공이 지역명을 띄우는 이유가 정확히 이것입니다.
+ */
+export interface LevelRegion {
+  name: string
+  /** 격자 좌표 범위 (양 끝 포함) */
+  x0: number
+  x1: number
+  z0: number
+  z1: number
+  /** 처음 들어왔을 때 한 줄 안내 (선택) */
+  hint?: string
+}
+
 export interface LevelData {
   version: number
   name: string
@@ -65,6 +84,7 @@ export interface LevelData {
   /** heights[z * w + x]. VOID(-1) 이거나 0 이상의 높이 단계. */
   heights: number[]
   entities: LevelEntity[]
+  regions?: LevelRegion[]
 }
 
 /** 격자 좌표 -> 월드 좌표 (칸의 중심). 격자 중앙이 월드 원점이 되도록 맞춥니다. */
@@ -156,6 +176,19 @@ export function parseLevel(text: string): { level: LevelData } | { error: string
         }))
     : []
 
+  const regions: LevelRegion[] = Array.isArray(d.regions)
+    ? d.regions
+        .filter((r): r is LevelRegion => !!r && typeof (r as LevelRegion).name === 'string')
+        .map((r) => ({
+          name: r.name,
+          x0: Number(r.x0) || 0,
+          x1: Number(r.x1) || 0,
+          z0: Number(r.z0) || 0,
+          z1: Number(r.z1) || 0,
+          hint: typeof r.hint === 'string' ? r.hint : undefined,
+        }))
+    : []
+
   return {
     level: {
       version: LEVEL_VERSION,
@@ -164,6 +197,7 @@ export function parseLevel(text: string): { level: LevelData } | { error: string
       h: d.h,
       heights,
       entities,
+      regions,
     },
   }
 }

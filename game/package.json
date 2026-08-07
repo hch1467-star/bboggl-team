@@ -12,6 +12,7 @@
     "vfx": "node tools/vfx-preview.mjs",
     "level": "node tools/level-preview.mjs",
     "skills": "node tools/skill-preview.mjs",
+    "weapons": "node tools/weapon-preview.mjs",
     "zone": "node tools/make-zone.mjs"
   },
   "devDependencies": {

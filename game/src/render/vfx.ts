@@ -21,8 +21,7 @@ const DAMAGE_LIFE = 0.75
 const SPARK_LIFE = 0.22
 /** 궤적은 짧아야 잔상처럼 보입니다. 길면 지면에 눌어붙은 장판처럼 보입니다. */
 const SWING_LIFE = 0.19
-/** 궤적 지오메트리의 기준 반지름. 실제 사거리는 이 값 대비 균등 스케일로 맞춥니다. */
-const SWING_BASE_RADIUS = 2.6
+
 
 interface DamageItem {
   sprite: THREE.Sprite
@@ -167,6 +166,7 @@ export class Vfx {
   private groundCursor = 0
   /** 부채꼴 지오메트리는 각도마다 달라서 캐시합니다(스킬 종류가 적어 금방 포화). */
   private readonly sectorCache = new Map<number, THREE.BufferGeometry>()
+  private readonly crescentCache = new Map<number, THREE.BufferGeometry>()
 
   constructor(private readonly scene: THREE.Scene) {
     for (let i = 0; i < DAMAGE_POOL; i++) {
@@ -201,14 +201,6 @@ export class Vfx {
       this.sparks.push({ mesh, material, life: 0, scale: 1 })
     }
 
-    // 검격 궤적 — 지면에 눕힌 초승달 모양. 중심이 로컬 +Z를 향하게 미리 회전해 둡니다.
-    //
-    // 두께가 얇아야 하는 이유: 안쪽까지 꽉 찬 부채꼴로 그리면 "회색 덩어리"로 보입니다
-    // (첫 검증 스크린샷에서 실제로 그렇게 나왔습니다). 바깥 테두리만 남긴 초승달이라야
-    // 칼이 지나간 자국으로 읽히고, 동시에 **공격이 닿는 거리와 각도**를 정확히 알려줍니다.
-    const swingGeo = new THREE.RingGeometry(SWING_BASE_RADIUS * 0.66, SWING_BASE_RADIUS, 44, 1, -1.15, 2.3)
-    swingGeo.rotateX(-Math.PI / 2)
-    swingGeo.rotateY(-Math.PI / 2)
     for (let i = 0; i < SWING_POOL; i++) {
       const material = new THREE.MeshBasicMaterial({
         color: 0xeaf6ff,
@@ -218,7 +210,7 @@ export class Vfx {
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
       })
-      const mesh = new THREE.Mesh(swingGeo, material)
+      const mesh = new THREE.Mesh(this.crescentGeo(120), material)
       mesh.visible = false
       mesh.renderOrder = 14
       scene.add(mesh)
@@ -239,6 +231,26 @@ export class Vfx {
       scene.add(mesh)
       this.grounds.push({ mesh, material, life: 0, maxLife: 1, mode: 'fade', radius: 1 })
     }
+  }
+
+  /**
+   * 반지름 1짜리 단위 **초승달**. 검격 궤적용.
+   *
+   * 각도마다 지오메트리를 따로 만드는 것이 핵심입니다.
+   * 예전에는 고정 각도(137°) 하나를 만들어 크기만 늘렸다 줄였다 했는데,
+   * 그러면 175°로 훑는 대검과 95°로 찌르는 단검이 **화면에서 완전히 똑같이** 보입니다.
+   * "무기 차이가 안 느껴진다"는 플레이 테스트 피드백의 직접적인 원인이었습니다.
+   */
+  private crescentGeo(arcDeg: number): THREE.BufferGeometry {
+    const key = Math.round(arcDeg)
+    const cached = this.crescentCache.get(key)
+    if (cached) return cached
+    const arc = (key * Math.PI) / 180
+    const geo = new THREE.RingGeometry(0.66, 1, 48, 1, -arc / 2, arc)
+    geo.rotateX(-Math.PI / 2)
+    geo.rotateY(-Math.PI / 2)
+    this.crescentCache.set(key, geo)
+    return geo
   }
 
   /** 반지름 1짜리 단위 부채꼴. 실제 크기는 스케일로 맞춥니다. */
@@ -312,20 +324,36 @@ export class Vfx {
     item.scale = scale
   }
 
-  spawnSwing(x: number, z: number, rotY: number, range: number, _arcDeg: number): void {
+  /**
+   * 검격 궤적. **실제 판정과 같은 사거리·같은 각도**로 그립니다.
+   * 이 도형이 곧 "내 공격이 닿는 범위"의 설명이므로, 조금이라도 어긋나면
+   * 플레이어가 사거리를 잘못 배우게 됩니다.
+   */
+  spawnSwing(x: number, z: number, rotY: number, range: number, arcDeg: number): void {
     const item = this.swings[this.swingCursor]
     this.swingCursor = (this.swingCursor + 1) % SWING_POOL
+    item.mesh.geometry = this.crescentGeo(arcDeg)
     item.mesh.position.set(x, 0.06, z)
     item.mesh.rotation.y = rotY
-    // 반드시 **균등 스케일**이어야 합니다. X와 Z를 다르게 주면 부채꼴이 좁아지는 게
-    // 아니라 타원으로 찌그러져서, 표시되는 범위가 실제 판정 범위와 어긋납니다.
-    // (각도 차이는 무기별 지오메트리를 따로 만들 때 반영합니다.)
-    const s = range / SWING_BASE_RADIUS
-    item.baseScale = s
-    item.mesh.scale.set(s, 1, s)
+    // 단위 초승달(반지름 1)을 사거리만큼 균등 확대. X/Z를 다르게 주면
+    // 타원으로 찌그러져 표시 범위와 판정 범위가 어긋납니다.
+    item.baseScale = range
+    item.mesh.scale.set(range, 1, range)
     item.mesh.visible = true
     item.material.opacity = 1
     item.life = SWING_LIFE
+  }
+
+  /**
+   * 지금 화면에 검격 궤적이 떠 있는가.
+   *
+   * 검증 도구가 **궤적이 실제로 보이는 프레임**을 집어내는 데 씁니다.
+   * 궤적은 0.19초만 살아 있어서, 브라우저 바깥에서 폴링하면 왕복 지연 때문에
+   * 매번 놓칩니다(실제로 롱소드 사진에 궤적이 통째로 빠졌습니다).
+   */
+  hasActiveSwing(): boolean {
+    for (const s of this.swings) if (s.life > 0) return true
+    return false
   }
 
   update(camera: THREE.Camera): void {
@@ -421,6 +449,8 @@ export class Vfx {
     }
     for (const geo of this.sectorCache.values()) geo.dispose()
     this.sectorCache.clear()
+    for (const geo of this.crescentCache.values()) geo.dispose()
+    this.crescentCache.clear()
     this.glowTexture.dispose()
   }
 }

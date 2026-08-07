@@ -125,6 +125,7 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Actor.moveScale[e] = 1
   Enemy.kind[e] = kind
   Enemy.aggro[e] = 0
+  Enemy.reactT[e] = 0
   Renderable.kind[e] = kind === EnemyKind.Boss ? KIND_BOSS : KIND_GRUNT
   return e
 }

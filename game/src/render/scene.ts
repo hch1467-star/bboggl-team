@@ -8,6 +8,9 @@ export interface SceneBundle {
   sunTarget: THREE.Object3D
   /** 기본 아레나(원형 바닥·격자·경계). 레벨을 불러오면 통째로 끕니다. */
   arena: THREE.Group
+  /** 목표 방향을 가리키는 지면 화살표 */
+  guide: THREE.Group
+  guideMaterials: THREE.MeshBasicMaterial[]
 }
 
 /**
@@ -130,5 +133,39 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   cursorRing.renderOrder = 2
   scene.add(cursorRing)
 
-  return { renderer, scene, cursorRing, sunTarget, arena }
+  // ---- 목표 방향 화살표 -------------------------------------------------
+  // 미니맵을 쓰지 않기로 했으므로(DESIGN.md 기둥 4), 길 안내는 **월드 안에서** 합니다.
+  // 발밑에서 목표 쪽으로 흘러가는 화살표 세 개. 오공이 미니맵 없이 조명과
+  // 지형으로 길을 안내한 것과 같은 접근이되, 도형 프로토타입이라 더 직접적으로 씁니다.
+  const guide = new THREE.Group()
+  const chevron = new THREE.Shape()
+  chevron.moveTo(-0.78, -0.44)
+  chevron.lineTo(0, 0.44)
+  chevron.lineTo(0.78, -0.44)
+  chevron.lineTo(0, 0.03)
+  const chevronGeo = new THREE.ShapeGeometry(chevron)
+  chevronGeo.rotateX(Math.PI / 2) // 셰이프의 +Y 가 월드 +Z(정면)가 되도록 눕힘
+  const guideMaterials: THREE.MeshBasicMaterial[] = []
+  for (let i = 0; i < 3; i++) {
+    // 가산 합성(Additive)입니다. 알파로만 섞으면 어두운 바닥색과 평균이 나서
+    // 금색이 **탁한 갈색**으로 주저앉습니다 — 첫 판이 실제로 그랬습니다.
+    // 가산은 바닥 위에 빛을 얹으므로 어두울수록 오히려 또렷해집니다.
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffd479,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    })
+    const mesh = new THREE.Mesh(chevronGeo, mat)
+    mesh.position.set(0, 0, 2.3 + i * 1.3)
+    mesh.renderOrder = 4
+    guide.add(mesh)
+    guideMaterials.push(mat)
+  }
+  guide.visible = false
+  scene.add(guide)
+
+  return { renderer, scene, cursorRing, sunTarget, arena, guide, guideMaterials }
 }

@@ -10,6 +10,7 @@ import {
   Velocity,
 } from '../core/components'
 import { defineQuery, isAlive } from '../core/ecs'
+import { isBehindPoint } from './combat'
 import { time } from '../core/time'
 
 /**
@@ -141,6 +142,24 @@ export function enemyAiSystem(
     }
 
     // ---- Idle: 추격하거나 공격을 시작 ----
+    //
+    // **등 뒤를 잡히면 바로 돌지 않습니다.** (DESIGN.md 기둥 3)
+    // 즉시 따라 돌면 플레이어가 아무리 돌아가도 항상 정면이라, 백어택이
+    // 시스템으로만 존재하고 실제로는 쓸 수 없습니다(플레이 테스트에서 확인).
+    // 지연 + 느린 회전이 합쳐져 "등 뒤를 잡았다"는 상태가 실제로 유지됩니다.
+    const behind = isBehindPoint(px, pz, Transform.x[e], Transform.z[e], Transform.rotY[e])
+    if (behind) {
+      if (Enemy.reactT[e] > 0) {
+        Enemy.reactT[e] = Math.max(0, Enemy.reactT[e] - dt)
+        // 알아채기 전에는 제자리에서 두리번거립니다 — 돌지도, 쫓지도 않습니다.
+        decayVelocity(e, dt, 8)
+        continue
+      }
+    } else {
+      // 정면으로 돌아오면 다시 방심합니다. 매번 새로운 기회가 생깁니다.
+      Enemy.reactT[e] = cfg.backReactionDelay
+    }
+
     turnToward(e, toPlayer, cfg.turnSpeedDeg, dt)
 
     const facingError = Math.abs(wrapAngle(toPlayer - Transform.rotY[e]))

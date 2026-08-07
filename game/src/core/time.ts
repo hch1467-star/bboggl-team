@@ -36,8 +36,22 @@ export function requestHitstop(seconds: number): void {
   if (seconds > time.hitstop) time.hitstop = seconds
 }
 
+/**
+ * 한 프레임 진행.
+ *
+ * ── 델타를 아래로도 막는 이유 (실제로 당한 버그) ─────────────────────
+ * 호출부는 `requestAnimationFrame` 타임스탬프에서 델타를 뽑는데, 이 값이
+ * **직전에 읽은 performance.now() 보다 이전 시각일 수 있습니다.** rAF 타임스탬프는
+ * "그 프레임의 렌더링 시작 시각"이라 이미 진행 중이던 프레임에서는 과거를 가리킵니다.
+ * 그러면 rawDelta가 음수가 되고, dt가 음수가 되고, **시뮬레이션이 거꾸로 돕니다.**
+ *
+ * 증상은 전혀 엉뚱하게 나타났습니다: 입력이 없는데 플레이어가 대각선으로 30m를
+ * 미끄러져 맵 밖으로 튕겨 나갔고, 카메라가 허공을 비춰 화면이 통째로 검게 나왔습니다.
+ * 원인을 여기서 막지 않으면 호출부마다 같은 실수를 반복하게 됩니다.
+ */
 export function tick(rawDeltaSeconds: number): void {
-  const realDt = Math.min(rawDeltaSeconds, MAX_FRAME_DT)
+  const safe = Number.isFinite(rawDeltaSeconds) ? rawDeltaSeconds : 0
+  const realDt = Math.min(Math.max(safe, 0), MAX_FRAME_DT)
   time.realDt = realDt
   time.elapsed += realDt
   time.frame++
