@@ -81,6 +81,14 @@ export const Actor = defineComponent({
   comboWindowT: 'f32',
   /** 콤보 입력 선입력(버퍼). 후딜 중에 눌러도 다음 타로 이어지게 해줍니다. */
   bufferedAttack: 'u8',
+  /**
+   * 스킬 선입력. 0 = 없음, 그 외에는 **슬롯 번호 + 1**.
+   *
+   * 0을 "없음"으로 쓰려면 슬롯 0(Q)과 구분되어야 해서 1을 더해 저장합니다.
+   */
+  bufferedSkill: 'u8',
+  /** 스킬 선입력이 만료되기까지 남은 시간(초). 지나면 버립니다. */
+  bufferedSkillT: 'f32',
   /** 다음 공격까지 남은 쿨다운(적 전용) */
   cooldownT: 'f32',
   /**

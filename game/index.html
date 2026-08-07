@@ -178,6 +178,24 @@
       .tpOpt.locked { opacity: 0.45; }
       .tpOpt:disabled { cursor: default; }
 
+      .saveNote {
+        font-size: 11px; margin-top: 3px; opacity: 0;
+        transition: opacity 220ms ease;
+      }
+      .saveNote.show { opacity: 1; }
+
+      .tpFoot {
+        border-top: 1px solid rgba(150,175,220,0.16); padding: 11px 16px 14px;
+        display: flex; align-items: center; gap: 10px;
+      }
+      .tpFoot span { font-size: 10.5px; color: #8c9ab3; line-height: 1.35; }
+      #resetProgress {
+        pointer-events: auto; flex: none; font: inherit; font-size: 12px; cursor: pointer;
+        background: rgba(200, 70, 60, 0.16); border: 1px solid rgba(230, 110, 95, 0.5);
+        color: #ffb3a7; border-radius: 7px; padding: 6px 12px;
+      }
+      #resetProgress:hover { background: rgba(200, 70, 60, 0.3); }
+
       #banner {
         position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%);
         text-align: center; pointer-events: none; opacity: 0;
@@ -236,6 +254,7 @@
             <div id="regionText" style="color: #9fd2ff; font-size: 11.5px"></div>
             <div style="margin-top: 4px">남은 적 <b id="levelEnemyText">0</b></div>
             <div>보물 <b id="treasureText">0 / 0</b></div>
+            <div id="saveText" class="saveNote"></div>
             <div
               id="objectiveText"
               style="margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(150,175,220,0.18)"
@@ -284,6 +303,10 @@
         <button id="tripodClose">닫기 (T)</button>
       </div>
       <div id="tripodBody"></div>
+      <div class="tpFoot">
+        <button id="resetProgress">진행 초기화</button>
+        <span>이 레벨의 각인석 · 룬 · 먹은 보물을 전부 지웁니다</span>
+      </div>
     </div>
 
     <div id="banner">

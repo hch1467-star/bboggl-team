@@ -32,6 +32,15 @@ import { enemyAiSystem, resetAttackTokens, setEnemyAiEnabled } from './systems/e
 import { deathEvents, healthSystem } from './systems/health'
 import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
+import {
+  applySave,
+  captureSave,
+  clearSave,
+  levelIdOf,
+  loadSave,
+  treasureKey,
+  writeSave,
+} from './systems/save'
 import { physicsSystem, setTerrain } from './systems/physics'
 import { playerControlSystem, type ControlContext } from './systems/playerControl'
 import { enemyCountForWave, spawnEnemy, spawnFromLevel, spawnGrunt, spawnPlayer, spawnWave } from './systems/world'
@@ -98,6 +107,10 @@ class Game {
   private currentRegion = ''
   private levelW = 0
   private levelH = 0
+  /** 이 레벨의 세이브 칸 식별자. 아레나면 빈 문자열(저장하지 않음). */
+  private saveId = ''
+  /** 이미 먹은 보물의 위치 키. 세이브에서 복원되고, 새로 먹을 때마다 추가됩니다. */
+  private takenTreasures = new Set<string>()
   /** 플레이어가 적중시킨 누적 타격 수/피해량 — 다단히트 같은 것을 검증할 때 씁니다. */
   private hitsDealt = 0
   private damageDealt = 0
@@ -150,6 +163,12 @@ class Game {
 
     initInput(canvas)
     this.hud.restartButton.addEventListener('click', () => this.reset())
+    // 진행 초기화는 되돌릴 수 없으므로 한 번 더 묻습니다.
+    document.getElementById('resetProgress')?.addEventListener('click', () => {
+      if (confirm('이 레벨의 각인석 · 룬 · 먹은 보물을 전부 지우고 처음부터 시작합니다.')) {
+        this.resetProgress()
+      }
+    })
     window.addEventListener('resize', () => this.resize())
     this.resize()
     this.reset()
@@ -187,6 +206,8 @@ class Game {
     this.backHits = 0
     this.critHits = 0
     this.hud.hideBanner()
+    this.saveId = ''
+    this.takenTreasures = new Set()
     resetTripods()
     this.tripodPanel.setOpen(false)
     setEnemyAiEnabled(true)
@@ -216,13 +237,38 @@ class Game {
       for (const e of spawned.entities) this.visuals.attach(e, Renderable.kind[e])
       this.treasureTotal = spawned.treasureTotal
 
-      // 레벨 모드는 룬 없이 시작합니다 — 룬은 탐험(보물)으로 얻습니다.
+      // ---- 세이브 복원 (systems/save.ts 설계 노트: 얻은 것은 남고, 싸움은 처음부터) ----
+      //
+      // **적은 이미 전부 되살아난 뒤**입니다(spawnFromLevel이 방금 다 만들었습니다).
+      // 여기서 되돌리는 것은 성장과 획득뿐입니다. 순서가 중요합니다 —
+      // 플레이어 엔티티가 만들어진 **다음에** 장비를 얹어야 합니다.
+      this.saveId = levelIdOf(level.name, level.w, level.h)
+      const save = loadSave(this.saveId)
+      if (save) {
+        applySave(save, this.playerEntity)
+        this.takenTreasures = new Set(save.treasures)
+        // 이미 먹은 보물은 아예 치웁니다. 남겨두면 다시 먹혀서 각인석이 무한정 생깁니다.
+        this.removeTakenTreasures()
+      }
+      this.treasuresFound = this.takenTreasures.size
+
       const foes = spawned.entities.length - spawned.treasureTotal
       this.hud.setMode('level')
-      this.hud.showBanner(level.name, `적 ${foes} · 보물 ${spawned.treasureTotal}`, 2.4)
+      if (save) {
+        this.hud.showBanner(
+          level.name,
+          `이어하기 — 보물 ${this.treasuresFound}/${this.treasureTotal} · 각인석 ${tripodPoints()}`,
+          2.4,
+        )
+      } else {
+        // 레벨 모드는 룬 없이 시작합니다 — 룬은 탐험(보물)으로 얻습니다.
+        this.hud.showBanner(level.name, `적 ${foes} · 보물 ${spawned.treasureTotal}`, 2.4)
+      }
       // 시작 지점이 화면 중앙에 오도록 카메라를 미리 붙여 둡니다.
       this.cam.snapTo(Transform.x[this.playerEntity], Transform.z[this.playerEntity])
     } else {
+      // 아레나는 전투 시험장이라 진행이라는 개념이 없습니다 — 저장하지 않습니다.
+      this.saveId = ''
       this.levelName = ''
       this.arena.visible = true
       this.playerEntity = spawnPlayer()
@@ -520,6 +566,7 @@ class Game {
 
       Pickup.taken[e] = 1
       this.treasuresFound++
+      this.takenTreasures.add(treasureKey(Transform.x[e], Transform.z[e]))
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
 
@@ -543,7 +590,56 @@ class Game {
       }
       this.visuals.detach(e)
       destroyEntity(e)
+      // 진행이 실제로 바뀐 순간에만 저장합니다. 매 프레임 쓰면 낭비이고,
+      // 종료 시점에만 쓰면 브라우저를 그냥 닫는 흔한 경우에 통째로 날아갑니다.
+      this.persist()
     }
+  }
+
+  /**
+   * 이미 먹은 보물을 월드에서 치웁니다.
+   *
+   * 남겨두면 다시 먹혀서 각인석이 무한정 생깁니다 — 세이브가 곧 치트가 됩니다.
+   * 보물 자체를 지우는 편이 "먹었지만 안 보이게"보다 낫습니다. 빛기둥과
+   * 길안내 목표 계산이 전부 살아 있는 보물만 보면 되기 때문입니다.
+   */
+  private removeTakenTreasures(): void {
+    const ids = pickups.run()
+    // 순회 중에 엔티티를 지우므로 먼저 모아 둡니다.
+    const doomed: number[] = []
+    for (let i = 0; i < pickups.count; i++) {
+      const e = ids[i]
+      if (this.takenTreasures.has(treasureKey(Transform.x[e], Transform.z[e]))) doomed.push(e)
+    }
+    for (const e of doomed) {
+      this.visuals.detach(e)
+      destroyEntity(e)
+    }
+  }
+
+  /**
+   * 지금 진행 상황을 기록합니다.
+   *
+   * 저장 실패(용량 초과·사생활 보호 모드)는 삼킵니다 — 저장이 안 된다고
+   * 게임이 멈추면 안 됩니다. 대신 HUD가 저장 여부를 보여줍니다.
+   */
+  /** 외부(트라이포드 창 등)에서 진행이 바뀌었을 때 부릅니다. */
+  persistProgress(): void {
+    this.persist()
+  }
+
+  private persist(): void {
+    if (!this.saveId || this.playerEntity < 0) return
+    const ok = writeSave(
+      captureSave(this.saveId, this.playerEntity, this.takenTreasures, time.elapsed),
+    )
+    this.hud.flashSaved(ok)
+  }
+
+  /** 이 레벨의 진행을 지우고 처음부터 시작합니다. */
+  resetProgress(): void {
+    if (this.saveId) clearSave(this.saveId)
+    this.reset()
   }
 
   /**
@@ -664,6 +760,10 @@ class Game {
       snare: Number(def.snare.toFixed(2)),
       dash: Number(def.dash.toFixed(2)),
     }
+  }
+
+  debugSaveInfo(): { saveId: string; treasuresTaken: number } {
+    return { saveId: this.saveId, treasuresTaken: this.takenTreasures.size }
   }
 
   debugTripodInfo(): { points: number; panelOpen: boolean } {
@@ -904,6 +1004,9 @@ declare global {
       effectiveSkill: (slot: number) => Record<string, number | string> | null
       tripodInfo: () => { points: number; panelOpen: boolean }
       toggleTripodPanel: () => void
+      /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
+      saveInfo: () => { saveId: string; treasuresTaken: number }
+      resetProgress: () => void
     }
   }
 }
@@ -935,15 +1038,23 @@ window.__game = {
   },
   unlockTripod: (skillId, tier, option) => {
     const ok = unlockTripod(skillId, tier, option)
-    if (ok) game.debugRefreshLoadout()
+    if (ok) {
+      game.debugRefreshLoadout()
+      game.persistProgress()
+    }
     return ok
   },
   switchTripod: (skillId, tier, option) => {
     const ok = switchTripod(skillId, tier, option)
-    if (ok) game.debugRefreshLoadout()
+    if (ok) {
+      game.debugRefreshLoadout()
+      game.persistProgress()
+    }
     return ok
   },
   effectiveSkill: (slot) => game.debugEffectiveSkill(slot),
   tripodInfo: () => game.debugTripodInfo(),
   toggleTripodPanel: () => game.debugToggleTripodPanel(),
+  saveInfo: () => game.debugSaveInfo(),
+  resetProgress: () => game.resetProgress(),
 }

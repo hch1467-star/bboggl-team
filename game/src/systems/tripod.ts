@@ -151,6 +151,48 @@ export function resolveSkill(skillId: string): SkillDef | null {
   return out
 }
 
+/**
+ * 세이브에 실리는 형태.
+ *
+ * 내부 자료구조(Map/Set)를 그대로 JSON으로 못 내보내므로 평평하게 폅니다.
+ * 그리고 **내부 구조가 바뀌어도 이 모양은 유지**해야 옛 세이브가 살아남습니다 —
+ * 그래서 저장 형식을 내부 표현과 분리해 둡니다.
+ */
+export interface TripodSaveData {
+  points: number
+  /** "스킬id#단계" 목록 */
+  unlocked: string[]
+  /** 스킬id -> 단계별 선택 */
+  selections: Record<string, number[]>
+}
+
+export function exportTripods(): TripodSaveData {
+  const out: Record<string, number[]> = {}
+  for (const [skillId, sel] of selections) {
+    // 아무것도 안 고른 스킬은 저장하지 않습니다 — 세이브가 쓸데없이 커집니다.
+    if (sel.some((v) => v >= 0)) out[skillId] = [...sel]
+  }
+  return { points, unlocked: [...unlocked], selections: out }
+}
+
+export function importTripods(data: TripodSaveData | null | undefined): void {
+  resetTripods()
+  if (!data) return
+  points = Math.max(0, Number(data.points) || 0)
+  for (const k of data.unlocked ?? []) {
+    if (typeof k === 'string') unlocked.add(k)
+  }
+  for (const [skillId, sel] of Object.entries(data.selections ?? {})) {
+    if (!Array.isArray(sel)) continue
+    const target = selectionsFor(skillId)
+    for (let i = 0; i < Math.min(TRIPOD_TIERS, sel.length); i++) {
+      const v = Number(sel[i])
+      target[i] = Number.isFinite(v) ? v : -1
+    }
+  }
+  resolvedCache.clear()
+}
+
 /** UI가 읽는 요약. 어느 단계가 열렸고 무엇을 골랐는지. */
 export interface TripodStatus {
   skillId: string

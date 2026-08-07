@@ -77,6 +77,15 @@ const DEG = Math.PI / 180
 /** 대시 스킬이 조준 지점을 지나쳐 더 나아가는 거리(m). 이만큼이 "등 뒤"가 됩니다. */
 const DASH_OVERSHOOT = 1.2
 
+/**
+ * 스킬 선입력을 붙잡아 두는 시간(초).
+ *
+ * 0.45초는 "한 동작이 끝나가는 것을 보고 미리 누르는" 자연스러운 앞당김을
+ * 전부 담으면서, 잊어버릴 만큼 길지는 않은 길이입니다.
+ * 더 길게 잡으면 예전에 누른 스킬이 뜬금없이 튀어나옵니다.
+ */
+const SKILL_BUFFER_TIME = 0.45
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2
   while (a < -Math.PI) a += Math.PI * 2
@@ -228,6 +237,30 @@ export function playerControlSystem(ctx: ControlContext): void {
     const p = ids[i]
     if (Actor.state[p] === ActorState.Dead) continue
 
+    /**
+     * ---- 스킬 선입력 버퍼 ----
+     *
+     * 플레이 테스트: **"스킬이 한 번씩밖에 사용이 안 되네."**
+     * 원인은 쿨다운이 아니라 **입력이 사라지는 것**이었습니다. 기본 공격에는
+     * 버퍼가 있었는데 스킬에는 없어서, 시전 중이나 후딜 중에 누른 키가
+     * 그대로 버려졌습니다. 측정해 보니 시간의 1/3을 시전 상태로 보내고 있어서
+     * 쿨다운이 6초인 스킬을 **13.4초 만에** 겨우 다시 쓰고 있었습니다.
+     *
+     * 스킬 3개를 이어 쓰는 것이 이 게임의 리듬(기둥 1: 버티다가 터뜨린다)인데,
+     * 버퍼가 없으면 매번 완전히 Idle이 될 때까지 기다렸다가 정확히 눌러야 합니다.
+     * 그건 조작이 아니라 눈치싸움입니다.
+     *
+     * 만료를 두는 이유: 버퍼가 영원히 남으면 2초 전에 누른 스킬이 뜬금없이
+     * 튀어나옵니다. 안 나가는 것보다 **의도하지 않은 때 나가는 것**이 더 나쁩니다.
+     */
+    if (skillPressed >= 0) {
+      Actor.bufferedSkill[p] = skillPressed + 1
+      Actor.bufferedSkillT[p] = SKILL_BUFFER_TIME
+    } else if (Actor.bufferedSkillT[p] > 0) {
+      Actor.bufferedSkillT[p] = Math.max(0, Actor.bufferedSkillT[p] - dt)
+      if (Actor.bufferedSkillT[p] === 0) Actor.bufferedSkill[p] = 0
+    }
+
     // ---- 타이머 ----
     tickCooldowns(p)
     if (dt > 0) {
@@ -299,6 +332,22 @@ export function playerControlSystem(ctx: ControlContext): void {
       return skillForSlot(p, slot)
     }
 
+    /**
+     * 버퍼에 담긴 스킬을 꺼내 씁니다. 쓸 수 있을 때만 버퍼를 비웁니다 —
+     * 쿨다운이라 못 쓴 것을 지워버리면, 쿨이 0.1초 뒤에 도는 흔한 경우에
+     * 또 입력이 사라집니다.
+     */
+    const takeBufferedSkill = (): { slot: number; def: SkillDef } | null => {
+      const buffered = Actor.bufferedSkill[p]
+      if (buffered === 0) return null
+      const slot = buffered - 1
+      const def = readySkill(slot)
+      if (!def) return null
+      Actor.bufferedSkill[p] = 0
+      Actor.bufferedSkillT[p] = 0
+      return { slot, def }
+    }
+
     let moveScale = 1
     /**
      * 전진 속도 오버라이드(m/s).
@@ -313,9 +362,9 @@ export function playerControlSystem(ctx: ControlContext): void {
 
     switch (Actor.state[p] as ActorState) {
       case ActorState.Idle: {
-        const skill = readySkill(skillPressed)
-        if (skill) {
-          beginSkill(p, skillPressed, skill, aimRot, ctx)
+        const queued = takeBufferedSkill()
+        if (queued) {
+          beginSkill(p, queued.slot, queued.def, aimRot, ctx)
           break
         }
         if (dodgePressed && canDodge) {
@@ -341,10 +390,12 @@ export function playerControlSystem(ctx: ControlContext): void {
         const phase = Actor.phase[p] as AttackPhase
 
         // 후딜에서만 스킬/구르기로 탈출할 수 있습니다.
+        // 여기서도 **버퍼**를 읽습니다 — 이번 프레임의 입력만 보면
+        // 후딜에 들어가기 직전에 누른 것이 사라집니다(이게 원래 버그였습니다).
         if (phase === AttackPhase.Recovery) {
-          const skill = readySkill(skillPressed)
-          if (skill) {
-            beginSkill(p, skillPressed, skill, aimRot, ctx)
+          const queued = takeBufferedSkill()
+          if (queued) {
+            beginSkill(p, queued.slot, queued.def, aimRot, ctx)
             break
           }
           if (dodgePressed && canDodge) {
@@ -428,6 +479,17 @@ export function playerControlSystem(ctx: ControlContext): void {
         ) {
           beginAttack(p, 0, aimRot)
           break
+        }
+
+        // 후딜 후반에는 **다음 스킬로 바로 이어갈 수 있습니다.**
+        // 스킬 3개를 엮는 것이 이 게임의 리듬이므로, 이어치기가 안 되면
+        // 슬롯을 늘린 의미가 없습니다. 전반부는 못 빠지므로 커밋은 유지됩니다.
+        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * 0.5) {
+          const queued = takeBufferedSkill()
+          if (queued) {
+            beginSkill(p, queued.slot, queued.def, aimRot, ctx)
+            break
+          }
         }
 
         // 후딜 후반에는 회피로도 빠져나갈 수 있습니다(기본 공격과 같은 규칙).

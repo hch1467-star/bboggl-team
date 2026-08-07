@@ -401,6 +401,30 @@ async function main() {
       `한 번 시전에 ${flurryHits}회 명중 (설계상 최대 5회)`,
     )
 
+    // ---------- 7.75 스킬 선입력 버퍼 ----------
+    // 플레이 테스트: "스킬이 한 번씩밖에 사용이 안 되네."
+    // 원인은 쿨다운이 아니라 **입력이 사라지는 것**이었습니다. 시전/공격 중에
+    // 누른 스킬 키가 버려져서, 쿨다운 6초짜리를 13초 만에 겨우 다시 쓰고 있었습니다.
+    // 그래서 검사도 "쿨다운이 도는가"가 아니라 **"바쁠 때 누른 입력이 살아남는가"** 를 봅니다.
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await page.evaluate(() => window.__game.clearEnemies())
+    await sleep(300)
+    await tap('Digit1') // 롱소드
+    await sleep(300)
+
+    // 기본 공격을 시작한 **직후**(선행동작 중)에 Q를 누릅니다.
+    // 버퍼가 없으면 이 입력은 그대로 버려집니다.
+    await tap('Mouse0')
+    await sleep(60)
+    await tap('KeyQ')
+    const buffered = await waitUntil((st) => st.loadout.cooldowns[0] > 0, 5000)
+    check(
+      '공격 중에 누른 스킬이 버려지지 않고 이어서 발동됨',
+      buffered.ok,
+      buffered.ok ? `쿨다운 ${buffered.state.loadout.cooldowns[0]}초 시작` : '5초 내 미발동',
+    )
+
     // ---------- 7.8 백어택이 실제 전투에 반영되는가 ----------
     // 적 AI를 멈추고 1:1로 통제된 실험을 합니다.
     // 적이 계속 몸을 돌리면 "보너스가 왜 안 붙지?"가 판정 버그 때문인지
@@ -802,6 +826,65 @@ async function main() {
       panel.open && panel.skills === 3 && panel.options === 18,
       `스킬 ${panel.skills}개 · 선택지 ${panel.options}개`)
     await page.evaluate(() => window.__game.toggleTripodPanel())
+
+    // ---------- 9.58 세이브 ----------
+    // 세이브의 핵심은 저장 기술이 아니라 **경계선**입니다:
+    // 얻은 것(각인석·룬·먹은 보물)은 남고, 싸움(적·체력)은 처음부터.
+    // 그래서 검사도 양쪽을 다 봅니다 — 남아야 할 것이 남는가, 날아가야 할 것이 날아가는가.
+    const zoneState = () => zone.evaluate(() => window.__game.state())
+
+    // 진행을 만듭니다: 각인석을 주고 트라이포드를 하나 열어 둡니다.
+    await zone.evaluate(() => {
+      window.__game.resetProgress() // 깨끗한 상태에서 시작
+    })
+    await sleep(900)
+    await zone.evaluate(() => {
+      window.__game.grantTripod(2)
+      window.__game.unlockTripod('lunge_slash', 0, 0)
+    })
+    await sleep(400)
+    const beforeReload = await zone.evaluate(() => ({
+      skill: window.__game.effectiveSkill(0),
+      tripod: window.__game.tripodInfo(),
+      save: window.__game.saveInfo(),
+    }))
+    check(
+      '레벨 모드에는 세이브 칸이 배정됨',
+      beforeReload.save.saveId.includes('무너진 성문'),
+      `"${beforeReload.save.saveId}"`,
+    )
+
+    // 페이지를 통째로 새로고침합니다 — 진짜 "다시 켰을 때"입니다.
+    await zone.reload({ waitUntil: 'load' })
+    await zone.waitForFunction(() => window.__game?.ready === true, { timeout: 20000 })
+    await sleep(1200)
+    const afterReload = await zone.evaluate(() => ({
+      skill: window.__game.effectiveSkill(0),
+      tripod: window.__game.tripodInfo(),
+      state: window.__game.state(),
+    }))
+    check(
+      '새로고침해도 각인석이 남음',
+      afterReload.tripod.points === beforeReload.tripod.points,
+      `${beforeReload.tripod.points} -> ${afterReload.tripod.points}`,
+    )
+    check(
+      '새로고침해도 트라이포드 선택이 남음 (피해 배율 유지)',
+      Math.abs(afterReload.skill.damage - beforeReload.skill.damage) < 0.05,
+      `피해 ${beforeReload.skill.damage} -> ${afterReload.skill.damage}`,
+    )
+    // 반대쪽: 전투 상태는 반드시 되돌아가야 합니다.
+    check(
+      '적은 전부 되살아남 (전투는 처음부터)',
+      afterReload.state.enemiesLeft === 12 && afterReload.state.player.hp === 100,
+      `적 ${afterReload.state.enemiesLeft}마리 · 체력 ${afterReload.state.player.hp}`,
+    )
+
+    // 진행 초기화가 실제로 지우는가.
+    await zone.evaluate(() => window.__game.resetProgress())
+    await sleep(1000)
+    const cleared = await zone.evaluate(() => window.__game.tripodInfo())
+    check('진행 초기화가 각인석을 0으로 되돌림', cleared.points === 0, `각인석 ${cleared.points}`)
 
     // ---------- 9.6 길안내 (기둥 4) ----------
     // 플레이 테스트 피드백: **"어디로 가야 하고, 어디에 뭐가 있는지 목표가 없으니

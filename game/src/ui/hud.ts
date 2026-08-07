@@ -33,6 +33,8 @@ export class Hud {
   private readonly bannerTitle = el<HTMLDivElement>('bannerTitle')
   private readonly bannerSub = el<HTMLDivElement>('bannerSub')
   readonly restartButton = el<HTMLButtonElement>('restart')
+  private readonly saveText = el<HTMLElement>('saveText')
+  private saveTimer: number | null = null
 
   private fpsAccum = 0
   private fpsFrames = 0
@@ -79,6 +81,22 @@ export class Hud {
   setNavigation(region: string, objective: string): void {
     if (this.regionText.textContent !== region) this.regionText.textContent = region
     if (this.objectiveText.textContent !== objective) this.objectiveText.textContent = objective
+  }
+
+  /**
+   * "저장됨"을 잠깐 띄웁니다.
+   *
+   * 세이브가 조용히 돌면 플레이어는 **저장되고 있는지 알 수 없습니다.**
+   * 그러면 브라우저를 닫을 때마다 불안해지고, 실제로 저장이 실패해도
+   * (사생활 보호 모드·용량 초과) 눈치채지 못한 채 진행을 통째로 잃습니다.
+   * 성공과 실패를 **다르게** 보여주는 것이 핵심입니다.
+   */
+  flashSaved(ok: boolean): void {
+    this.saveText.textContent = ok ? '저장됨' : '저장 실패 — 브라우저 설정 확인'
+    this.saveText.style.color = ok ? '#8fe3b0' : '#ff9d8a'
+    this.saveText.classList.add('show')
+    if (this.saveTimer !== null) clearTimeout(this.saveTimer)
+    this.saveTimer = window.setTimeout(() => this.saveText.classList.remove('show'), ok ? 1600 : 4000)
   }
 
   setProgress(wave: number, enemiesLeft: number, kills: number): void {
