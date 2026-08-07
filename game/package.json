@@ -13,7 +13,9 @@
     "level": "node tools/level-preview.mjs",
     "skills": "node tools/skill-preview.mjs",
     "weapons": "node tools/weapon-preview.mjs",
-    "zone": "node tools/make-zone.mjs"
+    "zone": "node tools/make-zone.mjs",
+    "intents": "node tools/intent-preview.mjs",
+    "tripod": "node tools/tripod-preview.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

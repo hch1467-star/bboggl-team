@@ -6,10 +6,13 @@ import {
   Enemy,
   EnemyKind,
   Health,
+  Status,
   Transform,
   Velocity,
 } from '../core/components'
+import { SNARE_MOVE_SCALE, attackAt, attacksFor, pickAttack } from '../config/enemyAttacks'
 import { defineQuery, isAlive } from '../core/ecs'
+import { combatRng } from '../core/rng'
 import { isBehindPoint } from './combat'
 import { time } from '../core/time'
 
@@ -77,9 +80,24 @@ export function enemyAiSystem(
 
     // 잡몹과 보스는 같은 코드를 쓰고 수치표만 갈아 끼웁니다.
     // 이렇게 해두면 새 적을 추가할 때 AI 코드를 건드릴 필요가 없습니다.
-    const cfg = Enemy.kind[e] === EnemyKind.Boss ? BOSS : GRUNT
+    const isBoss = Enemy.kind[e] === EnemyKind.Boss
+    const cfg = isBoss ? BOSS : GRUNT
 
     if (Actor.cooldownT[e] > 0) Actor.cooldownT[e] = Math.max(0, Actor.cooldownT[e] - dt)
+
+    /**
+     * 🔵 속박 (쌍단검의 '발목 긋기').
+     *
+     * **회전까지 함께 늦추는 것이 핵심입니다.** 이동만 늦추면 적이 제자리에서
+     * 팽이처럼 돌며 계속 나를 마주 봐서, 등 뒤를 잡을 시간이 전혀 생기지 않습니다.
+     * 그러면 이 스킬은 "조금 느려지는 디버프"가 되고, 기둥 3(포지셔닝이 보상받는다)과
+     * 연결되지 않습니다. 회전을 늦춰야 "묶고 → 돌아가고 → 등을 친다"가 성립합니다.
+     */
+    let snareScale = 1
+    if (Status.snareT[e] > 0) {
+      Status.snareT[e] = Math.max(0, Status.snareT[e] - dt)
+      snareScale = SNARE_MOVE_SCALE
+    }
 
     // 경직 중에는 아무것도 못 합니다 — 플레이어가 흐름을 끊을 수 있는 근거
     if (Actor.state[e] === ActorState.Stagger) {
@@ -109,6 +127,7 @@ export function enemyAiSystem(
 
     if (Actor.state[e] === ActorState.Attack) {
       const phase = Actor.phase[e] as AttackPhase
+      const atk = attackAt(isBoss, Enemy.attackIndex[e])
 
       if (phase === AttackPhase.Windup) {
         turnToward(e, toPlayer, cfg.turnSpeedDeg * 0.3, dt)
@@ -120,19 +139,13 @@ export function enemyAiSystem(
       if (Actor.timer[e] <= 0) {
         if (phase === AttackPhase.Windup) {
           Actor.phase[e] = AttackPhase.Active
-          Actor.timer[e] = cfg.active
+          Actor.timer[e] = atk.active
           Actor.hitsLeft[e] = 1
           Actor.nextHitT[e] = 0
-          ctx.onSwing(
-            Transform.x[e],
-            Transform.z[e],
-            Transform.rotY[e],
-            cfg.attackReach,
-            cfg.attackArcDeg,
-          )
+          ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg)
         } else if (phase === AttackPhase.Active) {
           Actor.phase[e] = AttackPhase.Recovery
-          Actor.timer[e] = cfg.recovery
+          Actor.timer[e] = atk.recovery
         } else {
           Actor.state[e] = ActorState.Idle
           Actor.cooldownT[e] = cfg.attackCooldown
@@ -160,19 +173,29 @@ export function enemyAiSystem(
       Enemy.reactT[e] = cfg.backReactionDelay
     }
 
-    turnToward(e, toPlayer, cfg.turnSpeedDeg, dt)
+    turnToward(e, toPlayer, cfg.turnSpeedDeg * snareScale, dt)
 
     const facingError = Math.abs(wrapAngle(toPlayer - Transform.rotY[e]))
     const inRange = dist <= cfg.attackRange
 
-    if (inRange && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
-      Actor.state[e] = ActorState.Attack
-      Actor.phase[e] = AttackPhase.Windup
-      Actor.timer[e] = cfg.windup
-      Actor.hitsLeft[e] = 1
-          Actor.nextHitT[e] = 0
-      decayVelocity(e, dt, 12)
-      continue
+    // ---- 공격 개시: 거리에 맞는 패턴을 골라 예고를 띄웁니다 ----
+    //
+    // 사거리를 `cfg.attackRange` 하나로 재던 것을 **패턴별 사거리**로 바꿨습니다.
+    // 보스의 갈고리(11m)처럼 멀리서만 쓰는 패턴이 생기면, 접근 판정 하나로는
+    // 표현할 수 없습니다. "거리마다 다른 색이 나온다"가 이 구조에서 나옵니다.
+    if (Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
+      const list = attacksFor(isBoss)
+      const picked = pickAttack(list, dist, combatRng.next())
+      if (picked) {
+        Enemy.attackIndex[e] = list.indexOf(picked)
+        Actor.state[e] = ActorState.Attack
+        Actor.phase[e] = AttackPhase.Windup
+        Actor.timer[e] = picked.windup
+        Actor.hitsLeft[e] = 1
+        Actor.nextHitT[e] = 0
+        decayVelocity(e, dt, 12)
+        continue
+      }
     }
 
     if (inRange) {
@@ -183,8 +206,8 @@ export function enemyAiSystem(
       const nx = dist > 0.0001 ? dx / dist : 0
       const nz = dist > 0.0001 ? dz / dist : 0
       const accel = 26 * dt
-      Velocity.x[e] += clampMag(nx * cfg.moveSpeed - Velocity.x[e], accel)
-      Velocity.z[e] += clampMag(nz * cfg.moveSpeed - Velocity.z[e], accel)
+      Velocity.x[e] += clampMag(nx * cfg.moveSpeed * snareScale - Velocity.x[e], accel)
+      Velocity.z[e] += clampMag(nz * cfg.moveSpeed * snareScale - Velocity.z[e], accel)
     }
   }
 }

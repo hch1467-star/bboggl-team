@@ -75,7 +75,7 @@
       }
       #slots { display: flex; gap: 7px; }
       .slot {
-        position: relative; width: 74px; height: 56px; overflow: hidden;
+        position: relative; width: 73px; height: 56px; overflow: hidden;
         background: rgba(13,16,23,0.82);
         border: 1px solid rgba(150,175,220,0.22); border-radius: 9px;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -101,8 +101,9 @@
         letter-spacing: 0.06em;
       }
       .slot .nm {
-        position: relative; font-size: 11.5px; font-weight: 600; color: #e2e9f5;
-        margin-top: 2px; text-align: center; line-height: 1.2; padding: 0 3px;
+        position: relative; font-size: 10.5px; font-weight: 600; color: #e2e9f5;
+        margin-top: 2px; text-align: center; line-height: 1.22; padding: 0 2px;
+        word-break: keep-all;
       }
       .slot.ready .nm { color: #fff; }
       /* 쿨다운 중에는 이름을 눌러 두어 숫자가 잘 읽히게 합니다. */
@@ -122,6 +123,60 @@
         border-radius: 4px; padding: 1px 5px; margin-right: 5px;
         font-family: inherit; font-size: 11px; font-weight: 600; color: #dbe4f2;
       }
+
+
+      /* --- 트라이포드 창 --- */
+      #tripod {
+        position: fixed; right: 0; top: 0; bottom: 0; width: min(460px, 92vw);
+        background: rgba(9, 12, 18, 0.94);
+        border-left: 1px solid rgba(150, 175, 220, 0.2);
+        backdrop-filter: blur(10px);
+        transform: translateX(100%); transition: transform 200ms ease;
+        pointer-events: auto; display: flex; flex-direction: column;
+        z-index: 5;
+      }
+      #tripod.show { transform: translateX(0); }
+      .tpTop {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 14px 16px 10px; border-bottom: 1px solid rgba(150, 175, 220, 0.16);
+      }
+      .tpTop h2 { font-size: 15px; font-weight: 700; color: #ffd479; }
+      .tpTop .sub { font-size: 11.5px; color: #8c9ab3; margin-top: 2px; }
+      #tripodClose {
+        pointer-events: auto; background: none; border: 1px solid rgba(150,175,220,0.25);
+        color: #cbd6e8; border-radius: 7px; padding: 5px 10px; font: inherit;
+        font-size: 12px; cursor: pointer;
+      }
+      #tripodBody { overflow-y: auto; padding: 12px 16px 24px; }
+      .tpEmpty { color: #8c9ab3; font-size: 12.5px; padding: 20px 0; text-align: center; }
+      .tpSkill {
+        border: 1px solid rgba(150,175,220,0.16); border-radius: 10px;
+        padding: 10px 11px; margin-bottom: 11px; background: rgba(20,25,35,0.6);
+      }
+      .tpHead {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 13.5px; font-weight: 700; color: #e8edf5; margin-bottom: 8px;
+      }
+      .tpKey {
+        display: inline-block; min-width: 20px; text-align: center;
+        background: #2b3444; border: 1px solid #465268; border-radius: 4px;
+        padding: 1px 5px; font-size: 11px; color: #ffd479;
+      }
+      .tpTierName { font-size: 11px; color: #8c9ab3; margin: 7px 0 4px; letter-spacing: 0.02em; }
+      .tpOpts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .tpOpt {
+        pointer-events: auto; text-align: left; font: inherit; cursor: pointer;
+        background: rgba(30,38,52,0.85); border: 1px solid rgba(150,175,220,0.18);
+        border-radius: 8px; padding: 7px 9px; color: #dbe4f2;
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      .tpOpt b { font-size: 12.5px; color: #fff; font-weight: 650; }
+      .tpOpt span { font-size: 10.5px; line-height: 1.35; color: #9fb0c8; }
+      .tpOpt:hover:not(:disabled) { border-color: rgba(255,212,121,0.5); }
+      .tpOpt.sel { border-color: #ffd479; background: rgba(255,212,121,0.13); }
+      .tpOpt.sel b { color: #ffd479; }
+      .tpOpt.locked { opacity: 0.45; }
+      .tpOpt:disabled { cursor: default; }
 
       #banner {
         position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%);
@@ -146,7 +201,7 @@
       @media (max-width: 620px) {
         #controls { display: none; }
         #vitals { width: 68vw; }
-        .slot { width: 60px; height: 48px; }
+        .slot { width: 52px; height: 44px; }
         .slot .nm { font-size: 10px; }
       }
     </style>
@@ -198,6 +253,7 @@
             <div class="slot" id="slot1"><span class="cd"></span><span class="cdText"></span><span class="key">E</span><span class="nm">-</span></div>
             <div class="slot" id="slot2"><span class="cd"></span><span class="cdText"></span><span class="key">R</span><span class="nm">-</span></div>
             <div class="slot" id="slot3"><span class="cd"></span><span class="cdText"></span><span class="key">F</span><span class="nm">-</span></div>
+            <div class="slot" id="slot4"><span class="cd"></span><span class="cdText"></span><span class="key">G</span><span class="nm">-</span></div>
           </div>
         </div>
         <div id="controls">
@@ -206,7 +262,8 @@
           <div class="key"><kbd>좌클릭</kbd> 공격 (3타 콤보)</div>
           <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
           <div class="key"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 무기 교체</div>
-          <div class="key"><kbd>Tab</kbd><kbd>G</kbd> 룬 교체</div>
+          <div class="key"><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>
+          <div class="key"><kbd>T</kbd> 트라이포드</div>
           <a class="key" href="./?mode=arena" style="color: #9fd2ff; text-decoration: none"
             >⚔ 전투 시험장</a
           >
@@ -215,6 +272,18 @@
           >
         </div>
       </div>
+    </div>
+
+
+    <div id="tripod">
+      <div class="tpTop">
+        <div>
+          <h2>트라이포드 — 스킬 변형</h2>
+          <div class="sub">각인석 <b id="tripodPoints" style="color:#ffd479">0</b> · 보물에서 얻습니다</div>
+        </div>
+        <button id="tripodClose">닫기 (T)</button>
+      </div>
+      <div id="tripodBody"></div>
     </div>
 
     <div id="banner">

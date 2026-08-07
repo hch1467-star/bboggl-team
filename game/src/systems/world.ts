@@ -11,6 +11,7 @@ import {
   Player,
   Renderable,
   Stamina,
+  Status,
   Transform,
   Velocity,
 } from '../core/components'
@@ -32,6 +33,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   addComponent(Stamina, e)
   addComponent(Actor, e)
   addComponent(Player, e)
+  addComponent(Status, e)
   addComponent(Loadout, e)
   addComponent(Renderable, e)
 
@@ -52,6 +54,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   Stamina.value[e] = PLAYER.maxStamina
   Stamina.max[e] = PLAYER.maxStamina
   Stamina.regenDelayT[e] = 0
+  Status.snareT[e] = 0
   Actor.state[e] = ActorState.Idle
   Actor.phase[e] = 0
   Actor.timer[e] = 0
@@ -80,6 +83,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   Loadout.cd1[e] = 0
   Loadout.cd2[e] = 0
   Loadout.cd3[e] = 0
+  Loadout.cd4[e] = 0
   Renderable.kind[e] = KIND_PLAYER
   return e
 }
@@ -94,6 +98,7 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   addComponent(Health, e)
   addComponent(Actor, e)
   addComponent(Enemy, e)
+  addComponent(Status, e)
   addComponent(Renderable, e)
 
   Transform.x[e] = x
@@ -126,6 +131,8 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.kind[e] = kind
   Enemy.aggro[e] = 0
   Enemy.reactT[e] = 0
+  Enemy.attackIndex[e] = 0
+  Status.snareT[e] = 0
   Renderable.kind[e] = kind === EnemyKind.Boss ? KIND_BOSS : KIND_GRUNT
   return e
 }

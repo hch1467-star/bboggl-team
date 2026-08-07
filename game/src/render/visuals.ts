@@ -1,11 +1,14 @@
 import * as THREE from 'three'
 import { WEAPONS } from '../config/arsenal'
+import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
 import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
+  Enemy,
   Health,
+  Status,
   Loadout,
   Pickup,
   Renderable,
@@ -55,6 +58,12 @@ interface Visual {
   /** 등 뒤(백어택) 구역 표시 */
   backZone?: THREE.Mesh
   backZoneMat?: THREE.MeshBasicMaterial
+  /** 🔵 속박 표시 (플레이어 전용) */
+  snareRing?: THREE.Mesh
+  snareMat?: THREE.MeshBasicMaterial
+  /** 기본 공격 사거리 예고 (플레이어 전용) */
+  rangeArc?: THREE.Mesh
+  rangeMat?: THREE.MeshBasicMaterial
   /** 보물 등 둥둥 뜨는 오브젝트 */
   floats: boolean
   /** 멀리서도 보이는 빛기둥 (보물 전용) */
@@ -172,7 +181,10 @@ export class Visuals {
   private readonly query = defineQuery(Transform, Renderable)
 
   private readonly geos: Record<number, THREE.BufferGeometry>
-  private readonly telegraphGeos: Record<number, THREE.BufferGeometry>
+  /** 적 공격 패턴 id -> 예고 부채꼴 */
+  private readonly telegraphGeos = new Map<string, THREE.BufferGeometry>()
+  /** "무기id:콤보단계" -> 기본 공격 사거리 부채꼴. 쓸 때 만들어 캐시합니다. */
+  private readonly rangeGeos = new Map<string, THREE.BufferGeometry>()
   private readonly backZoneGeos: Record<number, THREE.BufferGeometry>
   private readonly hpBarGeo: THREE.PlaneGeometry
   private readonly pillarGeo: THREE.BufferGeometry
@@ -187,9 +199,12 @@ export class Visuals {
       [KIND_BOSS]: new THREE.CapsuleGeometry(BOSS.radius, BOSS.height - BOSS.radius * 2, 8, 16),
       [KIND_TREASURE]: new THREE.OctahedronGeometry(0.42),
     }
-    this.telegraphGeos = {
-      [KIND_GRUNT]: makeSectorGeometry(0.35, GRUNT.attackReach, GRUNT.attackArcDeg),
-      [KIND_BOSS]: makeSectorGeometry(0.35, BOSS.attackReach, BOSS.attackArcDeg),
+    // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
+    // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.
+    for (const isBoss of [false, true]) {
+      for (const def of attacksFor(isBoss)) {
+        this.telegraphGeos.set(def.id, makeSectorGeometry(0.35, def.reach, def.arcDeg))
+      }
     }
     this.backZoneGeos = {
       [KIND_GRUNT]: makeSectorGeometry(GRUNT.radius + 0.1, GRUNT.radius + 1.15, COMBAT.backArcDeg),
@@ -197,6 +212,23 @@ export class Visuals {
     }
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
     this.pillarGeo = makePillarGeometry()
+  }
+
+  /** 기본 공격 사거리 도형을 캐시에서 꺼내거나 만듭니다. */
+  private rangeGeoFor(weaponId: string, comboIndex: number): THREE.BufferGeometry {
+    const key = `${weaponId}:${comboIndex}`
+    let geo = this.rangeGeos.get(key)
+    if (!geo) {
+      const w = WEAPONS.find((x) => x.id === weaponId) ?? WEAPONS[0]
+      const step = w.combo[Math.min(comboIndex, w.combo.length - 1)]
+      // **테두리만** 그립니다. 적 예고는 꽉 찬 부채꼴이라, 내 것도 채우면
+      // 파랑 예고(속박)와 헷갈립니다 — 플레이어 캡슐도 파란색이라 더 그렇습니다.
+      // 채우기 vs 선은 색보다 강한 구분이고, "내 사거리가 여기서 끝난다"는
+      // 정보 자체도 면적이 아니라 **가장자리**에 있습니다.
+      geo = makeSectorGeometry(Math.max(0.3, step.range - 0.22), step.range, step.arcDeg)
+      this.rangeGeos.set(key, geo)
+    }
+    return geo
   }
 
   attach(entity: number, kind: number): void {
@@ -211,7 +243,12 @@ export class Visuals {
     const isPlayer = kind === KIND_PLAYER
     const isBoss = kind === KIND_BOSS
     const cfg = isPlayer ? PLAYER : isBoss ? BOSS : GRUNT
-    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : isBoss ? 0x9b4ad6 : 0xc0453f)
+    // 색 배정 규칙: **예고 4색(빨/노/파/보)과 캐릭터 색이 겹치면 안 됩니다.**
+    // 보스가 보라색이던 첫 판에서, 보라 예고(끌어당김)가 깔리자 보스 몸과 바닥이
+    // 같은 색으로 뭉쳐 어디가 보스이고 어디가 장판인지 구분이 안 됐습니다.
+    // 적은 붉은 계열로 묶고(적대 = 붉은색), 보스는 더 어둡게 눌러 잡몹과 구분합니다.
+    // 예고는 항상 바닥에 밝게 깔리므로 어두운 몸과 확실히 분리됩니다.
+    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : isBoss ? 0x7a2733 : 0xc0453f)
     const material = new THREE.MeshStandardMaterial({
       color: baseColor.clone(),
       roughness: 0.55,
@@ -240,6 +277,47 @@ export class Visuals {
         swingPivot.add(model)
         return model
       })
+
+      // 🔵 속박 표시 — 발밑의 파란 족쇄.
+      //
+      // 이게 없으면 플레이어는 "왜 갑자기 느려졌지?"라고만 느낍니다.
+      // 파랑 예고 → 파란 족쇄로 **색을 이어 붙여야** "아, 저 파란 공격에 맞으면
+      // 이렇게 되는구나"를 한 번에 배웁니다. 색 구분의 목적은 학습이지 장식이 아닙니다.
+      const snareMat = new THREE.MeshBasicMaterial({
+        color: INTENT_COLOR[AttackIntent.Snare],
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+      const snareRing = new THREE.Mesh(
+        new THREE.RingGeometry(PLAYER.radius + 0.12, PLAYER.radius + 0.42, 28).rotateX(-Math.PI / 2),
+        snareMat,
+      )
+      snareRing.position.y = 0.05
+      snareRing.renderOrder = 3
+      snareRing.visible = false
+      group.add(snareRing)
+      visual.snareRing = snareRing
+      visual.snareMat = snareMat
+
+      // 기본 공격 사거리 예고. 도형은 콤보 단계마다 갈아 끼웁니다(syncPlayerRange).
+      const rangeMat = new THREE.MeshBasicMaterial({
+        color: 0xeaf4ff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      })
+      const rangeArc = new THREE.Mesh(this.rangeGeoFor(WEAPONS[0].id, 0), rangeMat)
+      rangeArc.position.y = 0.035
+      rangeArc.renderOrder = 2
+      rangeArc.visible = false
+      group.add(rangeArc)
+      visual.rangeArc = rangeArc
+      visual.rangeMat = rangeMat
     } else {
       const scale = isBoss ? 1.8 : 1
       const club = new THREE.Mesh(
@@ -257,7 +335,7 @@ export class Visuals {
         depthWrite: false,
         side: THREE.DoubleSide,
       })
-      const telegraph = new THREE.Mesh(this.telegraphGeos[kind], telegraphMat)
+      const telegraph = new THREE.Mesh(this.telegraphGeos.get(attacksFor(isBoss)[0].id)!, telegraphMat)
       telegraph.position.y = 0.04
       telegraph.renderOrder = 1
       telegraph.visible = false
@@ -410,18 +488,31 @@ export class Visuals {
         v.material.emissive.setRGB(0, 0, 0)
       }
 
+      this.syncSnare(e, v)
+      this.syncPlayerRange(e, v)
+
+      // ---- 4색 예고 (DESIGN.md 기둥 2) ----
+      // 모양(사거리·각도)과 색(요구되는 대응)이 **같은 데이터**에서 나옵니다.
+      // 그래서 "노랑은 넓다"가 연출이 아니라 사실입니다.
       if (v.telegraph && v.telegraphMat) {
-        const winding = Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Windup
-        const striking = Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active
-        if (winding) {
-          const p = 1 - Actor.timer[e] / v.telegraphWindup // 0 -> 1
+        const attacking = Actor.state[e] === ActorState.Attack
+        const winding = attacking && Actor.phase[e] === AttackPhase.Windup
+        const striking = attacking && Actor.phase[e] === AttackPhase.Active
+        if (winding || striking) {
+          const isBoss = Renderable.kind[e] === KIND_BOSS
+          const def = attackAt(isBoss, Enemy.attackIndex[e])
+          const geo = this.telegraphGeos.get(def.id)
+          if (geo && v.telegraph.geometry !== geo) v.telegraph.geometry = geo
           v.telegraph.visible = true
-          v.telegraphMat.opacity = 0.12 + p * 0.42
-          v.telegraphMat.color.setHex(0xff5a3c)
-        } else if (striking) {
-          v.telegraph.visible = true
-          v.telegraphMat.opacity = 0.75
-          v.telegraphMat.color.setHex(0xfff0d0)
+          if (winding) {
+            const p = 1 - Actor.timer[e] / def.windup // 0 -> 1
+            v.telegraphMat.opacity = 0.12 + p * 0.42
+            v.telegraphMat.color.setHex(INTENT_COLOR[def.intent])
+          } else {
+            // 터지는 순간만 흰색으로 날립니다 — "지금이 판정"이 색과 무관하게 읽혀야 합니다.
+            v.telegraphMat.opacity = 0.8
+            v.telegraphMat.color.setHex(0xfff0d0)
+          }
         } else if (v.telegraph.visible) {
           v.telegraph.visible = false
           v.telegraphMat.opacity = 0
@@ -443,6 +534,51 @@ export class Visuals {
         v.hpBar.quaternion.copy(this.camera.quaternion)
       }
     }
+  }
+
+  /** 🔵 속박 링 — 남은 시간에 따라 맥동합니다. */
+  private syncSnare(e: number, v: Visual): void {
+    if (!v.snareRing || !v.snareMat) return
+    const t = hasComponent(Status, e) ? Status.snareT[e] : 0
+    if (t <= 0) {
+      if (v.snareRing.visible) v.snareRing.visible = false
+      return
+    }
+    v.snareRing.visible = true
+    // 풀릴 때가 가까울수록 빠르게 깜빡입니다 — 언제 풀리는지 눈으로 세게 만듭니다.
+    const pulse = 0.55 + 0.45 * Math.sin(time.elapsed * 14)
+    v.snareMat.opacity = (0.3 + 0.4 * pulse) * Math.min(1, t / 0.35)
+  }
+
+  /**
+   * 플레이어 기본 공격의 **사거리 예고** (DESIGN.md 기둥 2).
+   *
+   * 적의 공격만 바닥에 그리고 내 공격은 안 그리면, 플레이어는 "내가 어디까지
+   * 닿는지"를 **맞아보고 배울** 수밖에 없습니다. 무기를 셋이나 두고 사거리를
+   * 1.9m~3.5m로 벌려 놓았으니, 그 차이를 몸으로 배우게 하는 것은 설계 낭비입니다.
+   *
+   * 적 예고와 **다른 언어**로 그립니다:
+   *  · 색  — 청백색. 4색(빨/노/파/보) 어디에도 안 걸치는 색이어야
+   *          "이건 내 것"이 즉시 구분됩니다.
+   *  · 시점 — 선행동작 동안만. 판정이 터지면 초승달(vfx)이 대신 말합니다.
+   * 스킬은 이미 자체 예고가 있으므로(playerControl의 onCast) 기본 콤보만 담당합니다.
+   */
+  private syncPlayerRange(e: number, v: Visual): void {
+    if (!v.rangeArc || !v.rangeMat) return
+    const winding =
+      Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Windup
+    if (!winding) {
+      if (v.rangeArc.visible) v.rangeArc.visible = false
+      return
+    }
+    const weapon = WEAPONS[Math.min(Loadout.weapon[e], WEAPONS.length - 1)]
+    const step = weapon.combo[Math.min(Actor.comboIndex[e], weapon.combo.length - 1)]
+    const geo = this.rangeGeoFor(weapon.id, Actor.comboIndex[e])
+    if (v.rangeArc.geometry !== geo) v.rangeArc.geometry = geo
+    v.rangeArc.visible = true
+    // 선행동작이 끝나갈수록 진해집니다 = "지금 터진다"가 읽힙니다.
+    const p = 1 - Math.max(0, Actor.timer[e]) / Math.max(step.windup, 0.001)
+    v.rangeMat.opacity = 0.1 + p * 0.3
   }
 
   private syncTreasure(e: number, v: Visual, playerX: number, playerZ: number): void {
@@ -550,7 +686,8 @@ export class Visuals {
   dispose(): void {
     for (const e of [...this.items.keys()]) this.detach(e)
     for (const geo of Object.values(this.geos)) geo.dispose()
-    for (const geo of Object.values(this.telegraphGeos)) geo.dispose()
+    for (const geo of this.telegraphGeos.values()) geo.dispose()
+    for (const geo of this.rangeGeos.values()) geo.dispose()
     for (const geo of Object.values(this.backZoneGeos)) geo.dispose()
     this.hpBarGeo.dispose()
     this.pillarGeo.dispose()

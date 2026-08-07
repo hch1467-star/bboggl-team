@@ -91,10 +91,37 @@ try {
     // 세 배 넘게 차이납니다. 실제로 고정 대기(150ms)로 찍었더니 롱소드는
     // 판정 순간이, 대검은 아직 칼을 들어 올리는 중이 찍혀 비교가 안 됐습니다.
     // 그래서 **판정(active) 단계로 들어간 프레임을 직접 기다립니다.**
+    // (a) 선행동작 — 바닥에 뜨는 **사거리 예고**를 확인합니다.
+    // 무기마다 1.9m / 3.1m / 2.3m 로 다르므로, 이 도형의 크기 차이가
+    // 곧 "무기를 바꾸면 닿는 거리가 달라진다"는 설명입니다.
+    const wound = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          window.__game.press('Mouse0')
+          window.__game.release('Mouse0')
+          let tries = 0
+          const step = () => {
+            const st = window.__game.state().player
+            if (st.state === 1 && st.phase === 0) {
+              window.__game.setPaused(true)
+              resolve(true)
+            } else if (++tries > 240) resolve(false)
+            else requestAnimationFrame(step)
+          }
+          requestAnimationFrame(step)
+        }),
+    )
+    const windupShot = `17-weapon-${w.id}-range.png`
+    await page.screenshot({ path: path.join(OUT, windupShot), clip: CLIP })
+    await page.evaluate(() => window.__game.setPaused(false))
+    if (!wound) console.warn(`    (경고: ${w.label} 선행동작을 못 잡았습니다)`)
+    await sleep(1400) // 이 콤보가 끝나고 콤보 카운터가 돌아올 때까지
+
     //
-    // 궤적은 0.19초만 살아 있습니다. 브라우저 **밖에서** 폴링하면 CDP 왕복(수십 ms)
-    // 때문에 매번 놓칩니다 — 실제로 롱소드는 궤적이 통째로 빠진 사진이 나왔습니다.
-    // 그래서 판정을 **페이지 안**에서 하고, 궤적이 뜬 그 프레임에 화면을 멈춥니다.
+    // (b) 판정 — 궤적은 0.19초만 살아 있습니다. 브라우저 **밖에서** 폴링하면
+    // CDP 왕복(수십 ms) 때문에 매번 놓칩니다 — 실제로 롱소드는 궤적이 통째로
+    // 빠진 사진이 나왔습니다. 그래서 판정을 **페이지 안**에서 하고,
+    // 궤적이 뜬 그 프레임에 화면을 멈춥니다.
     const hit = await page.evaluate(
       () =>
         new Promise((resolve) => {
@@ -117,7 +144,7 @@ try {
     await page.evaluate(() => window.__game.setPaused(false))
     if (!hit) console.warn(`    (경고: ${w.label} 궤적을 못 잡았습니다)`)
 
-    console.log(`  ${w.label.padEnd(4)} → ${idle} / ${swing}`)
+    console.log(`  ${w.label.padEnd(4)} → ${idle} / ${windupShot} / ${swing}`)
     await sleep(1200) // 후딜 + 콤보 리셋
   }
 } finally {

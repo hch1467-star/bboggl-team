@@ -1,5 +1,6 @@
 import { SKILL_KEY_CODES, type SkillDef } from '../config/arsenal'
 import { PLAYER } from '../config/balance'
+import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
   ActorState,
@@ -8,6 +9,7 @@ import {
   Loadout,
   Player,
   Stamina,
+  Status,
   Transform,
   Velocity,
 } from '../core/components'
@@ -18,11 +20,11 @@ import { WEAPONS } from '../config/arsenal'
 import { cooldownOf, cycleRune, setCooldown, skillForSlot, tickCooldowns, weaponOf } from './loadout'
 
 /**
- * 플레이어 조작 — 이동 + 조준 + 기본 콤보 + 회피 + **스킬 4슬롯**.
+ * 플레이어 조작 — 이동 + 조준 + 기본 콤보 + 회피 + **스킬 5슬롯**.
  *
  * ── 전투의 핵심 리듬 (DESIGN.md 기둥 1) ─────────────────────────────
  *   스태미나 = 기본 콤보 · 회피 구르기   (소울라이크)
- *   쿨다운   = 스킬 4개                  (로스트아크)
+ *   쿨다운   = 스킬 5개 (무기 3 + 룬 2)  (로스트아크)
  *
  * 두 자원을 분리했기 때문에 "쿨다운 도는 동안 기본기로 버티다가,
  * 차면 스킬로 터뜨리는" 리듬이 저절로 만들어집니다.
@@ -218,8 +220,9 @@ export function playerControlSystem(ctx: ControlContext): void {
       : consumePress('Digit3')
         ? 2
         : -1
-  const cycleR = consumePress('Tab')
-  const cycleF = consumePress('KeyG')
+  // 룬 교체 키. G가 스킬 슬롯(룬2)이 되면서 교체 키를 Tab / C 로 옮겼습니다.
+  const cycleRune0 = consumePress('Tab')
+  const cycleRune1 = consumePress('KeyC')
 
   for (let i = 0; i < players.count; i++) {
     const p = ids[i]
@@ -244,12 +247,12 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.comboIndex[p] = 0
       ctx.onLoadoutChange()
     }
-    if (idle && cycleR) {
-      cycleRune(p, 2)
+    if (idle && cycleRune0) {
+      cycleRune(p, 3)
       ctx.onLoadoutChange()
     }
-    if (idle && cycleF) {
-      cycleRune(p, 3)
+    if (idle && cycleRune1) {
+      cycleRune(p, 4)
       ctx.onLoadoutChange()
     }
 
@@ -516,6 +519,17 @@ export function playerControlSystem(ctx: ControlContext): void {
 
       default:
         break
+    }
+
+    // ---- 🔵 속박 (파랑 예고에 맞았을 때) ----
+    //
+    // **회피 구르기와 대시는 막지 않습니다.** 묶인 채로 탈출 수단까지 빼앗으면
+    // "맞는 순간 게임이 끝"이고, 그건 DESIGN.md가 못박은 "내가 못 피했네"가 아니라
+    // "손쓸 방법이 없었네"가 됩니다. 걷는 속도만 죽여서 **다음 예고를 피하기 어렵게**
+    // 만드는 것이 이 상태이상의 전부입니다.
+    if (Status.snareT[p] > 0) {
+      Status.snareT[p] = Math.max(0, Status.snareT[p] - dt)
+      moveScale *= SNARE_MOVE_SCALE
     }
 
     // ---- 목표 속도 적용 ----

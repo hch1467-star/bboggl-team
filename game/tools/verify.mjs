@@ -618,7 +618,12 @@ async function main() {
     check('존의 적 12마리(잡몹 11 + 보스 1)가 배치됨', zs.enemiesLeft === 12, `${zs.enemiesLeft}마리`)
     check('시작 지점이 바닥 위(높이 2)', zs.player.terrainLevel === 2, `높이 단계 ${zs.player.terrainLevel}`)
     check('시작 지점 근처에는 적이 없음', (zs.nearestEnemy?.dist ?? 99) > 8, `가장 가까운 적 ${zs.nearestEnemy?.dist}m`)
-    check('시작 시 룬 슬롯은 비어 있음(탐험으로 획득)', zs.loadout.slots[2] === null && zs.loadout.slots[3] === null)
+    // 룬 슬롯은 이제 3, 4번입니다(0~2가 무기 스킬 3개).
+    check(
+      '존 시작 시 룬 슬롯 2개는 비어 있음(탐험으로 획득)',
+      zs.loadout.slots[3] === null && zs.loadout.slots[4] === null,
+      `슬롯 ${JSON.stringify(zs.loadout.slots)}`,
+    )
 
     await zone.evaluate(() => window.__game.requestSample())
     let zpix = null
@@ -635,6 +640,129 @@ async function main() {
     const zoneShot = path.join(SHOTS, '13-zone.png')
     await zone.screenshot({ path: zoneShot })
     check('존 스크린샷 생성', statSync(zoneShot).size > 15000, `${(statSync(zoneShot).size / 1024).toFixed(0)} KB`)
+
+    // ---------- 9.55 4색 예고 (기둥 2) ----------
+    // "색이 다르다"만으로는 부족합니다. **판정 자체가 달라야** 색이 정보가 됩니다.
+    // 그래서 색이 아니라 **패턴별 실제 제원과 효과**를 검사합니다.
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await page.evaluate(() => window.__game.clearEnemies())
+    await page.evaluate(() => window.__game.freezeEnemies(true))
+    await sleep(250)
+    const bossE = await page.evaluate(() => window.__game.spawnBoss(0, 4))
+    const intentIds = []
+    for (let i = 0; i < 4; i++) {
+      intentIds.push(await page.evaluate(([b, n]) => window.__game.forceAttack(b, n), [bossE, i]))
+    }
+    check(
+      '보스가 4색 패턴을 모두 가짐',
+      new Set(intentIds).size === 4,
+      intentIds.join(', '),
+    )
+
+    // 🔵 속박이 실제로 이동을 늦추는가. 상태값이 아니라 **이동한 거리**로 잽니다.
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await page.evaluate(() => window.__game.clearEnemies())
+    await sleep(250)
+    const runFor = async (ms) => {
+      const a = (await state()).player
+      await press('KeyD')
+      await press('KeyS')
+      await sleep(ms)
+      const b = (await state()).player
+      await release('KeyD')
+      await release('KeyS')
+      await sleep(400)
+      return Math.hypot(b.x - a.x, b.z - a.z)
+    }
+    const freeDist = await runFor(1600)
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await page.evaluate(() => window.__game.clearEnemies())
+    await page.evaluate(() => window.__game.applySnare(6))
+    await sleep(250)
+    const snaredDist = await runFor(1600)
+    check(
+      '속박(파랑)에 걸리면 실제로 느려짐',
+      snaredDist < freeDist * 0.6,
+      `자유 ${freeDist.toFixed(1)}m vs 속박 ${snaredDist.toFixed(1)}m`,
+    )
+
+    // ---------- 9.57 무기 스킬 3개 + 트라이포드 ----------
+    await page.evaluate(() => window.__game.reset())
+    await sleep(500)
+    const arm = await state()
+    check(
+      '무기 스킬이 3개(Q/E/R)로 늘어남',
+      arm.loadout.slots.slice(0, 3).every(Boolean),
+      arm.loadout.slots.slice(0, 3).join(', '),
+    )
+    // 시험장은 룬 2개를 미리 쥐여줍니다(전투 검증용). 레벨 모드에서는 비어 있고,
+    // 그건 바로 위 9.5 존 검사가 확인합니다.
+    check(
+      '스킬 슬롯이 5개(무기 3 + 룬 2)로 확장됨',
+      arm.loadout.slots.length === 5 && arm.loadout.cooldowns.length === 5,
+      `슬롯 ${arm.loadout.slots.length}개 · 쿨다운 ${arm.loadout.cooldowns.length}개`,
+    )
+
+    // 트라이포드는 **실효 수치**로 검증합니다. 데이터가 맞는지가 아니라
+    // 전투 코드가 읽는 값이 실제로 바뀌었는지를 봐야 의미가 있습니다.
+    const baseSkill = await page.evaluate(() => window.__game.effectiveSkill(0))
+    const noPoint = await page.evaluate(() =>
+      window.__game.unlockTripod('lunge_slash', 0, 0),
+    )
+    check('각인석이 없으면 해금 불가', noPoint === false)
+
+    await page.evaluate(() => window.__game.grantTripod(3))
+    const skipTier = await page.evaluate(() =>
+      window.__game.unlockTripod('lunge_slash', 2, 0),
+    )
+    check('앞 단계를 건너뛰고 3단계를 열 수 없음', skipTier === false)
+
+    const ok1 = await page.evaluate(() => window.__game.unlockTripod('lunge_slash', 0, 0))
+    const afterT1 = await page.evaluate(() => window.__game.effectiveSkill(0))
+    check('1단계 해금 성공', ok1 === true)
+    check(
+      '1단계 「깊은 상처」가 피해를 +35% 올림',
+      Math.abs(afterT1.damage - baseSkill.damage * 1.35) < 0.05,
+      `${baseSkill.damage} -> ${afterT1.damage}`,
+    )
+    const pts = await page.evaluate(() => window.__game.tripodInfo())
+    check('해금이 각인석을 1개 소모함', pts.points === 2, `남은 각인석 ${pts.points}`)
+
+    // 같은 단계 안에서 갈아타는 것은 **무료**여야 합니다(실험을 막지 않기 위해).
+    await page.evaluate(() => window.__game.switchTripod('lunge_slash', 0, 1))
+    const swapped = await page.evaluate(() => window.__game.effectiveSkill(0))
+    const pts2 = await page.evaluate(() => window.__game.tripodInfo())
+    check(
+      '같은 단계 안 교체는 무료 (「가벼운 검」 쿨다운 -30%)',
+      pts2.points === 2 && Math.abs(swapped.cooldown - baseSkill.cooldown * 0.7) < 0.05,
+      `쿨다운 ${baseSkill.cooldown} -> ${swapped.cooldown}, 각인석 ${pts2.points}`,
+    )
+
+    // 3단계는 **판정 도형 자체**를 바꿉니다 — 트라이포드의 핵심 주장입니다.
+    await page.evaluate(() => window.__game.unlockTripod('lunge_slash', 1, 0))
+    await page.evaluate(() => window.__game.unlockTripod('lunge_slash', 2, 0))
+    const morphed = await page.evaluate(() => window.__game.effectiveSkill(0))
+    check(
+      '3단계 「관통」이 판정 도형을 부채꼴 -> 원형으로 바꿈',
+      baseSkill.shape === 'cone' && morphed.shape === 'circle',
+      `${baseSkill.shape} -> ${morphed.shape}`,
+    )
+
+    // 트라이포드 창이 실제로 열리고 내용이 그려지는가.
+    await page.evaluate(() => window.__game.toggleTripodPanel())
+    await sleep(300)
+    const panel = await page.evaluate(() => ({
+      open: document.getElementById('tripod')?.classList.contains('show') ?? false,
+      skills: document.querySelectorAll('#tripodBody .tpSkill').length,
+      options: document.querySelectorAll('#tripodBody .tpOpt').length,
+    }))
+    check('T 창이 열리고 스킬 3개 × 3단계 × 2선택이 그려짐',
+      panel.open && panel.skills === 3 && panel.options === 18,
+      `스킬 ${panel.skills}개 · 선택지 ${panel.options}개`)
+    await page.evaluate(() => window.__game.toggleTripodPanel())
 
     // ---------- 9.6 길안내 (기둥 4) ----------
     // 플레이 테스트 피드백: **"어디로 가야 하고, 어디에 뭐가 있는지 목표가 없으니

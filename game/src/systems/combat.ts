@@ -9,9 +9,11 @@ import {
   EnemyKind,
   Health,
   Player,
+  Status,
   Transform,
   Velocity,
 } from '../core/components'
+import { attackAt } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { time } from '../core/time'
@@ -105,6 +107,10 @@ export interface AttackSpec {
   originX?: number
   originZ?: number
   healSelf: number
+  /** 🔵 맞은 대상을 묶는 시간(초) */
+  snare?: number
+  /** 🟣 맞은 대상을 공격자 쪽으로 끌어당기는 세기(m/s) */
+  pull?: number
 }
 
 /** 현재 프레임에 발생한 타격들. 게임 루프가 읽고 비웁니다. */
@@ -147,38 +153,38 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
     originX: def.shape === 'point' ? Player.castX[e] : undefined,
     originZ: def.shape === 'point' ? Player.castZ[e] : undefined,
     healSelf: def.healSelf,
+    // 플레이어도 적을 묶을 수 있습니다(발목 긋기). 적이 나에게 쓰는 수단을
+    // 나도 쓴다 — 같은 코드, 같은 규칙입니다.
+    snare: def.snare > 0 ? def.snare : undefined,
   }
 }
 
-const GRUNT_SPEC: AttackSpec = {
-  shape: 'cone',
-  damage: GRUNT.damage,
-  range: GRUNT.attackReach,
-  arcDeg: GRUNT.attackArcDeg,
-  knockback: GRUNT.knockback,
-  hitstop: 0.05,
-  trauma: 0.34,
-  heavy: false,
-  hits: 1,
-  healSelf: 0,
-}
-
-/** 보스는 한 대가 무겁습니다 — 정지·흔들림도 그만큼 세게 줍니다. */
-const BOSS_SPEC: AttackSpec = {
-  shape: 'cone',
-  damage: BOSS.damage,
-  range: BOSS.attackReach,
-  arcDeg: BOSS.attackArcDeg,
-  knockback: BOSS.knockback,
-  hitstop: 0.1,
-  trauma: 0.62,
-  heavy: true,
-  hits: 1,
-  healSelf: 0,
-}
-
+/**
+ * 적의 공격 제원은 **지금 시전 중인 패턴**에서 나옵니다 (enemyAttacks.ts).
+ *
+ * 예전에는 적 종류마다 고정 제원 하나였습니다. 그러면 예고 색을 나눠도
+ * 실제 판정은 늘 같아서, 색이 **거짓말**을 하게 됩니다 — 노랑(넓음)을 띄워놓고
+ * 실제로는 빨강과 같은 좁은 부채꼴로 때리는 식으로요.
+ * 예고와 판정이 같은 데이터에서 나와야 색을 믿을 수 있습니다.
+ */
 function enemySpec(e: number): AttackSpec {
-  return Enemy.kind[e] === EnemyKind.Boss ? BOSS_SPEC : GRUNT_SPEC
+  const isBoss = Enemy.kind[e] === EnemyKind.Boss
+  const def = attackAt(isBoss, Enemy.attackIndex[e])
+  return {
+    // 360°짜리 전방위 패턴은 각도 검사를 건너뛰도록 circle로 넘깁니다.
+    shape: def.arcDeg >= 359 ? 'circle' : 'cone',
+    damage: def.damage,
+    range: def.reach,
+    arcDeg: def.arcDeg,
+    knockback: def.knockback,
+    hitstop: isBoss ? 0.1 : 0.05,
+    trauma: isBoss ? 0.62 : 0.34,
+    heavy: isBoss,
+    hits: 1,
+    healSelf: 0,
+    snare: def.snare,
+    pull: def.pull,
+  }
 }
 
 function enemyStagger(e: number): number {
@@ -326,6 +332,20 @@ function applyHit(a: number, spec: AttackSpec): void {
     // 즉시 지워버려서 밀려나는 연출이 안 보입니다.
     Velocity.kx[t] += nx * spec.knockback
     Velocity.kz[t] += nz * spec.knockback
+
+    // ---- 🟣 끌어당김 — 넉백의 부호를 뒤집습니다 ----
+    // 같은 채널을 쓰므로 "밀려남"과 정확히 같은 감쇠 곡선을 탑니다.
+    // 별도 처리를 만들면 두 힘이 서로 다른 물리로 움직여 어색해집니다.
+    if (spec.pull && spec.pull > 0) {
+      Velocity.kx[t] -= nx * spec.pull
+      Velocity.kz[t] -= nz * spec.pull
+    }
+
+    // ---- 🔵 속박 ----
+    // 피해가 아니라 **다음 공격을 못 피하게 만드는 것**이 이 공격의 위협입니다.
+    if (spec.snare && spec.snare > 0 && hasComponent(Status, t)) {
+      Status.snareT[t] = Math.max(Status.snareT[t], spec.snare)
+    }
 
     const killed = Health.hp[t] <= 0
     if (!killed) {

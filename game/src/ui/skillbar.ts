@@ -1,7 +1,7 @@
 import { SKILL_KEYS } from '../config/arsenal'
 
 /**
- * 스킬바 — 슬롯 4개의 이름과 쿨다운을 보여줍니다.
+ * 스킬바 — 슬롯 5개(무기 3 + 룬 2)의 이름과 쿨다운을 보여줍니다.
  *
  * 쿨다운을 **아래에서 위로 차오르는 어두운 판**으로 표현합니다.
  * 숫자만 띄우면 전투 중에 읽을 수가 없습니다. 판이 줄어드는 속도가
@@ -30,7 +30,7 @@ export interface SlotState {
 export class SkillBar {
   private readonly weaponName = el<HTMLElement>('weaponName')
   private readonly slots: SlotView[] = []
-  private readonly lastPercent = [-1, -1, -1, -1]
+  private readonly lastPercent = SKILL_KEYS.map(() => -1)
 
   constructor() {
     for (let i = 0; i < SKILL_KEYS.length; i++) {

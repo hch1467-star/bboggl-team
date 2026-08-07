@@ -130,12 +130,23 @@ export const Enemy = defineComponent({
    * 0이 되어야 몸을 돌리기 시작합니다 — 이 시간이 플레이어의 반격 창입니다.
    */
   reactT: 'f32',
+  /**
+   * 지금 시전 중인 공격 패턴의 인덱스 (enemyAttacks.ts 의 목록 기준).
+   * ECS에는 숫자만 담을 수 있어 인덱스로 들고 있다가 조회해서 씁니다.
+   */
+  attackIndex: 'u8',
+})
+
+/** 상태이상 — 지금은 속박 하나. 늘어나면 별도 컴포넌트로 나눕니다. */
+export const Status = defineComponent({
+  /** 🔵 속박 남은 시간(초). 이동 속도가 SNARE_MOVE_SCALE 배가 됩니다. */
+  snareT: 'f32',
 })
 
 /**
- * 장비 — 무기 1개 + 룬 2개, 그리고 스킬 슬롯 4개의 쿨다운.
+ * 장비 — 무기 1개 + 룬 2개, 그리고 스킬 슬롯 5개의 쿨다운.
  *
- * 슬롯 배치: [0]=무기스킬1(Q) [1]=무기스킬2(E) [2]=룬1(R) [3]=룬2(F)
+ * 슬롯 배치: [0]=무기1(Q) [1]=무기2(E) [2]=무기3(R) [3]=룬1(F) [4]=룬2(G)
  * 무기 슬롯을 고정해 둔 것이 밸런스의 기준선입니다(arsenal.ts 설계 노트 참고).
  */
 export const Loadout = defineComponent({
@@ -150,6 +161,7 @@ export const Loadout = defineComponent({
   cd1: 'f32',
   cd2: 'f32',
   cd3: 'f32',
+  cd4: 'f32',
 })
 
 /** 주울 수 있는 것 — 지금은 보물. 나중에 스킬 해금/소모품으로 확장합니다. */

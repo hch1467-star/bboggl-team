@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
 import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
+import { attacksFor } from './config/enemyAttacks'
 import {
   Actor,
   ActorState,
@@ -12,10 +13,12 @@ import {
   Player,
   Renderable,
   Stamina,
+  Status,
   Transform,
 } from './core/components'
+import { AttackPhase } from './core/components'
 import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
-import { debugInput, endFrame, initInput, mouse } from './core/input'
+import { consumePress, debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
 import { loadLevelFromStorage, worldToCell, type LevelData, type LevelRegion } from './level/format'
 import { DEFAULT_LEVEL_ID, loadBundledLevel } from './levels'
@@ -27,12 +30,14 @@ import { KIND_TREASURE, Visuals } from './render/visuals'
 import { countLivingEnemies, hitEvents, isBackAttack, isBehindPoint, resolveAttacks } from './systems/combat'
 import { enemyAiSystem, setEnemyAiEnabled } from './systems/enemyAI'
 import { deathEvents, healthSystem } from './systems/health'
-import { grantRune, skillForSlot, weaponOf } from './systems/loadout'
+import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
+import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
 import { physicsSystem, setTerrain } from './systems/physics'
 import { playerControlSystem, type ControlContext } from './systems/playerControl'
-import { enemyCountForWave, spawnFromLevel, spawnGrunt, spawnPlayer, spawnWave } from './systems/world'
+import { enemyCountForWave, spawnEnemy, spawnFromLevel, spawnGrunt, spawnPlayer, spawnWave } from './systems/world'
 import { Hud } from './ui/hud'
 import { SkillBar } from './ui/skillbar'
+import { TripodPanel } from './ui/tripodPanel'
 
 /**
  * 게임 루프 — 시스템 실행 순서가 여기 담깁니다.
@@ -62,9 +67,10 @@ class Game {
   private readonly vfx: Vfx
   private readonly hud: Hud
   private readonly skillBar: SkillBar
+  private readonly tripodPanel: TripodPanel
   /** 매 프레임 배열을 새로 만들지 않도록 재사용합니다. */
-  private readonly cdBuf = [0, 0, 0, 0]
-  private readonly cdMaxBuf = [1, 1, 1, 1]
+  private readonly cdBuf = new Array<number>(SLOT_COUNT).fill(0)
+  private readonly cdMaxBuf = new Array<number>(SLOT_COUNT).fill(1)
 
   private playerEntity = -1
   private wave = 1
@@ -113,6 +119,7 @@ class Game {
     this.vfx = new Vfx(this.scene)
     this.hud = new Hud()
     this.skillBar = new SkillBar()
+    this.tripodPanel = new TripodPanel()
 
     const params = new URLSearchParams(location.search)
     this.source =
@@ -180,6 +187,8 @@ class Game {
     this.backHits = 0
     this.critHits = 0
     this.hud.hideBanner()
+    resetTripods()
+    this.tripodPanel.setOpen(false)
     setEnemyAiEnabled(true)
     this.regions = []
     this.currentRegion = ''
@@ -233,11 +242,12 @@ class Game {
     const p = this.playerEntity
     if (p < 0) return
     const slots = []
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < SLOT_COUNT; i++) {
       const def = skillForSlot(p, i)
       slots.push({ name: def?.name ?? '', empty: !def })
     }
     this.skillBar.setLoadout(weaponOf(p).name, slots)
+    this.tripodPanel.setPlayer(p)
   }
 
   private startWave(): void {
@@ -280,6 +290,11 @@ class Game {
     }
     this.controlCtx.aimX = this.aim.x
     this.controlCtx.aimZ = this.aim.z
+
+    // ---- 1.5 트라이포드 창 (T) ----
+    // 창을 열어도 게임은 계속 돕니다(ui/tripodPanel.ts 설계 노트).
+    // 그래서 여는 것 자체가 안전하지 않은 선택이 되고, "언제 열지"도 판단이 됩니다.
+    if (consumePress('KeyT')) this.tripodPanel.toggle()
 
     // ---- 2. 시뮬레이션 ----
     if (playerAlive) playerControlSystem(this.controlCtx)
@@ -397,7 +412,8 @@ class Game {
     this.cdBuf[1] = Loadout.cd1[p]
     this.cdBuf[2] = Loadout.cd2[p]
     this.cdBuf[3] = Loadout.cd3[p]
-    for (let i = 0; i < 4; i++) this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
+    this.cdBuf[4] = Loadout.cd4[p]
+    for (let i = 0; i < SLOT_COUNT; i++) this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
     this.skillBar.update(this.cdBuf, this.cdMaxBuf)
     this.hud.tickPerf(time.realDt)
 
@@ -506,8 +522,13 @@ class Game {
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
 
-      // 보물 = 새 룬(= 새 스킬). "세져서" 가 아니라 "새로운 걸 할 수 있어서"
-      // 재미있어야 한다는 DESIGN.md 성장 설계를 시스템으로 구현한 지점입니다.
+      // 보물 = 새 룬(= 새 스킬) **또는** 트라이포드 포인트(= 스킬의 변형).
+      // "세져서" 가 아니라 "새로운 걸 할 수 있어서" 재미있어야 한다는
+      // DESIGN.md 성장 설계를 시스템으로 구현한 지점입니다.
+      //
+      // 룬을 먼저 주고 그다음에 포인트를 주는 순서인 이유: 룬은 **새 스킬**이라
+      // 변화가 크고 즉시 체감됩니다. 트라이포드는 이미 쓰던 스킬을 다듬는 것이라
+      // 먼저 주면 무슨 일이 일어났는지 알기 어렵습니다. 큰 변화부터 보여줍니다.
       const nextRune = Loadout.runesOwned[p]
       if (nextRune < RUNE_ORDER.length) {
         grantRune(p, nextRune)
@@ -515,7 +536,9 @@ class Game {
         const def = SKILLS[RUNE_ORDER[nextRune]]
         this.hud.showBanner(`룬 획득 — ${def.name}`, def.desc, 2.6)
       } else {
-        this.hud.showBanner('보물 획득', `${this.treasuresFound} / ${this.treasureTotal}`, 1.4)
+        grantTripodPoint()
+        this.tripodPanel.refresh()
+        this.hud.showBanner('각인석 획득', `T 를 눌러 스킬을 변형하세요 (보유 ${tripodPoints()})`, 2.6)
       }
       this.visuals.detach(e)
       destroyEntity(e)
@@ -558,6 +581,74 @@ class Game {
     if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
     this.visuals.attach(e, Renderable.kind[e])
     return e
+  }
+
+  /**
+   * 특정 적을 지정한 공격 패턴의 **예고 단계에 세워 둡니다.**
+   *
+   * 4색 예고는 "빨강이 떴을 때 화면이 어떻게 보이는가"를 눈으로 봐야 검증됩니다.
+   * 그런데 어떤 색이 나올지는 거리와 난수가 정하므로, 그냥 기다려서는
+   * 원하는 색을 잡을 수 없습니다. 그래서 직접 지정할 수단을 둡니다.
+   */
+  debugForceAttack(entity: number, index: number): string {
+    const isBoss = Enemy.kind[entity] === EnemyKind.Boss
+    const list = attacksFor(isBoss)
+    const i = Math.min(Math.max(index, 0), list.length - 1)
+    Enemy.attackIndex[entity] = i
+    Enemy.aggro[entity] = 1
+    Actor.state[entity] = ActorState.Attack
+    Actor.phase[entity] = AttackPhase.Windup
+    // 예고 투명도는 **남은 시간 비율**로 계산됩니다(가득 찰수록 진해짐).
+    // 그래서 타이머를 크게 넣으면 오히려 투명해져 아무것도 안 보입니다.
+    // 잘 보이는 후반부(75% 지점)에 세워 둡니다.
+    Actor.timer[entity] = list[i].windup * 0.25
+    // 플레이어를 바라보게 돌려 둡니다 — 등지고 선 예고는 확인할 의미가 없습니다.
+    const p = this.playerEntity
+    Transform.rotY[entity] = Math.atan2(
+      Transform.x[p] - Transform.x[entity],
+      Transform.z[p] - Transform.z[entity],
+    )
+    return list[i].id
+  }
+
+  debugSpawnBoss(x: number, z: number): number {
+    const e = spawnEnemy(EnemyKind.Boss, x, z)
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    this.visuals.attach(e, Renderable.kind[e])
+    return e
+  }
+
+  debugRefreshLoadout(): void {
+    this.refreshLoadout()
+  }
+
+  /** 트라이포드가 실제로 적용된 뒤의 수치. 데이터가 아니라 **결과**를 검증합니다. */
+  debugEffectiveSkill(slot: number): Record<string, number | string> | null {
+    const def = skillForSlot(this.playerEntity, slot)
+    if (!def) return null
+    return {
+      id: def.id,
+      shape: def.shape,
+      damage: Number(def.damage.toFixed(2)),
+      range: Number(def.range.toFixed(2)),
+      arcDeg: Number(def.arcDeg.toFixed(1)),
+      cooldown: Number(def.cooldown.toFixed(2)),
+      hits: def.hits,
+      snare: Number(def.snare.toFixed(2)),
+      dash: Number(def.dash.toFixed(2)),
+    }
+  }
+
+  debugTripodInfo(): { points: number; panelOpen: boolean } {
+    return { points: tripodPoints(), panelOpen: this.tripodPanel.isOpen() }
+  }
+
+  debugToggleTripodPanel(): void {
+    this.tripodPanel.toggle()
+  }
+
+  debugApplySnare(seconds: number): void {
+    Status.snareT[this.playerEntity] = seconds
   }
 
   debugSpawnVfx(kind: 'spark' | 'damage' | 'swing'): void {
@@ -722,12 +813,13 @@ class Game {
         weaponName: weaponOf(p).name,
         comboLength: weaponOf(p).combo.length,
         runesOwned: Loadout.runesOwned[p],
-        slots: [0, 1, 2, 3].map((i) => skillForSlot(p, i)?.id ?? null),
+        slots: Array.from({ length: SLOT_COUNT }, (_, i) => skillForSlot(p, i)?.id ?? null),
         cooldowns: [
           Number(Loadout.cd0[p].toFixed(2)),
           Number(Loadout.cd1[p].toFixed(2)),
           Number(Loadout.cd2[p].toFixed(2)),
           Number(Loadout.cd3[p].toFixed(2)),
+          Number(Loadout.cd4[p].toFixed(2)),
         ],
       },
       levelMode: this.levelMode,
@@ -770,6 +862,18 @@ declare global {
       spawnTestEnemy: (x: number, z: number, rotY?: number) => number
       freezeEnemies: (frozen: boolean) => void
       spawnVfx: (kind: 'spark' | 'damage' | 'swing') => void
+      /** 적을 특정 공격 패턴의 예고 상태로 세워 둡니다(4색 확인용). */
+      forceAttack: (entity: number, index: number) => string
+      spawnBoss: (x: number, z: number) => number
+      /** 플레이어에게 속박을 겁니다(파랑 상태 확인용). */
+      applySnare: (seconds: number) => void
+      /** 트라이포드 검증용 — 포인트 지급 / 해금 / 실효 수치 조회 */
+      grantTripod: (n: number) => void
+      unlockTripod: (skillId: string, tier: number, option: number) => boolean
+      switchTripod: (skillId: string, tier: number, option: number) => boolean
+      effectiveSkill: (slot: number) => Record<string, number | string> | null
+      tripodInfo: () => { points: number; panelOpen: boolean }
+      toggleTripodPanel: () => void
     }
   }
 }
@@ -792,4 +896,24 @@ window.__game = {
   spawnTestEnemy: (x, z, rotY) => game.debugSpawnTestEnemy(x, z, rotY),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),
+  forceAttack: (entity, index) => game.debugForceAttack(entity, index),
+  spawnBoss: (x, z) => game.debugSpawnBoss(x, z),
+  applySnare: (seconds) => game.debugApplySnare(seconds),
+  grantTripod: (n) => {
+    grantTripodPoint(n)
+    game.debugRefreshLoadout()
+  },
+  unlockTripod: (skillId, tier, option) => {
+    const ok = unlockTripod(skillId, tier, option)
+    if (ok) game.debugRefreshLoadout()
+    return ok
+  },
+  switchTripod: (skillId, tier, option) => {
+    const ok = switchTripod(skillId, tier, option)
+    if (ok) game.debugRefreshLoadout()
+    return ok
+  },
+  effectiveSkill: (slot) => game.debugEffectiveSkill(slot),
+  tripodInfo: () => game.debugTripodInfo(),
+  toggleTripodPanel: () => game.debugToggleTripodPanel(),
 }

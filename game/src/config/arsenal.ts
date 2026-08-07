@@ -23,12 +23,23 @@
  *
  * ── 구조: 무기 2슬롯 고정 + 룬 2슬롯 자유 ────────────────────────────────
  *
- *   Q, E  ← 무기 전용 스킬 (무기를 바꿔야 바뀜)      = 정체성, 밸런스 기준선
- *   R, F  ← 룬 스킬 (아무 무기에나 장착)             = 탐험 보상, 자유도
+ *   Q, E, R  ← 무기 전용 스킬 (무기를 바꿔야 바뀜)     = 정체성, 밸런스 기준선
+ *   F, G     ← 룬 스킬 (아무 무기에나 장착)            = 탐험 보상, 자유도
  *
  * 무기 전용 슬롯이 고정이라 "무기별 기본 골격"은 무기 수만큼만 검증하면 되고,
  * 자유 슬롯을 2개로 묶어 조합 폭발을 막습니다.
  * (조사 결론: "클래스 틀 + 스킬 특화"의 절충안이 1인 개발에 가장 현실적)
+ *
+ * ── 왜 무기 스킬을 2개에서 3개로 늘렸는가 ──────────────────────────────
+ * 2개는 **선택이 아니라 순서**였습니다. 둘 다 쿨마다 쓰는 게 언제나 최적이라
+ * "무엇을 쓸까"라는 판단이 발생하지 않았습니다. 3개가 되면 상황에 따라
+ * 하나를 아껴야 하고, 그때 비로소 판단이 생깁니다.
+ *
+ * 그리고 세 번째는 **그 무기가 못 하던 것**을 맡습니다. 셋 다 공격기면
+ * 숫자만 늘어난 것이지 플레이가 넓어지지 않습니다.
+ *   롱소드 → 원거리(검기 발사)    · 붙지 못할 때 할 게 없던 문제
+ *   대검   → 기동력(도약 강타)    · 적이 빠지면 아무것도 못 하던 문제
+ *   쌍단검 → 속박(발목 긋기)      · 등 뒤를 잡을 시간을 스스로 만들지 못하던 문제
  *
  * ── 자원: 스킬은 오직 쿨다운 ───────────────────────────────────────────
  * DESIGN.md 기둥 1 그대로입니다. 스킬에 스태미나를 물리면 "스킬 쓰면 회피 못 함"이
@@ -70,6 +81,8 @@ export interface SkillDef {
   iFrames?: [number, number]
   /** 자가 회복량 */
   healSelf: number
+  /** 맞은 대상을 묶는 시간(초). 적이 쓰는 파랑 공격과 같은 규칙입니다. */
+  snare: number
 
   /** 예고/이펙트 색 */
   color: number
@@ -94,6 +107,7 @@ function skill(def: Partial<SkillDef> & Pick<SkillDef, 'id' | 'name' | 'desc'>):
     trauma: 0.35,
     dash: 0,
     healSelf: 0,
+    snare: 0,
     color: 0xbfe0ff,
     ...def,
   }
@@ -138,6 +152,34 @@ export const SKILLS: Record<string, SkillDef> = {
     color: 0xcfe8ff,
   }),
 
+  blade_wave: skill({
+    id: 'blade_wave',
+    name: '검기 발사',
+    /**
+     * 롱소드의 **세 번째 다리**: 원거리.
+     *
+     * 세 번째 스킬을 고를 때 기준은 "더 센 것"이 아니라 **"이 무기가 못 하던 것"** 입니다.
+     * 롱소드는 파고들기(돌진 베기)와 광역(회전 베기)은 있는데, 붙지 못하는 상황에
+     * 할 수 있는 게 아무것도 없었습니다. 그래서 붙지 않고 때리는 수단을 줍니다.
+     * 좁은 각도(28°)로 둔 이유: 넓으면 이게 최적해가 되어 나머지 둘을 밀어냅니다.
+     * 겨눠야 맞는다 = 원거리를 주되 공짜로는 주지 않는다.
+     */
+    desc: '앞으로 검기를 날린다. 붙지 않고 때리는 유일한 수단.',
+    shape: 'cone',
+    range: 7.4,
+    arcDeg: 28,
+    cooldown: 10,
+    windup: 0.28,
+    active: 0.12,
+    recovery: 0.34,
+    damage: 30,
+    knockback: 2.4,
+    hitstop: 0.07,
+    trauma: 0.32,
+    moveScale: 0.08,
+    color: 0x8fe3ff,
+  }),
+
   // ── 대검 전용 ──────────────────────────────────────────────
   earthshatter: skill({
     id: 'earthshatter',
@@ -175,6 +217,36 @@ export const SKILLS: Record<string, SkillDef> = {
     trauma: 0.4,
     moveScale: 0.05,
     color: 0xffcf7a,
+  }),
+
+  leap_slam: skill({
+    id: 'leap_slam',
+    name: '도약 강타',
+    /**
+     * 대검의 **세 번째 다리**: 기동력.
+     *
+     * 대검의 약점은 명확합니다 — 이동 0.86배, 공격 중 0.04배로 사실상 못 움직입니다.
+     * 그래서 적이 빠지면 아무것도 못 합니다. 이 스킬 하나가 그 약점을 **정확히**
+     * 메웁니다: 뛰어가서 찍는다.
+     *
+     * 원형 판정 + 대시로 만든 이유는 그림자 도약과 같습니다 — 빠르게 이동하는
+     * 동안의 부채꼴 판정은 프레임률에 따라 빗나갑니다(arsenal.ts shadow_step 주석 참고).
+     * 무적은 주지 않습니다. 무적까지 붙으면 "느리고 무겁다"는 대검의 정체성이 사라집니다.
+     */
+    desc: '겨눈 곳으로 뛰어들며 내려찍는다. 붙지 못하던 약점을 메운다.',
+    shape: 'circle',
+    range: 3.2,
+    cooldown: 14,
+    windup: 0.3,
+    active: 0.14,
+    recovery: 0.62,
+    damage: 48,
+    knockback: 6,
+    dash: 6.5,
+    hitstop: 0.13,
+    trauma: 0.7,
+    moveScale: 0,
+    color: 0xffa93c,
   }),
 
   // ── 쌍단검 전용 ────────────────────────────────────────────
@@ -243,6 +315,40 @@ export const SKILLS: Record<string, SkillDef> = {
     trauma: 0.16,
     moveScale: 0.3,
     color: 0xc4b5fd,
+  }),
+
+  hamstring: skill({
+    id: 'hamstring',
+    name: '발목 긋기',
+    /**
+     * 쌍단검의 **세 번째 다리**: 상대를 묶는다.
+     *
+     * 이 스킬만 유일하게 "피해를 주는 것"이 목적이 아닙니다. 12뎀은 기본 콤보
+     * 1타(7)보다 조금 나은 수준입니다. 존재 이유는 **속박**입니다.
+     *
+     * 왜 하필 단검인가 — 기둥 3(포지셔닝이 보상받는다)과 정확히 맞물리기 때문입니다.
+     * 적을 묶으면 회전 속도까지 떨어져서 **등 뒤를 잡을 시간이 길어집니다.**
+     * 즉 이 스킬은 그 자체로 강한 게 아니라, **다음 백어택을 성립시키는 밑작업**입니다.
+     * "묶고 → 돌아가고 → 등을 친다"는 세 동작이 하나의 문장이 됩니다.
+     *
+     * 그리고 이건 적이 플레이어에게 쓰는 파랑(속박)과 **같은 규칙**입니다.
+     * 적이 나에게 쓰는 수단을 나도 쓴다 = 공정합니다(combat.ts 설계 노트).
+     */
+    desc: '다리를 그어 묶는다. 피해는 작지만 등 뒤를 잡을 시간을 만든다.',
+    shape: 'cone',
+    range: 2.5,
+    arcDeg: 120,
+    cooldown: 9,
+    windup: 0.1,
+    active: 0.08,
+    recovery: 0.22,
+    damage: 12,
+    knockback: 0.4,
+    snare: 1.8,
+    hitstop: 0.05,
+    trauma: 0.2,
+    moveScale: 0.3,
+    color: 0x67e8f9,
   }),
 
   // ── 룬 (모든 무기 공용, 탐험으로 획득) ──────────────────────
@@ -348,8 +454,8 @@ export interface WeaponDef {
   attackMoveScale: number
   comboWindow: number
   combo: ComboStep[]
-  /** Q, E 슬롯에 들어가는 전용 스킬 */
-  skills: [string, string]
+  /** Q, E, R 슬롯에 들어가는 전용 스킬 */
+  skills: [string, string, string]
 }
 
 export const WEAPONS: WeaponDef[] = [
@@ -360,7 +466,7 @@ export const WEAPONS: WeaponDef[] = [
     moveSpeedScale: 1,
     attackMoveScale: 0.12,
     comboWindow: 0.42,
-    skills: ['lunge_slash', 'whirlwind'],
+    skills: ['lunge_slash', 'whirlwind', 'blade_wave'],
     combo: [
       { name: '1타', windup: 0.12, active: 0.08, recovery: 0.2, damage: 12, range: 2.3, arcDeg: 110, staminaCost: 11, hitstop: 0.055, trauma: 0.22, lunge: 1.5, knockback: 1.6 },
       { name: '2타', windup: 0.1, active: 0.08, recovery: 0.22, damage: 14, range: 2.3, arcDeg: 120, staminaCost: 12, hitstop: 0.06, trauma: 0.26, lunge: 1.7, knockback: 1.8 },
@@ -375,7 +481,7 @@ export const WEAPONS: WeaponDef[] = [
     // 대검은 휘두르는 순간 거의 못 움직입니다. 이 수치 하나가 "무겁다"를 만듭니다.
     attackMoveScale: 0.04,
     comboWindow: 0.55,
-    skills: ['earthshatter', 'wide_cleave'],
+    skills: ['earthshatter', 'wide_cleave', 'leap_slam'],
     combo: [
       { name: '1타', windup: 0.26, active: 0.11, recovery: 0.34, damage: 26, range: 3.1, arcDeg: 130, staminaCost: 18, hitstop: 0.09, trauma: 0.4, lunge: 1.6, knockback: 3.4 },
       { name: '2타(마무리)', windup: 0.36, active: 0.13, recovery: 0.6, damage: 46, range: 3.5, arcDeg: 165, staminaCost: 30, hitstop: 0.15, trauma: 0.7, lunge: 2.2, knockback: 7.5 },
@@ -389,7 +495,7 @@ export const WEAPONS: WeaponDef[] = [
     // 단검은 공격 중에도 꽤 움직입니다 — 치고 빠지는 리듬의 근거.
     attackMoveScale: 0.34,
     comboWindow: 0.36,
-    skills: ['shadow_step', 'flurry'],
+    skills: ['shadow_step', 'flurry', 'hamstring'],
     combo: [
       { name: '1타', windup: 0.07, active: 0.06, recovery: 0.12, damage: 7, range: 1.9, arcDeg: 95, staminaCost: 6, hitstop: 0.035, trauma: 0.14, lunge: 1.1, knockback: 0.8 },
       { name: '2타', windup: 0.06, active: 0.06, recovery: 0.12, damage: 8, range: 1.9, arcDeg: 95, staminaCost: 6, hitstop: 0.035, trauma: 0.15, lunge: 1.1, knockback: 0.8 },
@@ -403,6 +509,10 @@ export function weaponAt(index: number): WeaponDef {
   return WEAPONS[Math.min(Math.max(index, 0), WEAPONS.length - 1)]
 }
 
-/** 슬롯 4개의 표시용 키. WASD와 겹치지 않게 고른 배치입니다. */
-export const SKILL_KEYS = ['Q', 'E', 'R', 'F'] as const
-export const SKILL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyR', 'KeyF'] as const
+/**
+ * 슬롯 5개의 표시용 키. WASD와 겹치지 않고 **왼손을 떼지 않고 닿는** 범위입니다.
+ *   Q E R  = 무기 스킬 3개   ·   F G = 룬 2개
+ * 룬 교체는 Tab(F슬롯) / C(G슬롯) — G가 스킬 키가 되면서 옮겼습니다.
+ */
+export const SKILL_KEYS = ['Q', 'E', 'R', 'F', 'G'] as const
+export const SKILL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyG'] as const
