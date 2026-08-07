@@ -1,10 +1,13 @@
 import * as THREE from 'three'
-import { KILL_FEEDBACK, PLAYER, TREASURE, WORLD } from './config/balance'
+import { RUNE_ORDER, SKILLS } from './config/arsenal'
+import { KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
 import {
   Actor,
   ActorState,
   Health,
+  Loadout,
   Pickup,
+  Player,
   Renderable,
   Stamina,
   Transform,
@@ -21,10 +24,12 @@ import { KIND_TREASURE, Visuals } from './render/visuals'
 import { countLivingEnemies, hitEvents, resolveAttacks } from './systems/combat'
 import { enemyAiSystem } from './systems/enemyAI'
 import { deathEvents, healthSystem } from './systems/health'
+import { grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { physicsSystem, setTerrain } from './systems/physics'
 import { playerControlSystem, type ControlContext } from './systems/playerControl'
 import { enemyCountForWave, spawnFromLevel, spawnPlayer, spawnWave } from './systems/world'
 import { Hud } from './ui/hud'
+import { SkillBar } from './ui/skillbar'
 
 /**
  * 게임 루프 — 시스템 실행 순서가 여기 담깁니다.
@@ -50,6 +55,10 @@ class Game {
   private readonly visuals: Visuals
   private readonly vfx: Vfx
   private readonly hud: Hud
+  private readonly skillBar: SkillBar
+  /** 매 프레임 배열을 새로 만들지 않도록 재사용합니다. */
+  private readonly cdBuf = [0, 0, 0, 0]
+  private readonly cdMaxBuf = [1, 1, 1, 1]
 
   private playerEntity = -1
   private wave = 1
@@ -67,6 +76,9 @@ class Game {
   private terrain: Terrain | null = null
   private treasureTotal = 0
   private treasuresFound = 0
+  /** 플레이어가 적중시킨 누적 타격 수/피해량 — 다단히트 같은 것을 검증할 때 씁니다. */
+  private hitsDealt = 0
+  private damageDealt = 0
   private lastFadeLevel = -999
 
   constructor(canvas: HTMLCanvasElement) {
@@ -81,6 +93,7 @@ class Game {
     this.visuals = new Visuals(this.scene, this.cam.camera)
     this.vfx = new Vfx(this.scene)
     this.hud = new Hud()
+    this.skillBar = new SkillBar()
 
     this.wantsLevel = new URLSearchParams(location.search).get('level') === 'storage'
 
@@ -92,6 +105,19 @@ class Game {
       aimX: 0,
       aimZ: 0,
       onSwing: (x, z, rotY, range, arcDeg) => this.vfx.spawnSwing(x, z, rotY, range, arcDeg),
+      onCast: (v) => {
+        const y = this.terrain ? this.terrain.groundYAt(v.x, v.z) : 0
+        // 원형/지점 스킬은 전방위이므로 부채꼴 각도를 360°로 바꿉니다.
+        const arc = v.shape === 'cone' ? v.arcDeg : 360
+        if (v.phase === 'telegraph') {
+          // 테두리(범위) + 차오르는 안쪽(남은 시간) 두 장을 겹칩니다.
+          this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'outline')
+          this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'fill')
+        } else {
+          this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'fade')
+        }
+      },
+      onLoadoutChange: () => this.refreshLoadout(),
     }
 
     initInput(canvas)
@@ -129,6 +155,8 @@ class Game {
     this.gameOver = false
     this.treasuresFound = 0
     this.treasureTotal = 0
+    this.hitsDealt = 0
+    this.damageDealt = 0
     this.hud.hideBanner()
 
     const level = this.wantsLevel ? loadLevelFromStorage() : null
@@ -147,6 +175,7 @@ class Game {
       for (const e of spawned.entities) this.visuals.attach(e, Renderable.kind[e])
       this.treasureTotal = spawned.treasureTotal
 
+      // 레벨 모드는 룬 없이 시작합니다 — 룬은 탐험(보물)으로 얻습니다.
       const foes = spawned.entities.length - spawned.treasureTotal
       this.hud.setMode('level')
       this.hud.showBanner(level.name, `적 ${foes} · 보물 ${spawned.treasureTotal}`, 2.4)
@@ -157,10 +186,27 @@ class Game {
       this.arena.visible = true
       this.playerEntity = spawnPlayer()
       this.visuals.attach(this.playerEntity, Renderable.kind[this.playerEntity])
+      // 아레나는 전투 시험장이므로 룬 두 개를 미리 줍니다.
+      // (레벨 모드에서는 탐험으로 얻어야 합니다 — 성장 설계의 차이)
+      grantRune(this.playerEntity, 0)
+      grantRune(this.playerEntity, 1)
       this.wave = 1
       this.hud.setMode('arena')
       this.startWave()
     }
+    this.refreshLoadout()
+  }
+
+  /** 스킬바에 현재 무기/룬 이름을 반영합니다. */
+  private refreshLoadout(): void {
+    const p = this.playerEntity
+    if (p < 0) return
+    const slots = []
+    for (let i = 0; i < 4; i++) {
+      const def = skillForSlot(p, i)
+      slots.push({ name: def?.name ?? '', empty: !def })
+    }
+    this.skillBar.setLoadout(weaponOf(p).name, slots)
   }
 
   private startWave(): void {
@@ -206,6 +252,10 @@ class Game {
     // ---- 3. 타격 피드백 ----
     // 손맛의 3요소(정지 + 흔들림 + 숫자)를 여기서 한꺼번에 터뜨립니다.
     for (const hit of hitEvents) {
+      if (!hit.victimIsPlayer && hit.damage > 0) {
+        this.hitsDealt++
+        this.damageDealt += hit.damage
+      }
       requestHitstop(hit.hitstop)
       this.cam.addTrauma(hit.trauma, hit.dirX, hit.dirZ)
       this.vfx.spawnHitSpark(hit.x, hit.y, hit.z, hit.heavy ? 1.5 : 1)
@@ -297,6 +347,12 @@ class Game {
     } else {
       this.hud.setProgress(this.wave, enemiesLeft, this.kills)
     }
+    this.cdBuf[0] = Loadout.cd0[p]
+    this.cdBuf[1] = Loadout.cd1[p]
+    this.cdBuf[2] = Loadout.cd2[p]
+    this.cdBuf[3] = Loadout.cd3[p]
+    for (let i = 0; i < 4; i++) this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
+    this.skillBar.update(this.cdBuf, this.cdMaxBuf)
     this.hud.tickPerf(time.realDt)
 
     endFrame()
@@ -322,7 +378,18 @@ class Game {
       this.treasuresFound++
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
-      this.hud.showBanner('보물 획득', `${this.treasuresFound} / ${this.treasureTotal}`, 1.4)
+
+      // 보물 = 새 룬(= 새 스킬). "세져서" 가 아니라 "새로운 걸 할 수 있어서"
+      // 재미있어야 한다는 DESIGN.md 성장 설계를 시스템으로 구현한 지점입니다.
+      const nextRune = Loadout.runesOwned[p]
+      if (nextRune < RUNE_ORDER.length) {
+        grantRune(p, nextRune)
+        this.refreshLoadout()
+        const def = SKILLS[RUNE_ORDER[nextRune]]
+        this.hud.showBanner(`룬 획득 — ${def.name}`, def.desc, 2.6)
+      } else {
+        this.hud.showBanner('보물 획득', `${this.treasuresFound} / ${this.treasureTotal}`, 1.4)
+      }
       this.visuals.detach(e)
       destroyEntity(e)
     }
@@ -429,16 +496,18 @@ class Game {
   }
 
   /** 가장 가까운 적 (검증 및 디버깅용) */
-  private nearestEnemy(): { x: number; z: number; dist: number } | null {
+  private nearestEnemy(): { x: number; z: number; dist: number; hp: number } | null {
     const p = this.playerEntity
-    let best: { x: number; z: number; dist: number } | null = null
+    let best: { x: number; z: number; dist: number; hp: number } | null = null
     for (let e = 0; e < 4096; e++) {
       if (!isAlive(e) || e === p) continue
       if (Actor.state[e] === ActorState.Dead) continue
       const kind = Renderable.kind[e]
       if (kind !== 1 && kind !== 3) continue
       const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
-      if (!best || d < best.dist) best = { x: Transform.x[e], z: Transform.z[e], dist: d }
+      if (!best || d < best.dist) {
+        best = { x: Transform.x[e], z: Transform.z[e], dist: d, hp: Health.hp[e] }
+      }
     }
     return best
   }
@@ -449,7 +518,12 @@ class Game {
     const near = this.nearestEnemy()
     return {
       nearestEnemy: near
-        ? { x: Number(near.x.toFixed(3)), z: Number(near.z.toFixed(3)), dist: Number(near.dist.toFixed(3)) }
+        ? {
+            x: Number(near.x.toFixed(3)),
+            z: Number(near.z.toFixed(3)),
+            dist: Number(near.dist.toFixed(3)),
+            hp: Number(near.hp.toFixed(1)),
+          }
         : null,
       frame: time.frame,
       elapsed: Number(time.elapsed.toFixed(3)),
@@ -467,11 +541,26 @@ class Game {
         terrainLevel: this.terrain ? this.terrain.levelAtWorld(Transform.x[p], Transform.z[p]) : null,
       },
       aim: { x: Number(this.aim.x.toFixed(3)), z: Number(this.aim.z.toFixed(3)) },
+      cast: { x: Number(Player.castX[p].toFixed(3)), z: Number(Player.castZ[p].toFixed(3)) },
       enemiesLeft: countLivingEnemies(),
       kills: this.kills,
+      hitsDealt: this.hitsDealt,
+      damageDealt: Number(this.damageDealt.toFixed(1)),
       wave: this.wave,
       gameOver: this.gameOver,
-      maxCombo: PLAYER.combo.length,
+      loadout: {
+        weapon: weaponOf(p).id,
+        weaponName: weaponOf(p).name,
+        comboLength: weaponOf(p).combo.length,
+        runesOwned: Loadout.runesOwned[p],
+        slots: [0, 1, 2, 3].map((i) => skillForSlot(p, i)?.id ?? null),
+        cooldowns: [
+          Number(Loadout.cd0[p].toFixed(2)),
+          Number(Loadout.cd1[p].toFixed(2)),
+          Number(Loadout.cd2[p].toFixed(2)),
+          Number(Loadout.cd3[p].toFixed(2)),
+        ],
+      },
       levelMode: this.levelMode,
       levelName: this.levelName,
       treasuresFound: this.treasuresFound,

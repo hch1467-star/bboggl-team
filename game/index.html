@@ -63,6 +63,52 @@
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
       }
 
+      /* --- 스킬바 --- */
+      #loadout {
+        display: flex; flex-direction: column; align-items: center; gap: 7px;
+        margin-bottom: 10px; pointer-events: none;
+      }
+      #weaponName {
+        font-size: 12px; color: #ffd479; font-weight: 600; letter-spacing: 0.02em;
+        background: rgba(13,16,23,0.72); border: 1px solid rgba(150,175,220,0.18);
+        border-radius: 7px; padding: 3px 11px; backdrop-filter: blur(6px);
+      }
+      #slots { display: flex; gap: 7px; }
+      .slot {
+        position: relative; width: 74px; height: 56px; overflow: hidden;
+        background: rgba(13,16,23,0.82);
+        border: 1px solid rgba(150,175,220,0.22); border-radius: 9px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        backdrop-filter: blur(6px);
+      }
+      .slot.empty { opacity: 0.42; }
+      /* 쿨다운은 아래에서 위로 차오르는 어두운 판. 남은 시간이 한눈에 보입니다. */
+      .slot .cd {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        background: rgba(6,8,12,0.78); height: 0%;
+        transition: height 80ms linear;
+      }
+      /* z-index 없이 두면 .key/.nm(position:relative)이 DOM 순서상 위에 그려져
+         쿨다운 숫자가 이름 뒤에 가려집니다. 실제로 그렇게 나왔습니다. */
+      .slot .cdText {
+        position: absolute; inset: 0; z-index: 3;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 20px; font-weight: 800; color: #ffd479; opacity: 0;
+        text-shadow: 0 2px 6px rgba(0,0,0,1), 0 0 12px rgba(0,0,0,0.9);
+      }
+      .slot .key {
+        position: relative; font-size: 10px; font-weight: 700; color: #8c9ab3;
+        letter-spacing: 0.06em;
+      }
+      .slot .nm {
+        position: relative; font-size: 11.5px; font-weight: 600; color: #e2e9f5;
+        margin-top: 2px; text-align: center; line-height: 1.2; padding: 0 3px;
+      }
+      .slot.ready .nm { color: #fff; }
+      /* 쿨다운 중에는 이름을 눌러 두어 숫자가 잘 읽히게 합니다. */
+      .slot:not(.ready) .nm, .slot:not(.ready) .key { opacity: 0.45; }
+      .slot.ready { border-color: rgba(255, 212, 121, 0.5); }
+
       #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
       .key {
         background: rgba(13, 16, 23, 0.72);
@@ -100,6 +146,8 @@
       @media (max-width: 620px) {
         #controls { display: none; }
         #vitals { width: 68vw; }
+        .slot { width: 60px; height: 48px; }
+        .slot .nm { font-size: 10px; }
       }
     </style>
   </head>
@@ -137,12 +185,23 @@
         </div>
       </div>
 
-      <div class="hud-bottom">
+      <div class="hud-bottom" style="flex-direction: column; align-items: center">
+        <div id="loadout">
+          <div id="weaponName">롱소드</div>
+          <div id="slots">
+            <div class="slot" id="slot0"><span class="cd"></span><span class="cdText"></span><span class="key">Q</span><span class="nm">-</span></div>
+            <div class="slot" id="slot1"><span class="cd"></span><span class="cdText"></span><span class="key">E</span><span class="nm">-</span></div>
+            <div class="slot" id="slot2"><span class="cd"></span><span class="cdText"></span><span class="key">R</span><span class="nm">-</span></div>
+            <div class="slot" id="slot3"><span class="cd"></span><span class="cdText"></span><span class="key">F</span><span class="nm">-</span></div>
+          </div>
+        </div>
         <div id="controls">
           <div class="key"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</div>
           <div class="key"><kbd>마우스</kbd> 조준</div>
           <div class="key"><kbd>좌클릭</kbd> 공격 (3타 콤보)</div>
           <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
+          <div class="key"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 무기 교체</div>
+          <div class="key"><kbd>Tab</kbd><kbd>G</kbd> 룬 교체</div>
           <a class="key" href="./editor.html" style="color: #ffd479; text-decoration: none"
             >🛠 레벨 에디터</a
           >

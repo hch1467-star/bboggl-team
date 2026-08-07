@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "verify": "node tools/verify.mjs",
     "vfx": "node tools/vfx-preview.mjs",
-    "level": "node tools/level-preview.mjs"
+    "level": "node tools/level-preview.mjs",
+    "skills": "node tools/skill-preview.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

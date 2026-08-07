@@ -276,6 +276,110 @@ async function main() {
     check('적 AI가 플레이어를 추격해 공격함', damaged.ok, damaged.ok ? `체력 ${startHp} -> ${damaged.state.player.hp}` : '40초 내 미발생')
     await shot('03-enemies-engaging')
 
+    // ---------- 7.5 스킬 + 쿨다운 ----------
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    s = await state()
+    check('시작 무기 = 롱소드', s.loadout.weapon === 'longsword', s.loadout.weaponName)
+    check(
+      '슬롯 4개(무기2 + 룬2)가 모두 채워짐',
+      s.loadout.slots.every((x) => x !== null),
+      JSON.stringify(s.loadout.slots),
+    )
+    check('시작 쿨다운은 모두 0', s.loadout.cooldowns.every((c) => c === 0))
+
+    await tap('KeyQ')
+    const casting = await waitUntil((st) => st.player.state === 5, 3000)
+    check('Q로 스킬 시전 (state=Skill)', casting.ok, `state=${casting.state.player.state}`)
+    check(
+      '시전과 동시에 해당 슬롯 쿨다운 시작',
+      casting.ok && casting.state.loadout.cooldowns[0] > 0,
+      `cd=${casting.state?.loadout.cooldowns[0]}`,
+    )
+
+    // 시전이 끝난 뒤에도 쿨다운이 남아 있으면 재시전이 막혀야 합니다.
+    await waitUntil((st) => st.player.state !== 5, 5000)
+    const cdState = await state()
+    await tap('KeyQ')
+    await sleep(400)
+    const afterRecast = await state()
+    check(
+      '쿨다운 중에는 재시전 불가',
+      cdState.loadout.cooldowns[0] > 0 && afterRecast.player.state !== 5,
+      `남은 쿨다운 ${cdState.loadout.cooldowns[0]}초`,
+    )
+
+    // ---------- 7.6 무기별로 스킬과 콤보가 달라지는가 ----------
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await tap('Digit2')
+    await sleep(400)
+    s = await state()
+    check('2번 키로 대검 교체', s.loadout.weapon === 'greatsword', s.loadout.weaponName)
+    check('대검은 2타 콤보 (롱소드는 3타)', s.loadout.comboLength === 2, `${s.loadout.comboLength}타`)
+    check(
+      '무기를 바꾸면 Q/E 스킬도 바뀜',
+      s.loadout.slots[0] === 'earthshatter' && s.loadout.slots[1] === 'wide_cleave',
+      JSON.stringify(s.loadout.slots.slice(0, 2)),
+    )
+    // 룬 슬롯은 무기와 무관하게 유지되어야 합니다(자유 슬롯의 정의).
+    check('무기를 바꿔도 룬 슬롯은 유지됨', s.loadout.slots[2] !== null && s.loadout.slots[3] !== null)
+
+    // 지점 지정 스킬은 커서 위치에 착탄점을 고정합니다.
+    await aimAt(6, 0)
+    await sleep(250)
+    await tap('KeyQ')
+    const pointCast = await waitUntil((st) => st.player.state === 5, 3000)
+    check(
+      '지점 지정 스킬이 커서 쪽에 착탄점을 고정',
+      pointCast.ok && Math.hypot(pointCast.state.cast.x - 6, pointCast.state.cast.z) < 4,
+      `착탄 (${pointCast.state?.cast.x}, ${pointCast.state?.cast.z}) / 조준 (6, 0)`,
+    )
+
+    // 무기 교체는 **대기 상태에서만** 됩니다(시전 중 교체는 의도적으로 막혀 있음).
+    // 그래서 시전이 끝날 때까지 기다린 뒤에 눌러야 합니다.
+    const idleAgain = await waitUntil((st) => st.player.state === 0, 6000)
+    check('시전 중에는 무기 교체가 막힘 (시전 종료 대기)', idleAgain.ok)
+    await tap('Digit3')
+    await sleep(400)
+    s = await state()
+    check('3번 키로 쌍단검 교체 + 4타 콤보', s.loadout.weapon === 'daggers' && s.loadout.comboLength === 4, `${s.loadout.weaponName} ${s.loadout.comboLength}타`)
+
+    // ---------- 7.7 다단히트 스킬이 실제로 여러 번 때리는가 ----------
+    // 쌍단검 E = 연속 찌르기(5회). 적의 체력 변화로 재면 그 사이 적이 죽거나 바뀌어
+    // 측정이 흔들립니다. 그래서 **명중 횟수 자체**를 셉니다.
+    await page.evaluate(() => window.__game.reset())
+    await sleep(400)
+    await tap('Digit3')
+    await sleep(300)
+
+    let flurryHits = 0
+    const flurryStart = Date.now()
+    await press('KeyW')
+    while (Date.now() - flurryStart < 45000) {
+      const st = await state()
+      if (!st.nearestEnemy) break
+      await aimAt(st.nearestEnemy.x, st.nearestEnemy.z)
+      if (st.nearestEnemy.dist < 2.0) {
+        await release('KeyW')
+        const hitsBefore = st.hitsDealt
+        await tap('KeyE')
+        await sleep(1600)
+        const after = await state()
+        flurryHits = after.hitsDealt - hitsBefore
+        if (flurryHits > 0) break
+      } else {
+        await press('KeyW')
+      }
+      await sleep(90)
+    }
+    await release('KeyW')
+    check(
+      '다단히트 스킬이 한 번의 시전으로 여러 번 명중',
+      flurryHits >= 3,
+      `한 번 시전에 ${flurryHits}회 명중 (설계상 최대 5회)`,
+    )
+
     // ---------- 8. 레벨 에디터 ----------
     // 에디터로 레벨을 "만들어서" 저장하고, 그 레벨을 게임이 실제로 불러와
     // 플레이되는지까지 한 번에 확인합니다. 두 프로그램의 접점이 여기라서

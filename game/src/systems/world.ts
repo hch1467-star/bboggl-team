@@ -6,6 +6,7 @@ import {
   Enemy,
   EnemyKind,
   Health,
+  Loadout,
   Pickup,
   Player,
   Renderable,
@@ -31,6 +32,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   addComponent(Stamina, e)
   addComponent(Actor, e)
   addComponent(Player, e)
+  addComponent(Loadout, e)
   addComponent(Renderable, e)
 
   Transform.x[e] = x
@@ -57,12 +59,26 @@ export function spawnPlayer(x = 0, z = 0): number {
   Actor.comboWindowT[e] = 0
   Actor.bufferedAttack[e] = 0
   Actor.cooldownT[e] = 0
-  Actor.hasHit[e] = 0
+  Actor.hitsLeft[e] = 0
+  Actor.nextHitT[e] = 0
+  Actor.skillSlot[e] = 0
   Actor.moveScale[e] = 1
   Player.dodgeDirX[e] = 0
   Player.dodgeDirZ[e] = 1
   Player.dodgeElapsed[e] = 0
   Player.dodgeCooldownT[e] = 0
+  Player.castX[e] = 0
+  Player.castZ[e] = 0
+  // 시작 장비: 롱소드, 룬 없음. 룬은 탐험(보물)으로 얻습니다 — 기둥 4의
+  // "성장 = 새로운 걸 할 수 있게 되는 것"을 시스템으로 강제하는 지점입니다.
+  Loadout.weapon[e] = 0
+  Loadout.rune0[e] = -1
+  Loadout.rune1[e] = -1
+  Loadout.runesOwned[e] = 0
+  Loadout.cd0[e] = 0
+  Loadout.cd1[e] = 0
+  Loadout.cd2[e] = 0
+  Loadout.cd3[e] = 0
   Renderable.kind[e] = KIND_PLAYER
   return e
 }
@@ -102,7 +118,9 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Actor.bufferedAttack[e] = 0
   // 스폰 직후 바로 때리지 못하게 짧은 유예를 줍니다.
   Actor.cooldownT[e] = 0.6
-  Actor.hasHit[e] = 0
+  Actor.hitsLeft[e] = 0
+  Actor.nextHitT[e] = 0
+  Actor.skillSlot[e] = 0
   Actor.moveScale[e] = 1
   Enemy.kind[e] = kind
   Enemy.aggro[e] = 0

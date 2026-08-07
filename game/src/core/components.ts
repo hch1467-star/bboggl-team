@@ -48,10 +48,13 @@ export const Stamina = defineComponent({
 /** 액터 상태 값 (Actor.state) */
 export const enum ActorState {
   Idle = 0,
+  /** 기본 공격 콤보 */
   Attack = 1,
   Dodge = 2,
   Stagger = 3,
   Dead = 4,
+  /** 스킬 시전. 기본 공격과 같은 windup/active/recovery 3단 구조를 씁니다. */
+  Skill = 5,
 }
 
 /** 공격 단계 값 (Actor.phase) */
@@ -80,8 +83,16 @@ export const Actor = defineComponent({
   bufferedAttack: 'u8',
   /** 다음 공격까지 남은 쿨다운(적 전용) */
   cooldownT: 'f32',
-  /** 이번 active 구간에서 이미 명중했는지 (1프레임 다중 히트 방지) */
-  hasHit: 'u8',
+  /**
+   * 이번 active 구간에서 남은 타격 횟수.
+   * 1이면 한 번만 맞습니다(1프레임 다중 히트 방지). 다단히트 스킬은 2 이상으로 시작해
+   * active 구간을 균등 분할하며 여러 번 때립니다.
+   */
+  hitsLeft: 'u8',
+  /** 다음 타격까지 남은 시간(초). 다단히트 간격. */
+  nextHitT: 'f32',
+  /** 시전 중인 스킬 슬롯 (0~3). state === Skill 일 때만 유효. */
+  skillSlot: 'u8',
   /** 이동 속도 배율 (공격 중 감속 등) */
   moveScale: 'f32',
 })
@@ -91,6 +102,10 @@ export const Player = defineComponent({
   /** 구르기 방향 */
   dodgeDirX: 'f32',
   dodgeDirZ: 'f32',
+  /** 지점 지정 스킬의 착탄 좌표 — 시전 시작 순간에 고정합니다.
+   *  매 프레임 커서를 따라가게 하면 예고를 보고 피하는 것이 불가능해집니다. */
+  castX: 'f32',
+  castZ: 'f32',
   /** 구르기 총 지속시간 대비 경과 시간 — 무적 프레임 판정에 사용 */
   dodgeElapsed: 'f32',
   dodgeCooldownT: 'f32',
@@ -108,6 +123,26 @@ export const Enemy = defineComponent({
   kind: 'u8',
   /** 어그로 상태 (0 = 미발견, 1 = 추격 중) */
   aggro: 'u8',
+})
+
+/**
+ * 장비 — 무기 1개 + 룬 2개, 그리고 스킬 슬롯 4개의 쿨다운.
+ *
+ * 슬롯 배치: [0]=무기스킬1(Q) [1]=무기스킬2(E) [2]=룬1(R) [3]=룬2(F)
+ * 무기 슬롯을 고정해 둔 것이 밸런스의 기준선입니다(arsenal.ts 설계 노트 참고).
+ */
+export const Loadout = defineComponent({
+  weapon: 'u8',
+  /** 장착된 룬의 RUNE_ORDER 인덱스. -1 = 비어 있음. */
+  rune0: 'i32',
+  rune1: 'i32',
+  /** 지금까지 획득한 룬 개수 (탐험 보상으로 늘어남) */
+  runesOwned: 'u8',
+  /** 슬롯별 남은 쿨다운(초) */
+  cd0: 'f32',
+  cd1: 'f32',
+  cd2: 'f32',
+  cd3: 'f32',
 })
 
 /** 주울 수 있는 것 — 지금은 보물. 나중에 스킬 해금/소모품으로 확장합니다. */

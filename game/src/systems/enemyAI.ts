@@ -105,7 +105,8 @@ export function enemyAiSystem(
         if (phase === AttackPhase.Windup) {
           Actor.phase[e] = AttackPhase.Active
           Actor.timer[e] = cfg.active
-          Actor.hasHit[e] = 0
+          Actor.hitsLeft[e] = 1
+          Actor.nextHitT[e] = 0
           ctx.onSwing(
             Transform.x[e],
             Transform.z[e],
@@ -134,7 +135,8 @@ export function enemyAiSystem(
       Actor.state[e] = ActorState.Attack
       Actor.phase[e] = AttackPhase.Windup
       Actor.timer[e] = cfg.windup
-      Actor.hasHit[e] = 0
+      Actor.hitsLeft[e] = 1
+          Actor.nextHitT[e] = 0
       decayVelocity(e, dt, 12)
       continue
     }

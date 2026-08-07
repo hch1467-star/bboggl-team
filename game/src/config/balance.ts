@@ -60,9 +60,6 @@ export const PLAYER = {
   acceleration: 60,
   /** 초당 회전 속도(도) — 마우스 조준 방향으로 몸을 돌리는 속도 */
   turnSpeedDeg: 900,
-  /** 공격 중 이동 속도 배율. 소울라이크의 "커밋" 감각을 만드는 핵심 수치. */
-  attackMoveScale: 0.12,
-
   /** 스태미나 */
   maxStamina: 100,
   staminaRegen: 34,
@@ -81,63 +78,9 @@ export const PLAYER = {
     cooldown: 0.12,
   },
 
-  /**
-   * 3타 콤보. 각 타는 3단계로 구성됩니다:
-   *   windup(선행동작) → active(판정 발생) → recovery(후딜)
-   *
-   * windup이 없으면 "허공에서 데미지가 튀어나오는" 느낌이 나고,
-   * recovery가 없으면 무한 연타가 되어 긴장감이 사라집니다.
-   */
-  combo: [
-    {
-      name: '1타',
-      windup: 0.12,
-      active: 0.08,
-      recovery: 0.2,
-      damage: 12,
-      range: 2.3,
-      arcDeg: 110,
-      staminaCost: 11,
-      /** 타격 시 정지 시간(초) */
-      hitstop: 0.055,
-      /** 타격 시 화면 흔들림 강도(0~1) */
-      trauma: 0.22,
-      /** 공격하며 앞으로 미끄러지는 거리(m) */
-      lunge: 1.5,
-      knockback: 1.6,
-    },
-    {
-      name: '2타',
-      windup: 0.1,
-      active: 0.08,
-      recovery: 0.22,
-      damage: 14,
-      range: 2.3,
-      arcDeg: 120,
-      staminaCost: 12,
-      hitstop: 0.06,
-      trauma: 0.26,
-      lunge: 1.7,
-      knockback: 1.8,
-    },
-    {
-      name: '3타(마무리)',
-      windup: 0.22,
-      active: 0.1,
-      recovery: 0.42,
-      damage: 27,
-      range: 2.7,
-      arcDeg: 150,
-      staminaCost: 20,
-      hitstop: 0.11,
-      trauma: 0.5,
-      lunge: 2.4,
-      knockback: 4.2,
-    },
-  ],
+  // 기본 공격 콤보 · 콤보 윈도우 · 공격 중 이동 배율은 **무기마다 다르므로**
+  // config/arsenal.ts 의 WEAPONS 로 옮겼습니다. (대검은 2타, 쌍단검은 4타 등)
 
-  /** active가 끝난 뒤 이 시간 안에 다시 누르면 다음 타로 이어집니다. */
-  comboWindow: 0.42,
   /** 피격 시 경직 시간(초) */
   hurtStagger: 0.28,
   /** 피격 후 무적(연속 피격 방지) */

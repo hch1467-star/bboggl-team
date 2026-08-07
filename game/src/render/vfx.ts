@@ -15,6 +15,7 @@ import { time } from '../core/time'
 const DAMAGE_POOL = 40
 const SPARK_POOL = 24
 const SWING_POOL = 8
+const GROUND_POOL = 20
 
 const DAMAGE_LIFE = 0.75
 const SPARK_LIFE = 0.22
@@ -38,6 +39,29 @@ interface SparkItem {
   material: THREE.MeshBasicMaterial
   life: number
   scale: number
+}
+
+/**
+ * 지면 도형 — 스킬의 예고(telegraph)와 발동 범위 표시.
+ *
+ * DESIGN.md 기둥 2("바닥을 읽는 전투")의 핵심 장치입니다.
+ * 로스트아크가 바닥 색으로 대응을 구분하듯, 우리도 스킬마다 색을 다르게 주고
+ * **예고 → 채워짐 → 발동** 3단계로 보여줍니다. 이게 있어야 적도 플레이어도
+ * "보고 피할" 수 있고, 죽었을 때 "못 봤다"가 아니라 "못 피했다"가 됩니다.
+ *
+ *   outline — 범위 테두리 (예고 내내 고정)
+ *   fill    — 안쪽이 차오름 (남은 시간 = 위험 시점을 알려줌)
+ *   fade    — 발동 순간 번쩍이며 사라짐
+ */
+type GroundMode = 'outline' | 'fill' | 'fade'
+
+interface GroundItem {
+  mesh: THREE.Mesh
+  material: THREE.MeshBasicMaterial
+  life: number
+  maxLife: number
+  mode: GroundMode
+  radius: number
 }
 
 interface SwingItem {
@@ -103,6 +127,10 @@ export class Vfx {
   private sparkCursor = 0
   private swingCursor = 0
   private readonly glowTexture: THREE.CanvasTexture
+  private readonly grounds: GroundItem[] = []
+  private groundCursor = 0
+  /** 부채꼴 지오메트리는 각도마다 달라서 캐시합니다(스킬 종류가 적어 금방 포화). */
+  private readonly sectorCache = new Map<number, THREE.BufferGeometry>()
 
   constructor(private readonly scene: THREE.Scene) {
     for (let i = 0; i < DAMAGE_POOL; i++) {
@@ -160,6 +188,62 @@ export class Vfx {
       scene.add(mesh)
       this.swings.push({ mesh, material, life: 0, baseScale: 1 })
     }
+
+    for (let i = 0; i < GROUND_POOL; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+      const mesh = new THREE.Mesh(this.sectorGeo(360), material)
+      mesh.visible = false
+      mesh.renderOrder = 12
+      scene.add(mesh)
+      this.grounds.push({ mesh, material, life: 0, maxLife: 1, mode: 'fade', radius: 1 })
+    }
+  }
+
+  /** 반지름 1짜리 단위 부채꼴. 실제 크기는 스케일로 맞춥니다. */
+  private sectorGeo(arcDeg: number): THREE.BufferGeometry {
+    const key = Math.round(arcDeg)
+    const cached = this.sectorCache.get(key)
+    if (cached) return cached
+    const arc = key >= 359 ? Math.PI * 2 : (key * Math.PI) / 180
+    const geo = new THREE.RingGeometry(0.03, 1, 56, 1, -arc / 2, arc)
+    geo.rotateX(-Math.PI / 2) // 지면에 눕히기
+    geo.rotateY(-Math.PI / 2) // theta=0 을 정면(+Z)으로
+    this.sectorCache.set(key, geo)
+    return geo
+  }
+
+  spawnGroundShape(
+    x: number,
+    y: number,
+    z: number,
+    rotY: number,
+    radius: number,
+    arcDeg: number,
+    color: number,
+    life: number,
+    mode: GroundMode,
+  ): void {
+    const item = this.grounds[this.groundCursor]
+    this.groundCursor = (this.groundCursor + 1) % GROUND_POOL
+    item.mesh.geometry = this.sectorGeo(arcDeg)
+    item.mesh.position.set(x, y + 0.05, z)
+    item.mesh.rotation.y = rotY
+    item.mesh.scale.set(radius, 1, radius)
+    item.mesh.visible = true
+    item.material.color.setHex(color)
+    item.material.opacity = mode === 'fade' ? 0.85 : mode === 'fill' ? 0.5 : 0.42
+    item.material.blending = mode === 'fade' ? THREE.AdditiveBlending : THREE.NormalBlending
+    item.material.needsUpdate = true
+    item.life = Math.max(life, 0.05)
+    item.maxLife = item.life
+    item.mode = mode
+    item.radius = radius
   }
 
   spawnDamage(x: number, y: number, z: number, amount: number, heavy = false): void {
@@ -239,6 +323,29 @@ export class Vfx {
       s.mesh.quaternion.copy(camera.quaternion)
     }
 
+    for (const g of this.grounds) {
+      if (g.life <= 0) continue
+      g.life -= dt
+      if (g.life <= 0) {
+        g.mesh.visible = false
+        continue
+      }
+      const t = 1 - g.life / g.maxLife
+      if (g.mode === 'fill') {
+        // 안쪽이 차오르는 속도 = 남은 예고 시간. 다 차면 터집니다.
+        const s2 = g.radius * (0.06 + t * 0.94)
+        g.mesh.scale.set(s2, 1, s2)
+        g.material.opacity = 0.5
+      } else if (g.mode === 'fade') {
+        const s2 = g.radius * (1 + t * 0.14)
+        g.mesh.scale.set(s2, 1, s2)
+        g.material.opacity = 0.8 * (1 - t)
+      } else {
+        // outline — 예고 내내 같은 자리에 같은 세기로 남아 범위를 알려줍니다.
+        g.material.opacity = 0.42
+      }
+    }
+
     for (const w of this.swings) {
       if (w.life <= 0) continue
       w.life -= dt
@@ -270,6 +377,12 @@ export class Vfx {
       this.scene.remove(w.mesh)
       w.material.dispose()
     }
+    for (const g of this.grounds) {
+      this.scene.remove(g.mesh)
+      g.material.dispose()
+    }
+    for (const geo of this.sectorCache.values()) geo.dispose()
+    this.sectorCache.clear()
     this.glowTexture.dispose()
   }
 }
