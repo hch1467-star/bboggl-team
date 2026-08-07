@@ -277,7 +277,7 @@ function applyHit(a: number, spec: AttackSpec): void {
   const rot = Transform.rotY[a]
   const fx = Math.sin(rot)
   const fz = Math.cos(rot)
-  const cosHalfArc = Math.cos((spec.arcDeg * Math.PI) / 180 / 2)
+  const halfArc = (spec.arcDeg * Math.PI) / 180 / 2
 
   const tids = targets.run()
   const tcount = targets.count
@@ -301,10 +301,28 @@ function applyHit(a: number, spec: AttackSpec): void {
     // 코앞에서 때려도 빗나가는 것처럼 느껴집니다.
     if (dist > spec.range + Body.radius[t]) continue
 
-    // cone 만 각도 검사를 합니다. circle/point 는 반경 안이면 전부 맞습니다.
+    /**
+     * cone 만 각도 검사를 합니다. circle/point 는 반경 안이면 전부 맞습니다.
+     *
+     * ── 대상의 **굵기**를 각도에도 반영합니다 ────────────────────────
+     * 플레이 테스트: "공격범위 이펙트에 히트박스가 좀 어색해, 제대로 안 맞는 느낌."
+     *
+     * 원인은 판정의 **비대칭**이었습니다:
+     *   · 거리는 관대 — `range + Body.radius` 로 대상의 굵기를 더해 줍니다
+     *   · 각도는 엄격 — 대상의 **중심**이 부채꼴 안에 있어야만 했습니다
+     *
+     * 그래서 적의 몸통이 초승달에 뻔히 겹쳐 보이는데도 중심이 부채꼴 밖이면
+     * 빗나갔습니다. 보이는 것과 판정이 어긋나니 "왜 안 맞지"가 됩니다.
+     *
+     * 반지름 r인 물체는 거리 d에서 ±atan(r/d) 만큼의 각도를 차지합니다.
+     * 그만큼 부채꼴을 넓혀 주면 **"몸이 겹치면 맞는다"** 가 성립합니다.
+     * 임의의 보정값이 아니라 기하학적으로 옳은 값이라는 점이 중요합니다 —
+     * 가까울수록 많이, 멀수록 적게 넓어져서 저절로 자연스러워집니다.
+     */
     if (spec.shape === 'cone' && dist > 0.0001) {
       const dot = (dx * fx + dz * fz) / dist
-      if (dot < cosHalfArc) continue
+      const slack = Math.atan2(Body.radius[t], dist)
+      if (dot < Math.cos(Math.min(Math.PI, halfArc + slack))) continue
     }
 
     // 넉백 방향: point 스킬은 착탄점 바깥으로 밀어야 자연스럽습니다.

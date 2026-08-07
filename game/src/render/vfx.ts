@@ -246,7 +246,17 @@ export class Vfx {
     const cached = this.crescentCache.get(key)
     if (cached) return cached
     const arc = (key * Math.PI) / 180
-    const geo = new THREE.RingGeometry(0.66, 1, 48, 1, -arc / 2, arc)
+    /**
+     * 안쪽 반지름 0.66 -> 0.46.
+     *
+     * 히트박스는 **0부터 사거리까지 전부**인데 초승달은 바깥 1/3만 그려서,
+     * 사거리 안쪽에 바짝 붙은 적이 맞아도 화면에는 그 적 **너머로** 궤적이
+     * 지나갔습니다. "이펙트랑 히트박스가 어긋난다"는 지적의 절반이 이것입니다.
+     *
+     * 완전히 채우면(0부터) 예전처럼 회색 덩어리가 되어 궤적으로 안 읽힙니다.
+     * 0.46은 "휘두른 자국"으로 읽히면서도 실제 도달 범위를 훨씬 정직하게 덮는 선입니다.
+     */
+    const geo = new THREE.RingGeometry(0.46, 1, 48, 1, -arc / 2, arc)
     geo.rotateX(-Math.PI / 2)
     geo.rotateY(-Math.PI / 2)
     this.crescentCache.set(key, geo)

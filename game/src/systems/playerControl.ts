@@ -99,6 +99,24 @@ function turnToward(p: number, targetRot: number, speedDegPerSec: number, dt: nu
   Transform.rotY[p] += Math.abs(diff) <= maxStep ? diff : Math.sign(diff) * maxStep
 }
 
+/**
+ * 남은 시간 안에 **정확히 도착하도록** 목표 각도로 수렴시킵니다.
+ *
+ * 플레이 테스트: "공격 시작할 때 몸이 확 도는 게 이상하다."
+ * 예전에는 공격을 시작하는 순간 `rotY = 목표`로 **순간이동**시켰습니다.
+ * 조준 보정이 붙으면서 그 순간 회전이 최대 48°까지 커져 더 튀어 보였습니다.
+ *
+ * 그렇다고 고정 속도로 천천히 돌리면, 선행동작이 0.07초인 단검은 다 돌기 전에
+ * 판정이 터져서 **엉뚱한 곳을 벱니다.** 그래서 "남은 시간에 맞춰" 도는 방식을 씁니다:
+ * 남은 시간이 한 프레임 이하면 그냥 도착시킵니다. 판정이 시작되는 순간에는
+ * 항상 목표를 정확히 향하고 있으므로 **부드러워지되 정확도는 그대로**입니다.
+ */
+function turnArrive(p: number, targetRot: number, remaining: number, dt: number): void {
+  const diff = wrapAngle(targetRot - Transform.rotY[p])
+  const k = remaining <= dt ? 1 : dt / remaining
+  Transform.rotY[p] += diff * k
+}
+
 /** 남은 속도를 상한까지 눌러 관성 미끄러짐을 끊습니다. */
 function damp(p: number, cap: number): void {
   const speed = Math.hypot(Velocity.x[p], Velocity.z[p])
@@ -146,8 +164,8 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.bufferedAttack[p] = 0
   Stamina.value[p] = Math.max(0, Stamina.value[p] - c.staminaCost)
   Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
-  // 공격 시작 순간 몸을 스냅. 반응이 즉각적으로 느껴집니다.
-  Transform.rotY[p] = rot
+  // 스냅하지 않고 **목표만 정해 둡니다.** 선행동작 동안 수렴합니다(turnArrive).
+  Player.faceRot[p] = rot
 }
 
 function beginSkill(
@@ -177,7 +195,8 @@ function beginSkill(
   Actor.bufferedAttack[p] = 0
   // 무적 프레임 타이밍은 회피와 같은 필드를 씁니다(동시에 일어나지 않으므로 안전).
   Player.dodgeElapsed[p] = 0
-  Transform.rotY[p] = aimRot
+  // 기본 공격과 같은 규칙 — 스냅하지 않고 선행동작 동안 수렴합니다.
+  Player.faceRot[p] = aimRot
   setCooldown(p, slot, def.cooldown)
 
   // 대시 거리는 **조준한 지점 바로 뒤**에 착지하도록 그때그때 계산합니다.
@@ -439,12 +458,11 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
 
         // 선행동작 중에는 느리게나마 방향을 틀 수 있습니다(완전 고정은 답답함).
-        if (phase === AttackPhase.Windup && Player.dashSpeed[p] > 0) {
-          turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
+        if (phase === AttackPhase.Windup) {
+          // 판정이 시작될 때 정확히 목표를 향하도록 남은 선행동작 시간에 맞춰 수렴합니다.
+          turnArrive(p, Player.faceRot[p], Actor.timer[p], dt)
           // 앞으로 파고드는 전진. 거리는 beginAttack 이 적과의 간격에 맞춰 정합니다.
-          forwardOverride = Player.dashSpeed[p]
-        } else if (phase === AttackPhase.Windup) {
-          turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
+          if (Player.dashSpeed[p] > 0) forwardOverride = Player.dashSpeed[p]
         }
 
         Actor.timer[p] -= dt
@@ -538,8 +556,9 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
 
         if (phase === AttackPhase.Windup) {
-          // 지점 지정 스킬은 시전 중 방향을 못 바꿉니다(착탄점이 이미 고정됨).
-          if (def.shape !== 'point') turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.3, dt)
+          // 지점 지정 스킬도 몸은 시전 방향으로 돌아야 자세가 자연스럽습니다.
+          // (착탄점은 이미 고정돼 있으므로 몸이 도는 것은 판정에 영향이 없습니다.)
+          turnArrive(p, Player.faceRot[p], Actor.timer[p], dt)
         }
 
         Actor.timer[p] -= dt
@@ -628,8 +647,10 @@ export function playerControlSystem(ctx: ControlContext): void {
 
     // ---- 목표 속도 적용 ----
     if (forwardOverride !== null) {
-      Velocity.x[p] = Math.sin(Transform.rotY[p]) * forwardOverride
-      Velocity.z[p] = Math.cos(Transform.rotY[p]) * forwardOverride
+      // **최종 방향**으로 나갑니다. 회전 중인 몸을 따라가면 궤적이 휘어서
+      // beginAttack/beginSkill 이 계산해 둔 착지 지점과 어긋납니다.
+      Velocity.x[p] = Math.sin(Player.faceRot[p]) * forwardOverride
+      Velocity.z[p] = Math.cos(Player.faceRot[p]) * forwardOverride
     } else if (Actor.state[p] !== ActorState.Dodge) {
       const speedCap = PLAYER.moveSpeed * weapon.moveSpeedScale
       const targetVx = mx * speedCap * moveScale

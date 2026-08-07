@@ -72,6 +72,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   Player.dodgeDirZ[e] = 1
   Player.dodgeElapsed[e] = 0
   Player.dashSpeed[e] = 0
+  Player.faceRot[e] = 0
   Player.dodgeCooldownT[e] = 0
   Player.castX[e] = 0
   Player.castZ[e] = 0

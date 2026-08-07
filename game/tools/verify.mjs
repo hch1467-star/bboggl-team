@@ -735,24 +735,40 @@ async function main() {
     await sleep(400)
     await page.evaluate(() => window.__game.clearEnemies())
     await sleep(250)
-    const runFor = async (ms) => {
-      const a = (await state()).player
+    /**
+     * **시뮬레이션 시간**으로 잽니다(벽시계가 아니라).
+     *
+     * 벽시계 1.6초로 재던 것이 부하가 걸린 날 거짓으로 깨졌습니다:
+     * 시뮬레이션이 거의 안 흘러서 자유 이동도 0.4m밖에 못 갔고,
+     * 그러면 "속박이 느리게 만드는가"를 0.4 vs 0.3 으로 판정하게 됩니다 — 노이즈입니다.
+     * 두 조건을 비교하려면 **같은 게임 시간**을 줘야 합니다.
+     */
+    const runFor = async (simSeconds) => {
+      const first = await state()
+      const a = first.player
+      const t0 = first.elapsed
+      const wallCap = Date.now() + 40000 // 안전장치
       await press('KeyD')
       await press('KeyS')
-      await sleep(ms)
-      const b = (await state()).player
+      let b = a
+      for (;;) {
+        const cur = await state()
+        b = cur.player
+        if (cur.elapsed - t0 >= simSeconds || Date.now() > wallCap) break
+        await sleep(70)
+      }
       await release('KeyD')
       await release('KeyS')
-      await sleep(400)
+      await sleep(300)
       return Math.hypot(b.x - a.x, b.z - a.z)
     }
-    const freeDist = await runFor(1600)
+    const freeDist = await runFor(1.6)
     await page.evaluate(() => window.__game.reset())
     await sleep(400)
     await page.evaluate(() => window.__game.clearEnemies())
     await page.evaluate(() => window.__game.applySnare(6))
     await sleep(250)
-    const snaredDist = await runFor(1600)
+    const snaredDist = await runFor(1.6)
     check(
       '속박(파랑)에 걸리면 실제로 느려짐',
       snaredDist < freeDist * 0.6,
