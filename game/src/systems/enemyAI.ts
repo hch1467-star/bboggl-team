@@ -1,9 +1,10 @@
-import { GRUNT } from '../config/balance'
+import { BOSS, GRUNT } from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
   Enemy,
+  EnemyKind,
   Health,
   Transform,
   Velocity,
@@ -58,6 +59,10 @@ export function enemyAiSystem(
     if (!isAlive(e)) continue
     if (Actor.state[e] === ActorState.Dead) continue
 
+    // 잡몹과 보스는 같은 코드를 쓰고 수치표만 갈아 끼웁니다.
+    // 이렇게 해두면 새 적을 추가할 때 AI 코드를 건드릴 필요가 없습니다.
+    const cfg = Enemy.kind[e] === EnemyKind.Boss ? BOSS : GRUNT
+
     if (Actor.cooldownT[e] > 0) Actor.cooldownT[e] = Math.max(0, Actor.cooldownT[e] - dt)
 
     // 경직 중에는 아무것도 못 합니다 — 플레이어가 흐름을 끊을 수 있는 근거
@@ -79,7 +84,7 @@ export function enemyAiSystem(
       continue
     }
 
-    if (Enemy.aggro[e] === 0 && dist <= GRUNT.aggroRange) Enemy.aggro[e] = 1
+    if (Enemy.aggro[e] === 0 && dist <= cfg.aggroRange) Enemy.aggro[e] = 1
 
     if (Enemy.aggro[e] === 0) {
       decayVelocity(e, dt, 5)
@@ -90,7 +95,7 @@ export function enemyAiSystem(
       const phase = Actor.phase[e] as AttackPhase
 
       if (phase === AttackPhase.Windup) {
-        turnToward(e, toPlayer, GRUNT.turnSpeedDeg * 0.3, dt)
+        turnToward(e, toPlayer, cfg.turnSpeedDeg * 0.3, dt)
       }
       // 공격 중에는 발이 묶입니다 — 적도 커밋합니다
       decayVelocity(e, dt, 12)
@@ -99,36 +104,36 @@ export function enemyAiSystem(
       if (Actor.timer[e] <= 0) {
         if (phase === AttackPhase.Windup) {
           Actor.phase[e] = AttackPhase.Active
-          Actor.timer[e] = GRUNT.active
+          Actor.timer[e] = cfg.active
           Actor.hasHit[e] = 0
           ctx.onSwing(
             Transform.x[e],
             Transform.z[e],
             Transform.rotY[e],
-            GRUNT.attackReach,
-            GRUNT.attackArcDeg,
+            cfg.attackReach,
+            cfg.attackArcDeg,
           )
         } else if (phase === AttackPhase.Active) {
           Actor.phase[e] = AttackPhase.Recovery
-          Actor.timer[e] = GRUNT.recovery
+          Actor.timer[e] = cfg.recovery
         } else {
           Actor.state[e] = ActorState.Idle
-          Actor.cooldownT[e] = GRUNT.attackCooldown
+          Actor.cooldownT[e] = cfg.attackCooldown
         }
       }
       continue
     }
 
     // ---- Idle: 추격하거나 공격을 시작 ----
-    turnToward(e, toPlayer, GRUNT.turnSpeedDeg, dt)
+    turnToward(e, toPlayer, cfg.turnSpeedDeg, dt)
 
     const facingError = Math.abs(wrapAngle(toPlayer - Transform.rotY[e]))
-    const inRange = dist <= GRUNT.attackRange
+    const inRange = dist <= cfg.attackRange
 
     if (inRange && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       Actor.state[e] = ActorState.Attack
       Actor.phase[e] = AttackPhase.Windup
-      Actor.timer[e] = GRUNT.windup
+      Actor.timer[e] = cfg.windup
       Actor.hasHit[e] = 0
       decayVelocity(e, dt, 12)
       continue
@@ -142,8 +147,8 @@ export function enemyAiSystem(
       const nx = dist > 0.0001 ? dx / dist : 0
       const nz = dist > 0.0001 ? dz / dist : 0
       const accel = 26 * dt
-      Velocity.x[e] += clampMag(nx * GRUNT.moveSpeed - Velocity.x[e], accel)
-      Velocity.z[e] += clampMag(nz * GRUNT.moveSpeed - Velocity.z[e], accel)
+      Velocity.x[e] += clampMag(nx * cfg.moveSpeed - Velocity.x[e], accel)
+      Velocity.z[e] += clampMag(nz * cfg.moveSpeed - Velocity.z[e], accel)
     }
   }
 }

@@ -186,6 +186,43 @@ export const GRUNT = {
   separationForce: 7.5,
 } as const
 
+/**
+ * 보스 — 잡몹과 같은 상태 기계를 쓰되 수치만 다릅니다.
+ *
+ * 설계 근거: 보스를 "체력 많은 잡몹"으로 만들면 지루해집니다. 그래서
+ * 체력보다 **예고 시간과 후딜을 더 길게** 잡았습니다. 느리고 무거운 대신
+ * 한 대가 치명적이라, 플레이어가 "읽고 → 피하고 → 반격하는" 리듬을
+ * 확실히 연습하게 됩니다. (기둥 2·3의 훈련장 역할)
+ */
+export const BOSS = {
+  maxHp: 420,
+  radius: 0.95,
+  height: 2.9,
+  moveSpeed: 2.4,
+  turnSpeedDeg: 240,
+  aggroRange: 55,
+  attackRange: 3.4,
+  attackCooldown: 1.5,
+  /** 잡몹보다 확실히 긴 예고 — 크고 느린 만큼 확실히 읽힙니다. */
+  windup: 0.78,
+  active: 0.16,
+  recovery: 1.05,
+  damage: 30,
+  attackArcDeg: 130,
+  attackReach: 4.2,
+  knockback: 6.5,
+  hurtStagger: 0.1,
+} as const
+
+/** 보물 */
+export const TREASURE = {
+  /** 이 거리 안에 들어오면 획득 */
+  pickupRadius: 1.5,
+  bobHeight: 0.25,
+  bobSpeed: 2.2,
+  spinSpeed: 1.6,
+} as const
+
 /** 월드 */
 export const WORLD = {
   /** 아레나 반지름(m) */

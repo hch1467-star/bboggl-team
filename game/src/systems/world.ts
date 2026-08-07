@@ -1,10 +1,12 @@
-import { GRUNT, PLAYER, WORLD } from '../config/balance'
+import { BOSS, GRUNT, PLAYER, WORLD } from '../config/balance'
 import {
   Actor,
   ActorState,
   Body,
   Enemy,
+  EnemyKind,
   Health,
+  Pickup,
   Player,
   Renderable,
   Stamina,
@@ -13,12 +15,14 @@ import {
 } from '../core/components'
 import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
-import { KIND_GRUNT, KIND_PLAYER } from '../render/visuals'
+import type { LevelData } from '../level/format'
+import type { Terrain } from '../level/terrain'
+import { KIND_BOSS, KIND_GRUNT, KIND_PLAYER, KIND_TREASURE } from '../render/visuals'
 
 /** 스폰 전용 RNG. 전투 RNG와 분리해야 재현성이 깨지지 않습니다. */
 const spawnRng = new Rng(20260807)
 
-export function spawnPlayer(): number {
+export function spawnPlayer(x = 0, z = 0): number {
   const e = createEntity()
   addComponent(Transform, e)
   addComponent(Velocity, e)
@@ -29,9 +33,9 @@ export function spawnPlayer(): number {
   addComponent(Player, e)
   addComponent(Renderable, e)
 
-  Transform.x[e] = 0
+  Transform.x[e] = x
   Transform.y[e] = 0
-  Transform.z[e] = 0
+  Transform.z[e] = z
   Transform.rotY[e] = 0
   Velocity.x[e] = 0
   Velocity.z[e] = 0
@@ -63,7 +67,9 @@ export function spawnPlayer(): number {
   return e
 }
 
-export function spawnGrunt(x: number, z: number): number {
+/** 잡몹과 보스는 같은 상태 기계를 공유합니다 — 수치와 외형만 다릅니다. */
+export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
+  const cfg = kind === EnemyKind.Boss ? BOSS : GRUNT
   const e = createEntity()
   addComponent(Transform, e)
   addComponent(Velocity, e)
@@ -76,16 +82,16 @@ export function spawnGrunt(x: number, z: number): number {
   Transform.x[e] = x
   Transform.y[e] = 0
   Transform.z[e] = z
-  // 스폰 즉시 중앙(플레이어)을 바라보게 — 등 돌린 채 나타나면 어색합니다.
+  // 스폰 즉시 원점(대체로 플레이어 쪽)을 바라보게 — 등 돌린 채 나타나면 어색합니다.
   Transform.rotY[e] = Math.atan2(-x, -z)
   Velocity.x[e] = 0
   Velocity.z[e] = 0
   Velocity.kx[e] = 0
   Velocity.kz[e] = 0
-  Body.radius[e] = GRUNT.radius
-  Body.height[e] = GRUNT.height
-  Health.hp[e] = GRUNT.maxHp
-  Health.max[e] = GRUNT.maxHp
+  Body.radius[e] = cfg.radius
+  Body.height[e] = cfg.height
+  Health.hp[e] = cfg.maxHp
+  Health.max[e] = cfg.maxHp
   Health.invulnT[e] = 0
   Health.flashT[e] = 0
   Actor.state[e] = ActorState.Idle
@@ -98,14 +104,34 @@ export function spawnGrunt(x: number, z: number): number {
   Actor.cooldownT[e] = 0.6
   Actor.hasHit[e] = 0
   Actor.moveScale[e] = 1
-  Enemy.kind[e] = 0
+  Enemy.kind[e] = kind
   Enemy.aggro[e] = 0
-  Renderable.kind[e] = KIND_GRUNT
+  Renderable.kind[e] = kind === EnemyKind.Boss ? KIND_BOSS : KIND_GRUNT
+  return e
+}
+
+export function spawnGrunt(x: number, z: number): number {
+  return spawnEnemy(EnemyKind.Grunt, x, z)
+}
+
+export function spawnTreasure(x: number, z: number): number {
+  const e = createEntity()
+  addComponent(Transform, e)
+  addComponent(Pickup, e)
+  addComponent(Renderable, e)
+  Transform.x[e] = x
+  Transform.y[e] = 0
+  Transform.z[e] = z
+  Transform.rotY[e] = 0
+  Pickup.taken[e] = 0
+  // 위상차를 줘서 여러 보물이 동시에 똑같이 출렁이지 않게 합니다.
+  Pickup.phase[e] = spawnRng.range(0, Math.PI * 2)
+  Renderable.kind[e] = KIND_TREASURE
   return e
 }
 
 /**
- * 아레나 가장자리 링 위에 적을 흩뿌립니다.
+ * 아레나 가장자리 링 위에 적을 흩뿌립니다. (레벨이 없을 때의 기본 모드)
  * 플레이어 바로 옆에 튀어나오면 "불공정하다"고 느껴지므로,
  * 항상 시야 안쪽 가장자리에서 걸어 들어오게 합니다.
  */
@@ -127,4 +153,36 @@ export function enemyCountForWave(wave: number): number {
     WORLD.maxEnemiesPerWave,
     WORLD.initialEnemies + (wave - 1) * WORLD.enemiesPerWaveGrowth,
   )
+}
+
+export interface SpawnedLevel {
+  player: number
+  entities: number[]
+  treasureTotal: number
+}
+
+/**
+ * 레벨 데이터에 적힌 대로 엔티티를 배치합니다.
+ * 지형이 주어지면 각 엔티티를 그 지점의 지면 높이에 올려 둡니다.
+ */
+export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel {
+  const spawnPoint = level.entities.find((e) => e.kind === 'spawn')
+  const player = spawnPlayer(spawnPoint?.x ?? 0, spawnPoint?.z ?? 0)
+  Transform.y[player] = terrain.groundYAt(Transform.x[player], Transform.z[player])
+
+  const entities: number[] = []
+  let treasureTotal = 0
+  for (const item of level.entities) {
+    let e = -1
+    if (item.kind === 'grunt') e = spawnEnemy(EnemyKind.Grunt, item.x, item.z)
+    else if (item.kind === 'boss') e = spawnEnemy(EnemyKind.Boss, item.x, item.z)
+    else if (item.kind === 'treasure') {
+      e = spawnTreasure(item.x, item.z)
+      treasureTotal++
+    }
+    if (e < 0) continue
+    Transform.y[e] = terrain.groundYAt(item.x, item.z)
+    entities.push(e)
+  }
+  return { player, entities, treasureTotal }
 }

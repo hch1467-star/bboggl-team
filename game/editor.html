@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>레벨 에디터 — Quarterview ARPG</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230d1017'/><path d='M4 20l12-7 12 7-12 7z' fill='none' stroke='%2366d492' stroke-width='2.4'/><path d='M4 20V13l12-7 12 7v7' fill='none' stroke='%23ffd479' stroke-width='2.4'/></svg>"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden; background: #0d1017;
+        font-family: system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+        color: #e8edf5; -webkit-user-select: none; user-select: none;
+      }
+      #view { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+      .panel {
+        position: fixed;
+        background: rgba(13, 16, 23, 0.9);
+        border: 1px solid rgba(150, 175, 220, 0.2);
+        border-radius: 11px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      }
+
+      /* ---- 상단 바 ---- */
+      #topbar {
+        top: 12px; left: 12px; right: 12px;
+        display: flex; align-items: center; gap: 9px; padding: 9px 12px; flex-wrap: wrap;
+      }
+      #topbar .title { font-weight: 700; font-size: 14px; color: #ffd479; margin-right: 4px; }
+      input[type='text'] {
+        background: #1a1f2b; border: 1px solid #333c4d; border-radius: 7px;
+        color: #e8edf5; padding: 6px 10px; font: inherit; font-size: 13px; width: 160px;
+      }
+      button {
+        background: #232b39; border: 1px solid #3b465a; border-radius: 7px;
+        color: #dbe4f2; padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer;
+        white-space: nowrap;
+      }
+      button:hover { background: #2e384a; border-color: #4d5b73; }
+      button.primary { background: #ffd479; border-color: #ffd479; color: #0d1017; font-weight: 700; }
+      button.primary:hover { background: #ffe0a0; }
+      .spacer { flex: 1; }
+
+      /* ---- 도구 패널 ---- */
+      #tools { top: 66px; left: 12px; width: 208px; padding: 11px; }
+      .group { margin-bottom: 13px; }
+      .group:last-child { margin-bottom: 0; }
+      .group h3 {
+        font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: #8c9ab3;
+        margin-bottom: 6px; text-transform: uppercase;
+      }
+      .tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+      .tool {
+        background: #1a1f2b; border: 1px solid #2e3648; border-radius: 7px;
+        padding: 7px 6px; font-size: 12px; cursor: pointer; text-align: center; color: #c3cddd;
+      }
+      .tool:hover { background: #232b39; }
+      .tool.active { background: #2f5d8f; border-color: #5fa8ff; color: #fff; font-weight: 600; }
+      .tool .k { display: block; font-size: 9.5px; color: #7d8ba3; margin-top: 2px; }
+      .tool.active .k { color: #bcd8ff; }
+
+      .size-row { display: flex; gap: 5px; }
+      .size-row .tool { flex: 1; }
+
+      /* ---- 상태 / 도움말 ---- */
+      #status {
+        bottom: 12px; left: 12px; padding: 9px 12px; font-size: 12px; line-height: 1.65;
+        font-variant-numeric: tabular-nums; min-width: 208px;
+      }
+      #status b { color: #ffd479; }
+      #help {
+        bottom: 12px; right: 12px; padding: 9px 12px; font-size: 11.5px; line-height: 1.75;
+        color: #a4b1c6; max-width: 260px;
+      }
+      #help kbd {
+        display: inline-block; background: #2b3444; border: 1px solid #465268;
+        border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; margin: 0 1px;
+        font-family: inherit; font-size: 10.5px; color: #dbe4f2;
+      }
+
+      #toast {
+        position: fixed; left: 50%; top: 74px; transform: translateX(-50%);
+        background: rgba(13, 16, 23, 0.95); border: 1px solid #ffd479; color: #ffd479;
+        padding: 9px 18px; border-radius: 9px; font-size: 13px; font-weight: 600;
+        opacity: 0; transition: opacity 200ms ease; pointer-events: none;
+      }
+      #toast.show { opacity: 1; }
+      #toast.error { border-color: #f2604f; color: #f2604f; }
+
+      #fileInput { display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+
+    <div class="panel" id="topbar">
+      <span class="title">레벨 에디터</span>
+      <input type="text" id="levelName" placeholder="레벨 이름" />
+      <button id="btnNew">새로 만들기</button>
+      <button id="btnSave">저장</button>
+      <button id="btnLoad">불러오기</button>
+      <button id="btnExport">JSON 내보내기</button>
+      <button id="btnImport">JSON 가져오기</button>
+      <span class="spacer"></span>
+      <button id="btnUndo">되돌리기 (Ctrl+Z)</button>
+      <button class="primary" id="btnPlay">▶ 테스트 플레이</button>
+      <input type="file" id="fileInput" accept="application/json,.json" />
+    </div>
+
+    <div class="panel" id="tools">
+      <div class="group">
+        <h3>지형</h3>
+        <div class="tool-grid">
+          <div class="tool active" data-tool="raise">올리기<span class="k">1</span></div>
+          <div class="tool" data-tool="lower">내리기<span class="k">2</span></div>
+          <div class="tool" data-tool="flatten">평탄화<span class="k">3</span></div>
+          <div class="tool" data-tool="fill">바닥 만들기<span class="k">4</span></div>
+          <div class="tool" data-tool="erase">지우기(절벽)<span class="k">5</span></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>브러시 크기</h3>
+        <div class="size-row">
+          <div class="tool active" data-size="1">1</div>
+          <div class="tool" data-size="2">2</div>
+          <div class="tool" data-size="3">3</div>
+          <div class="tool" data-size="5">5</div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>배치</h3>
+        <div class="tool-grid">
+          <div class="tool" data-tool="spawn">시작 지점<span class="k">6</span></div>
+          <div class="tool" data-tool="grunt">잡몹<span class="k">7</span></div>
+          <div class="tool" data-tool="treasure">보물<span class="k">8</span></div>
+          <div class="tool" data-tool="boss">보스<span class="k">9</span></div>
+          <div class="tool" data-tool="delete">삭제<span class="k">0</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="status">
+      <div>칸 <b id="stCell">–</b> · 높이 <b id="stHeight">–</b></div>
+      <div>잡몹 <b id="stGrunt">0</b> · 보물 <b id="stTreasure">0</b> · 보스 <b id="stBoss">0</b></div>
+      <div style="color: #8c9ab3" id="stZoom">확대 –</div>
+    </div>
+
+    <div class="panel" id="help">
+      <div><kbd>좌클릭</kbd> 드래그 — 도구 사용</div>
+      <div><kbd>우클릭</kbd>/<kbd>휠클릭</kbd> 드래그 — 시점 이동</div>
+      <div><kbd>휠</kbd> — 확대/축소</div>
+      <div><kbd>Q</kbd> <kbd>E</kbd> — 시점 90° 회전 (뒤쪽 편집)</div>
+      <div><kbd>1</kbd>~<kbd>0</kbd> — 도구 전환</div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>

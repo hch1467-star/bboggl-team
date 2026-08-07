@@ -1,10 +1,11 @@
-import { GRUNT, PLAYER } from '../config/balance'
+import { BOSS, GRUNT, PLAYER } from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
   Body,
   Enemy,
+  EnemyKind,
   Health,
   Player,
   Transform,
@@ -81,6 +82,25 @@ const GRUNT_SPEC: AttackSpec = {
   heavy: false,
 }
 
+/** 보스는 한 대가 무겁습니다 — 정지·흔들림도 그만큼 세게 줍니다. */
+const BOSS_SPEC: AttackSpec = {
+  damage: BOSS.damage,
+  range: BOSS.attackReach,
+  arcDeg: BOSS.attackArcDeg,
+  knockback: BOSS.knockback,
+  hitstop: 0.1,
+  trauma: 0.62,
+  heavy: true,
+}
+
+function enemySpec(e: number): AttackSpec {
+  return Enemy.kind[e] === EnemyKind.Boss ? BOSS_SPEC : GRUNT_SPEC
+}
+
+function enemyStagger(e: number): number {
+  return Enemy.kind[e] === EnemyKind.Boss ? BOSS.hurtStagger : GRUNT.hurtStagger
+}
+
 /**
  * active 단계에 들어간 공격을 해석해 피해를 적용합니다.
  * hasHit 플래그 덕분에 active가 여러 프레임 이어져도 한 번만 맞습니다.
@@ -96,7 +116,7 @@ export function resolveAttacks(): void {
     if (Actor.hasHit[a] === 1) continue
 
     const attackerIsPlayer = hasComponent(Player, a)
-    const spec = attackerIsPlayer ? playerSpec(Actor.comboIndex[a]) : GRUNT_SPEC
+    const spec = attackerIsPlayer ? playerSpec(Actor.comboIndex[a]) : enemySpec(a)
 
     const ax = Transform.x[a]
     const az = Transform.z[a]
@@ -152,7 +172,7 @@ export function resolveAttacks(): void {
       if (!killed) {
         // 경직: 공격 중이던 적도 끊깁니다 = 플레이어가 선공으로 흐름을 끊을 수 있음
         Actor.state[t] = ActorState.Stagger
-        Actor.timer[t] = targetIsPlayer ? PLAYER.hurtStagger : GRUNT.hurtStagger
+        Actor.timer[t] = targetIsPlayer ? PLAYER.hurtStagger : enemyStagger(t)
         Actor.hasHit[t] = 0
         Actor.comboWindowT[t] = 0
         Actor.bufferedAttack[t] = 0

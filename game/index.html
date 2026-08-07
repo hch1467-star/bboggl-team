@@ -123,9 +123,16 @@
         </div>
 
         <div class="panel" id="stats">
-          <div>웨이브 <b id="waveText">1</b></div>
-          <div>남은 적 <b id="enemyText">0</b></div>
-          <div>처치 <b id="killText">0</b></div>
+          <div id="arenaStats">
+            <div>웨이브 <b id="waveText">1</b></div>
+            <div>남은 적 <b id="enemyText">0</b></div>
+            <div>처치 <b id="killText">0</b></div>
+          </div>
+          <div id="levelStats" style="display: none">
+            <div id="levelNameText" style="color: #ffd479; font-weight: 600"></div>
+            <div>남은 적 <b id="levelEnemyText">0</b></div>
+            <div>보물 <b id="treasureText">0 / 0</b></div>
+          </div>
           <div class="dim" id="perfText">60 fps</div>
         </div>
       </div>
@@ -136,6 +143,9 @@
           <div class="key"><kbd>마우스</kbd> 조준</div>
           <div class="key"><kbd>좌클릭</kbd> 공격 (3타 콤보)</div>
           <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
+          <a class="key" href="./editor.html" style="color: #ffd479; text-decoration: none"
+            >🛠 레벨 에디터</a
+          >
         </div>
       </div>
     </div>

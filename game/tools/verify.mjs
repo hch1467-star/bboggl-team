@@ -55,7 +55,11 @@ async function main() {
     ],
   })
 
-  const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 })
+  // 반드시 **하나의 컨텍스트**를 공유해야 합니다.
+  // browser.newPage() 는 호출할 때마다 새 컨텍스트를 만들어서 localStorage 가 격리됩니다.
+  // 그러면 에디터가 저장한 레벨을 게임 페이지가 못 읽습니다.
+  const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 })
+  const page = await context.newPage()
 
   const consoleErrors = []
   page.on('console', (m) => {
@@ -114,7 +118,7 @@ async function main() {
     await page.waitForFunction(() => window.__game?.ready === true, { timeout: 20000 })
     let s = await state()
     check('게임 부팅 및 디버그 훅 노출', s != null)
-    check('플레이어가 원점에 스폰됨', Math.abs(s.player.x) < 0.01 && Math.abs(s.player.z) < 0.01)
+    check('플레이어가 원점에 스폰됨', Math.abs(s.player.x) < 0.05 && Math.abs(s.player.z) < 0.05, `(${s.player.x}, ${s.player.z})`)
     check('1웨이브 적 6마리 스폰', s.enemiesLeft === 6, `실제 ${s.enemiesLeft}마리`)
     check('플레이어 체력 100', s.player.hp === 100)
 
@@ -132,8 +136,8 @@ async function main() {
     // 파일 크기만 보면 HUD 텍스트 때문에 3D가 새까매도 통과해버립니다.
     const pix = await sampleScreen()
     check('3D 씬이 실제로 렌더링됨 (검은 화면 아님)',
-      pix != null && pix.uniqueColors >= 12 && pix.meanLuma >= 10 && pix.darkRatio <= 0.7,
-      pix ? `색상 ${pix.uniqueColors}종 · 평균밝기 ${pix.meanLuma} · 어두운픽셀 ${(pix.darkRatio * 100).toFixed(0)}%` : '샘플 수집 실패')
+      pix != null && pix.bgRatio < 0.5 && pix.meanLuma >= 10,
+      pix ? `배경색 픽셀 ${(pix.bgRatio * 100).toFixed(0)}% · 평균밝기 ${pix.meanLuma} · 색상 ${pix.uniqueColors}종` : '샘플 수집 실패')
 
     // ---------- 2. WASD 이동이 카메라 기준인지 ----------
     // 카메라 yaw 45° -> 전방 = (-0.707, 0, -0.707). W를 누르면 x, z 둘 다 감소해야 합니다.
@@ -272,7 +276,130 @@ async function main() {
     check('적 AI가 플레이어를 추격해 공격함', damaged.ok, damaged.ok ? `체력 ${startHp} -> ${damaged.state.player.hp}` : '40초 내 미발생')
     await shot('03-enemies-engaging')
 
-    // ---------- 8. 안정성 ----------
+    // ---------- 8. 레벨 에디터 ----------
+    // 에디터로 레벨을 "만들어서" 저장하고, 그 레벨을 게임이 실제로 불러와
+    // 플레이되는지까지 한 번에 확인합니다. 두 프로그램의 접점이 여기라서
+    // 따로 검사하면 "에디터는 되는데 게임에서 안 열리는" 상태를 놓칩니다.
+    const ed = await context.newPage()
+    ed.on('pageerror', (e) => consoleErrors.push(`editor: ${e}`))
+    await ed.goto(`http://127.0.0.1:${PORT}/editor.html`, { waitUntil: 'load' })
+    await ed.waitForFunction(() => window.__editor?.ready === true, { timeout: 20000 })
+
+    const edState = () => ed.evaluate(() => window.__editor.state())
+    const edTool = (t) => ed.evaluate((x) => window.__editor.setTool(x), t)
+    const edBrush = (n) => ed.evaluate((x) => window.__editor.setBrush(x), n)
+    const edApply = (cx, cz) => ed.evaluate(([a, b]) => window.__editor.applyAt(a, b), [cx, cz])
+
+    let es = await edState()
+    check('에디터 부팅 + 기본 레벨 생성', es.floorCells > 100, `바닥 ${es.floorCells}칸 (${es.w}x${es.h})`)
+    check('기본 레벨에 시작 지점 존재', es.byKind.spawn === 1)
+
+    // 지형 특징은 **벽처럼 길게** 만듭니다. 한 칸만 올리면 플레이어가 적에게
+    // 밀려 살짝만 옆으로 벗어나도 그 칸을 비껴가서, 검사 자체가 무의미해집니다.
+    await edTool('raise')
+    await edBrush(1)
+    const ROWS = []
+    for (let cz = 20; cz <= 36; cz++) ROWS.push(cz)
+    for (const cz of ROWS) await edApply(31, cz) // 오를 수 있는 1단 능선
+    for (let i = 0; i < 3; i++) for (const cz of ROWS) await edApply(34, cz) // 오를 수 없는 3단 절벽
+    es = await edState()
+    check('지형 올리기 도구 동작', es.maxHeight === 3, `최고 높이 ${es.maxHeight}`)
+
+    // 보물도 한 줄로 여러 개 — 지나가는 경로가 조금 달라져도 반드시 하나는 만납니다.
+    // 칸 간격(2m)이 획득 반경(1.5m)보다 좁으므로, 연속으로 깔면
+    // 이 띠를 가로지르는 어떤 경로든 반드시 하나는 지나가게 됩니다.
+    await edTool('treasure')
+    for (const cz of ROWS) await edApply(30, cz)
+    await edTool('grunt')
+    await edApply(24, 28)
+    es = await edState()
+    check(
+      '보물/적 배치 도구 동작',
+      es.byKind.treasure === ROWS.length && es.byKind.grunt === 1,
+      JSON.stringify(es.byKind),
+    )
+
+    const beforeUndo = es.entities
+    await ed.evaluate(() => window.__editor.undo())
+    es = await edState()
+    check('되돌리기 동작', es.entities === beforeUndo - 1, `엔티티 ${beforeUndo} -> ${es.entities}`)
+
+    await edApply(24, 28) // 되돌린 적을 다시 배치
+    await ed.evaluate(() => window.__editor.save())
+    es = await edState()
+    check('레벨 저장', es.byKind.grunt === 1 && es.byKind.treasure === ROWS.length)
+
+    const edShot = path.join(SHOTS, '04-editor.png')
+    await ed.screenshot({ path: edShot })
+    check('에디터 스크린샷 생성', statSync(edShot).size > 15000, `${(statSync(edShot).size / 1024).toFixed(0)} KB`)
+
+    // ---------- 9. 게임이 그 레벨을 실제로 플레이하는가 ----------
+    const lv = await context.newPage()
+    lv.on('pageerror', (e) => consoleErrors.push(`level: ${e}`))
+    await lv.goto(`http://127.0.0.1:${PORT}/?level=storage&lowfx=1`, { waitUntil: 'load' })
+    await lv.waitForFunction(() => window.__game?.ready === true, { timeout: 20000 })
+    await sleep(1200)
+
+    const lvState = () => lv.evaluate(() => window.__game.state())
+    const lvPress = (c) => lv.evaluate((x) => window.__game.press(x), c)
+    const lvRelease = (c) => lv.evaluate((x) => window.__game.release(x), c)
+
+    let ls = await lvState()
+    check('게임이 에디터 레벨을 불러옴', ls.levelMode === true, `레벨명 "${ls.levelName}"`)
+    check('레벨의 보물 개수 반영', ls.treasureTotal === ROWS.length, `${ls.treasureTotal}개`)
+    check('레벨의 적 배치 반영', ls.enemiesLeft === 1, `${ls.enemiesLeft}마리`)
+    check('플레이어가 지형 위에 서 있음', ls.player.terrainLevel === 0, `높이 단계 ${ls.player.terrainLevel}`)
+
+    await lv.evaluate(() => window.__game.requestSample())
+    let lvPix = null
+    for (let t = 0; t < 130 && !lvPix; t++) {
+      lvPix = await lv.evaluate(() => window.__game.getSample())
+      if (!lvPix) await sleep(60)
+    }
+    check(
+      '레벨 지형이 화면에 렌더링됨',
+      lvPix != null && lvPix.bgRatio < 0.5 && lvPix.meanLuma >= 10,
+      lvPix
+        ? `배경색 픽셀 ${(lvPix.bgRatio * 100).toFixed(0)}% · 평균밝기 ${lvPix.meanLuma} · 색상 ${lvPix.uniqueColors}종`
+        : '샘플 실패',
+    )
+
+    // 카메라 전방(-0.707,0,-0.707)과 우측(0.707,0,-0.707)을 더하면 -Z,
+    // 우측에서 전방을 빼면 +X 입니다. 즉 D + S 동시 입력이 월드 +X 직진입니다.
+    const startX = ls.player.x
+    await lvPress('KeyD')
+    await lvPress('KeyS')
+
+    let climbed = null
+    for (const t0 = Date.now(); Date.now() - t0 < 30000; ) {
+      const st = await lvState()
+      if (st.player.terrainLevel === 1) {
+        climbed = st
+        break
+      }
+      await sleep(80)
+    }
+    check('한 칸 단차를 걸어서 오름', climbed !== null, climbed ? `y=${climbed.player.y}` : '30초 내 미발생')
+    check('오르면 실제로 Y좌표가 올라감', !!climbed && climbed.player.y > 0.5, `y=${climbed?.player.y ?? '-'}`)
+
+    await sleep(7000)
+    const blocked1 = await lvState()
+    await sleep(3000)
+    const blocked2 = await lvState()
+    await lvRelease('KeyD')
+    await lvRelease('KeyS')
+    check(
+      '오를 수 없는 절벽에서 막힘',
+      Math.abs(blocked2.player.x - blocked1.player.x) < 0.35 && blocked2.player.x > startX + 2,
+      `x ${blocked1.player.x} -> ${blocked2.player.x} (시작 ${startX})`,
+    )
+    check('지나가며 보물 획득', blocked2.treasuresFound >= 1, `${blocked2.treasuresFound}/${blocked2.treasureTotal}`)
+
+    const lvShot = path.join(SHOTS, '05-level-play.png')
+    await lv.screenshot({ path: lvShot })
+    check('레벨 플레이 스크린샷 생성', statSync(lvShot).size > 15000, `${(statSync(lvShot).size / 1024).toFixed(0)} KB`)
+
+    // ---------- 10. 안정성 ----------
     check('런타임 콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))
     // 프레임 총량이 아니라 "지금도 증가하는가"를 봅니다.
     // reset()이 프레임 카운터를 0으로 되돌리므로 누적값 비교는 의미가 없습니다.

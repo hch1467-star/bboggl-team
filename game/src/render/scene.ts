@@ -6,6 +6,8 @@ export interface SceneBundle {
   scene: THREE.Scene
   cursorRing: THREE.Mesh
   sunTarget: THREE.Object3D
+  /** 기본 아레나(원형 바닥·격자·경계). 레벨을 불러오면 통째로 끕니다. */
+  arena: THREE.Group
 }
 
 /**
@@ -77,13 +79,16 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   scene.add(rim)
 
   // ---- 지면 -------------------------------------------------------------
+  const arena = new THREE.Group()
+  scene.add(arena)
+
   const ground = new THREE.Mesh(
     new THREE.CircleGeometry(WORLD.arenaRadius, 96),
     new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.96, metalness: 0.0 }),
   )
   ground.rotation.x = -Math.PI / 2
   ground.receiveShadow = true
-  scene.add(ground)
+  arena.add(ground)
 
   // 격자 — 쿼터뷰에서 거리감을 읽는 데 결정적입니다. 이게 없으면 내가 얼마나
   // 움직였는지, 적이 몇 미터 앞인지 눈으로 가늠할 수가 없습니다.
@@ -97,7 +102,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   gridMat.transparent = true
   gridMat.opacity = 0.5
   grid.position.y = 0.01
-  scene.add(grid)
+  arena.add(grid)
 
   // 아레나 경계 링
   const boundary = new THREE.Mesh(
@@ -106,7 +111,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   )
   boundary.rotation.x = -Math.PI / 2
   boundary.position.y = 0.02
-  scene.add(boundary)
+  arena.add(boundary)
 
   // ---- 커서 링 ----------------------------------------------------------
   // 마우스 조준 위치를 지면에 표시합니다. 쿼터뷰에서 "어디를 겨누는지"를
@@ -125,5 +130,5 @@ export function createScene(canvas: HTMLCanvasElement): SceneBundle {
   cursorRing.renderOrder = 2
   scene.add(cursorRing)
 
-  return { renderer, scene, cursorRing, sunTarget }
+  return { renderer, scene, cursorRing, sunTarget, arena }
 }

@@ -1,7 +1,16 @@
 import * as THREE from 'three'
-import { GRUNT, PLAYER } from '../config/balance'
-import { Actor, ActorState, AttackPhase, Health, Renderable, Transform } from '../core/components'
-import { defineQuery } from '../core/ecs'
+import { BOSS, GRUNT, PLAYER, TREASURE } from '../config/balance'
+import {
+  Actor,
+  ActorState,
+  AttackPhase,
+  Health,
+  Pickup,
+  Renderable,
+  Transform,
+} from '../core/components'
+import { defineQuery, hasComponent } from '../core/ecs'
+import { time } from '../core/time'
 
 /**
  * ECS 데이터 -> Three.js 오브젝트 동기화.
@@ -16,20 +25,23 @@ import { defineQuery } from '../core/ecs'
  * Three.js Group의 rotation.y 를 rotY 로 두면 로컬 +Z 가 정확히 이 방향이 됩니다.
  */
 
-const KIND_PLAYER = 0
-const KIND_GRUNT = 1
+export const KIND_PLAYER = 0
+export const KIND_GRUNT = 1
+export const KIND_TREASURE = 2
+export const KIND_BOSS = 3
 
 interface Visual {
   group: THREE.Group
-  body: THREE.Mesh
   material: THREE.MeshStandardMaterial
   /** 적이 공격을 준비할 때 지면에 뜨는 예고 부채꼴 */
   telegraph?: THREE.Mesh
   telegraphMat?: THREE.MeshBasicMaterial
+  telegraphWindup: number
   /** 머리 위 체력바 (적 전용) */
   hpBar?: THREE.Group
   hpFill?: THREE.Mesh
-  baseColor: THREE.Color
+  /** 보물 등 둥둥 뜨는 오브젝트 */
+  floats: boolean
 }
 
 /** 부채꼴 예고 지오메트리를 만들고, 부채꼴 중심이 로컬 +Z를 향하도록 미리 눕혀 둡니다. */
@@ -47,20 +59,26 @@ export class Visuals {
 
   // 지오메트리는 모든 엔티티가 공유합니다(메모리/드로우콜 절약).
   // 머티리얼만 개체별로 복제 — 피격 플래시를 개별로 켜야 하기 때문입니다.
-  private readonly playerGeo: THREE.CapsuleGeometry
-  private readonly gruntGeo: THREE.CapsuleGeometry
+  private readonly geos: Record<number, THREE.BufferGeometry>
   private readonly bladeGeo: THREE.BoxGeometry
-  private readonly telegraphGeo: THREE.BufferGeometry
+  private readonly telegraphGeos: Record<number, THREE.BufferGeometry>
   private readonly hpBarGeo: THREE.PlaneGeometry
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly camera: THREE.Camera,
   ) {
-    this.playerGeo = new THREE.CapsuleGeometry(PLAYER.radius, PLAYER.height - PLAYER.radius * 2, 6, 14)
-    this.gruntGeo = new THREE.CapsuleGeometry(GRUNT.radius, GRUNT.height - GRUNT.radius * 2, 6, 12)
+    this.geos = {
+      [KIND_PLAYER]: new THREE.CapsuleGeometry(PLAYER.radius, PLAYER.height - PLAYER.radius * 2, 6, 14),
+      [KIND_GRUNT]: new THREE.CapsuleGeometry(GRUNT.radius, GRUNT.height - GRUNT.radius * 2, 6, 12),
+      [KIND_BOSS]: new THREE.CapsuleGeometry(BOSS.radius, BOSS.height - BOSS.radius * 2, 8, 16),
+      [KIND_TREASURE]: new THREE.OctahedronGeometry(0.42),
+    }
     this.bladeGeo = new THREE.BoxGeometry(0.1, 0.1, 0.95)
-    this.telegraphGeo = makeTelegraphGeometry(GRUNT.attackReach, GRUNT.attackArcDeg)
+    this.telegraphGeos = {
+      [KIND_GRUNT]: makeTelegraphGeometry(GRUNT.attackReach, GRUNT.attackArcDeg),
+      [KIND_BOSS]: makeTelegraphGeometry(BOSS.attackReach, BOSS.attackArcDeg),
+    }
     // 왼쪽 끝을 고정한 채 오른쪽으로 자라도록 지오메트리를 +X 쪽으로 밀어 둡니다.
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
   }
@@ -69,8 +87,40 @@ export class Visuals {
     if (this.items.has(entity)) return
     const group = new THREE.Group()
 
+    if (kind === KIND_TREASURE) {
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xffd479,
+        emissive: new THREE.Color(0xffa93c),
+        emissiveIntensity: 0.85,
+        roughness: 0.25,
+        metalness: 0.65,
+      })
+      const mesh = new THREE.Mesh(this.geos[KIND_TREASURE], material)
+      mesh.castShadow = true
+      group.add(mesh)
+      // 발밑 표시 — 높이 차가 있는 지형에서 보물이 어느 바닥에 놓였는지 알려줍니다.
+      const halo = new THREE.Mesh(
+        new THREE.RingGeometry(0.5, 0.72, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0xffd479,
+          transparent: true,
+          opacity: 0.4,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        }),
+      )
+      halo.rotation.x = -Math.PI / 2
+      halo.position.y = -0.85
+      group.add(halo)
+      this.scene.add(group)
+      this.items.set(entity, { group, material, floats: true, telegraphWindup: 0 })
+      return
+    }
+
     const isPlayer = kind === KIND_PLAYER
-    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : 0xc0453f)
+    const isBoss = kind === KIND_BOSS
+    const cfg = isPlayer ? PLAYER : isBoss ? BOSS : GRUNT
+    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : isBoss ? 0x9b4ad6 : 0xc0453f)
     const material = new THREE.MeshStandardMaterial({
       color: baseColor.clone(),
       roughness: 0.55,
@@ -78,10 +128,8 @@ export class Visuals {
       emissive: new THREE.Color(0x000000),
     })
 
-    const geo = isPlayer ? this.playerGeo : this.gruntGeo
-    const height = isPlayer ? PLAYER.height : GRUNT.height
-    const body = new THREE.Mesh(geo, material)
-    body.position.y = height / 2
+    const body = new THREE.Mesh(this.geos[kind], material)
+    body.position.y = cfg.height / 2
     body.castShadow = true
     body.receiveShadow = true
     group.add(body)
@@ -96,11 +144,13 @@ export class Visuals {
         metalness: 0.6,
       }),
     )
-    blade.position.set(isPlayer ? 0.32 : 0.3, height * 0.55, 0.55)
+    const scale = isBoss ? 1.7 : 1
+    blade.scale.setScalar(scale)
+    blade.position.set(0.3 * scale, cfg.height * 0.55, 0.55 * scale)
     blade.castShadow = true
     group.add(blade)
 
-    const visual: Visual = { group, body, material, baseColor }
+    const visual: Visual = { group, material, floats: false, telegraphWindup: 0 }
 
     if (!isPlayer) {
       const telegraphMat = new THREE.MeshBasicMaterial({
@@ -110,35 +160,37 @@ export class Visuals {
         depthWrite: false,
         side: THREE.DoubleSide,
       })
-      const telegraph = new THREE.Mesh(this.telegraphGeo, telegraphMat)
+      const telegraph = new THREE.Mesh(this.telegraphGeos[kind], telegraphMat)
       telegraph.position.y = 0.04
       telegraph.renderOrder = 1
       telegraph.visible = false
       group.add(telegraph)
       visual.telegraph = telegraph
       visual.telegraphMat = telegraphMat
+      visual.telegraphWindup = isBoss ? BOSS.windup : GRUNT.windup
 
       const hpBar = new THREE.Group()
-      hpBar.position.y = height + 0.42
-      const barW = 1.1
+      hpBar.position.y = cfg.height + 0.42
+      const barW = isBoss ? 2.2 : 1.1
       const bg = new THREE.Mesh(
         this.hpBarGeo,
         new THREE.MeshBasicMaterial({ color: 0x14181f, depthTest: false, transparent: true, opacity: 0.8 }),
       )
-      bg.scale.set(barW, 0.13, 1)
+      bg.scale.set(barW, isBoss ? 0.2 : 0.13, 1)
       bg.position.x = -barW / 2
       bg.renderOrder = 10
       const fill = new THREE.Mesh(
         this.hpBarGeo,
-        new THREE.MeshBasicMaterial({ color: 0xe8503c, depthTest: false }),
+        new THREE.MeshBasicMaterial({ color: isBoss ? 0xd23ce8 : 0xe8503c, depthTest: false }),
       )
-      fill.scale.set(barW, 0.1, 1)
+      fill.scale.set(barW, isBoss ? 0.16 : 0.1, 1)
       fill.position.set(-barW / 2, 0, 0.001)
       fill.renderOrder = 11
       hpBar.add(bg, fill)
       group.add(hpBar)
       visual.hpBar = hpBar
       visual.hpFill = fill
+      visual.group.userData.barWidth = barW
     }
 
     this.scene.add(group)
@@ -162,6 +214,15 @@ export class Visuals {
       const v = this.items.get(e)
       if (!v) continue
 
+      if (v.floats) {
+        // 보물은 둥둥 뜨고 돕니다. 정지해 있으면 배경으로 묻혀서 눈에 안 띕니다.
+        const phase = hasComponent(Pickup, e) ? Pickup.phase[e] : 0
+        const bob = Math.sin(time.elapsed * TREASURE.bobSpeed + phase) * TREASURE.bobHeight
+        v.group.position.set(Transform.x[e], Transform.y[e] + 1.05 + bob, Transform.z[e])
+        v.group.rotation.y = time.elapsed * TREASURE.spinSpeed + phase
+        continue
+      }
+
       v.group.position.set(Transform.x[e], Transform.y[e], Transform.z[e])
       v.group.rotation.y = Transform.rotY[e]
 
@@ -181,7 +242,7 @@ export class Visuals {
         const winding = Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Windup
         const striking = Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active
         if (winding) {
-          const p = 1 - Actor.timer[e] / GRUNT.windup // 0 -> 1
+          const p = 1 - Actor.timer[e] / v.telegraphWindup // 0 -> 1
           v.telegraph.visible = true
           v.telegraphMat.opacity = 0.12 + p * 0.42
           v.telegraphMat.color.setHex(0xff5a3c)
@@ -198,7 +259,7 @@ export class Visuals {
       if (v.hpBar && v.hpFill) {
         const ratio = Math.max(0, Health.hp[e]) / Health.max[e]
         v.hpBar.visible = ratio < 0.999
-        v.hpFill.scale.x = 1.1 * ratio
+        v.hpFill.scale.x = (v.group.userData.barWidth as number) * ratio
         // 빌보드 — 카메라를 향해 항상 정면
         v.hpBar.quaternion.copy(this.camera.quaternion)
       }
@@ -207,12 +268,9 @@ export class Visuals {
 
   dispose(): void {
     for (const e of [...this.items.keys()]) this.detach(e)
-    this.playerGeo.dispose()
-    this.gruntGeo.dispose()
+    for (const geo of Object.values(this.geos)) geo.dispose()
+    for (const geo of Object.values(this.telegraphGeos)) geo.dispose()
     this.bladeGeo.dispose()
-    this.telegraphGeo.dispose()
     this.hpBarGeo.dispose()
   }
 }
-
-export { KIND_GRUNT, KIND_PLAYER }

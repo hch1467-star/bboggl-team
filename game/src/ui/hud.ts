@@ -18,6 +18,11 @@ export class Hud {
   private readonly hpText = el<HTMLSpanElement>('hpText')
   private readonly stamFill = el<HTMLDivElement>('stamFill')
   private readonly stamText = el<HTMLSpanElement>('stamText')
+  private readonly arenaStats = el<HTMLElement>('arenaStats')
+  private readonly levelStats = el<HTMLElement>('levelStats')
+  private readonly levelNameText = el<HTMLElement>('levelNameText')
+  private readonly levelEnemyText = el<HTMLElement>('levelEnemyText')
+  private readonly treasureText = el<HTMLElement>('treasureText')
   private readonly waveText = el<HTMLElement>('waveText')
   private readonly enemyText = el<HTMLElement>('enemyText')
   private readonly killText = el<HTMLElement>('killText')
@@ -49,6 +54,18 @@ export class Hud {
       this.stamText.textContent = String(Math.ceil(Math.max(0, stamina)))
       this.lastStam = quantised
     }
+  }
+
+  /** 아레나 모드와 레벨 모드는 보여줄 정보가 다릅니다. */
+  setMode(mode: 'arena' | 'level'): void {
+    this.arenaStats.style.display = mode === 'arena' ? '' : 'none'
+    this.levelStats.style.display = mode === 'level' ? '' : 'none'
+  }
+
+  setLevelProgress(name: string, enemiesLeft: number, found: number, total: number): void {
+    this.levelNameText.textContent = name
+    this.levelEnemyText.textContent = String(enemiesLeft)
+    this.treasureText.textContent = `${found} / ${total}`
   }
 
   setProgress(wave: number, enemiesLeft: number, kills: number): void {

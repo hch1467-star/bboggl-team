@@ -96,12 +96,25 @@ export const Player = defineComponent({
   dodgeCooldownT: 'f32',
 })
 
+/** 적 종류 (Enemy.kind) */
+export const enum EnemyKind {
+  Grunt = 0,
+  Boss = 1,
+}
+
 /** 적 전용 데이터 */
 export const Enemy = defineComponent({
-  /** 0 = 잡몹. 나중에 정예/보스 추가 */
+  /** EnemyKind */
   kind: 'u8',
   /** 어그로 상태 (0 = 미발견, 1 = 추격 중) */
   aggro: 'u8',
+})
+
+/** 주울 수 있는 것 — 지금은 보물. 나중에 스킬 해금/소모품으로 확장합니다. */
+export const Pickup = defineComponent({
+  taken: 'u8',
+  /** 둥둥 뜨는 연출의 위상차. 여러 개가 똑같이 움직이면 인공적으로 보입니다. */
+  phase: 'f32',
 })
 
 /** Three.js 오브젝트와 엔티티를 잇는 핸들. 실제 메시는 render/visuals.ts가 보관합니다. */

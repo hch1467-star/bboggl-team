@@ -96,10 +96,13 @@ export class QuarterViewCamera {
   }
 
   /**
-   * @param focusX,focusZ 따라갈 대상(플레이어) 위치
+   * @param focusX,focusY,focusZ 따라갈 대상(플레이어) 위치
    * @param aimX,aimZ 커서의 지면 위치 — 시야를 그쪽으로 살짝 밀어줍니다
+   *
+   * Y를 따라가는 이유: 높이 지형에서 계단을 오르면 캐릭터가 화면 위로 밀려납니다.
+   * 카메라가 높이를 안 따라가면 언덕을 오를수록 캐릭터가 화면 밖으로 나갑니다.
    */
-  update(focusX: number, focusZ: number, aimX: number, aimZ: number): void {
+  update(focusX: number, focusY: number, focusZ: number, aimX: number, aimZ: number): void {
     // 커서 방향으로 리드. 조준 지점이 화면 안에 들어와 조준감이 좋아집니다.
     let leadX = (aimX - focusX) * CAMERA.aimLeadFactor
     let leadZ = (aimZ - focusZ) * CAMERA.aimLeadFactor
@@ -109,7 +112,7 @@ export class QuarterViewCamera {
       leadX *= s
       leadZ *= s
     }
-    this.focus.set(focusX + leadX, 0, focusZ + leadZ)
+    this.focus.set(focusX + leadX, focusY, focusZ + leadZ)
 
     if (!this.initialised) {
       this.smoothed.copy(this.focus)
@@ -146,13 +149,30 @@ export class QuarterViewCamera {
     this.camera.updateMatrixWorld()
   }
 
+  /** 카메라를 목표 지점에 즉시 붙입니다(레벨 시작 시 화면이 미끄러지지 않게). */
+  snapTo(x: number, z: number): void {
+    this.focus.set(x, 0, z)
+    this.smoothed.copy(this.focus)
+    this.initialised = true
+  }
+
   /**
-   * 화면 좌표(NDC) -> 지면(y=0) 월드 좌표.
+   * 화면 좌표(NDC) -> 지면 월드 좌표.
    * 마우스 조준의 핵심. 실패하면(카메라가 지면과 평행) false.
+   *
+   * @param planeY 조준 평면의 높이. 플레이어가 서 있는 높이를 넘겨야
+   *   언덕 위에서 커서와 실제 조준 방향이 어긋나지 않습니다.
    */
-  screenToGround(ndcX: number, ndcY: number, out: { x: number; z: number }): boolean {
+  screenToGround(
+    ndcX: number,
+    ndcY: number,
+    planeY: number,
+    out: { x: number; z: number },
+  ): boolean {
     this.ndc.set(ndcX, ndcY)
     this.raycaster.setFromCamera(this.ndc, this.camera)
+    // Plane(normal=(0,1,0), constant=c) 는 y = -c 평면입니다.
+    this.groundPlane.constant = -planeY
     const hit = this.raycaster.ray.intersectPlane(this.groundPlane, this.tmp)
     if (!hit) return false
     out.x = hit.x
