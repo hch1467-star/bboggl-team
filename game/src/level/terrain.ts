@@ -8,18 +8,38 @@ import {
   worldToCell,
 } from './format'
 
+/** 청크 한 변의 칸 수. 24m 단위 — 너무 크면 페이드가 뭉툭하고, 너무 작으면 드로우콜이 폭증합니다. */
+const CHUNK = 12
+
+/** 이 거리 안의 높은 덩어리만 반투명 대상이 됩니다(m). */
+const OCCLUSION_RANGE = 26
+
+interface Chunk {
+  mesh: THREE.Mesh
+  material: THREE.MeshStandardMaterial
+  level: number
+  /** 청크 중심의 월드 좌표 */
+  cx: number
+  cz: number
+}
+
 /**
  * 높이맵 지형 — 충돌 질의 + 메시 생성.
  *
- * 메시를 **높이 단계별로 따로** 만듭니다. 이유는 쿼터뷰의 고질병인 '가림' 때문입니다.
+ * 메시를 **(높이 단계 × 청크)** 로 쪼개 만듭니다. 쿼터뷰의 고질병인 '가림' 때문입니다.
  * 고정 각도라서 플레이어보다 높은 지형이 캐릭터를 통째로 가려버립니다.
- * 층을 나눠 두면 "플레이어보다 2단계 이상 높은 층"만 반투명으로 낮출 수 있습니다.
- * (디아블로2가 캐릭터와 겹치는 벽 전체를 페이드시킨 것과 같은 접근입니다.)
+ *
+ * 처음에는 높이 단계별로만 나눠서 "플레이어보다 2단 이상 높은 층"을 통째로
+ * 반투명하게 만들었는데, 그러면 **저 멀리 있는 성벽까지 전부 흐려져서**
+ * 세계가 경계 없는 판때기처럼 보였습니다(실제 스크린샷에서 확인).
+ *
+ * 청크로 쪼개면 "플레이어 근처에 있고, 카메라와 플레이어 **사이**에 있고,
+ * 플레이어보다 높은" 덩어리만 골라 낮출 수 있습니다. 이게 실제로 가리는 것들입니다.
+ * (디아블로2가 캐릭터와 겹치는 벽만 페이드시킨 것과 같은 접근입니다.)
  */
 export class Terrain {
   readonly maxLevel: number
-  private readonly layers: THREE.Mesh[] = []
-  private readonly layerMaterials: THREE.MeshStandardMaterial[] = []
+  private readonly chunks: Chunk[] = []
   readonly group = new THREE.Group()
 
   constructor(readonly level: LevelData) {
@@ -88,16 +108,33 @@ export class Terrain {
   // ---- 메시 -------------------------------------------------------------
 
   /**
-   * 플레이어보다 훨씬 높은 층을 반투명으로 만듭니다.
-   * @param playerLevel 플레이어가 서 있는 높이 단계
+   * 실제로 플레이어를 가리는 덩어리만 반투명으로 낮춥니다.
+   *
+   * 세 조건을 **모두** 만족해야 합니다:
+   *   1) 플레이어보다 2단 이상 높다      (1단 차이는 눈높이라 가리지 않음)
+   *   2) 플레이어에게서 가깝다           (먼 성벽까지 흐려지면 세계가 사라짐)
+   *   3) 카메라와 플레이어 사이에 있다   (뒤쪽 벽은 가릴 수가 없음)
+   *
+   * @param camDirX,camDirZ 플레이어 -> 카메라 방향(XZ, 정규화)
    */
-  applyOcclusionFade(playerLevel: number): void {
-    for (let lvl = 0; lvl < this.layerMaterials.length; lvl++) {
-      const mat = this.layerMaterials[lvl]
-      if (!mat) continue
-      // 2단계 이상 높은 층만 낮춥니다. 1단계 차이는 눈높이 정도라 가리지 않습니다.
-      const occluding = lvl >= playerLevel + 2
-      const target = occluding ? 0.26 : 1
+  applyOcclusionFade(
+    playerLevel: number,
+    playerX: number,
+    playerZ: number,
+    camDirX: number,
+    camDirZ: number,
+  ): void {
+    for (const chunk of this.chunks) {
+      const dx = chunk.cx - playerX
+      const dz = chunk.cz - playerZ
+      const towardCamera = dx * camDirX + dz * camDirZ
+      const occluding =
+        chunk.level >= playerLevel + 2 &&
+        Math.hypot(dx, dz) < OCCLUSION_RANGE &&
+        towardCamera > -CHUNK // 청크가 크므로 살짝 뒤쪽까지는 포함합니다
+
+      const target = occluding ? 0.22 : 1
+      const mat = chunk.material
       if (mat.opacity !== target) {
         mat.opacity = target
         mat.transparent = target < 1
@@ -108,29 +145,29 @@ export class Terrain {
   }
 
   dispose(): void {
-    // 비어 있는 높이 단계는 자리만 채워 둔 빈 칸(undefined)입니다.
-    // 인덱스를 높이 단계와 1:1로 맞추기 위한 것이라, 정리할 때 반드시 걸러야 합니다.
-    // (이걸 빼먹어서 에디터에서 지형을 고칠 때마다 크래시가 났습니다.)
-    for (const mesh of this.layers) {
-      if (!mesh) continue
-      mesh.geometry.dispose()
-      ;(mesh.material as THREE.Material).dispose()
+    for (const chunk of this.chunks) {
+      chunk.mesh.geometry.dispose()
+      chunk.material.dispose()
     }
-    this.layers.length = 0
-    this.layerMaterials.length = 0
+    this.chunks.length = 0
     this.group.clear()
   }
 
   private build(): void {
     const { w, h } = this.level
 
-    // 높이 단계별로 정점을 모읍니다.
-    const buckets: { pos: number[]; norm: number[]; col: number[]; idx: number[] }[] = []
-    for (let i = 0; i <= this.maxLevel; i++) {
-      buckets.push({ pos: [], norm: [], col: [], idx: [] })
+    // (높이 단계, 청크) 조합별로 정점을 모읍니다. 대부분의 조합은 비어 있으므로
+    // Map으로 성긴 저장을 합니다.
+    const buckets = new Map<string, Bucket>()
+    const bucketOf = (lvl: number, cx: number, cz: number): Bucket => {
+      const key = `${lvl}|${(cx / CHUNK) | 0}|${(cz / CHUNK) | 0}`
+      let b = buckets.get(key)
+      if (!b) {
+        b = { pos: [], norm: [], col: [], idx: [], level: lvl, minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity }
+        buckets.set(key, b)
+      }
+      return b
     }
-
-    const half = CELL_SIZE / 2
     const originX = (-w / 2) * CELL_SIZE
     const originZ = (-h / 2) * CELL_SIZE
 
@@ -139,12 +176,16 @@ export class Terrain {
         const lvl = this.levelAtCell(cx, cz)
         if (lvl === VOID) continue
 
-        const b = buckets[lvl]
+        const b = bucketOf(lvl, cx, cz)
         const y = lvl * HEIGHT_STEP
         const x0 = originX + cx * CELL_SIZE
         const x1 = x0 + CELL_SIZE
         const z0 = originZ + cz * CELL_SIZE
         const z1 = z0 + CELL_SIZE
+        if (x0 < b.minX) b.minX = x0
+        if (x1 > b.maxX) b.maxX = x1
+        if (z0 < b.minZ) b.minZ = z0
+        if (z1 > b.maxZ) b.maxZ = z1
 
         // 윗면 — 격자 체크무늬를 살짝 넣습니다. 단색이면 직교 투영에서
         // 거리감이 전혀 안 잡혀서 "얼마나 걸었는지"를 알 수 없습니다.
@@ -188,15 +229,8 @@ export class Terrain {
       }
     }
 
-    void half
-
-    for (let lvl = 0; lvl < buckets.length; lvl++) {
-      const b = buckets[lvl]
-      if (b.pos.length === 0) {
-        this.layers.push(undefined as unknown as THREE.Mesh)
-        this.layerMaterials.push(undefined as unknown as THREE.MeshStandardMaterial)
-        continue
-      }
+    for (const b of buckets.values()) {
+      if (b.pos.length === 0) continue
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.norm, 3))
@@ -212,8 +246,13 @@ export class Terrain {
       const mesh = new THREE.Mesh(geo, mat)
       mesh.castShadow = true
       mesh.receiveShadow = true
-      this.layers.push(mesh)
-      this.layerMaterials.push(mat)
+      this.chunks.push({
+        mesh,
+        material: mat,
+        level: b.level,
+        cx: (b.minX + b.maxX) / 2,
+        cz: (b.minZ + b.maxZ) / 2,
+      })
       this.group.add(mesh)
     }
   }
@@ -241,7 +280,17 @@ export class Terrain {
   }
 }
 
-type Bucket = { pos: number[]; norm: number[]; col: number[]; idx: number[] }
+type Bucket = {
+  pos: number[]
+  norm: number[]
+  col: number[]
+  idx: number[]
+  level: number
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
+}
 
 /** 사각형 하나를 삼각형 두 개로 밀어 넣습니다. 정점 순서가 곧 앞면 방향입니다. */
 function quad(

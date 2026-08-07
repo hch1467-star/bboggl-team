@@ -11,7 +11,8 @@
     "verify": "node tools/verify.mjs",
     "vfx": "node tools/vfx-preview.mjs",
     "level": "node tools/level-preview.mjs",
-    "skills": "node tools/skill-preview.mjs"
+    "skills": "node tools/skill-preview.mjs",
+    "zone": "node tools/make-zone.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

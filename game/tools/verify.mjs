@@ -72,7 +72,8 @@ async function main() {
   })
 
   // lowfx=1: 소프트웨어 렌더링에서 그림자를 끄면 프레임이 5배 이상 나옵니다.
-  await page.goto(`http://127.0.0.1:${PORT}/?lowfx=1`, { waitUntil: 'load' })
+  // mode=arena: 기본 화면은 이제 번들 존이므로, 전투 검사는 시험장을 명시적으로 엽니다.
+  await page.goto(`http://127.0.0.1:${PORT}/?mode=arena&lowfx=1`, { waitUntil: 'load' })
 
   const state = () => page.evaluate(() => window.__game.state())
   const press = (c) => page.evaluate((code) => window.__game.press(code), c)
@@ -569,6 +570,39 @@ async function main() {
     const lvShot = path.join(SHOTS, '05-level-play.png')
     await lv.screenshot({ path: lvShot })
     check('레벨 플레이 스크린샷 생성', statSync(lvShot).size > 15000, `${(statSync(lvShot).size / 1024).toFixed(0)} KB`)
+
+    // ---------- 9.5 배포되는 존이 기본으로 열리는가 ----------
+    // 링크만 열었을 때 무엇이 나오는지가 사실상 이 게임의 첫인상입니다.
+    const zone = await context.newPage()
+    zone.on('pageerror', (e) => consoleErrors.push(`zone: ${e}`))
+    await zone.goto(`http://127.0.0.1:${PORT}/?lowfx=1`, { waitUntil: 'load' })
+    await zone.waitForFunction(() => window.__game?.ready === true, { timeout: 20000 })
+    await sleep(1500)
+
+    const zs = await zone.evaluate(() => window.__game.state())
+    check('아무 옵션 없이 열면 번들 존이 실행됨', zs.source === 'bundled' && zs.levelMode, `source=${zs.source}`)
+    check('존 이름이 표시됨', zs.levelName === '무너진 성문', `"${zs.levelName}"`)
+    check('존의 보물 4개가 배치됨', zs.treasureTotal === 4, `${zs.treasureTotal}개`)
+    check('존의 적 12마리(잡몹 11 + 보스 1)가 배치됨', zs.enemiesLeft === 12, `${zs.enemiesLeft}마리`)
+    check('시작 지점이 바닥 위(높이 2)', zs.player.terrainLevel === 2, `높이 단계 ${zs.player.terrainLevel}`)
+    check('시작 지점 근처에는 적이 없음', (zs.nearestEnemy?.dist ?? 99) > 8, `가장 가까운 적 ${zs.nearestEnemy?.dist}m`)
+    check('시작 시 룬 슬롯은 비어 있음(탐험으로 획득)', zs.loadout.slots[2] === null && zs.loadout.slots[3] === null)
+
+    await zone.evaluate(() => window.__game.requestSample())
+    let zpix = null
+    for (let t = 0; t < 130 && !zpix; t++) {
+      zpix = await zone.evaluate(() => window.__game.getSample())
+      if (!zpix) await sleep(60)
+    }
+    check(
+      '존이 화면에 렌더링됨',
+      zpix != null && zpix.bgRatio < 0.5 && zpix.meanLuma >= 10,
+      zpix ? `배경색 픽셀 ${(zpix.bgRatio * 100).toFixed(0)}% · 평균밝기 ${zpix.meanLuma}` : '샘플 실패',
+    )
+
+    const zoneShot = path.join(SHOTS, '13-zone.png')
+    await zone.screenshot({ path: zoneShot })
+    check('존 스크린샷 생성', statSync(zoneShot).size > 15000, `${(statSync(zoneShot).size / 1024).toFixed(0)} KB`)
 
     // ---------- 10. 안정성 ----------
     check('런타임 콘솔 에러 없음', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '))

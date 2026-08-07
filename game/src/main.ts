@@ -15,7 +15,8 @@ import {
 import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
 import { debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
-import { loadLevelFromStorage } from './level/format'
+import { loadLevelFromStorage, type LevelData } from './level/format'
+import { DEFAULT_LEVEL_ID, loadBundledLevel } from './levels'
 import { Terrain } from './level/terrain'
 import { QuarterViewCamera } from './render/camera'
 import { createScene } from './render/scene'
@@ -69,8 +70,13 @@ class Game {
   private readonly aim = { x: 0, z: 0 }
   private readonly controlCtx: ControlContext
 
-  /** 레벨 모드 상태 */
-  private readonly wantsLevel: boolean
+  /**
+   * 어떤 콘텐츠를 띄울지.
+   *   bundled — 함께 배포되는 존 (기본). 링크만 열면 누구나 같은 콘텐츠를 봅니다.
+   *   storage — 에디터에서 만든 레벨 (?level=storage)
+   *   arena   — 웨이브 전투 시험장 (?mode=arena)
+   */
+  private readonly source: 'bundled' | 'storage' | 'arena'
   private levelMode = false
   private levelName = ''
   private terrain: Terrain | null = null
@@ -81,7 +87,6 @@ class Game {
   private damageDealt = 0
   private backHits = 0
   private critHits = 0
-  private lastFadeLevel = -999
 
   constructor(canvas: HTMLCanvasElement) {
     const bundle = createScene(canvas)
@@ -97,7 +102,9 @@ class Game {
     this.hud = new Hud()
     this.skillBar = new SkillBar()
 
-    this.wantsLevel = new URLSearchParams(location.search).get('level') === 'storage'
+    const params = new URLSearchParams(location.search)
+    this.source =
+      params.get('level') === 'storage' ? 'storage' : params.get('mode') === 'arena' ? 'arena' : 'bundled'
 
     this.controlCtx = {
       forwardX: this.cam.forward.x,
@@ -150,7 +157,6 @@ class Game {
       this.terrain = null
       setTerrain(null)
     }
-    this.lastFadeLevel = -999
 
     this.kills = 0
     this.waveTimer = 0
@@ -164,7 +170,9 @@ class Game {
     this.hud.hideBanner()
     setEnemyAiEnabled(true)
 
-    const level = this.wantsLevel ? loadLevelFromStorage() : null
+    let level: LevelData | null = null
+    if (this.source === 'storage') level = loadLevelFromStorage()
+    else if (this.source === 'bundled') level = loadBundledLevel(DEFAULT_LEVEL_ID)
     this.levelMode = level !== null
 
     if (level) {
@@ -338,10 +346,8 @@ class Game {
     if (this.terrain) {
       const lvl = this.terrain.levelAtWorld(px, pz)
       const safeLvl = lvl < 0 ? 0 : lvl
-      if (safeLvl !== this.lastFadeLevel) {
-        this.terrain.applyOcclusionFade(safeLvl)
-        this.lastFadeLevel = safeLvl
-      }
+      // 플레이어 -> 카메라 방향(XZ). 이 방향에 있는 덩어리만 시야를 가릴 수 있습니다.
+      this.terrain.applyOcclusionFade(safeLvl, px, pz, -this.cam.forward.x, -this.cam.forward.z)
     }
 
     this.visuals.sync(px, pz)
@@ -606,6 +612,7 @@ class Game {
       },
       levelMode: this.levelMode,
       levelName: this.levelName,
+      source: this.source,
       treasuresFound: this.treasuresFound,
       treasureTotal: this.treasureTotal,
     }
