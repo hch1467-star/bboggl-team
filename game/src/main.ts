@@ -18,6 +18,7 @@ import {
 } from './core/components'
 import { AttackPhase } from './core/components'
 import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
+import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
 import { loadLevelFromStorage, worldToCell, type LevelData, type LevelRegion } from './level/format'
@@ -162,6 +163,15 @@ class Game {
     }
 
     initInput(canvas)
+    /**
+     * 브라우저는 사용자가 페이지를 한 번이라도 건드리기 전에는 소리를 막습니다
+     * (자동재생 정책). 그래서 첫 입력에서 오디오를 엽니다. `once`가 아니라
+     * 매번 부르는 이유: 탭을 옮겼다 오면 AudioContext가 다시 잠들기 때문에,
+     * 조작할 때마다 깨워 주는 쪽이 확실합니다(이미 열려 있으면 즉시 반환).
+     */
+    const wake = () => sfx.unlock()
+    window.addEventListener('pointerdown', wake)
+    window.addEventListener('keydown', wake)
     this.hud.restartButton.addEventListener('click', () => this.reset())
     // 진행 초기화는 되돌릴 수 없으므로 한 번 더 묻습니다.
     document.getElementById('resetProgress')?.addEventListener('click', () => {
@@ -338,6 +348,16 @@ class Game {
     this.controlCtx.aimX = this.aim.x
     this.controlCtx.aimZ = this.aim.z
 
+    // 소리의 기준점 = 플레이어. 좌우 패닝은 **카메라의 우측 벡터**로 계산합니다.
+    // 월드 좌표를 그대로 쓰면 쿼터뷰 45° 때문에 화면 왼쪽 적이 오른쪽에서
+    // 들립니다 — 보이는 위치와 들리는 위치가 어긋나면 정보가 아니라 방해입니다.
+    sfx.setListener(Transform.x[p], Transform.z[p], this.cam.right.x, this.cam.right.z)
+
+    // ---- 1.4 음소거 (M) ----
+    if (consumePress('KeyM')) {
+      this.hud.showBanner(sfx.toggleMute() ? '음소거' : '소리 켜짐', 'M 키로 전환', 1.1)
+    }
+
     // ---- 1.5 트라이포드 창 (T) ----
     // 창을 열어도 게임은 계속 돕니다(ui/tripodPanel.ts 설계 노트).
     // 그래서 여는 것 자체가 안전하지 않은 선택이 되고, "언제 열지"도 판단이 됩니다.
@@ -360,6 +380,18 @@ class Game {
       }
       requestHitstop(hit.hitstop)
       this.cam.addTrauma(hit.trauma, hit.dirX, hit.dirZ)
+      /**
+       * 소리를 **여기서** 냅니다 — 히트스톱·흔들림·데미지 숫자와 같은 줄에서.
+       *
+       * 손맛은 눈·귀·손 세 신호가 **같은 프레임에** 도착할 때 완성됩니다.
+       * 시스템 안쪽에서 따로 울리면 히트스톱만큼(최대 0.11초) 어긋나는데,
+       * 그 정도면 사람은 "소리가 늦다"로 느낍니다.
+       */
+      if (hit.victimIsPlayer) {
+        sfx.hurt()
+      } else if (hit.damage > 0) {
+        sfx.impact(hit.heavy, hit.back || hit.crit, hit.x, hit.z)
+      }
       this.vfx.spawnHitSpark(hit.x, hit.y, hit.z, hit.back || hit.crit ? 1.8 : hit.heavy ? 1.5 : 1)
       this.vfx.spawnDamage(hit.x, hit.y + 0.5, hit.z, Math.abs(hit.damage), {
         heavy: hit.heavy,
@@ -377,11 +409,14 @@ class Game {
         this.gameOver = true
         this.cam.addTrauma(0.8)
         requestHitstop(0.22)
+        sfx.death(true)
         this.hud.showGameOver(this.kills, this.wave)
       } else {
         this.kills++
         requestHitstop(KILL_FEEDBACK.hitstop)
         this.cam.addTrauma(KILL_FEEDBACK.trauma)
+        // 보스는 더 낮고 길게 꺼집니다 — 처치의 무게가 소리 길이로 구분됩니다.
+        sfx.death(Enemy.kind[death.entity] === EnemyKind.Boss, death.x, death.z)
         // 처치 순간 파편을 여러 개 흩뿌립니다 — 한 개보다 훨씬 시원합니다.
         for (let i = 0; i < 4; i++) {
           this.vfx.spawnHitSpark(
@@ -569,6 +604,7 @@ class Game {
       this.takenTreasures.add(treasureKey(Transform.x[e], Transform.z[e]))
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
+      sfx.pickup()
 
       // 보물 = 새 룬(= 새 스킬) **또는** 트라이포드 포인트(= 스킬의 변형).
       // "세져서" 가 아니라 "새로운 걸 할 수 있어서" 재미있어야 한다는
@@ -1007,6 +1043,16 @@ declare global {
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
       resetProgress: () => void
+      /**
+       * 사운드 검증용. 헤드리스에서는 소리를 들을 수 없으므로 **파형의 진폭**을
+       * 재서 "실제로 소리가 났다"를 숫자로 확인합니다.
+       */
+      audio: {
+        unlock: () => void
+        state: () => { ready: boolean; state: string; voices: number; muted: boolean }
+        level: () => number
+        cue: (name: string, a?: number, b?: number) => void
+      }
     }
   }
 }
@@ -1057,4 +1103,45 @@ window.__game = {
   toggleTripodPanel: () => game.debugToggleTripodPanel(),
   saveInfo: () => game.debugSaveInfo(),
   resetProgress: () => game.resetProgress(),
+  audio: {
+    unlock: () => sfx.unlock(),
+    state: () => sfx.debugState(),
+    level: () => sfx.debugLevel(),
+    cue: (name, a = 0, b = 0) => {
+      switch (name) {
+        case 'swing':
+          sfx.swing(a)
+          break
+        case 'impact':
+          sfx.impact(a > 0, b > 0)
+          break
+        case 'telegraph': {
+          // 예고음은 **위치가 있는 소리**입니다. 원점에서 울리면 플레이어가
+          // 레벨 어디에 서 있느냐에 따라 거리 감쇠로 지워집니다.
+          // b = 플레이어로부터의 거리(m).
+          const at = sfx.debugListener()
+          sfx.telegraph(a, at.x + b, at.z)
+          break
+        }
+        case 'dodge':
+          sfx.dodge()
+          break
+        case 'hurt':
+          sfx.hurt()
+          break
+        case 'death':
+          sfx.death(a > 0)
+          break
+        case 'cast':
+          sfx.cast(a)
+          break
+        case 'pickup':
+          sfx.pickup()
+          break
+        case 'deny':
+          sfx.deny()
+          break
+      }
+    },
+  },
 }

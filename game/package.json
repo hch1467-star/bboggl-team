@@ -17,7 +17,8 @@
     "intents": "node tools/intent-preview.mjs",
     "tripod": "node tools/tripod-preview.mjs",
     "crowd": "node tools/crowd-probe.mjs",
-    "aim": "node tools/aim-probe.mjs"
+    "aim": "node tools/aim-probe.mjs",
+    "audio": "node tools/audio-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

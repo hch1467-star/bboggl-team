@@ -13,6 +13,7 @@ import {
   Transform,
   Velocity,
 } from '../core/components'
+import { sfx } from '../core/audio'
 import { defineQuery } from '../core/ecs'
 import { consumePress, isDown } from '../core/input'
 import { time } from '../core/time'
@@ -166,6 +167,14 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
   // 스냅하지 않고 **목표만 정해 둡니다.** 선행동작 동안 수렴합니다(turnArrive).
   Player.faceRot[p] = rot
+
+  /**
+   * 휘두르는 소리의 무게를 **trauma 값에서 그대로 가져옵니다.**
+   * 무게용 필드를 새로 만들지 않은 이유: trauma는 이미 "이 타격이 얼마나
+   * 묵직한가"를 나타내는 숫자입니다. 같은 뜻의 숫자를 두 개 두면 밸런스를
+   * 바꿀 때 한쪽만 고쳐서 소리와 화면이 어긋나게 됩니다.
+   */
+  sfx.swing(c.trauma / 0.55)
 }
 
 function beginSkill(
@@ -230,6 +239,9 @@ function beginSkill(
     Player.castZ[p] = Transform.z[p]
   }
 
+  // 무기마다 시전음의 음정이 다릅니다 — 어떤 무기의 스킬을 썼는지 귀로 구분됩니다.
+  sfx.cast(WEAPONS.indexOf(weaponOf(p)))
+
   // 예고 표시 — windup 동안 지면에 범위를 그려 줍니다.
   ctx.onCast({
     shape: def.shape,
@@ -256,6 +268,7 @@ function beginDodge(p: number, dirX: number, dirZ: number): void {
   Stamina.value[p] = Math.max(0, Stamina.value[p] - PLAYER.dodge.staminaCost)
   Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
   Transform.rotY[p] = Math.atan2(dirX, dirZ)
+  sfx.dodge()
 }
 
 export function playerControlSystem(ctx: ControlContext): void {
@@ -429,6 +442,13 @@ export function playerControlSystem(ctx: ControlContext): void {
           beginAttack(p, 0, aimRot)
           break
         }
+        /**
+         * **거절음.** 지금까지 스태미나가 모자라면 아무 일도 안 일어났습니다.
+         * 초보자에게는 "키가 안 먹혔나?"와 구분이 되지 않습니다.
+         * 짧은 저음 하나로 "입력은 됐고, 지금은 자원이 없다"가 됩니다.
+         * — 스태미나가 자원으로 작동하려면 **바닥났다는 사실이 들려야** 합니다.
+         */
+        if (dodgePressed || attackPressed) sfx.deny()
         turnToward(p, aimRot, PLAYER.turnSpeedDeg, dt)
         break
       }

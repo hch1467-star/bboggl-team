@@ -20,6 +20,7 @@ import {
   attacksFor,
   pickAttack,
 } from '../config/enemyAttacks'
+import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { isBehindPoint } from './combat'
@@ -221,6 +222,9 @@ export function enemyAiSystem(
           Actor.hitsLeft[e] = 1
           Actor.nextHitT[e] = 0
           ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg)
+          // 실제로 휘두르는 순간. 예고음(windup 시작)과 시간이 벌어져 있어서
+          // "예고 → 발동" 두 박자가 귀로도 잡힙니다.
+          sfx.swing(isBoss ? 0.95 : 0.55, Transform.x[e], Transform.z[e])
         } else if (phase === AttackPhase.Active) {
           Actor.phase[e] = AttackPhase.Recovery
           Actor.timer[e] = atk.recovery
@@ -282,6 +286,19 @@ export function enemyAiSystem(
         Actor.timer[e] = picked.windup
         Actor.hitsLeft[e] = 1
         Actor.nextHitT[e] = 0
+        /**
+         * **예고음 — 4색이 곧 4개의 음입니다.**
+         *
+         * 쿼터뷰에서 적이 겹치면 색 예고가 서로를 가립니다(플레이 테스트에서
+         * "여러 명 겹쳤을 때 피하기 어렵다"로 이미 확인). 공격 토큰으로
+         * 동시 예고를 2개로 줄였지만, 2개도 겹치면 하나는 안 보입니다.
+         * 소리는 겹쳐도 서로를 가리지 않는다 — 이게 이 한 줄의 이유입니다.
+         *
+         * AttackIntent 와 SfxIntent 는 값이 1:1로 같습니다(0~3).
+         * 일부러 같게 맞춰서 변환 표를 만들지 않았습니다 — 표가 있으면
+         * 색을 추가할 때 한쪽만 고쳐서 색과 소리가 어긋납니다.
+         */
+        sfx.telegraph(picked.intent as unknown as SfxIntent, Transform.x[e], Transform.z[e])
         decayVelocity(e, dt, 12)
         continue
       }
