@@ -100,23 +100,59 @@ function makeGlowTexture(): THREE.CanvasTexture {
 
 function makeDamageCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas')
-  c.width = 160
-  c.height = 80
+  c.width = 220
+  c.height = 112
   return c
 }
 
-function drawDamage(canvas: HTMLCanvasElement, text: string, color: string): void {
+/** 데미지 숫자의 종류. 색·크기·머리말이 달라집니다. */
+export interface DamageStyle {
+  heavy?: boolean
+  /** 등 뒤에서 꽂았는가 */
+  back?: boolean
+  crit?: boolean
+  heal?: boolean
+}
+
+/**
+ * 숫자 위에 머리말을 붙여 **왜 이 숫자가 큰지** 알려줍니다.
+ *
+ * 색만 바꾸면 "어? 이번엔 왜 세게 들어갔지?"에 답이 안 됩니다.
+ * "백어택"이라고 써 줘야 플레이어가 **다음에도 그렇게 하려고** 움직입니다.
+ * 기둥 3(포지셔닝 보상)이 학습되는 지점이 정확히 여기입니다.
+ */
+function styleOf(style: DamageStyle): { color: string; label: string; scale: number } {
+  if (style.heal) return { color: '#7ef2a5', label: '회복', scale: 1.1 }
+  if (style.back && style.crit) return { color: '#ff8a3c', label: '백어택 치명타!', scale: 1.9 }
+  if (style.back) return { color: '#ffb648', label: '백어택', scale: 1.5 }
+  if (style.crit) return { color: '#ffe07a', label: '치명타', scale: 1.45 }
+  if (style.heavy) return { color: '#ffd257', label: '', scale: 1.3 }
+  return { color: '#ffffff', label: '', scale: 1 }
+}
+
+function drawDamage(canvas: HTMLCanvasElement, text: string, color: string, label: string): void {
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, canvas.width, canvas.height)
-  ctx.font = 'bold 56px system-ui, -apple-system, "Segoe UI", sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
+
+  const numY = label ? canvas.height * 0.62 : canvas.height / 2
+  ctx.font = 'bold 58px system-ui, -apple-system, "Segoe UI", sans-serif'
   // 검은 테두리 — 밝은 바닥 위에서도 숫자가 읽히게 합니다.
   ctx.lineWidth = 9
-  ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-  ctx.strokeText(text, canvas.width / 2, canvas.height / 2)
+  ctx.strokeStyle = 'rgba(0,0,0,0.88)'
+  ctx.strokeText(text, canvas.width / 2, numY)
   ctx.fillStyle = color
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2)
+  ctx.fillText(text, canvas.width / 2, numY)
+
+  if (label) {
+    ctx.font = 'bold 26px system-ui, -apple-system, "Segoe UI", sans-serif'
+    ctx.lineWidth = 6
+    ctx.strokeStyle = 'rgba(0,0,0,0.88)'
+    ctx.strokeText(label, canvas.width / 2, canvas.height * 0.2)
+    ctx.fillStyle = color
+    ctx.fillText(label, canvas.width / 2, canvas.height * 0.2)
+  }
 }
 
 export class Vfx {
@@ -246,14 +282,16 @@ export class Vfx {
     item.radius = radius
   }
 
-  spawnDamage(x: number, y: number, z: number, amount: number, heavy = false): void {
+  spawnDamage(x: number, y: number, z: number, amount: number, style: DamageStyle = {}): void {
     const item = this.damages[this.damageCursor]
     this.damageCursor = (this.damageCursor + 1) % DAMAGE_POOL
 
-    drawDamage(item.canvas, String(Math.round(amount)), heavy ? '#ffd257' : '#ffffff')
+    const look = styleOf(style)
+    const text = (style.heal ? '+' : '') + String(Math.round(amount))
+    drawDamage(item.canvas, text, look.color, look.label)
     item.texture.needsUpdate = true
     item.sprite.position.set(x, y, z)
-    item.sprite.scale.set(heavy ? 2.1 : 1.5, heavy ? 1.05 : 0.75, 1)
+    item.sprite.scale.set(1.7 * look.scale, 0.87 * look.scale, 1)
     item.sprite.visible = true
     item.sprite.material.opacity = 1
     item.life = DAMAGE_LIFE

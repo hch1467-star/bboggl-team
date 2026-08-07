@@ -21,13 +21,13 @@ import { QuarterViewCamera } from './render/camera'
 import { createScene } from './render/scene'
 import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
-import { countLivingEnemies, hitEvents, resolveAttacks } from './systems/combat'
-import { enemyAiSystem } from './systems/enemyAI'
+import { countLivingEnemies, hitEvents, isBackAttack, isBehindPoint, resolveAttacks } from './systems/combat'
+import { enemyAiSystem, setEnemyAiEnabled } from './systems/enemyAI'
 import { deathEvents, healthSystem } from './systems/health'
 import { grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { physicsSystem, setTerrain } from './systems/physics'
 import { playerControlSystem, type ControlContext } from './systems/playerControl'
-import { enemyCountForWave, spawnFromLevel, spawnPlayer, spawnWave } from './systems/world'
+import { enemyCountForWave, spawnFromLevel, spawnGrunt, spawnPlayer, spawnWave } from './systems/world'
 import { Hud } from './ui/hud'
 import { SkillBar } from './ui/skillbar'
 
@@ -79,6 +79,8 @@ class Game {
   /** 플레이어가 적중시킨 누적 타격 수/피해량 — 다단히트 같은 것을 검증할 때 씁니다. */
   private hitsDealt = 0
   private damageDealt = 0
+  private backHits = 0
+  private critHits = 0
   private lastFadeLevel = -999
 
   constructor(canvas: HTMLCanvasElement) {
@@ -157,7 +159,10 @@ class Game {
     this.treasureTotal = 0
     this.hitsDealt = 0
     this.damageDealt = 0
+    this.backHits = 0
+    this.critHits = 0
     this.hud.hideBanner()
+    setEnemyAiEnabled(true)
 
     const level = this.wantsLevel ? loadLevelFromStorage() : null
     this.levelMode = level !== null
@@ -255,11 +260,18 @@ class Game {
       if (!hit.victimIsPlayer && hit.damage > 0) {
         this.hitsDealt++
         this.damageDealt += hit.damage
+        if (hit.back) this.backHits++
+        if (hit.crit) this.critHits++
       }
       requestHitstop(hit.hitstop)
       this.cam.addTrauma(hit.trauma, hit.dirX, hit.dirZ)
-      this.vfx.spawnHitSpark(hit.x, hit.y, hit.z, hit.heavy ? 1.5 : 1)
-      this.vfx.spawnDamage(hit.x, hit.y + 0.5, hit.z, hit.damage, hit.heavy)
+      this.vfx.spawnHitSpark(hit.x, hit.y, hit.z, hit.back || hit.crit ? 1.8 : hit.heavy ? 1.5 : 1)
+      this.vfx.spawnDamage(hit.x, hit.y + 0.5, hit.z, Math.abs(hit.damage), {
+        heavy: hit.heavy,
+        back: hit.back,
+        crit: hit.crit,
+        heal: hit.damage < 0,
+      })
     }
     hitEvents.length = 0
 
@@ -332,7 +344,7 @@ class Game {
       }
     }
 
-    this.visuals.sync()
+    this.visuals.sync(px, pz)
     this.vfx.update(this.cam.camera)
     this.renderer.render(this.scene, this.cam.camera)
     if (this.sampleRequested) {
@@ -409,12 +421,28 @@ class Game {
     }
   }
 
+  /**
+   * 적을 정확히 한 마리만 세워 1:1 상황을 만듭니다.
+   *
+   * 백어택 같은 포지셔닝 기술은 적이 여럿이면 검증이 불가능합니다 —
+   * "가장 가까운 적"이 계속 바뀌어서 무엇의 등 뒤인지 알 수가 없기 때문입니다.
+   * 밸런스를 손으로 만져볼 때도 1:1 시험장이 필요해서 남겨 둡니다.
+   */
+  debugSpawnTestEnemy(x: number, z: number, rotY?: number): number {
+    const e = spawnGrunt(x, z)
+    // 바라보는 방향을 지정할 수 있어야 백어택 같은 방향 판정을 검증할 수 있습니다.
+    if (rotY !== undefined) Transform.rotY[e] = rotY
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    this.visuals.attach(e, Renderable.kind[e])
+    return e
+  }
+
   debugSpawnVfx(kind: 'spark' | 'damage' | 'swing'): void {
     const x = Transform.x[this.playerEntity]
     const z = Transform.z[this.playerEntity] + 2.5
     const y = Transform.y[this.playerEntity]
     if (kind === 'spark') this.vfx.spawnHitSpark(x, y + 1.0, z, 1)
-    else if (kind === 'damage') this.vfx.spawnDamage(x, y + 1.4, z, 27, true)
+    else if (kind === 'damage') this.vfx.spawnDamage(x, y + 1.4, z, 62, { back: true, crit: true })
     else this.vfx.spawnSwing(x, z, 0, 2.7, 150)
   }
 
@@ -496,9 +524,15 @@ class Game {
   }
 
   /** 가장 가까운 적 (검증 및 디버깅용) */
-  private nearestEnemy(): { x: number; z: number; dist: number; hp: number } | null {
+  private nearestEnemy(): {
+    x: number
+    z: number
+    dist: number
+    hp: number
+    playerBehind: boolean
+  } | null {
     const p = this.playerEntity
-    let best: { x: number; z: number; dist: number; hp: number } | null = null
+    let best: { x: number; z: number; dist: number; hp: number; playerBehind: boolean } | null = null
     for (let e = 0; e < 4096; e++) {
       if (!isAlive(e) || e === p) continue
       if (Actor.state[e] === ActorState.Dead) continue
@@ -506,7 +540,13 @@ class Game {
       if (kind !== 1 && kind !== 3) continue
       const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
       if (!best || d < best.dist) {
-        best = { x: Transform.x[e], z: Transform.z[e], dist: d, hp: Health.hp[e] }
+        best = {
+          x: Transform.x[e],
+          z: Transform.z[e],
+          dist: d,
+          hp: Health.hp[e],
+          playerBehind: isBackAttack(p, e),
+        }
       }
     }
     return best
@@ -523,6 +563,7 @@ class Game {
             z: Number(near.z.toFixed(3)),
             dist: Number(near.dist.toFixed(3)),
             hp: Number(near.hp.toFixed(1)),
+            playerBehind: near.playerBehind,
           }
         : null,
       frame: time.frame,
@@ -546,6 +587,8 @@ class Game {
       kills: this.kills,
       hitsDealt: this.hitsDealt,
       damageDealt: Number(this.damageDealt.toFixed(1)),
+      backHits: this.backHits,
+      critHits: this.critHits,
       wave: this.wave,
       gameOver: this.gameOver,
       loadout: {
@@ -588,6 +631,9 @@ declare global {
       requestSample: () => void
       getSample: () => ReturnType<Game['getSample']>
       clearEnemies: () => void
+      testBehind: (ax: number, az: number, tx: number, tz: number, trot: number) => boolean
+      spawnTestEnemy: (x: number, z: number, rotY?: number) => number
+      freezeEnemies: (frozen: boolean) => void
       spawnVfx: (kind: 'spark' | 'damage' | 'swing') => void
     }
   }
@@ -603,5 +649,9 @@ window.__game = {
   requestSample: () => game.requestSample(),
   getSample: () => game.getSample(),
   clearEnemies: () => game.debugClearEnemies(),
+  // 등 뒤 판정은 순수 기하 계산이라 엔티티 없이 그대로 검증할 수 있습니다.
+  testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
+  spawnTestEnemy: (x, z, rotY) => game.debugSpawnTestEnemy(x, z, rotY),
+  freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),
 }

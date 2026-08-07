@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { BOSS, GRUNT, PLAYER, TREASURE } from '../config/balance'
+import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -40,6 +40,9 @@ interface Visual {
   /** 머리 위 체력바 (적 전용) */
   hpBar?: THREE.Group
   hpFill?: THREE.Mesh
+  /** 등 뒤(백어택) 구역 표시 */
+  backZone?: THREE.Mesh
+  backZoneMat?: THREE.MeshBasicMaterial
   /** 보물 등 둥둥 뜨는 오브젝트 */
   floats: boolean
 }
@@ -53,6 +56,21 @@ function makeTelegraphGeometry(reach: number, arcDeg: number): THREE.BufferGeome
   return geo
 }
 
+/**
+ * 등 뒤 구역 고리 — 적의 후방 부채꼴을 지면에 그립니다.
+ *
+ * 이게 없으면 백어택이 **운처럼 느껴집니다.** 쿼터뷰에서는 적이 어디를 보는지
+ * 캡슐만 봐서는 알기 어렵기 때문입니다. 반대로 항상 켜두면 적이 많을 때
+ * 화면이 고리로 뒤덮이므로, 가까이 갔을 때만 서서히 나타나게 합니다.
+ */
+function makeBackZoneGeometry(inner: number, outer: number, arcDeg: number): THREE.BufferGeometry {
+  const arc = (arcDeg * Math.PI) / 180
+  const geo = new THREE.RingGeometry(inner, outer, 40, 1, -arc / 2, arc)
+  geo.rotateX(-Math.PI / 2)
+  geo.rotateY(-Math.PI / 2)
+  return geo
+}
+
 export class Visuals {
   private readonly items = new Map<number, Visual>()
   private readonly query = defineQuery(Transform, Renderable)
@@ -62,6 +80,7 @@ export class Visuals {
   private readonly geos: Record<number, THREE.BufferGeometry>
   private readonly bladeGeo: THREE.BoxGeometry
   private readonly telegraphGeos: Record<number, THREE.BufferGeometry>
+  private readonly backZoneGeos: Record<number, THREE.BufferGeometry>
   private readonly hpBarGeo: THREE.PlaneGeometry
 
   constructor(
@@ -78,6 +97,10 @@ export class Visuals {
     this.telegraphGeos = {
       [KIND_GRUNT]: makeTelegraphGeometry(GRUNT.attackReach, GRUNT.attackArcDeg),
       [KIND_BOSS]: makeTelegraphGeometry(BOSS.attackReach, BOSS.attackArcDeg),
+    }
+    this.backZoneGeos = {
+      [KIND_GRUNT]: makeBackZoneGeometry(GRUNT.radius + 0.1, GRUNT.radius + 1.15, COMBAT.backArcDeg),
+      [KIND_BOSS]: makeBackZoneGeometry(BOSS.radius + 0.1, BOSS.radius + 1.5, COMBAT.backArcDeg),
     }
     // 왼쪽 끝을 고정한 채 오른쪽으로 자라도록 지오메트리를 +X 쪽으로 밀어 둡니다.
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
@@ -169,6 +192,23 @@ export class Visuals {
       visual.telegraphMat = telegraphMat
       visual.telegraphWindup = isBoss ? BOSS.windup : GRUNT.windup
 
+      // 등 뒤 구역 — 그룹의 로컬 +Z가 정면이므로 180° 돌려 후방을 향하게 합니다.
+      const backZoneMat = new THREE.MeshBasicMaterial({
+        color: 0xffc14a,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+      const backZone = new THREE.Mesh(this.backZoneGeos[kind], backZoneMat)
+      backZone.rotation.y = Math.PI
+      backZone.position.y = 0.05
+      backZone.renderOrder = 3
+      backZone.visible = false
+      group.add(backZone)
+      visual.backZone = backZone
+      visual.backZoneMat = backZoneMat
+
       const hpBar = new THREE.Group()
       hpBar.position.y = cfg.height + 0.42
       const barW = isBoss ? 2.2 : 1.1
@@ -203,11 +243,15 @@ export class Visuals {
     this.scene.remove(v.group)
     v.material.dispose()
     v.telegraphMat?.dispose()
+    v.backZoneMat?.dispose()
     this.items.delete(entity)
   }
 
-  /** 매 프레임 호출. ECS의 숫자를 읽어 화면에 반영합니다. */
-  sync(): void {
+  /**
+   * 매 프레임 호출. ECS의 숫자를 읽어 화면에 반영합니다.
+   * @param playerX,playerZ 등 뒤 표시를 켤지 판단하기 위한 플레이어 위치
+   */
+  sync(playerX: number, playerZ: number): void {
     const ids = this.query.run()
     for (let i = 0; i < this.query.count; i++) {
       const e = ids[i]
@@ -256,6 +300,16 @@ export class Visuals {
         }
       }
 
+      // 등 뒤 구역: 가까이 갈수록 진해집니다. 멀면 아예 안 보입니다.
+      if (v.backZone && v.backZoneMat) {
+        const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
+        const near = d < COMBAT.backIndicatorRange && Actor.state[e] !== ActorState.Dead
+        v.backZone.visible = near
+        if (near) {
+          v.backZoneMat.opacity = 0.42 * (1 - d / COMBAT.backIndicatorRange)
+        }
+      }
+
       if (v.hpBar && v.hpFill) {
         const ratio = Math.max(0, Health.hp[e]) / Health.max[e]
         v.hpBar.visible = ratio < 0.999
@@ -270,6 +324,7 @@ export class Visuals {
     for (const e of [...this.items.keys()]) this.detach(e)
     for (const geo of Object.values(this.geos)) geo.dispose()
     for (const geo of Object.values(this.telegraphGeos)) geo.dispose()
+    for (const geo of Object.values(this.backZoneGeos)) geo.dispose()
     this.bladeGeo.dispose()
     this.hpBarGeo.dispose()
   }

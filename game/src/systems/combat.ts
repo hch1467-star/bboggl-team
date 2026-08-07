@@ -1,5 +1,5 @@
 import type { SkillShape } from '../config/arsenal'
-import { BOSS, GRUNT, PLAYER } from '../config/balance'
+import { BOSS, COMBAT, GRUNT, PLAYER } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -13,6 +13,7 @@ import {
   Velocity,
 } from '../core/components'
 import { defineQuery, hasComponent } from '../core/ecs'
+import { combatRng } from '../core/rng'
 import { time } from '../core/time'
 import { skillForSlot, weaponOf } from './loadout'
 
@@ -44,8 +45,48 @@ export interface HitEvent {
   trauma: number
   /** 강타 여부 — 데미지 숫자 크기/색이 달라집니다 */
   heavy: boolean
+  /** 등 뒤에서 꽂았는가 (기둥 3) */
+  back: boolean
+  /** 치명타인가 */
+  crit: boolean
   victimIsPlayer: boolean
   killed: boolean
+}
+
+/**
+ * 대상의 **등 뒤 부채꼴** 안에서 때렸는지.
+ *
+ * 대상이 바라보는 방향의 정반대 COMBAT.backArcDeg 안에 공격자가 있으면 백어택입니다.
+ * 판정을 "공격 방향"이 아니라 **"내가 서 있는 위치"**로 재는 것이 중요합니다.
+ * 공격 방향으로 재면 제자리에서 마우스만 돌려도 백어택이 터져서,
+ * 이동해서 등 뒤를 잡는다는 기둥 3의 의미가 사라집니다.
+ */
+export function isBehindPoint(
+  attackerX: number,
+  attackerZ: number,
+  targetX: number,
+  targetZ: number,
+  targetRotY: number,
+): boolean {
+  const dx = attackerX - targetX
+  const dz = attackerZ - targetZ
+  const dist = Math.hypot(dx, dz)
+  if (dist < 0.0001) return false
+  const fx = Math.sin(targetRotY)
+  const fz = Math.cos(targetRotY)
+  const dot = (dx * fx + dz * fz) / dist
+  // 후방 부채꼴의 절반 각도까지가 등 뒤입니다.
+  return dot <= -Math.cos(((COMBAT.backArcDeg / 2) * Math.PI) / 180)
+}
+
+export function isBackAttack(attacker: number, target: number): boolean {
+  return isBehindPoint(
+    Transform.x[attacker],
+    Transform.z[attacker],
+    Transform.x[target],
+    Transform.z[target],
+    Transform.rotY[target],
+  )
 }
 
 export interface AttackSpec {
@@ -216,6 +257,8 @@ function applyHit(a: number, spec: AttackSpec): void {
       hitstop: 0,
       trauma: 0,
       heavy: false,
+      back: false,
+      crit: false,
       victimIsPlayer: attackerIsPlayer,
       killed: false,
     })
@@ -262,7 +305,19 @@ function applyHit(a: number, spec: AttackSpec): void {
     const nx = dist > 0.0001 ? dx / dist : fx
     const nz = dist > 0.0001 ? dz / dist : fz
 
-    Health.hp[t] -= spec.damage
+    // ---- 포지셔닝 보상 (기둥 3) ----
+    // 근접 부채꼴 공격에만 적용합니다. 광역기(원형/지점)까지 등 뒤 보너스를 주면
+    // "위치를 잡는 기술"이 아니라 "장판을 크게 까는 기술"이 최적이 되어버립니다.
+    const back =
+      attackerIsPlayer && !targetIsPlayer && spec.shape === 'cone' && isBackAttack(a, t)
+    const critChance = COMBAT.baseCritChance + (back ? COMBAT.backCritBonus : 0)
+    const crit = spec.damage > 0 && combatRng.chance(critChance)
+
+    let damage = spec.damage
+    if (back) damage *= COMBAT.backDamageMult
+    if (crit) damage *= COMBAT.critMult
+
+    Health.hp[t] -= damage
     Health.flashT[t] = 0.12
     // 다단히트 스킬은 무적 시간을 아주 짧게 줘야 두 번째 타격이 씹히지 않습니다.
     Health.invulnT[t] = targetIsPlayer ? PLAYER.invulnAfterHit : 0.02
@@ -288,10 +343,13 @@ function applyHit(a: number, spec: AttackSpec): void {
       z: Transform.z[t],
       dirX: nx,
       dirZ: nz,
-      damage: spec.damage,
-      hitstop: spec.hitstop,
-      trauma: spec.trauma,
-      heavy: spec.heavy,
+      damage,
+      // 제대로 꽂혔을 때 정지와 흔들림을 더 줍니다 — 손으로 느껴지는 보상.
+      hitstop: spec.hitstop + (back ? COMBAT.backHitstopBonus : 0),
+      trauma: spec.trauma + (back ? COMBAT.backTraumaBonus : 0),
+      heavy: spec.heavy || crit,
+      back,
+      crit,
       victimIsPlayer: targetIsPlayer,
       killed,
     })

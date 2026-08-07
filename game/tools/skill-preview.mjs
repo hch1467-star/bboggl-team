@@ -69,6 +69,32 @@ try {
   await page.screenshot({ path: path.join(OUT, '10-skill-circle.png') })
   console.log('  캡처: 10-skill-circle.png (롱소드 · 회전 베기 원형 범위)')
 
+  // 4) 백어택 — 등 뒤 구역 표시와 "백어택 치명타!" 데미지 숫자
+  await page.evaluate(() => window.__game.reset())
+  await sleep(600)
+  await page.evaluate(() => window.__game.clearEnemies())
+  await sleep(300)
+  // rotY=0 이면 적이 +Z(플레이어 반대편)를 봅니다 = 플레이어가 등 뒤
+  await page.evaluate(() => window.__game.spawnTestEnemy(0, 2.4, 0))
+  await page.evaluate(() => window.__game.spawnTestEnemy(3.2, 3.6, 0))
+  await page.evaluate(() => window.__game.freezeEnemies(true))
+  await sleep(500)
+  await aimAt(0, 2.4)
+  await sleep(300)
+  await page.screenshot({ path: path.join(OUT, '11-backzone.png') })
+  console.log('  캡처: 11-backzone.png (등 뒤 구역 표시)')
+
+  for (let i = 0; i < 8; i++) {
+    await tap('Mouse0')
+    await sleep(120)
+    const st = await page.evaluate(() => window.__game.state())
+    if (st.backHits > 0) break
+    await sleep(200)
+  }
+  await sleep(120)
+  await page.screenshot({ path: path.join(OUT, '12-backattack.png') })
+  console.log('  캡처: 12-backattack.png (백어택 데미지 숫자)')
+
   console.log('\n상태:', JSON.stringify((await page.evaluate(() => window.__game.state())).loadout))
 } finally {
   await browser.close()

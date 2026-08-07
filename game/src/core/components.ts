@@ -108,6 +108,8 @@ export const Player = defineComponent({
   castZ: 'f32',
   /** 구르기 총 지속시간 대비 경과 시간 — 무적 프레임 판정에 사용 */
   dodgeElapsed: 'f32',
+  /** 대시 스킬의 실제 전진 속도(m/s). 시전 순간 조준 거리에 맞춰 계산합니다. */
+  dashSpeed: 'f32',
   dodgeCooldownT: 'f32',
 })
 

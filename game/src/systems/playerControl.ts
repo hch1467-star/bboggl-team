@@ -72,6 +72,9 @@ const players = defineQuery(Player, Actor, Transform, Velocity, Stamina, Health,
 
 const DEG = Math.PI / 180
 
+/** 대시 스킬이 조준 지점을 지나쳐 더 나아가는 거리(m). 이만큼이 "등 뒤"가 됩니다. */
+const DASH_OVERSHOOT = 1.2
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2
   while (a < -Math.PI) a += Math.PI * 2
@@ -82,6 +85,15 @@ function turnToward(p: number, targetRot: number, speedDegPerSec: number, dt: nu
   const diff = wrapAngle(targetRot - Transform.rotY[p])
   const maxStep = speedDegPerSec * DEG * dt
   Transform.rotY[p] += Math.abs(diff) <= maxStep ? diff : Math.sign(diff) * maxStep
+}
+
+/** 남은 속도를 상한까지 눌러 관성 미끄러짐을 끊습니다. */
+function damp(p: number, cap: number): void {
+  const speed = Math.hypot(Velocity.x[p], Velocity.z[p])
+  if (speed <= cap) return
+  const k = cap / speed
+  Velocity.x[p] *= k
+  Velocity.z[p] *= k
 }
 
 function clampMag(value: number, max: number): number {
@@ -124,6 +136,23 @@ function beginSkill(
   Player.dodgeElapsed[p] = 0
   Transform.rotY[p] = aimRot
   setCooldown(p, slot, def.cooldown)
+
+  // 대시 거리는 **조준한 지점 바로 뒤**에 착지하도록 그때그때 계산합니다.
+  //
+  // 고정 거리로 두면 교전 거리에 따라 착지점이 들쭉날쭉합니다.
+  // 자동 검증에서 확인한 실제 문제: 1.4m 거리에서 3.6m 대시를 쓰면 적을
+  // 2.2m 지나쳐 착지하는데, 여기에 밀어내기까지 겹쳐 4.5m가 벌어지면서
+  // 단검(사거리 2.35m)이 전혀 닿지 않았습니다. "뚫고 지나가 등 뒤를 친다"가
+  // 성립하려면 **항상 사거리 안에** 떨어져야 합니다.
+  if (def.dash > 0) {
+    const adx = ctx.aimX - Transform.x[p]
+    const adz = ctx.aimZ - Transform.z[p]
+    const aimDist = Math.hypot(adx, adz)
+    const distance = Math.min(def.dash, aimDist + DASH_OVERSHOOT)
+    Player.dashSpeed[p] = distance / Math.max(def.windup + def.active, 0.001)
+  } else {
+    Player.dashSpeed[p] = 0
+  }
 
   if (def.shape === 'point') {
     // 착탄 지점을 시전 순간에 **고정**합니다. 커서를 계속 따라가면
@@ -268,7 +297,16 @@ export function playerControlSystem(ctx: ControlContext): void {
     }
 
     let moveScale = 1
-    let dashOverride: SkillDef | null = null
+    /**
+     * 전진 속도 오버라이드(m/s).
+     *
+     * 공격의 파고들기(lunge)와 스킬의 대시는 **일반 이동 로직을 무시하고**
+     * 속도를 직접 지정해야 합니다. 예전에는 lunge를 Velocity에 더하기만 했는데,
+     * 바로 아래 이동 코드가 "목표 속도(정지)"로 매 프레임 3m/s씩 끌어내려서
+     * 결국 한 발짝도 못 나갔습니다. 사거리를 채워주려고 넣은 장치가
+     * 실제로는 아무 일도 안 하고 있었습니다.
+     */
+    let forwardOverride: number | null = null
 
     switch (Actor.state[p] as ActorState) {
       case ActorState.Idle: {
@@ -315,12 +353,12 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
 
         // 선행동작 중에는 느리게나마 방향을 틀 수 있습니다(완전 고정은 답답함).
-        if (phase === AttackPhase.Windup) {
+        if (phase === AttackPhase.Windup && combo.lunge > 0) {
           turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
           // 앞으로 파고드는 전진. 사거리가 짧은 무기가 닿게 해주는 장치입니다.
-          const lungeSpeed = combo.lunge / Math.max(combo.windup, 0.001)
-          Velocity.x[p] += Math.sin(Transform.rotY[p]) * lungeSpeed * dt * 4
-          Velocity.z[p] += Math.cos(Transform.rotY[p]) * lungeSpeed * dt * 4
+          forwardOverride = combo.lunge / Math.max(combo.windup, 0.001)
+        } else if (phase === AttackPhase.Windup) {
+          turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
         }
 
         Actor.timer[p] -= dt
@@ -330,6 +368,9 @@ export function playerControlSystem(ctx: ControlContext): void {
             Actor.timer[p] = combo.active
             Actor.hitsLeft[p] = 1
             Actor.nextHitT[p] = 0
+            // 파고들기가 끝나면 잔여 속도를 죽입니다(대시와 같은 이유).
+            forwardOverride = null
+            damp(p, PLAYER.moveSpeed * weapon.moveSpeedScale * 0.3)
             ctx.onSwing(
               Transform.x[p],
               Transform.z[p],
@@ -363,7 +404,41 @@ export function playerControlSystem(ctx: ControlContext): void {
         const phase = Actor.phase[p] as AttackPhase
 
         // 대시 스킬은 선행동작+판정 동안 앞으로 미끄러집니다.
-        if (def.dash > 0 && phase !== AttackPhase.Recovery) dashOverride = def
+        if (def.dash > 0 && phase !== AttackPhase.Recovery) {
+          forwardOverride = Player.dashSpeed[p]
+        }
+
+        // 스킬 후딜에도 **선입력**을 받습니다.
+        //
+        // 이게 없으면 그림자 도약처럼 "뚫고 지나가 등 뒤를 친다"는 기술이
+        // 성립하지 않습니다. 자동 검증에서 실제로 확인한 결과:
+        // 적은 경직에서 풀린 뒤 0.29초면 몸을 돌려 등 뒤 판정을 벗어나는데,
+        // 후딜이 끝나고 나서야 입력을 받으면 그 창을 놓칩니다.
+        // 후딜의 후반부에서 기본 공격으로 이어갈 수 있게 하면
+        // "커밋"은 유지하면서(전반부는 못 빠짐) 반격 창이 살아납니다.
+        if (attackPressed) Actor.bufferedAttack[p] = 1
+        if (
+          phase === AttackPhase.Recovery &&
+          Actor.bufferedAttack[p] === 1 &&
+          Actor.timer[p] <= def.recovery * 0.5 &&
+          Stamina.value[p] >= weapon.combo[0].staminaCost
+        ) {
+          beginAttack(p, 0, aimRot)
+          break
+        }
+
+        // 후딜 후반에는 회피로도 빠져나갈 수 있습니다(기본 공격과 같은 규칙).
+        if (
+          phase === AttackPhase.Recovery &&
+          dodgePressed &&
+          canDodge &&
+          Actor.timer[p] <= def.recovery * 0.5
+        ) {
+          const dx = hasMoveInput ? mx : -Math.sin(Transform.rotY[p])
+          const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
+          beginDodge(p, dx, dz)
+          break
+        }
 
         if (phase === AttackPhase.Windup) {
           // 지점 지정 스킬은 시전 중 방향을 못 바꿉니다(착탄점이 이미 고정됨).
@@ -391,6 +466,20 @@ export function playerControlSystem(ctx: ControlContext): void {
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery
             Actor.timer[p] = def.recovery
+            // 대시가 끝나면 남은 속도를 반드시 죽여야 합니다.
+            //
+            // 자동 검증으로 잡은 버그: 대시는 초당 29m로 달리는데, 대시가 끝난 뒤
+            // 일반 이동 로직은 가속도 60m/s²로만 감속합니다. 29 -> 0 까지 0.5초가
+            // 걸리고 그 사이에 **관성으로 6m를 더 미끄러집니다.**
+            // 설계상 4m 대시가 실제로는 10.4m 날아가서, 적 등 뒤에 착지한다는
+            // 이 스킬의 존재 이유 자체가 무너져 있었습니다.
+            if (def.dash > 0) {
+              // 오버라이드를 반드시 같이 꺼야 합니다. 이 블록은 switch 안이고,
+              // 속도를 실제로 쓰는 코드는 switch **뒤**에 있습니다. 안 끄면
+              // 여기서 줄인 속도를 그 코드가 다시 29m/s로 덮어씁니다.
+              forwardOverride = null
+              damp(p, PLAYER.moveSpeed * weapon.moveSpeedScale * 0.35)
+            }
           } else {
             Actor.state[p] = ActorState.Idle
             Actor.hitsLeft[p] = 0
@@ -430,11 +519,9 @@ export function playerControlSystem(ctx: ControlContext): void {
     }
 
     // ---- 목표 속도 적용 ----
-    if (dashOverride) {
-      const total = Math.max(dashOverride.windup + dashOverride.active, 0.001)
-      const speed = dashOverride.dash / total
-      Velocity.x[p] = Math.sin(Transform.rotY[p]) * speed
-      Velocity.z[p] = Math.cos(Transform.rotY[p]) * speed
+    if (forwardOverride !== null) {
+      Velocity.x[p] = Math.sin(Transform.rotY[p]) * forwardOverride
+      Velocity.z[p] = Math.cos(Transform.rotY[p]) * forwardOverride
     } else if (Actor.state[p] !== ActorState.Dodge) {
       const speedCap = PLAYER.moveSpeed * weapon.moveSpeedScale
       const targetVx = mx * speedCap * moveScale

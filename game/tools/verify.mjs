@@ -276,6 +276,22 @@ async function main() {
     check('적 AI가 플레이어를 추격해 공격함', damaged.ok, damaged.ok ? `체력 ${startHp} -> ${damaged.state.player.hp}` : '40초 내 미발생')
     await shot('03-enemies-engaging')
 
+    // ---------- 7.4 백어택 판정 (기둥 3) ----------
+    // 판정은 순수 기하 계산이라, 전투를 돌리지 않고 좌표만 넣어 정확히 검사합니다.
+    // 적은 rotY=0 일 때 +Z를 봅니다. 따라서 -Z 쪽(뒤)에서 때리면 백어택입니다.
+    const behind = (ax, az, trot = 0) =>
+      page.evaluate(([a, b, r]) => window.__game.testBehind(a, b, 0, 0, r), [ax, az, trot])
+
+    check('정면(+Z)에서 때리면 백어택 아님', (await behind(0, 3)) === false)
+    check('등 뒤(-Z)에서 때리면 백어택', (await behind(0, -3)) === true)
+    check('옆(+X)에서 때리면 백어택 아님', (await behind(3, 0)) === false)
+    // 후방 부채꼴 120° = 정중앙 뒤에서 좌우 60°까지. 55°는 안, 65°는 밖.
+    const at = (deg, r = 3) => [Math.sin(((180 - deg) * Math.PI) / 180) * r, Math.cos(((180 - deg) * Math.PI) / 180) * r]
+    check('뒤에서 55° 비껴서도 백어택 (부채꼴 120°)', (await behind(...at(55))) === true)
+    check('뒤에서 65° 비끼면 백어택 아님', (await behind(...at(65))) === false)
+    // 적이 돌아서면 판정도 같이 돌아야 합니다.
+    check('적이 180° 돌면 +Z 쪽이 등 뒤가 됨', (await behind(0, 3, Math.PI)) === true)
+
     // ---------- 7.5 스킬 + 쿨다운 ----------
     await page.evaluate(() => window.__game.reset())
     await sleep(400)
@@ -378,6 +394,57 @@ async function main() {
       '다단히트 스킬이 한 번의 시전으로 여러 번 명중',
       flurryHits >= 3,
       `한 번 시전에 ${flurryHits}회 명중 (설계상 최대 5회)`,
+    )
+
+    // ---------- 7.8 백어택이 실제 전투에 반영되는가 ----------
+    // 적 AI를 멈추고 1:1로 통제된 실험을 합니다.
+    // 적이 계속 몸을 돌리면 "보너스가 왜 안 붙지?"가 판정 버그 때문인지
+    // 타이밍 때문인지 구분할 수 없어, 검증이 아니라 추측이 됩니다.
+    // 적을 **원하는 방향으로** 세워 놓습니다.
+    // 플레이어는 원점, 적은 (0, 2.2). 적의 rotY=0 이면 +Z(플레이어 반대)를 보므로
+    // 플레이어는 정확히 등 뒤에 있게 됩니다. rotY=PI 면 플레이어를 마주 봅니다.
+    // 걸어서 돌아가는 방식은 밀어내기 때문에 재현이 안 돼서 이렇게 바꿨습니다.
+    const setupDummy = async (facing) => {
+      await page.evaluate(() => window.__game.reset())
+      await sleep(300)
+      await page.evaluate(() => window.__game.clearEnemies())
+      await sleep(200)
+      await page.evaluate((f) => window.__game.spawnTestEnemy(0, 2.2, f), facing)
+      await page.evaluate(() => window.__game.freezeEnemies(true))
+      await sleep(300)
+      await aimAt(0, 2.2)
+      await sleep(250)
+    }
+    /** 적을 여러 번 후려쳐, 실제 타격이 날 때까지 기다립니다. */
+    const swingUntilHit = async (times = 8) => {
+      for (let i = 0; i < times; i++) {
+        await tap('Mouse0')
+        await sleep(300)
+        if ((await state()).hitsDealt > 0) break
+      }
+      return state()
+    }
+
+    // (A) 대조군 — 적이 플레이어를 마주 봄. 보너스가 붙으면 안 됩니다.
+    await setupDummy(Math.PI)
+    let facingMe = await state()
+    check('대조군: 적이 플레이어를 마주 봄', facingMe.nearestEnemy?.playerBehind === false)
+    const front = await swingUntilHit()
+    check('정면 타격은 명중함', front.hitsDealt > 0, `${front.hitsDealt}타`)
+    check('정면 타격에는 백어택 보너스가 없음', front.backHits === 0, `백어택 ${front.backHits}회`)
+
+    // (B) 실험군 — 적이 등을 보임. 보너스가 붙어야 합니다.
+    await setupDummy(0)
+    const turned = await state()
+    check('실험군: 플레이어가 적의 등 뒤에 위치', turned.nearestEnemy?.playerBehind === true)
+    const back = await swingUntilHit()
+    check('등 뒤 타격이 백어택으로 판정됨', back.backHits > 0, `백어택 ${back.backHits}회`)
+    // 롱소드 1타 기본 피해는 12. 백어택(x1.55)만 붙어도 18.6,
+    // 치명타(x1.8)까지 겹치면 33.5 입니다. 보너스가 없으면 12를 넘을 수 없습니다.
+    check(
+      '백어택 피해 배율이 실제로 적용됨',
+      back.damageDealt > 15,
+      `첫 타 피해 ${back.damageDealt} (보너스 없으면 12)`,
     )
 
     // ---------- 8. 레벨 에디터 ----------

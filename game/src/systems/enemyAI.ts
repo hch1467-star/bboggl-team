@@ -26,6 +26,20 @@ import { time } from '../core/time'
  *     이 창이 없으면 회피에 보상이 없어서 그냥 도망 다니는 게 최적이 됩니다.
  */
 
+/**
+ * AI 일시정지 스위치.
+ *
+ * 전투 판정(백어택 등)을 검증하려면 적이 가만히 있어야 합니다.
+ * 적이 계속 몸을 돌리면 "등 뒤를 쳤는데 왜 보너스가 안 붙지?"를
+ * 판정 버그 때문인지 타이밍 때문인지 구분할 수가 없습니다.
+ * 밸런스를 손으로 만져볼 때도 필요해서 정식 기능으로 둡니다.
+ */
+let aiEnabled = true
+
+export function setEnemyAiEnabled(enabled: boolean): void {
+  aiEnabled = enabled
+}
+
 export interface EnemyAiContext {
   onSwing: (x: number, z: number, rotY: number, range: number, arcDeg: number) => void
 }
@@ -49,6 +63,7 @@ export function enemyAiSystem(
 ): void {
   const dt = time.dt
   if (dt <= 0) return // 히트스톱 중엔 AI도 멈춥니다
+  if (!aiEnabled) return
 
   const px = Transform.x[playerEntity]
   const pz = Transform.z[playerEntity]
