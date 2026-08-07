@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Quarterview ARPG — 프로토타입</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230d1017'/><path d='M16 5l10 6v10l-10 6-10-6V11z' fill='none' stroke='%23ffd479' stroke-width='2.4'/></svg>"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%; height: 100%; overflow: hidden;
+        background: #0d1017;
+        font-family: system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+        color: #e8edf5;
+        -webkit-user-select: none; user-select: none;
+      }
+      #game { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+      /* --- HUD ---------------------------------------------------------- */
+      #hud {
+        position: fixed; inset: 0; pointer-events: none;
+        display: flex; flex-direction: column; justify-content: space-between;
+      }
+      .hud-top {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        padding: 14px 18px; gap: 12px;
+      }
+      .hud-bottom { padding: 0 18px 20px; display: flex; justify-content: center; }
+
+      .panel {
+        background: rgba(13, 16, 23, 0.72);
+        border: 1px solid rgba(150, 175, 220, 0.18);
+        border-radius: 10px;
+        padding: 9px 13px;
+        backdrop-filter: blur(6px);
+        font-size: 12.5px; line-height: 1.55;
+        font-variant-numeric: tabular-nums;
+      }
+      .panel b { color: #ffd479; font-weight: 600; }
+      .dim { color: #8c9ab3; }
+
+      #vitals { width: min(400px, 62vw); display: flex; flex-direction: column; gap: 7px; }
+      .bar {
+        position: relative; height: 17px; border-radius: 5px; overflow: hidden;
+        background: rgba(8, 10, 15, 0.85);
+        border: 1px solid rgba(150, 175, 220, 0.22);
+      }
+      .bar > .fill {
+        position: absolute; inset: 0; transform-origin: left center;
+        transition: transform 90ms linear;
+      }
+      #hpFill { background: linear-gradient(90deg, #c8362c, #f2604f); }
+      /* 체력이 줄 때 뒤따라 내려오는 흰 잔상 — 얼마나 깎였는지 눈으로 보입니다. */
+      #hpGhost { background: rgba(255, 235, 210, 0.35); transition: transform 420ms ease-out 180ms; }
+      #stamFill { background: linear-gradient(90deg, #3f9d63, #66d492); }
+      .bar > .label {
+        position: absolute; inset: 0; display: flex; align-items: center;
+        justify-content: space-between; padding: 0 8px;
+        font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      }
+
+      #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      .key {
+        background: rgba(13, 16, 23, 0.72);
+        border: 1px solid rgba(150, 175, 220, 0.18);
+        border-radius: 8px; padding: 6px 11px; font-size: 12px;
+        backdrop-filter: blur(6px);
+      }
+      .key kbd {
+        display: inline-block; min-width: 20px; text-align: center;
+        background: #2b3444; border: 1px solid #465268; border-bottom-width: 2px;
+        border-radius: 4px; padding: 1px 5px; margin-right: 5px;
+        font-family: inherit; font-size: 11px; font-weight: 600; color: #dbe4f2;
+      }
+
+      #banner {
+        position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%);
+        text-align: center; pointer-events: none; opacity: 0;
+        transition: opacity 260ms ease;
+      }
+      #banner.show { opacity: 1; }
+      #banner .big {
+        font-size: clamp(30px, 6vw, 58px); font-weight: 800; letter-spacing: 0.02em;
+        text-shadow: 0 4px 26px rgba(0, 0, 0, 0.85);
+      }
+      #banner .sub { margin-top: 8px; font-size: 14px; color: #b9c6dc; }
+
+      #restart {
+        pointer-events: auto; margin-top: 18px; padding: 11px 26px;
+        font: inherit; font-size: 15px; font-weight: 600; color: #0d1017;
+        background: #ffd479; border: none; border-radius: 9px; cursor: pointer;
+        display: none;
+      }
+      #restart:hover { background: #ffe0a0; }
+
+      @media (max-width: 620px) {
+        #controls { display: none; }
+        #vitals { width: 68vw; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div class="hud-top">
+        <div id="vitals">
+          <div class="bar">
+            <div class="fill" id="hpGhost"></div>
+            <div class="fill" id="hpFill"></div>
+            <div class="label"><span>체력</span><span id="hpText">100 / 100</span></div>
+          </div>
+          <div class="bar" style="height: 13px">
+            <div class="fill" id="stamFill"></div>
+            <div class="label" style="font-size: 10px">
+              <span>스태미나</span><span id="stamText">100</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="stats">
+          <div>웨이브 <b id="waveText">1</b></div>
+          <div>남은 적 <b id="enemyText">0</b></div>
+          <div>처치 <b id="killText">0</b></div>
+          <div class="dim" id="perfText">60 fps</div>
+        </div>
+      </div>
+
+      <div class="hud-bottom">
+        <div id="controls">
+          <div class="key"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</div>
+          <div class="key"><kbd>마우스</kbd> 조준</div>
+          <div class="key"><kbd>좌클릭</kbd> 공격 (3타 콤보)</div>
+          <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="banner">
+      <div class="big" id="bannerTitle"></div>
+      <div class="sub" id="bannerSub"></div>
+      <button id="restart">다시 시작</button>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

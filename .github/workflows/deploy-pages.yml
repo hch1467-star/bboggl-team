@@ -1,0 +1,76 @@
+name: Deploy site (flight app + game)
+
+# 이 워크플로는 GitHub Pages 소스를 "GitHub Actions"로 바꾸기 전까지는
+# 아무 일도 하지 않습니다. 기존 항공 예약 앱 배포에 영향을 주지 않습니다.
+#
+# 배포 결과 구조:
+#   /            -> 기존 항공 예약 앱 (저장소 루트 파일 그대로)
+#   /game/       -> 쿼터뷰 ARPG 프로토타입 (game/ 을 빌드한 결과)
+
+on:
+  push:
+    branches:
+      - main
+      - claude/quarter-view-game-dev-iva3y8
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포가 겹치면 나중 것만 남깁니다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+
+      - name: Install game dependencies
+        working-directory: game
+        run: npm ci
+
+      - name: Build game
+        working-directory: game
+        env:
+          # Pages는 https://<user>.github.io/<repo>/ 아래에 올라갑니다.
+          # base를 안 맞추면 JS/에셋 경로가 전부 404가 납니다.
+          PUBLIC_BASE_PATH: /${{ github.event.repository.name }}/game/
+        run: npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'game' \
+            --exclude '_site' \
+            --exclude 'node_modules' \
+            ./ _site/
+          mkdir -p _site/game
+          cp -r game/dist/. _site/game/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
