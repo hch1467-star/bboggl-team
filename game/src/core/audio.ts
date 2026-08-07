@@ -305,6 +305,20 @@ class Sfx {
     this.noiseVoice({ duration: 0.2, startHz: 700, endHz: 180, q: 0.7, gain: 0.24 })
   }
 
+  /**
+   * 보스 페이즈 전환 — 게임에서 가장 크고 가장 긴 소리입니다.
+   *
+   * 일부러 다른 어떤 큐와도 안 닮게 만들었습니다. 전환은 **놓치면 안 되는
+   * 단 한 순간**이라, "무슨 소리였지?"가 생기면 안 됩니다.
+   * 낮게 깔리는 포효 + 위로 솟는 층을 겹쳐서, 다른 소리들 위로 뚫고 나옵니다.
+   */
+  bossPhase(): void {
+    this.toneVoice({ type: 'sawtooth', duration: 1.5, startHz: 150, endHz: 46, gain: 0.55 })
+    this.toneVoice({ type: 'square', duration: 1.2, startHz: 220, endHz: 330, gain: 0.16, swell: true })
+    this.toneVoice({ type: 'triangle', duration: 0.9, startHz: 440, endHz: 1320, gain: 0.14, delay: 0.1 })
+    this.noiseVoice({ duration: 1.0, startHz: 260, endHz: 2600, q: 0.7, gain: 0.24 })
+  }
+
   /** 적 처치 — 아래로 꺼지는 소리. 보스는 더 낮고 길게. */
   death(boss: boolean, x?: number, z?: number): void {
     this.toneVoice({

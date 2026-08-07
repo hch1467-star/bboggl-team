@@ -18,7 +18,8 @@
     "tripod": "node tools/tripod-preview.mjs",
     "crowd": "node tools/crowd-probe.mjs",
     "aim": "node tools/aim-probe.mjs",
-    "audio": "node tools/audio-probe.mjs"
+    "audio": "node tools/audio-probe.mjs",
+    "boss": "node tools/boss-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

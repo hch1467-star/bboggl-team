@@ -20,6 +20,14 @@ import {
   attacksFor,
   pickAttack,
 } from '../config/enemyAttacks'
+import {
+  BOSS_PHASES,
+  NO_CHAIN,
+  PHASE_SHOCKWAVE,
+  PHASE_TRANSITION_TIME,
+  bossPhase,
+  phaseForHp,
+} from '../config/bossPhases'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -136,6 +144,71 @@ function grantAttackTokens(
 /** 이번 프레임에 광역 패턴을 몇 개 더 허용할 수 있는가. grantAttackTokens가 채웁니다. */
 let wideSlotsLeft = MAX_CONCURRENT_WIDE
 
+/** 페이즈가 바뀐 순간. 게임 루프가 읽고 비웁니다(연출은 시스템 밖에서). */
+export interface PhaseEvent {
+  entity: number
+  phase: number
+  name: string
+  banner: string
+  desc: string
+  x: number
+  z: number
+}
+export const phaseEvents: PhaseEvent[] = []
+
+/**
+ * 패턴 하나를 실제로 겁니다 — 예고 시작.
+ *
+ * 일반 커밋과 연계 커밋이 **같은 함수**를 지나가야 합니다. 따로 쓰면
+ * 한쪽에만 예고음을 넣거나 한쪽만 선행동작 배율을 빠뜨리는 식으로
+ * 조용히 어긋납니다(4색 예고에서 이미 겪은 종류의 버그입니다).
+ */
+export function chainIndexFor(isBoss: boolean, phaseIdx: number, attackIndex: number): number {
+  if (!isBoss) return NO_CHAIN
+  const list = attacksFor(isBoss)
+  const chainId = bossPhase(phaseIdx).chains?.[list[attackIndex]?.id ?? '']
+  if (!chainId) return NO_CHAIN
+  const idx = list.findIndex((a) => a.id === chainId)
+  return idx >= 0 ? idx : NO_CHAIN
+}
+
+function commitAttack(
+  e: number,
+  isBoss: boolean,
+  index: number,
+  windupScale: number,
+  chained = false,
+): void {
+  const list = attacksFor(isBoss)
+  const atk = list[index]
+  Enemy.attackIndex[e] = index
+  Actor.state[e] = ActorState.Attack
+  Actor.phase[e] = AttackPhase.Windup
+  Actor.timer[e] = atk.windup * windupScale
+  Actor.hitsLeft[e] = 1
+  Actor.nextHitT[e] = 0
+  Enemy.chained[e] = chained ? 1 : 0
+
+  // 이 패턴 뒤에 따라붙을 연계를 지금 정해 둡니다.
+  Enemy.chainNext[e] = chainIndexFor(isBoss, Enemy.phase[e], index)
+
+  /**
+   * **예고음 — 4색이 곧 4개의 음입니다.**
+   *
+   * 쿼터뷰에서 적이 겹치면 색 예고가 서로를 가립니다. 공격 토큰으로 동시 예고를
+   * 2개로 줄였지만, 2개도 겹치면 하나는 안 보입니다. 소리는 겹쳐도 서로를
+   * 가리지 않는다 — 이게 이 한 줄의 이유입니다.
+   *
+   * 보스 연계에서는 이게 더 중요해집니다. 🔵 뒤에 🔴 이 붙는다는 걸
+   * **화면을 다시 안 봐도** 알 수 있어야 무적 타이밍을 잡을 수 있습니다.
+   *
+   * AttackIntent 와 SfxIntent 는 값이 1:1로 같습니다(0~3). 일부러 같게 맞춰서
+   * 변환 표를 만들지 않았습니다 — 표가 있으면 색을 추가할 때 한쪽만 고쳐서
+   * 색과 소리가 어긋납니다.
+   */
+  sfx.telegraph(atk.intent as unknown as SfxIntent, Transform.x[e], Transform.z[e])
+}
+
 export function enemyAiSystem(
   playerEntity: number,
   playerAlive: boolean,
@@ -161,6 +234,58 @@ export function enemyAiSystem(
     // 이렇게 해두면 새 적을 추가할 때 AI 코드를 건드릴 필요가 없습니다.
     const isBoss = Enemy.kind[e] === EnemyKind.Boss
     const cfg = isBoss ? BOSS : GRUNT
+    const ph = bossPhase(isBoss ? Enemy.phase[e] : 0)
+
+    /**
+     * ── 보스 페이즈 전환 ────────────────────────────────────────────
+     *
+     * 체력 비율 하나로만 판정합니다. 시간도 확률도 섞지 않는 이유:
+     * 참고한 보스전에서 플레이어가 가장 싫어한다고 말한 것이
+     * **"미리 알 수 없는 조건이 겹치는 것"** 이었습니다. 전환이 결정적이면
+     * "체력 얼마에서 바뀐다"를 외울 수 있고, 외울 수 있으면 준비할 수 있습니다.
+     *
+     * 전환 중에는 **무적 + 행동 정지 + 넉백** 입니다. 무적이 필요한 이유는
+     * 두 가지입니다: 화력이 높으면 페이즈를 통째로 건너뛸 수 있고(설계한
+     * 학습 순서가 무너짐), 규칙이 바뀌는 순간에 얻어맞으면 무엇이 바뀌었는지
+     * 읽을 시간이 없습니다.
+     */
+    if (isBoss && Health.max[e] > 0) {
+      if (Enemy.transitionT[e] > 0) {
+        Enemy.transitionT[e] = Math.max(0, Enemy.transitionT[e] - dt)
+        // 전환이 끝날 때까지 계속 무적을 덮어씁니다(healthSystem이 깎으므로).
+        Health.invulnT[e] = Math.max(Health.invulnT[e], Enemy.transitionT[e])
+        decayVelocity(e, dt, 10)
+        continue
+      }
+      const want = phaseForHp(Health.hp[e] / Health.max[e])
+      if (want > Enemy.phase[e]) {
+        Enemy.phase[e] = want
+        Enemy.transitionT[e] = PHASE_TRANSITION_TIME
+        Enemy.chainNext[e] = NO_CHAIN
+        Health.invulnT[e] = PHASE_TRANSITION_TIME
+        Actor.state[e] = ActorState.Idle
+        Actor.timer[e] = 0
+        Actor.cooldownT[e] = PHASE_TRANSITION_TIME
+        // 붙어서 딜을 넣던 자세를 한 번 끊습니다 — 전환이 "쉬는 시간"이 아니라
+        // **자리를 다시 잡는 시간**이 되어야 페이즈가 바뀐 값어치가 있습니다.
+        const kdx = px - Transform.x[e]
+        const kdz = pz - Transform.z[e]
+        const klen = Math.hypot(kdx, kdz) || 1
+        Velocity.kx[playerEntity] += (kdx / klen) * PHASE_SHOCKWAVE
+        Velocity.kz[playerEntity] += (kdz / klen) * PHASE_SHOCKWAVE
+        const def = BOSS_PHASES[want]
+        phaseEvents.push({
+          entity: e,
+          phase: want,
+          name: def.name,
+          banner: def.banner,
+          desc: def.desc,
+          x: Transform.x[e],
+          z: Transform.z[e],
+        })
+        continue
+      }
+    }
 
     if (Actor.cooldownT[e] > 0) Actor.cooldownT[e] = Math.max(0, Actor.cooldownT[e] - dt)
 
@@ -211,8 +336,29 @@ export function enemyAiSystem(
       if (phase === AttackPhase.Windup) {
         turnToward(e, toPlayer, cfg.turnSpeedDeg * 0.3, dt)
       }
-      // 공격 중에는 발이 묶입니다 — 적도 커밋합니다
-      decayVelocity(e, dt, 12)
+
+      /**
+       * 공격 중에는 발이 묶입니다 — 적도 커밋합니다.
+       *
+       * **단, 연계로 들어온 공격의 선행동작만 예외입니다.**
+       * 이 예외가 없으면 2단계의 `🔵 속박 → 🔴 직격` 이 설계대로 작동하지
+       * 않습니다: 속박은 5.5m까지 닿는데 직격은 4.2m라서, 5m 거리에서
+       * 묶인 플레이어에게는 후속타가 그냥 빗나갑니다. 그러면
+       * **"파랑을 무적으로 넘겨야 한다"** 는 교훈이 성립하지 않습니다.
+       *
+       * 그래서 연계 선행동작 동안 보스가 **성큼 다가옵니다.** 예고는 그대로
+       * 다 나오므로 여전히 읽고 대응할 수 있고, 다만 "멀리 있으면 저절로
+       * 안 맞는다"가 사라집니다 — 파랑을 무시한 대가가 확실해집니다.
+       */
+      if (phase === AttackPhase.Windup && Enemy.chained[e] === 1 && dist > atk.reach * 0.7) {
+        const nx = dist > 0.0001 ? dx / dist : 0
+        const nz = dist > 0.0001 ? dz / dist : 0
+        const accel = 30 * dt
+        Velocity.x[e] += clampMag(nx * cfg.moveSpeed * 1.35 - Velocity.x[e], accel)
+        Velocity.z[e] += clampMag(nz * cfg.moveSpeed * 1.35 - Velocity.z[e], accel)
+      } else {
+        decayVelocity(e, dt, 12)
+      }
 
       Actor.timer[e] -= dt
       if (Actor.timer[e] <= 0) {
@@ -229,8 +375,27 @@ export function enemyAiSystem(
           Actor.phase[e] = AttackPhase.Recovery
           Actor.timer[e] = atk.recovery
         } else {
+          /**
+           * ── 연계 ────────────────────────────────────────────────
+           * 후딜이 끝나는 순간, 페이즈가 정해 둔 다음 패턴이 있으면
+           * **쿨다운도 토큰도 없이** 바로 겁니다.
+           *
+           * 토큰을 요구하지 않는 이유: 연계는 이미 시작한 하나의 공격이
+           * 두 박자로 이어지는 것이지, 새 공격자가 끼어드는 것이 아닙니다.
+           * (보스는 1:1이라 실제로 다른 적과 겹칠 일도 없습니다.)
+           *
+           * **예고는 그대로 다 나옵니다.** 사라지는 건 쉬는 시간뿐입니다 —
+           * bossPhases.ts 의 "예고는 줄이지 않는다" 원칙 그대로입니다.
+           */
+          const next = Enemy.chainNext[e]
           Actor.state[e] = ActorState.Idle
-          Actor.cooldownT[e] = cfg.attackCooldown
+          if (next !== NO_CHAIN) {
+            Enemy.chainNext[e] = NO_CHAIN
+            Actor.cooldownT[e] = 0
+            commitAttack(e, isBoss, next, ph.windupScale, true)
+          } else {
+            Actor.cooldownT[e] = cfg.attackCooldown * ph.cooldownScale
+          }
         }
       }
       continue
@@ -270,7 +435,7 @@ export function enemyAiSystem(
     // 토큰이 없는 적은 그냥 다음 판정으로 흘러가 노려보며 기다립니다.
     if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       const list = attacksFor(isBoss)
-      let picked = pickAttack(list, dist, combatRng.next())
+      let picked = pickAttack(list, dist, combatRng.next(), ph.weights)
       // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
       // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
       if (picked && picked.arcDeg >= WIDE_ARC_DEG && wideSlotsLeft <= 0) {
@@ -280,25 +445,7 @@ export function enemyAiSystem(
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
-        Enemy.attackIndex[e] = list.indexOf(picked)
-        Actor.state[e] = ActorState.Attack
-        Actor.phase[e] = AttackPhase.Windup
-        Actor.timer[e] = picked.windup
-        Actor.hitsLeft[e] = 1
-        Actor.nextHitT[e] = 0
-        /**
-         * **예고음 — 4색이 곧 4개의 음입니다.**
-         *
-         * 쿼터뷰에서 적이 겹치면 색 예고가 서로를 가립니다(플레이 테스트에서
-         * "여러 명 겹쳤을 때 피하기 어렵다"로 이미 확인). 공격 토큰으로
-         * 동시 예고를 2개로 줄였지만, 2개도 겹치면 하나는 안 보입니다.
-         * 소리는 겹쳐도 서로를 가리지 않는다 — 이게 이 한 줄의 이유입니다.
-         *
-         * AttackIntent 와 SfxIntent 는 값이 1:1로 같습니다(0~3).
-         * 일부러 같게 맞춰서 변환 표를 만들지 않았습니다 — 표가 있으면
-         * 색을 추가할 때 한쪽만 고쳐서 색과 소리가 어긋납니다.
-         */
-        sfx.telegraph(picked.intent as unknown as SfxIntent, Transform.x[e], Transform.z[e])
+        commitAttack(e, isBoss, list.indexOf(picked), ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
       }

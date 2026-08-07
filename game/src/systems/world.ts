@@ -1,4 +1,5 @@
 import { BOSS, GRUNT, PLAYER, WORLD } from '../config/balance'
+import { NO_CHAIN } from '../config/bossPhases'
 import {
   Actor,
   ActorState,
@@ -135,6 +136,10 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.aggro[e] = 0
   Enemy.reactT[e] = 0
   Enemy.attackIndex[e] = 0
+  Enemy.phase[e] = 0
+  Enemy.transitionT[e] = 0
+  Enemy.chainNext[e] = NO_CHAIN
+  Enemy.chained[e] = 0
   Status.snareT[e] = 0
   Renderable.kind[e] = kind === EnemyKind.Boss ? KIND_BOSS : KIND_GRUNT
   return e

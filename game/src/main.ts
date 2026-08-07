@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
 import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
+import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import {
   Actor,
   ActorState,
@@ -29,7 +30,13 @@ import { createScene } from './render/scene'
 import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
 import { countLivingEnemies, hitEvents, isBackAttack, isBehindPoint, resolveAttacks } from './systems/combat'
-import { enemyAiSystem, resetAttackTokens, setEnemyAiEnabled } from './systems/enemyAI'
+import {
+  chainIndexFor,
+  enemyAiSystem,
+  phaseEvents,
+  resetAttackTokens,
+  setEnemyAiEnabled,
+} from './systems/enemyAI'
 import { deathEvents, healthSystem } from './systems/health'
 import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
@@ -198,6 +205,7 @@ class Game {
     resetTime()
     hitEvents.length = 0
     deathEvents.length = 0
+    phaseEvents.length = 0
 
     if (this.terrain) {
       this.scene.remove(this.terrain.group)
@@ -401,6 +409,31 @@ class Game {
       })
     }
     hitEvents.length = 0
+
+    /**
+     * ---- 3.5 보스 페이즈 전환 ----
+     *
+     * 전환은 **놓칠 수 없어야** 합니다. 배너(눈) + 포효(귀) + 흔들림/충격파(손)를
+     * 한꺼번에 터뜨립니다. 소리를 넣어 둔 덕에 이제 세 채널이 다 동원됩니다.
+     * 배너 문구에 "무엇이 바뀌었는지"를 그대로 적는 이유: 규칙이 바뀐 것을
+     * 알아도 **무엇이 바뀌었는지 모르면** 결국 맞아 보고 배우게 됩니다.
+     */
+    for (const ev of phaseEvents) {
+      this.hud.showBanner(ev.banner, ev.desc, 3.2)
+      this.cam.addTrauma(0.95)
+      requestHitstop(0.16)
+      sfx.bossPhase()
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2
+        this.vfx.spawnHitSpark(
+          ev.x + Math.cos(a) * 1.9,
+          0.6 + Math.random() * 1.8,
+          ev.z + Math.sin(a) * 1.9,
+          1.5,
+        )
+      }
+    }
+    phaseEvents.length = 0
 
     // ---- 4. 사망 처리 ----
     healthSystem()
@@ -729,6 +762,9 @@ class Game {
     const i = Math.min(Math.max(index, 0), list.length - 1)
     Enemy.attackIndex[entity] = i
     Enemy.aggro[entity] = 1
+    // 강제 공격도 **정상 커밋과 같은 연계**를 달고 있어야 합니다.
+    // 여기서 빠뜨리면 검증 도구가 보는 것과 실제 전투가 달라집니다.
+    Enemy.chainNext[entity] = chainIndexFor(isBoss, Enemy.phase[entity], i)
     Actor.state[entity] = ActorState.Attack
     Actor.phase[entity] = AttackPhase.Windup
     // 예고 투명도는 **남은 시간 비율**로 계산됩니다(가득 찰수록 진해짐).
@@ -1040,6 +1076,36 @@ declare global {
       effectiveSkill: (slot: number) => Record<string, number | string> | null
       tripodInfo: () => { points: number; panelOpen: boolean }
       toggleTripodPanel: () => void
+      /**
+       * 보스 페이즈 튜닝 값을 그대로 내보냅니다.
+       * 검증 스크립트가 상수를 베껴 두면, 밸런스를 바꿨을 때
+       * **테스트만 통과하고 게임은 망가집니다.**
+       */
+      bossTuning: () => {
+        name: string
+        enterBelow: number
+        cooldownScale: number
+        windups: { id: string; seconds: number }[]
+      }[]
+      /** 보스 페이즈 검증용 — 체력을 직접 깎고 상태를 읽습니다. */
+      damageEntity: (entity: number, amount: number) => void
+      enemyInfo: (entity: number) => {
+        hp: number
+        max: number
+        phase: number
+        transitionT: number
+        state: number
+        /**
+         * 지금 공격(예고 포함) 중인가.
+         * 검증 스크립트가 `state === 1` 같은 숫자를 베껴 두면 열거형 순서를
+         * 바꿨을 때 조용히 틀립니다 — 실제로 이 프로브가 그렇게 실패했습니다.
+         */
+        attacking: boolean
+        attackId: string
+        attackPhase: number
+        chainNext: string
+        cooldownT: number
+      } | null
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
       resetProgress: () => void
@@ -1101,6 +1167,35 @@ window.__game = {
   effectiveSkill: (slot) => game.debugEffectiveSkill(slot),
   tripodInfo: () => game.debugTripodInfo(),
   toggleTripodPanel: () => game.debugToggleTripodPanel(),
+  bossTuning: () =>
+    BOSS_PHASES.map((ph) => ({
+      name: ph.name,
+      enterBelow: ph.enterBelow,
+      cooldownScale: ph.cooldownScale,
+      windups: attacksFor(true).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
+    })),
+  damageEntity: (entity, amount) => {
+    if (!isAlive(entity)) return
+    Health.hp[entity] = Math.max(0, Health.hp[entity] - amount)
+  },
+  enemyInfo: (entity) => {
+    if (!isAlive(entity)) return null
+    const isBoss = Enemy.kind[entity] === EnemyKind.Boss
+    const list = attacksFor(isBoss)
+    const chain = Enemy.chainNext[entity]
+    return {
+      hp: Number(Health.hp[entity].toFixed(1)),
+      max: Health.max[entity],
+      phase: Enemy.phase[entity],
+      transitionT: Number(Enemy.transitionT[entity].toFixed(3)),
+      state: Actor.state[entity],
+      attacking: Actor.state[entity] === ActorState.Attack,
+      attackId: attackAt(isBoss, Enemy.attackIndex[entity]).id,
+      attackPhase: Actor.phase[entity],
+      chainNext: chain === NO_CHAIN ? '' : (list[chain]?.id ?? ''),
+      cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
+    }
+  },
   saveInfo: () => game.debugSaveInfo(),
   resetProgress: () => game.resetProgress(),
   audio: {

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { WEAPONS } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
 import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
+import { BOSS_PHASES } from '../config/bossPhases'
 import {
   Actor,
   ActorState,
@@ -379,6 +380,28 @@ export class Visuals {
       fill.position.set(-barW / 2, 0, 0.001)
       fill.renderOrder = 11
       hpBar.add(bg, fill)
+
+      /**
+       * 보스 체력바에 **페이즈 눈금**을 새깁니다.
+       *
+       * 페이즈가 결정적(체력 비율)이라는 설계는, 플레이어가 그 경계를 볼 수
+       * 있을 때에만 값어치가 있습니다. 눈금이 없으면 "언젠가 갑자기 바뀐다"가
+       * 되어 결국 무작위와 구분되지 않습니다. 눈금이 있으면
+       * **"저기 닿기 전에 물약을 쓸까"** 같은 판단이 생깁니다.
+       */
+      if (isBoss) {
+        for (let i = 1; i < BOSS_PHASES.length; i++) {
+          const tick = new THREE.Mesh(
+            this.hpBarGeo,
+            new THREE.MeshBasicMaterial({ color: 0xffe08a, depthTest: false }),
+          )
+          tick.scale.set(0.05, 0.3, 1)
+          tick.position.set(-barW / 2 + barW * BOSS_PHASES[i].enterBelow, 0, 0.002)
+          tick.renderOrder = 12
+          hpBar.add(tick)
+        }
+      }
+
       group.add(hpBar)
       visual.hpBar = hpBar
       visual.hpFill = fill
@@ -481,7 +504,17 @@ export class Visuals {
 
       // 피격 플래시 — 흰색 발광을 순간적으로 올렸다가 감쇠시킵니다.
       const flash = Math.max(0, Health.flashT[e]) / 0.12
-      if (flash > 0) {
+      /**
+       * 페이즈 전환 중에는 **금빛으로 타오릅니다.**
+       * 무적이라 피격 플래시가 아예 안 뜨는데, 아무 반응이 없으면 플레이어는
+       * "왜 안 맞지?"를 버그로 읽습니다. 색으로 "지금은 못 때린다"를 말해 줍니다.
+       * 맥동시키는 이유: 정지된 빛은 상태가 아니라 재질처럼 보입니다.
+       */
+      const transition = hasComponent(Enemy, e) ? Enemy.transitionT[e] : 0
+      if (transition > 0) {
+        const pulse = 0.55 + 0.45 * Math.sin(time.elapsed * 26)
+        v.material.emissive.setRGB(pulse, pulse * 0.72, pulse * 0.2)
+      } else if (flash > 0) {
         const k = Math.min(1, flash)
         v.material.emissive.setRGB(k, k * 0.85, k * 0.7)
       } else if (v.material.emissive.r !== 0) {

@@ -273,16 +273,24 @@ export function pickAttack(
   attacks: EnemyAttackDef[],
   dist: number,
   rand: number,
+  /**
+   * 가중치 덮어쓰기(패턴 id → 가중치). 보스 페이즈가 이걸로 "이 구간에서는
+   * 파랑이 자주 나온다" 같은 성격을 만듭니다. 패턴 정의를 복제하지 않고
+   * 가중치만 갈아 끼우는 이유: 같은 패턴을 두 벌 두면 예고 도형·소리·판정을
+   * 전부 두 번 관리해야 하고, 한쪽만 고쳐서 어긋나기 시작합니다.
+   */
+  weights?: Record<string, number>,
 ): EnemyAttackDef | null {
+  const weightOf = (a: EnemyAttackDef): number => weights?.[a.id] ?? a.weight
   let total = 0
   for (const a of attacks) {
-    if (dist >= a.minRange && dist <= a.maxRange) total += a.weight
+    if (dist >= a.minRange && dist <= a.maxRange) total += weightOf(a)
   }
   if (total <= 0) return null
   let roll = rand * total
   for (const a of attacks) {
     if (dist < a.minRange || dist > a.maxRange) continue
-    roll -= a.weight
+    roll -= weightOf(a)
     if (roll <= 0) return a
   }
   return null
