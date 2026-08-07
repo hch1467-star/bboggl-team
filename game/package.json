@@ -1,0 +1,23 @@
+{
+  "name": "quarterview-arpg",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Quarter-view ARPG - soulslike combat meets loot farming. Web prototype designed for later port to Unity 6.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "verify": "node tools/verify.mjs",
+    "vfx": "node tools/vfx-preview.mjs"
+  },
+  "devDependencies": {
+    "@types/three": "^0.181.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.7"
+  },
+  "dependencies": {
+    "three": "^0.181.0"
+  }
+}
