@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
 import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
-import { attacksFor } from './config/enemyAttacks'
+import { attackAt, attacksFor } from './config/enemyAttacks'
 import {
   Actor,
   ActorState,
@@ -28,7 +28,7 @@ import { createScene } from './render/scene'
 import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
 import { countLivingEnemies, hitEvents, isBackAttack, isBehindPoint, resolveAttacks } from './systems/combat'
-import { enemyAiSystem, setEnemyAiEnabled } from './systems/enemyAI'
+import { enemyAiSystem, resetAttackTokens, setEnemyAiEnabled } from './systems/enemyAI'
 import { deathEvents, healthSystem } from './systems/health'
 import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
@@ -190,6 +190,7 @@ class Game {
     resetTripods()
     this.tripodPanel.setOpen(false)
     setEnemyAiEnabled(true)
+    resetAttackTokens()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -618,6 +619,32 @@ class Game {
     return e
   }
 
+  /**
+   * 동시 공격 부하 측정.
+   *
+   * 플레이 테스트 피드백: "여러 명이 겹쳤을 때 피하기가 쉽지 않다."
+   * 공격 하나하나의 크기를 아무리 줄여도, **여럿이 동시에 걸면** 도망칠 방향의
+   * 합집합이 사라져 피할 수 없게 됩니다. 즉 이 문제는 개별 공격의 수치가 아니라
+   * **동시성**의 문제이고, 그렇다면 측정해야 할 것도 동시에 걸리는 개수입니다.
+   */
+  debugAttackLoad(): { attacking: number; telegraphing: number; wideTelegraphs: number } {
+    const ids = enemyQuery.run()
+    let attacking = 0
+    let telegraphing = 0
+    let wideTelegraphs = 0
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (Actor.state[e] !== ActorState.Attack) continue
+      attacking++
+      if (Actor.phase[e] !== AttackPhase.Windup) continue
+      telegraphing++
+      if (attackAt(Enemy.kind[e] === EnemyKind.Boss, Enemy.attackIndex[e]).arcDeg >= 180) {
+        wideTelegraphs++
+      }
+    }
+    return { attacking, telegraphing, wideTelegraphs }
+  }
+
   debugRefreshLoadout(): void {
     this.refreshLoadout()
   }
@@ -801,6 +828,9 @@ class Game {
       aim: { x: Number(this.aim.x.toFixed(3)), z: Number(this.aim.z.toFixed(3)) },
       cast: { x: Number(Player.castX[p].toFixed(3)), z: Number(Player.castZ[p].toFixed(3)) },
       enemiesLeft: countLivingEnemies(),
+      // 지금 몇 마리가 **동시에** 공격을 걸고 있는가.
+      // "여러 명이 겹치면 못 피한다"는 문제는 이 숫자로만 잴 수 있습니다.
+      ...this.debugAttackLoad(),
       kills: this.kills,
       hitsDealt: this.hitsDealt,
       damageDealt: Number(this.damageDealt.toFixed(1)),

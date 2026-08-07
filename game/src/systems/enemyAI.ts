@@ -10,7 +10,16 @@ import {
   Transform,
   Velocity,
 } from '../core/components'
-import { SNARE_MOVE_SCALE, attackAt, attacksFor, pickAttack } from '../config/enemyAttacks'
+import {
+  ATTACK_COMMIT_GAP,
+  MAX_CONCURRENT_ATTACKERS,
+  MAX_CONCURRENT_WIDE,
+  SNARE_MOVE_SCALE,
+  WIDE_ARC_DEG,
+  attackAt,
+  attacksFor,
+  pickAttack,
+} from '../config/enemyAttacks'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { isBehindPoint } from './combat'
@@ -60,6 +69,72 @@ function wrapAngle(a: number): number {
   return a
 }
 
+/**
+ * 다음 적이 공격을 걸 수 있을 때까지 남은 시간. **무리 전체가 공유**합니다.
+ * 이 한 줄이 "동시에 시작해서 완전히 겹치는" 문제를 막습니다.
+ */
+let commitGapT = 0
+
+export function resetAttackTokens(): void {
+  commitGapT = 0
+}
+
+/**
+ * 이번 프레임에 공격을 걸어도 되는 적들을 미리 뽑습니다.
+ *
+ * **왜 미리 뽑는가:** 루프를 돌면서 선착순으로 허용하면, 배열에 먼저 들어 있는
+ * 적이 늘 이깁니다. 그건 플레이어 눈에 무작위로 보입니다.
+ * **가장 가까운 적부터** 권한을 주면 "붙은 놈이 친다"가 되어 납득이 갑니다.
+ *
+ * @returns 공격을 걸어도 되는 엔티티 집합
+ */
+function grantAttackTokens(
+  ids: Int32Array | Uint32Array | number[],
+  count: number,
+  px: number,
+  pz: number,
+): Set<number> {
+  const granted = new Set<number>()
+
+  // 이미 공격 중인 적이 토큰을 쥐고 있는 것으로 칩니다.
+  let busy = 0
+  let wideBusy = 0
+  const waiting: { e: number; d: number }[] = []
+  for (let i = 0; i < count; i++) {
+    const e = ids[i]
+    if (!isAlive(e) || Actor.state[e] === ActorState.Dead) continue
+    if (Actor.state[e] === ActorState.Attack) {
+      busy++
+      const def = attackAt(Enemy.kind[e] === EnemyKind.Boss, Enemy.attackIndex[e])
+      if (def.arcDeg >= WIDE_ARC_DEG) wideBusy++
+      continue
+    }
+    if (Enemy.aggro[e] === 0) continue
+    if (Actor.state[e] === ActorState.Stagger) continue
+    waiting.push({ e, d: Math.hypot(Transform.x[e] - px, Transform.z[e] - pz) })
+  }
+
+  // 광역 여유분은 **항상 먼저** 갱신합니다.
+  // 아래 조기 반환보다 뒤에 두면 값이 지난 프레임 것으로 남아,
+  // 광역이 이미 하나 진행 중인데도 하나 더 허용되는 순간이 생깁니다.
+  wideSlotsLeft = MAX_CONCURRENT_WIDE - wideBusy
+
+  if (commitGapT > 0) return granted // 아직 다음 차례가 아닙니다
+  let free = MAX_CONCURRENT_ATTACKERS - busy
+  if (free <= 0) return granted
+
+  waiting.sort((a, b) => a.d - b.d)
+  for (const w of waiting) {
+    if (free <= 0) break
+    granted.add(w.e)
+    free--
+  }
+  return granted
+}
+
+/** 이번 프레임에 광역 패턴을 몇 개 더 허용할 수 있는가. grantAttackTokens가 채웁니다. */
+let wideSlotsLeft = MAX_CONCURRENT_WIDE
+
 export function enemyAiSystem(
   playerEntity: number,
   playerAlive: boolean,
@@ -72,6 +147,9 @@ export function enemyAiSystem(
   const px = Transform.x[playerEntity]
   const pz = Transform.z[playerEntity]
   const ids = enemies.run()
+
+  if (commitGapT > 0) commitGapT = Math.max(0, commitGapT - dt)
+  const tokens = grantAttackTokens(ids, enemies.count, px, pz)
 
   for (let i = 0; i < enemies.count; i++) {
     const e = ids[i]
@@ -183,10 +261,21 @@ export function enemyAiSystem(
     // 사거리를 `cfg.attackRange` 하나로 재던 것을 **패턴별 사거리**로 바꿨습니다.
     // 보스의 갈고리(11m)처럼 멀리서만 쓰는 패턴이 생기면, 접근 판정 하나로는
     // 표현할 수 없습니다. "거리마다 다른 색이 나온다"가 이 구조에서 나옵니다.
-    if (Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
+    //
+    // **공격 토큰**이 있어야 커밋할 수 있습니다(enemyAttacks.ts 설계 노트).
+    // 토큰이 없는 적은 그냥 다음 판정으로 흘러가 노려보며 기다립니다.
+    if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       const list = attacksFor(isBoss)
-      const picked = pickAttack(list, dist, combatRng.next())
+      let picked = pickAttack(list, dist, combatRng.next())
+      // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
+      // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
+      if (picked && picked.arcDeg >= WIDE_ARC_DEG && wideSlotsLeft <= 0) {
+        picked = list.find((a) => a.arcDeg < WIDE_ARC_DEG && dist >= a.minRange && dist <= a.maxRange) ?? null
+      }
       if (picked) {
+        if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
+        commitGapT = ATTACK_COMMIT_GAP
+        tokens.delete(e)
         Enemy.attackIndex[e] = list.indexOf(picked)
         Actor.state[e] = ActorState.Attack
         Actor.phase[e] = AttackPhase.Windup

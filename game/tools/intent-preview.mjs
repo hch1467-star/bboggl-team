@@ -67,6 +67,21 @@ try {
     await sleep(150)
   }
 
+  // 잡몹의 노랑(200°). 보스의 360°와 달리 **등 뒤가 열려 있어야** 합니다 —
+  // 그게 "돌아서 뒤로 가라"는 답이 존재한다는 증거입니다.
+  await page.evaluate(() => window.__game.clearEnemies())
+  await sleep(300)
+  const grunt = await page.evaluate(() => window.__game.spawnTestEnemy(0, 4.5))
+  await sleep(300)
+  await page.evaluate(([g]) => window.__game.forceAttack(g, 1), [grunt])
+  await page.evaluate(
+    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  )
+  await page.evaluate(() => window.__game.setPaused(true))
+  await page.screenshot({ path: path.join(OUT, '17-grunt-sweep.png'), clip: CLIP })
+  await page.evaluate(() => window.__game.setPaused(false))
+  console.log('  잡몹 노랑(200°) → 17-grunt-sweep.png')
+
   // 🔵 속박에 걸린 상태 — 파랑 예고와 파란 족쇄가 **같은 색**이어야
   // "저 공격에 맞으면 이렇게 된다"가 한 번에 연결됩니다.
   await page.evaluate(() => window.__game.applySnare(3))

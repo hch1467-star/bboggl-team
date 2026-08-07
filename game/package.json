@@ -15,7 +15,8 @@
     "weapons": "node tools/weapon-preview.mjs",
     "zone": "node tools/make-zone.mjs",
     "intents": "node tools/intent-preview.mjs",
-    "tripod": "node tools/tripod-preview.mjs"
+    "tripod": "node tools/tripod-preview.mjs",
+    "crowd": "node tools/crowd-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
