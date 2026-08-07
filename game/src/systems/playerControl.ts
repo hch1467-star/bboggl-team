@@ -17,6 +17,7 @@ import { defineQuery } from '../core/ecs'
 import { consumePress, isDown } from '../core/input'
 import { time } from '../core/time'
 import { WEAPONS } from '../config/arsenal'
+import { assistAim } from './combat'
 import { cooldownOf, cycleRune, setCooldown, skillForSlot, tickCooldowns, weaponOf } from './loadout'
 
 /**
@@ -115,6 +116,27 @@ function clampMag(value: number, max: number): number {
 
 function beginAttack(p: number, index: number, aimRot: number): void {
   const c = weaponOf(p).combo[index]
+  // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
+  // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
+  const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
+
+  /**
+   * **적응형 파고들기.**
+   *
+   * 고정 1.5m를 파고들면 1.6m 앞의 적을 지나쳐 버립니다. 측정에서 정확히
+   * 그렇게 나왔습니다 — 몸은 적을 보고 있는데(보정 성공) 코앞에서만 빗나갔습니다:
+   *
+   *     롱소드 1.6m :  0°  O  /  15°  .  /  30°  .      (몸각 0~10°)
+   *
+   * 그래서 **고정 거리가 아니라 "사거리 안쪽으로 들어갈 만큼만"** 파고듭니다.
+   * 대시 스킬에서 이미 같은 방식으로 고쳤던 문제입니다(arsenal.ts shadow_step 주석).
+   * 적이 없으면(허공을 침) 원래 거리를 그대로 써서 전진하는 손맛을 남깁니다.
+   */
+  const settle = c.range * 0.55 // 이 정도 거리에 서면 부채꼴 한가운데에 들어옵니다
+  const lunge =
+    aim.dist === Infinity ? c.lunge : Math.min(c.lunge, Math.max(0, aim.dist - settle))
+  Player.dashSpeed[p] = lunge / Math.max(c.windup, 0.001)
+  const rot = aim.rot
   Actor.state[p] = ActorState.Attack
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = c.windup
@@ -124,17 +146,27 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.bufferedAttack[p] = 0
   Stamina.value[p] = Math.max(0, Stamina.value[p] - c.staminaCost)
   Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
-  // 공격 시작 순간 커서 방향으로 몸을 스냅. 반응이 즉각적으로 느껴집니다.
-  Transform.rotY[p] = aimRot
+  // 공격 시작 순간 몸을 스냅. 반응이 즉각적으로 느껴집니다.
+  Transform.rotY[p] = rot
 }
 
 function beginSkill(
   p: number,
   slot: number,
   def: SkillDef,
-  aimRot: number,
+  aimRotIn: number,
   ctx: ControlContext,
 ): void {
+  let aimRot = aimRotIn
+  /**
+   * 스킬도 같은 보정을 받습니다 — 단, **지점 지정(point) 스킬은 제외**합니다.
+   * 지점 스킬은 "커서가 가리킨 자리에 떨어뜨린다"가 기술의 정체라서,
+   * 여기에 보정을 넣으면 플레이어가 고른 자리를 게임이 덮어쓰게 됩니다.
+   */
+  if (def.shape !== 'point') {
+    aimRot = assistAim(Transform.x[p], Transform.z[p], aimRot, def.range + def.dash).rot
+  }
+
   Actor.state[p] = ActorState.Skill
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = def.windup
@@ -407,10 +439,10 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
 
         // 선행동작 중에는 느리게나마 방향을 틀 수 있습니다(완전 고정은 답답함).
-        if (phase === AttackPhase.Windup && combo.lunge > 0) {
+        if (phase === AttackPhase.Windup && Player.dashSpeed[p] > 0) {
           turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
-          // 앞으로 파고드는 전진. 사거리가 짧은 무기가 닿게 해주는 장치입니다.
-          forwardOverride = combo.lunge / Math.max(combo.windup, 0.001)
+          // 앞으로 파고드는 전진. 거리는 beginAttack 이 적과의 간격에 맞춰 정합니다.
+          forwardOverride = Player.dashSpeed[p]
         } else if (phase === AttackPhase.Windup) {
           turnToward(p, aimRot, PLAYER.turnSpeedDeg * 0.35, dt)
         }

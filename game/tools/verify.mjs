@@ -84,6 +84,19 @@ async function main() {
     await release(c)
   }
   const aimAt = (x, z) => page.evaluate(([ax, az]) => window.__game.aimAtWorld(ax, az), [x, z])
+  /**
+   * Idle 이 될 때까지 기다립니다.
+   * 벽시계로 기다리면 안 됩니다 — 소프트웨어 렌더링에서는 시뮬레이션이 실제 시간의
+   * 1/3 속도로 돌아서, 후딜이 안 끝난 상태에서 누른 입력이 통째로 씹힙니다.
+   */
+  const waitIdle = async (timeoutMs = 4000) => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < timeoutMs) {
+      if ((await state()).player.state === 0) return true
+      await sleep(60)
+    }
+    return false
+  }
   const shot = async (name) => {
     const file = path.join(SHOTS, `${name}.png`)
     await page.screenshot({ path: file })
@@ -425,6 +438,32 @@ async function main() {
       buffered.ok ? `쿨다운 ${buffered.state.loadout.cooldowns[0]}초 시작` : '5초 내 미발동',
     )
 
+    // ---------- 7.77 논타겟 조준 보정 ----------
+    // 플레이 테스트: "아예 논타겟팅인 만큼 맞추기가 좀 어려워."
+    //
+    // 보정의 목표는 **관대하되 무의미하지는 않게**입니다. 그래서 양쪽을 다 봅니다:
+    // 대충 맞게 겨눴으면 맞아야 하고, 확실히 빗나가게 겨눴으면 빗나가야 합니다.
+    // 뒤쪽이 없으면 조준이 장식이 되고 기둥 3(포지셔닝)이 무너집니다.
+    const aimTrial = async (offsetDeg) => {
+      await page.evaluate(() => window.__game.reset())
+      await sleep(350)
+      await page.evaluate(() => window.__game.clearEnemies())
+      await page.evaluate(() => window.__game.freezeEnemies(true))
+      await sleep(250)
+      await page.evaluate(() => window.__game.spawnTestEnemy(0, 2.2, Math.PI))
+      await sleep(250)
+      const rad = (offsetDeg * Math.PI) / 180
+      await aimAt(Math.sin(rad) * 2.2, Math.cos(rad) * 2.2)
+      await sleep(250)
+      await waitIdle()
+      await tap('Mouse0')
+      const hit = await waitUntil((st) => st.hitsDealt > 0, 3000)
+      return hit.ok
+    }
+    check('커서가 30° 빗나가도 명중 (보정이 걸림)', await aimTrial(30))
+    check('커서가 75° 빗나가면 빗나감 (조준은 여전히 의미 있음)', (await aimTrial(75)) === false)
+    await page.evaluate(() => window.__game.freezeEnemies(true))
+
     // ---------- 7.8 백어택이 실제 전투에 반영되는가 ----------
     // 적 AI를 멈추고 1:1로 통제된 실험을 합니다.
     // 적이 계속 몸을 돌리면 "보너스가 왜 안 붙지?"가 판정 버그 때문인지
@@ -451,14 +490,6 @@ async function main() {
     // 있습니다. 그러면 8번을 눌러도 전부 후딜 중에 씹혀 "0타"가 나옵니다.
     // 실제로 그렇게 실패했습니다 — 판정 코드는 멀쩡한데 테스트만 깨진 경우입니다.
     // 그래서 **Idle 상태가 된 것을 확인하고** 누릅니다.
-    const waitIdle = async (timeoutMs = 4000) => {
-      const t0 = Date.now()
-      while (Date.now() - t0 < timeoutMs) {
-        if ((await state()).player.state === 0) return true
-        await sleep(60)
-      }
-      return false
-    }
     const swingUntilHit = async (times = 8) => {
       for (let i = 0; i < times; i++) {
         await waitIdle()

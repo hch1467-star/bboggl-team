@@ -118,7 +118,7 @@ export const hitEvents: HitEvent[] = []
 
 const attackers = defineQuery(Transform, Actor)
 const targets = defineQuery(Transform, Body, Health)
-const livingEnemies = defineQuery(Enemy, Health)
+const livingEnemies = defineQuery(Enemy, Health, Transform, Body, Actor)
 
 function comboSpec(e: number, comboIndex: number): AttackSpec {
   const weapon = weaponOf(e)
@@ -374,6 +374,72 @@ function applyHit(a: number, spec: AttackSpec): void {
       killed,
     })
   }
+}
+
+/**
+ * 조준 보정 (소프트 락온).
+ *
+ * ── 왜 필요한가 ────────────────────────────────────────────────────
+ * 플레이 테스트: **"아예 논타겟팅인 만큼 맞추기가 좀 어려워."**
+ *
+ * 감으로 고치지 않고 재봤습니다. "커서가 적에서 몇 도까지 빗나가도 맞는가":
+ *
+ *     롱소드        0°  10°  20°  30°  40°
+ *       1.6m         O   O   .   .   .     <- 코앞이 제일 어렵다
+ *       2.4m         O   O   O   O   .
+ *
+ * **가까울수록 어려운** 이상한 결과가 나왔고, 원인은 파고들기였습니다.
+ * 공격을 시작하면 커서 방향으로 1.5m를 파고드는데, 커서가 빗나가 있으면
+ * 그 빗나간 방향으로 파고들어 **코앞의 적을 지나쳐 버립니다.**
+ * 조준이 조금 틀린 것이 위치까지 틀어지면서 두 배로 벌어진 것입니다.
+ *
+ * ── 보정하되, 조준을 무의미하게 만들지는 않습니다 ──────────────────
+ * 완전 자동 조준은 기둥 3(포지셔닝이 보상받는다)을 무너뜨립니다.
+ * 그래서 **이미 대충 맞게 겨눈 경우에만** 마무리를 다듬어 줍니다:
+ *  · 조준선에서 ASSIST_ARC 안에 있는 적만 후보
+ *  · 사거리 안(+여유)에 있는 적만 후보
+ *  · 여럿이면 **조준선에 가장 가까운** 적 (거리순이 아닙니다 —
+ *    거리순으로 하면 겨눈 적을 두고 옆의 다른 적을 치는 배신이 일어납니다)
+ *
+ * 백어택은 **위치**로 판정하므로(isBehindPoint) 이 보정이 기둥 3을 건드리지
+ * 않습니다. 몸이 도는 것뿐이고, 등 뒤로 돌아가는 일은 여전히 발로 해야 합니다.
+ */
+const ASSIST_ARC = (48 * Math.PI) / 180
+/** 사거리 밖이어도 이만큼까지는 후보로 봅니다(파고들며 닿는 거리). */
+const ASSIST_REACH_MARGIN = 1.4
+
+export interface AimAssist {
+  /** 보정된 몸 방향(라디안) */
+  rot: number
+  /** 보정 대상까지의 거리(m). 대상이 없으면 Infinity. */
+  dist: number
+}
+
+export function assistAim(px: number, pz: number, aimRot: number, reach: number): AimAssist {
+  const ids = livingEnemies.run()
+  const maxDist = reach + ASSIST_REACH_MARGIN
+  let bestRot = aimRot
+  let bestDist = Infinity
+  let bestOff = ASSIST_ARC
+  for (let i = 0; i < livingEnemies.count; i++) {
+    const e = ids[i]
+    if (Actor.state[e] === ActorState.Dead) continue
+    const dx = Transform.x[e] - px
+    const dz = Transform.z[e] - pz
+    const dist = Math.hypot(dx, dz)
+    if (dist < 0.0001 || dist > maxDist + Body.radius[e]) continue
+    const rot = Math.atan2(dx, dz)
+    let off = rot - aimRot
+    while (off > Math.PI) off -= Math.PI * 2
+    while (off < -Math.PI) off += Math.PI * 2
+    off = Math.abs(off)
+    if (off < bestOff) {
+      bestOff = off
+      bestRot = rot
+      bestDist = dist
+    }
+  }
+  return { rot: bestRot, dist: bestDist }
 }
 
 /** 회피 구르기 무적 프레임 + 대시 스킬 무적 프레임 */

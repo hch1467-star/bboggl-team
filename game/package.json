@@ -16,7 +16,8 @@
     "zone": "node tools/make-zone.mjs",
     "intents": "node tools/intent-preview.mjs",
     "tripod": "node tools/tripod-preview.mjs",
-    "crowd": "node tools/crowd-probe.mjs"
+    "crowd": "node tools/crowd-probe.mjs",
+    "aim": "node tools/aim-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
