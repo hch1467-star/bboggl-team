@@ -105,8 +105,13 @@ try {
     let regionStart = t0
     let vialsUsed = 0
     let lastVials = G.vialInfo().vials
-    let upgrades = 0
-    let weaponUps = 0
+    // 강화 횟수는 **게임 상태의 차이**로 셉니다. 누른 직후에 읽으면 아직
+    // 반영 전이라 0으로 나옵니다 — 실제로 불티 424를 쓰고도 "강화 0회"로
+    // 보고했습니다. 또 계측기가 거짓말을 한 경우입니다.
+    const startVialMax = G.vialInfo().max
+    const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
+    /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
+    let fireCooldownUntil = 0
     let bossSeen = false
     let bossKilled = false
     let clearedAt = 0
@@ -349,17 +354,31 @@ try {
        * 없었습니다.** 사람이라면 400을 들고 있으면 쓰러 갑니다.
        * 다만 너무 멀면 안 갑니다 — 강화하러 존을 되돌아가는 것은 사람도 안 합니다.
        */
-      if (fire && canUpgrade) {
+      if (fire && canUpgrade && now() >= fireCooldownUntil) {
+        const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
-        if (step && step.dist > 2.2 && step.dist < 45) {
-          moveToward(step.x - p.x, step.z - p.z)
+        if (step && step.dist < 45 && straight > 1.6) {
+          /**
+           * **마지막 몇 미터는 직선으로 갑니다.**
+           *
+           * 길찾기는 격자(2m) 단위라 목표에 붙으면 두 칸 사이를 진동합니다.
+           * 실제로 화톳불 3.5m 앞에서 제자리걸음을 하다 66초에 "막힘"으로
+           * 끝났습니다. 길찾기는 **벽을 돌아가는 용도**지 마지막 두 걸음용이
+           * 아닙니다.
+           */
+          const useStraight = straight < 6
+          const tx = useStraight ? fire.x : step.x
+          const tz = useStraight ? fire.z : step.z
+          moveToward(tx - p.x, tz - p.z)
           await sleep()
           continue
         }
+        // 붙었는데도 못 쓰는 상황이면(적이 가까워 막힘 등) 한동안 포기합니다.
+        if (straight <= 1.6) fireCooldownUntil = now() + 40
       }
       if (fire && (p.hp < 70 || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
-        if (fd < 2.2) {
+        if (fd < 2.6) {
           releaseAll()
           /**
            * 봇은 **성수병 먼저, 남으면 무기**로 씁니다.
@@ -368,18 +387,21 @@ try {
            * 싶은가"를 저울질하지만 봇은 그런 판단을 못 합니다. 가장 단순한
            * 우선순위 하나만 씁니다 — 그리고 그게 초보자의 기본값이기도 합니다.
            */
-          const maxBefore = vi.max
           if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
             await sleep()
-            if (G.vialInfo().max > maxBefore) upgrades++
           }
-          const lvBefore = G.weaponUpgradeInfo().level
-          if (G.weaponUpgradeInfo().nextCost > 0 && G.emberInfo().embers >= G.weaponUpgradeInfo().nextCost) {
+          if (
+            G.weaponUpgradeInfo().nextCost > 0 &&
+            G.emberInfo().embers >= G.weaponUpgradeInfo().nextCost
+          ) {
             tap('KeyB')
             await sleep()
-            if (G.weaponUpgradeInfo().level > lvBefore) weaponUps++
           }
+          // 한 번 들렀으면 한동안 다시 오지 않습니다. 안 그러면 아직 살 수 있는
+          // 강화가 남아 있는 한 화톳불과 목표 사이를 영원히 오갑니다
+          // (실제로 그렇게 막혀서 139초에 실행이 끝났습니다).
+          fireCooldownUntil = now() + 40
           const until = now() + 2.5
           while (now() < until) await sleep()
           lastVials = G.vialInfo().vials
@@ -440,8 +462,8 @@ try {
       // 봇의 추측이 아니라 **게임이 센 값**입니다. 예전엔 "성수병이 늘었으면
       // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
       restCount: G.vialInfo().restCount,
-      upgrades,
-      weaponUps,
+      upgrades: G.vialInfo().max - startVialMax,
+      weaponUps: G.weaponUpgradeInfo().levels.reduce((a, v, i) => a + (v - startWeaponLevels[i]), 0),
       weaponLevels: G.weaponUpgradeInfo().levels,
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
