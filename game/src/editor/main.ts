@@ -141,6 +141,8 @@ class Editor {
       // 마커를 납작한 판으로 둔 이유: 서 있는 기둥으로 만들면 벽에 붙었을 때
       // 어느 칸에 놓았는지가 안 보입니다.
       ladder: new THREE.BoxGeometry(1.1, 0.18, 0.5),
+      // 가장 큰 잡몹 실루엣 — 키 2.25m 가 그대로 보이게 길쭉하게.
+      charger: new THREE.CapsuleGeometry(0.5, 1.25, 4, 10),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()

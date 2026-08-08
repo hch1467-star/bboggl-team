@@ -3,11 +3,13 @@ import { RUNE_ORDER, SKILLS } from './config/arsenal'
 import {
   BOSS_ARENA,
   COMBAT,
+  COUNTER,
   EMBER,
   FALL,
   KILL_FEEDBACK,
   LADDER_REACH,
   PLAYER as PLAYER_CFG,
+  POISE,
   TREASURE,
   VIAL,
   WORLD,
@@ -54,6 +56,7 @@ import { KIND_TREASURE, Visuals } from './render/visuals'
 import {
   breakEvents,
   breakPoise,
+  counterEvents,
   countLivingEnemies,
   hitEvents,
   isBackAttack,
@@ -169,6 +172,8 @@ class Game {
    * 보고하면서 불티가 280에서 32로 줄어 있었습니다 — 계측기가 거짓말을 한 것입니다.
    */
   private deathCount = 0
+  /** 🟢 반격 성공 횟수 — 프로브와 봇이 추측하지 않고 읽습니다. */
+  private counterCount = 0
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -630,6 +635,28 @@ class Game {
       }
     }
     fallEvents.length = 0
+
+    /**
+     * ---- 3.79 🟢 반격 성공 ----
+     *
+     * 일반 무너짐과 **따로** 알립니다. 같은 연출로 처리하면 플레이어는
+     * "운 좋게 강인도가 찼구나"로 읽고, 자기가 **의도해서 만든 일**임을
+     * 모릅니다. 새 동사를 가르치는 중에는 인과가 분명해야 합니다.
+     */
+    for (const c of counterEvents) {
+      this.counterCount++
+      this.cam.addTrauma(COUNTER.trauma)
+      requestHitstop(COUNTER.hitstop)
+      sfx.bossPhase()
+      this.hud.showBanner('반격!', '2.4초 무방비', 1.4)
+      // 무너짐(6방향)보다 촘촘한 12방향 — 같은 불꽃이라도 밀도가 다르면
+      // "더 큰 일이 일어났다"가 읽힙니다.
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2
+        this.vfx.spawnHitSpark(c.x + Math.cos(a) * 1.2, c.y + 1.1, c.z + Math.sin(a) * 1.2, 1.7)
+      }
+    }
+    counterEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -1407,6 +1434,10 @@ class Game {
     }
   }
 
+  debugCounterCount(): number {
+    return this.counterCount
+  }
+
   debugRunStats(): { deaths: number; rests: number; kills: number } {
     return { deaths: this.deathCount, rests: this.restCount, kills: this.kills }
   }
@@ -1923,6 +1954,10 @@ declare global {
          * 바꿨을 때 조용히 틀립니다 — 실제로 이 프로브가 그렇게 실패했습니다.
          */
         attacking: boolean
+        winding: boolean
+        rotY: number
+        brokenT: number
+        intent: number
         staggered: boolean
         broken: boolean
         poise: number
@@ -1939,6 +1974,9 @@ declare global {
        * (쿼터뷰 45°에서 월드 +X로 가려면 화면상 오른쪽 아래로 가야 합니다).
        * 봇이 축을 직접 계산하면 카메라 각도를 바꿀 때 봇이 조용히 틀립니다.
        */
+      /** 🟢 반격 검증용 */
+      counterInfo: () => { brokenTime: number; normalBrokenTime: number; damageMultiplier: number }
+      counterCount: () => number
       cameraAxes: () => { forwardX: number; forwardZ: number; rightX: number; rightZ: number }
       /** 지금 목표 지점(길안내와 **같은 계산**). 없으면 null. */
       objective: () => {
@@ -2131,6 +2169,12 @@ window.__game = {
       z: Number(Transform.z[entity].toFixed(3)),
       state: Actor.state[entity],
       attacking: Actor.state[entity] === ActorState.Attack,
+      // 예고 중인가 — 반격 검증이 `attackPhase === 0` 을 베끼지 않도록 노출합니다.
+      winding:
+        Actor.state[entity] === ActorState.Attack && Actor.phase[entity] === AttackPhase.Windup,
+      rotY: Number(Transform.rotY[entity].toFixed(3)),
+      brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
+      intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       staggered: Actor.state[entity] === ActorState.Stagger,
       broken: Enemy.brokenT[entity] > 0,
       poise: Number(Enemy.poise[entity].toFixed(1)),
@@ -2141,6 +2185,12 @@ window.__game = {
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
     }
   },
+  counterInfo: () => ({
+    brokenTime: COUNTER.brokenTime,
+    normalBrokenTime: POISE.brokenTime,
+    damageMultiplier: COUNTER.damageMultiplier,
+  }),
+  counterCount: () => game.debugCounterCount(),
   cameraAxes: () => game.debugCameraAxes(),
   objective: () => game.debugObjective(),
   bossEncounter: () => game.debugBossEncounter(),

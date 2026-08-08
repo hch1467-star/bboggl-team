@@ -38,6 +38,7 @@ export const KIND_TREASURE = 2
 export const KIND_BOSS = 3
 export const KIND_BINDER = 4
 export const KIND_DRAGGER = 5
+export const KIND_CHARGER = 6
 
 /**
  * EnemyKind → 렌더 종류.
@@ -55,6 +56,8 @@ export function renderKindForEnemy(kind: EnemyKind): number {
       return KIND_BINDER
     case EnemyKind.Dragger:
       return KIND_DRAGGER
+    case EnemyKind.Charger:
+      return KIND_CHARGER
     default:
       return KIND_GRUNT
   }
@@ -612,6 +615,17 @@ export class Visuals {
           if (winding) {
             const p = 1 - Actor.timer[e] / def.windup // 0 -> 1
             v.telegraphMat.opacity = 0.12 + p * 0.42
+            /**
+             * 🟢 반격만 **깜빡입니다.**
+             *
+             * 다른 넷은 차오르기만 합니다("점점 위험해진다"). 반격은 요구하는
+             * 동작이 정반대(피하지 말고 앞으로)라, 같은 문법으로 표시하면
+             * 색이 안 보이는 사람에게는 그냥 또 하나의 위험 장판입니다.
+             * **움직임이 다르면 색이 안 보여도 다른 것**임이 읽힙니다.
+             */
+            if (def.intent === AttackIntent.Counter) {
+              v.telegraphMat.opacity *= 0.55 + 0.45 * Math.abs(Math.sin(time.elapsed * 11))
+            }
             v.telegraphMat.color.setHex(INTENT_COLOR[def.intent])
           } else {
             // 터지는 순간만 흰색으로 날립니다 — "지금이 판정"이 색과 무관하게 읽혀야 합니다.

@@ -41,6 +41,26 @@ export const enum AttackIntent {
   Snare = 2,
   /** 🟣 강제이동 — 사거리 밖에 있어야 함 */
   Pull = 3,
+  /**
+   * 🟢 반격 — **피하는 것이 정답이 아닌 유일한 색.**
+   *
+   * ── 왜 이 색을 추가했는가 ──────────────────────────────────────
+   * 네 색의 정답을 나란히 놓고 보니 전부 **"피하라"** 였습니다:
+   * 구르기 · 걸어서 이탈 · 무적 프레임 · 사거리 밖. 다른 것을 요구하는 척
+   * 했지만 동사는 하나였습니다 — **회피**. 그래서 전투의 리듬이 늘
+   * "참고 → 피하고 → 반격" 한 방향으로만 흐릅니다.
+   *
+   * 로스트아크의 **카운터**가 정확히 이 문제를 푸는 장치입니다. 보스가 파랗게
+   * 빛나는 동안 앞에서 카운터기를 꽂으면 무너집니다. 플레이어들이 이 게임에서
+   * 가장 재미있다고 꼽는 순간이 여기인 이유는, **한 색만 반대 방향을 요구하기
+   * 때문**입니다. 물러나던 몸을 갑자기 앞으로 밀어야 합니다.
+   *
+   * 우리 식으로 옮기면: 예고 동안 **정면에서** 때리면 즉시 무너집니다.
+   * 등 뒤는 안 됩니다 — 백어택은 이미 보상받고 있고, 그것까지 반격이 되면
+   * "뒤로 도는 것"이 또 만능 정답이 됩니다. 위험 구역 안에 서서 휘둘러야
+   * 성립하는 것이 이 색의 값입니다.
+   */
+  Counter = 4,
 }
 
 /**
@@ -55,6 +75,9 @@ export const INTENT_COLOR: Record<AttackIntent, number> = {
   [AttackIntent.Sweep]: 0xffc61e,
   [AttackIntent.Snare]: 0x35a7ff,
   [AttackIntent.Pull]: 0xc061ff,
+  // 초록은 네 색과 색상환에서 가장 멀고, 적록 색맹에게는 노랑/빨강 계열과
+  // 헷갈릴 수 있어 **밝기를 가장 높게** 잡았습니다(도형도 유일하게 깜빡입니다).
+  [AttackIntent.Counter]: 0x4dffa1,
 }
 
 export const INTENT_LABEL: Record<AttackIntent, string> = {
@@ -62,6 +85,7 @@ export const INTENT_LABEL: Record<AttackIntent, string> = {
   [AttackIntent.Sweep]: '광역 — 걸어서 이탈',
   [AttackIntent.Snare]: '속박 — 무적 프레임',
   [AttackIntent.Pull]: '끌어당김 — 거리 두기',
+  [AttackIntent.Counter]: '반격 — 정면에서 때려라',
 }
 
 export interface EnemyAttackDef {
@@ -269,6 +293,41 @@ export const BOSS_ATTACKS: EnemyAttackDef[] = [
     weight: 2,
     pull: 15,
   },
+  {
+    /**
+     * 🟢 초록 — **돌진.** 이 존에서 유일하게 "앞으로 나가라"고 말하는 패턴입니다.
+     *
+     * 예고를 1.25초로 길게 잡은 이유: 새 동사를 배우는 중이라 **결심할 시간**이
+     * 필요합니다. 짧게 잡으면 "반응"이 되는데, 반격은 반사신경이 아니라
+     * **결단**이어야 합니다(피할 수도 있는데 굳이 앞으로 나가는 것).
+     *
+     * 피해가 큽니다(34). 그냥 맞으면 아프고, 구르면 아무 일도 안 일어나고,
+     * 정면에서 때리면 2.4초가 열립니다 — 셋 다 다른 결과여야 선택이 됩니다.
+     */
+    id: 'boss_charge',
+    intent: AttackIntent.Counter,
+    windup: 1.25,
+    active: 0.18,
+    recovery: 1.1,
+    reach: 6.5,
+    arcDeg: 60,
+    damage: 34,
+    knockback: 8,
+    minRange: 3,
+    maxRange: 10,
+    /**
+     * 가중치 1 — 다른 패턴(2~3)보다 **드물게** 나옵니다.
+     *
+     * 처음엔 2로 뒀는데 `npm run poise` 가 잡았습니다. 이 패턴은 예고 1.25초에
+     * 후딜 1.1초라 한 사이클이 2.53초로, 베기(1.99초)보다 확실히 깁니다.
+     * 자주 나오면 보스의 공격 빈도 자체가 떨어져서 "계속 때려도 보스는
+     * 그대로 공격한다"는 기준선이 무너졌습니다(4회 → 2회).
+     *
+     * 드물게 두는 것이 설계상으로도 맞습니다. 반격은 **하이라이트**여야지
+     * 다섯 번 중 한 번 오는 일상이 되면 안 됩니다.
+     */
+    weight: 1,
+  },
 ]
 
 /**
@@ -333,6 +392,35 @@ export const BINDER_ATTACKS: EnemyAttackDef[] = [
 ]
 
 /**
+ * 🟢 달려드는 자 — 반격을 가르치는 적. 패턴은 역시 **하나뿐**입니다.
+ *
+ * ── 왜 전용 적이 필요한가 ──────────────────────────────────────
+ * 파랑·보라를 얽는 자·끄는 자가 먼저 가르치게 한 것과 같은 이유입니다.
+ * 새 동사를 **실수 대가가 가장 큰 싸움(보스)에서 처음 만나게** 하면 안 됩니다.
+ * 특히 반격은 "위험 구역 안에 서서 휘두르라"는, 지금까지 배운 것과 **정반대**
+ * 지시라서 더 그렇습니다.
+ *
+ * 잡몹판은 보스판보다 예고가 길고(1.4초) 피해가 작습니다(16). 실패해도
+ * 죽지 않는 자리에서 손에 익히게 하려는 것입니다.
+ */
+export const CHARGER_ATTACKS: EnemyAttackDef[] = [
+  {
+    id: 'charger_rush',
+    intent: AttackIntent.Counter,
+    windup: 1.4,
+    active: 0.16,
+    recovery: 1.15,
+    reach: 5.5,
+    arcDeg: 55,
+    damage: 16,
+    knockback: 6,
+    minRange: 0,
+    maxRange: 7.5,
+    weight: 1,
+  },
+]
+
+/**
  * 🟣 끄는 자 — 역시 패턴 하나. 12m 갈고리뿐입니다.
  *
  * 예고 1.15초는 게임에서 가장 깁니다. 가장 멀리서 오는 공격이라
@@ -370,6 +458,7 @@ const ATTACKS_BY_KIND: Record<number, EnemyAttackDef[]> = {
   1: BOSS_ATTACKS,
   2: BINDER_ATTACKS,
   3: DRAGGER_ATTACKS,
+  4: CHARGER_ATTACKS,
 }
 
 /** 이 적이 쓰는 패턴 목록. EnemyKind 값으로 찾습니다. */

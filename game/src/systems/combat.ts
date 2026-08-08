@@ -1,5 +1,5 @@
 import type { SkillShape } from '../config/arsenal'
-import { COMBAT, PLAYER, POISE } from '../config/balance'
+import { COMBAT, COUNTER, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -14,7 +14,7 @@ import {
   Velocity,
 } from '../core/components'
 import { enemyDef } from '../config/enemies'
-import { attackAt } from '../config/enemyAttacks'
+import { AttackIntent, attackAt } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { time } from '../core/time'
@@ -207,6 +207,24 @@ function enemySpec(e: number): AttackSpec {
  */
 function applyPoise(t: number, spec: AttackSpec): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
+
+  /**
+   * 🟢 초록 예고 중에는 **강인도가 깎이지 않습니다.**
+   *
+   * 프로브가 잡은 것: 스킬로만 반격되게 막아 놨더니, 이번엔 좌클릭 연타로
+   * **강인도를 깎아** 초록 예고를 끊고 있었습니다(8초에 무너짐 3회 중 반격은 1회).
+   * 그러면 반격은 있어도 그만 없어도 그만인 기능이 됩니다.
+   *
+   * 예외를 두는 근거: 다른 넷은 "예고 중에 때리면 더 깎인다"(×2.5)가 보상인데,
+   * 초록은 **예고 중에 때리는 것 자체가 이미 전용 답(반격)** 을 갖고 있습니다.
+   * 두 답이 같은 입력에 겹치면 쉬운 쪽(연타)이 이깁니다. 그래서 초록 예고를
+   * 끊는 길은 반격 하나만 남깁니다 — 그것이 이 색의 정의입니다.
+   * (피해는 정상적으로 들어갑니다. 못 깎이는 것은 강인도뿐입니다.)
+   */
+  if (winding && attackAt(Enemy.kind[t], Enemy.attackIndex[t]).intent === AttackIntent.Counter) {
+    Enemy.poiseIdleT[t] = 0
+    return
+  }
   const dmg = spec.trauma * POISE.fromTrauma * (winding ? POISE.windupMultiplier : 1)
 
   Enemy.poiseIdleT[t] = 0
@@ -247,6 +265,9 @@ export interface BreakEvent {
   z: number
 }
 export const breakEvents: BreakEvent[] = []
+
+/** 🟢 반격이 성립한 순간. 무너짐과 **따로** 알립니다 — 다른 사건이기 때문입니다. */
+export const counterEvents: BreakEvent[] = []
 
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
 export function currentSpec(a: number): AttackSpec | null {
@@ -394,9 +415,44 @@ function applyHit(a: number, spec: AttackSpec): void {
     const critChance = COMBAT.baseCritChance + (back ? COMBAT.backCritBonus : 0)
     const crit = spec.damage > 0 && combatRng.chance(critChance)
 
+    /**
+     * ---- 🟢 반격 성립 판정 ----
+     *
+     * 조건 셋이 **전부** 맞아야 합니다:
+     *   1) 상대가 🟢 패턴의 **예고 중**일 것 — 판정이 시작된 뒤엔 늦었습니다
+     *   2) 내가 **정면**에 있을 것 — 등 뒤는 안 됩니다
+     *   3) 내가 때린 것일 것 — 적끼리는 반격하지 않습니다
+     *
+     * 2번이 이 색의 전부입니다. 등 뒤에서도 되게 하면 백어택이 또 만능
+     * 정답이 되고, 새 동사를 가르치려던 것이 옛 동사의 보너스가 됩니다.
+     */
+    const countered =
+      attackerIsPlayer &&
+      /**
+       * **스킬로만 반격됩니다.**
+       *
+       * 처음엔 아무 공격이나 되게 했는데, 프로브가 재 보니 정면에서 좌클릭만
+       * 연타해도 초록이 8초 동안 한 번도 못 터졌습니다. 반격이 결단이 아니라
+       * 사고로 성립하고 있었습니다 — 새 동사를 가르치려던 것이 결국
+       * '계속 때리면 되는 색'이 된 것입니다.
+       *
+       * 로스트아크가 카운터를 아무 공격이 아니라 카운터 **스킬**로 제한한 이유가
+       * 이것입니다. 쿨다운이 붙은 자원을 써야 하므로 '지금 쓸까'가 판단이 되고,
+       * 놓쳐도 구르기라는 답이 남아 있어 막다른 길이 되지 않습니다.
+       * 덤으로, 놀고 있던 스킬 슬롯 다섯 개에 쓸 이유가 하나 생깁니다.
+       */
+      Actor.state[a] === ActorState.Skill &&
+      !targetIsPlayer &&
+      hasComponent(Enemy, t) &&
+      Actor.state[t] === ActorState.Attack &&
+      Actor.phase[t] === AttackPhase.Windup &&
+      attackAt(Enemy.kind[t], Enemy.attackIndex[t]).intent === AttackIntent.Counter &&
+      !isBehindPoint(Transform.x[a], Transform.z[a], Transform.x[t], Transform.z[t], Transform.rotY[t])
+
     let damage = spec.damage
     if (back) damage *= COMBAT.backDamageMult
     if (crit) damage *= COMBAT.critMult
+    if (countered) damage *= COUNTER.damageMultiplier
 
     Health.hp[t] -= damage
     Health.flashT[t] = 0.12
@@ -432,6 +488,13 @@ function applyHit(a: number, spec: AttackSpec): void {
         Actor.hitsLeft[t] = 0
         Actor.comboWindowT[t] = 0
         Actor.bufferedAttack[t] = 0
+      } else if (countered) {
+        // 강인도를 **깎지 않고 즉시 부숩니다.** 반격은 누적의 결과가 아니라
+        // 타이밍의 결과여야 합니다 — 강인도가 얼마나 남았든 성공해야 합니다.
+        breakPoise(t)
+        Enemy.brokenT[t] = COUNTER.brokenTime
+        Actor.timer[t] = COUNTER.brokenTime
+        counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
       } else if (hasComponent(Enemy, t)) {
         applyPoise(t, spec)
       }

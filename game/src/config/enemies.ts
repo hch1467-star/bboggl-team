@@ -13,7 +13,7 @@
  *
  * (Unity 이식 노트: 이 표의 한 항목이 EnemyDefinition.asset 하나가 됩니다.)
  */
-import { BINDER, BOSS, DRAGGER, GRUNT } from './balance'
+import { BINDER, BOSS, CHARGER, DRAGGER, GRUNT } from './balance'
 import { EnemyKind } from '../core/components'
 
 /**
@@ -132,6 +132,19 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     trauma: 0.3,
     heavy: false,
   },
+  [EnemyKind.Charger]: {
+    id: 'charger',
+    name: '달려드는 자',
+    ...CHARGER,
+    // 강인도를 높게(45) 둔 이유: 반격 말고 **연타로도 예고를 끊을 수 있으면**
+    // 초록이 "그냥 세게 때리면 되는 색"이 되어 새 동사가 안 배워집니다.
+    poiseMax: 45,
+    ember: 18,
+    color: 0x3f7a52,
+    hitstop: 0.06,
+    trauma: 0.36,
+    heavy: false,
+  },
 }
 
 export function enemyDef(kind: number): EnemyDef {
@@ -140,7 +153,13 @@ export function enemyDef(kind: number): EnemyDef {
 
 /** 레벨 파일에 적힌 문자열 → EnemyKind. 없으면 null(적이 아님). */
 export function kindFromId(id: string): EnemyKind | null {
-  for (const k of [EnemyKind.Grunt, EnemyKind.Boss, EnemyKind.Binder, EnemyKind.Dragger]) {
+  for (const k of [
+    EnemyKind.Grunt,
+    EnemyKind.Boss,
+    EnemyKind.Binder,
+    EnemyKind.Dragger,
+    EnemyKind.Charger,
+  ]) {
     if (ENEMY_DEFS[k].id === id) return k
   }
   return null
