@@ -28,7 +28,7 @@ import {
   bossPhase,
   phaseForHp,
 } from '../config/bossPhases'
-import { POISE } from '../config/balance'
+import { BOSS_ARENA, POISE } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -156,6 +156,19 @@ export interface PhaseEvent {
   z: number
 }
 export const phaseEvents: PhaseEvent[] = []
+
+/**
+ * 보스전이 시작되거나 끝난 순간.
+ * `name` 이 빈 문자열이면 **종료**(귀환)입니다.
+ */
+export interface EncounterEvent {
+  entity: number
+  name: string
+  maxHp: number
+  x: number
+  z: number
+}
+export const encounterEvents: EncounterEvent[] = []
 
 /**
  * 패턴 하나를 실제로 겁니다 — 예고 시작.
@@ -336,6 +349,97 @@ export function enemyAiSystem(
       Enemy.aggro[e] = 0
       decayVelocity(e, dt, 5)
       continue
+    }
+
+    /**
+     * ── 보스 조우 (전용 영역) ──────────────────────────────────────
+     *
+     * 보스는 **자기 자리를 중심으로 한 영역** 안에서만 싸웁니다.
+     *
+     * 왜 필요한가: 보스 어그로가 55m라 존을 가로지르면 잡몹 전투 도중에
+     * 보스가 걸어 들어왔습니다. 3페이즈짜리 보스전을 잡몹 넷과 섞으면
+     * 페이즈도 연계도 읽을 수가 없습니다. 그리고 걷다 보면 어느새 시작돼
+     * 있어서 **준비할 순간이 없었습니다.**
+     *
+     * 안개문 대신 영역을 쓴 이유는 balance.ts BOSS_ARENA 주석 참고
+     * (쿼터뷰에서 안 보이는 벽은 버그로 읽힙니다).
+     */
+    if (isBoss) {
+      const homeDist = Math.hypot(px - Enemy.homeX[e], pz - Enemy.homeZ[e])
+      const state = Enemy.encounter[e]
+
+      if (state === 0) {
+        // 대기 — 영역 밖이면 아무것도 안 합니다. 어그로도 안 잡힙니다.
+        if (homeDist > BOSS_ARENA.radius || !playerAlive) {
+          Enemy.aggro[e] = 0
+          decayVelocity(e, dt, 6)
+          continue
+        }
+        Enemy.encounter[e] = 1
+        Enemy.introT[e] = BOSS_ARENA.introTime
+        Enemy.aggro[e] = 1
+        encounterEvents.push({
+          entity: e,
+          name: cfg.name,
+          maxHp: Health.max[e],
+          x: Transform.x[e],
+          z: Transform.z[e],
+        })
+      }
+
+      if (Enemy.encounter[e] === 1) {
+        // 조우 연출 — 플레이어를 노려보기만 합니다. 여기가 "준비할 순간"입니다.
+        Enemy.introT[e] = Math.max(0, Enemy.introT[e] - dt)
+        turnToward(e, Math.atan2(px - Transform.x[e], pz - Transform.z[e]), cfg.turnSpeedDeg, dt)
+        decayVelocity(e, dt, 8)
+        if (Enemy.introT[e] <= 0) {
+          Enemy.encounter[e] = 2
+          Actor.cooldownT[e] = 0.35
+        }
+        continue
+      }
+
+      const selfHome = Math.hypot(Transform.x[e] - Enemy.homeX[e], Transform.z[e] - Enemy.homeZ[e])
+      if (Enemy.encounter[e] === 2 && (homeDist > BOSS_ARENA.leashRadius || !playerAlive)) {
+        // 영역 밖으로 나갔습니다 — 귀환.
+        Enemy.encounter[e] = 3
+        Enemy.aggro[e] = 0
+        Actor.state[e] = ActorState.Idle
+        Enemy.chainNext[e] = NO_CHAIN
+        encounterEvents.push({ entity: e, name: '', maxHp: 0, x: 0, z: 0 })
+      }
+
+      if (Enemy.encounter[e] === 3) {
+        /**
+         * 귀환 — 자리로 걸어 돌아가며 **체력·페이즈·강인도를 전부 되돌립니다.**
+         *
+         * 되돌리지 않으면 "때리고 도망, 회복하고 다시"가 최적 전략이 되어
+         * 보스전이 소모전이 됩니다. 도망은 가능하되 **아무것도 얻지 못해야**
+         * 안개문에 갇힌 것과 같은 압박이 됩니다.
+         */
+        if (selfHome < 1.2) {
+          Enemy.encounter[e] = 0
+          Health.hp[e] = Health.max[e]
+          Enemy.phase[e] = 0
+          Enemy.poise[e] = cfg.poiseMax
+          Enemy.brokenT[e] = 0
+          Enemy.transitionT[e] = 0
+          decayVelocity(e, dt, 8)
+          continue
+        }
+        const hx = Enemy.homeX[e] - Transform.x[e]
+        const hz = Enemy.homeZ[e] - Transform.z[e]
+        const hl = Math.hypot(hx, hz) || 1
+        const accel = 26 * dt
+        const speed = cfg.moveSpeed * BOSS_ARENA.returnSpeedScale
+        Velocity.x[e] += clampMag((hx / hl) * speed - Velocity.x[e], accel)
+        Velocity.z[e] += clampMag((hz / hl) * speed - Velocity.z[e], accel)
+        turnToward(e, Math.atan2(hx, hz), cfg.turnSpeedDeg, dt)
+        // 돌아가는 동안은 무적입니다 — 뒤에서 쫓아가며 때리는 것이
+        // "리셋 없이 딜을 넣는" 우회로가 되면 안 됩니다.
+        Health.invulnT[e] = Math.max(Health.invulnT[e], 0.2)
+        continue
+      }
     }
 
     if (Enemy.aggro[e] === 0 && dist <= cfg.aggroRange) Enemy.aggro[e] = 1

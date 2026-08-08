@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
-import { COMBAT, EMBER, KILL_FEEDBACK, TREASURE, VIAL, WORLD } from './config/balance'
+import { BOSS_ARENA, COMBAT, EMBER, KILL_FEEDBACK, TREASURE, VIAL, WORLD } from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { enemyDef, kindFromId } from './config/enemies'
@@ -40,6 +40,7 @@ import {
 } from './systems/combat'
 import {
   chainIndexFor,
+  encounterEvents,
   enemyAiSystem,
   phaseEvents,
   resetAttackTokens,
@@ -143,6 +144,8 @@ class Game {
    * 여러 개가 쌓이면 "나중에 한꺼번에 줍지 뭐"가 되어 손실이 실감나지 않습니다.
    * 하나만 두면 **되찾으러 가다가 또 죽는 것이 진짜 손실**이 됩니다.
    */
+  /** 지금 싸우고 있는 보스 엔티티. -1 이면 교전 중이 아닙니다. */
+  private bossEntity = -1
   private drop: { x: number; y: number; z: number; amount: number } | null = null
   private dropVisual: THREE.Object3D | null = null
   /** 이 레벨의 세이브 칸 식별자. 아레나면 빈 문자열(저장하지 않음). */
@@ -241,6 +244,8 @@ class Game {
     healEvents.length = 0
     this.visuals.clearBonfires()
     this.clearDrop()
+    this.bossEntity = -1
+    encounterEvents.length = 0
     this.defeatedBosses = new Set()
     this.bonfires = []
     this.levelData = null
@@ -506,6 +511,28 @@ class Game {
       this.hud.setRest(false, 0, false)
     }
 
+    /**
+     * ---- 3.75 보스 조우 ----
+     *
+     * 영역에 들어서면 **준비할 순간**이 생깁니다(1.6초). 그동안 보스는
+     * 노려보기만 하고, 배너·포효·전용 체력바가 함께 뜹니다.
+     * 안개문이 원래 하던 일 — "여기부터 보스다"를 명확히 알리는 것 — 을
+     * 문 없이 하는 방법입니다.
+     */
+    for (const ev of encounterEvents) {
+      if (ev.name === '') {
+        // 귀환 = 교전 종료. 체력바를 내립니다.
+        this.bossEntity = -1
+        this.hud.showBanner('놓쳤다', '보스가 자리로 돌아갑니다', 1.8)
+        continue
+      }
+      this.bossEntity = ev.entity
+      this.cam.addTrauma(0.55)
+      sfx.bossPhase()
+      this.hud.showBanner(ev.name, '물러설 곳이 없다', 2.2)
+    }
+    encounterEvents.length = 0
+
     // ---- 3.8 무너짐 연출 ----
     //
     // 무너짐은 **긴 무방비**라는 큰 보상이라, 눈·귀·손 셋 다 써서 확실히 알립니다.
@@ -630,6 +657,19 @@ class Game {
     this.hud.setVitals(Health.hp[p], Health.max[p], Stamina.value[p], Stamina.max[p])
     this.hud.setVials(Player.vials[p], Player.vialsMax[p])
     this.hud.setEmbers(Player.embers[p])
+    if (this.bossEntity >= 0 && isAlive(this.bossEntity) && Health.hp[this.bossEntity] > 0) {
+      const b = this.bossEntity
+      this.hud.setBoss(
+        enemyDef(Enemy.kind[b]).name,
+        Health.hp[b] / Math.max(1, Health.max[b]),
+        // 눈금은 페이즈 표에서 그대로 가져옵니다 — 숫자를 베끼면 밸런스를
+        // 바꿨을 때 화면과 실제가 어긋납니다(머리 위 바와 같은 규칙).
+        BOSS_PHASES.slice(1).map((ph) => ph.enterBelow),
+      )
+    } else {
+      if (this.bossEntity >= 0) this.bossEntity = -1
+      this.hud.setBoss(null, 0, [])
+    }
     // 맥동은 **실시간**(realDt) 축으로 돕니다 — 히트스톱 중에도 경고는 살아 있어야
     // 합니다. 화면이 멈춘 그 순간이 정확히 "위험하다"를 알려야 할 때입니다.
     this.hud.setLowHp(
@@ -1103,6 +1143,43 @@ class Game {
     return best
   }
 
+  debugBossEncounter(): {
+    entity: number
+    encounter: number
+    aggro: number
+    hp: number
+    maxHp: number
+    phase: number
+    homeDist: number
+    selfHomeDist: number
+    arenaRadius: number
+    leashRadius: number
+  } | null {
+    const ids = enemyQuery.run()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (Enemy.kind[e] !== EnemyKind.Boss) continue
+      const p = this.playerEntity
+      return {
+        entity: e,
+        encounter: Enemy.encounter[e],
+        aggro: Enemy.aggro[e],
+        hp: Number(Health.hp[e].toFixed(1)),
+        maxHp: Health.max[e],
+        phase: Enemy.phase[e],
+        homeDist: Number(
+          Math.hypot(Transform.x[p] - Enemy.homeX[e], Transform.z[p] - Enemy.homeZ[e]).toFixed(2),
+        ),
+        selfHomeDist: Number(
+          Math.hypot(Transform.x[e] - Enemy.homeX[e], Transform.z[e] - Enemy.homeZ[e]).toFixed(2),
+        ),
+        arenaRadius: BOSS_ARENA.radius,
+        leashRadius: BOSS_ARENA.leashRadius,
+      }
+    }
+    return null
+  }
+
   debugEmberInfo(): {
     embers: number
     vialsMax: number
@@ -1519,6 +1596,20 @@ declare global {
         chainNext: string
         cooldownT: number
       } | null
+      /** 보스 조우 검증용 */
+      bossEncounter: () => {
+        entity: number
+        encounter: number
+        aggro: number
+        hp: number
+        maxHp: number
+        phase: number
+        homeDist: number
+        /** 보스 **자신**이 자기 자리에서 떨어진 거리 — 귀환 관측에 필요합니다. */
+        selfHomeDist: number
+        arenaRadius: number
+        leashRadius: number
+      } | null
       /** 불티 검증용 */
       emberInfo: () => {
         embers: number
@@ -1661,6 +1752,7 @@ window.__game = {
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
     }
   },
+  bossEncounter: () => game.debugBossEncounter(),
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
   killAllEnemies: () => game.debugKillAll(),

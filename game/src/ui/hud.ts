@@ -40,8 +40,14 @@ export class Hud {
   private readonly restFill = el<HTMLDivElement>('restFill')
   private readonly lowHp = el<HTMLDivElement>('lowHp')
   private readonly emberText = el<HTMLElement>('emberText')
+  private readonly bossBar = el<HTMLDivElement>('bossBar')
+  private readonly bossName = el<HTMLElement>('bossName')
+  private readonly bossFill = el<HTMLDivElement>('bossFill')
+  private readonly bossTicks = el<HTMLElement>('bossTicks')
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private saveTimer: number | null = null
+  /** 지금 표시 중인 보스 이름. 눈금을 다시 그릴지 판단합니다. */
+  private bossShown = ''
 
   private fpsAccum = 0
   private fpsFrames = 0
@@ -68,6 +74,29 @@ export class Hud {
   }
 
   /** 아레나 모드와 레벨 모드는 보여줄 정보가 다릅니다. */
+  /**
+   * 보스 전용 체력바. `name` 이 null 이면 감춥니다.
+   * @param thresholds 페이즈 경계 비율(0~1). 머리 위 바와 **같은 값**을 받습니다.
+   */
+  setBoss(name: string | null, ratio: number, thresholds: number[]): void {
+    if (!name) {
+      this.bossBar.style.display = 'none'
+      this.bossShown = ''
+      return
+    }
+    this.bossBar.style.display = 'block'
+    if (this.bossShown !== name) {
+      this.bossShown = name
+      this.bossName.textContent = name
+      // 눈금은 이름이 바뀔 때만 다시 그립니다 — 매 프레임 DOM을 만들면
+      // 소프트웨어 렌더링에서 그 자체로 프레임을 잡아먹습니다.
+      this.bossTicks.innerHTML = thresholds
+        .map((t) => `<i style="left:${(t * 100).toFixed(2)}%"></i>`)
+        .join('')
+    }
+    this.bossFill.style.transform = `scaleX(${Math.max(0, Math.min(1, ratio))})`
+  }
+
   setEmbers(n: number): void {
     this.emberText.textContent = String(n)
   }

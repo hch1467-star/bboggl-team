@@ -152,6 +152,10 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.poise[e] = cfg.poiseMax
   Enemy.poiseIdleT[e] = 0
   Enemy.brokenT[e] = 0
+  Enemy.homeX[e] = x
+  Enemy.homeZ[e] = z
+  Enemy.encounter[e] = 0
+  Enemy.introT[e] = 0
   Status.snareT[e] = 0
   Renderable.kind[e] = renderKindForEnemy(kind)
   return e
