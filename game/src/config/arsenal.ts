@@ -514,6 +514,24 @@ export interface WeaponDef {
   /** 공격 중 이동 속도 배율 — 무거운 무기일수록 발이 묶입니다 */
   attackMoveScale: number
   comboWindow: number
+  /**
+   * **강인도 피해 배율 — 무기의 정체성이 여기에 있습니다.**
+   *
+   * ── 왜 생겼는가 (프로브가 잡았습니다) ────────────────────────────
+   * `npm run weapons` 로 세 무기를 같은 허수아비에 8초씩 두들겨 봤더니
+   * **초당 강인도 피해가 4.9 / 4.7 / 4.7** 이었습니다. 셋이 사실상 같습니다.
+   * 강인도 피해를 `trauma` 에서 뽑는데, 콤보 한 바퀴의 trauma 합이 무기마다
+   * 비슷하게 적혀 있었기 때문입니다.
+   *
+   * 그러면 *"대검은 무너뜨리는 무기"* 라는 말이 **어디에도 없는 상태**가
+   * 됩니다. 소울류에서 대검이 성립하는 이유가 정확히 그건데요 — 느리고
+   * 스태미나를 많이 먹는 대신 **한 방이 자세를 무너뜨립니다.**
+   *
+   * 그래서 무기마다 배율을 둡니다. 별도 필드를 만든 이유는 `trauma` 를
+   * 건드리면 화면 흔들림·소리까지 같이 바뀌기 때문입니다(손맛과 강인도는
+   * 같은 숫자에서 나오되, 무기 성격만큼은 따로 조절할 수 있어야 합니다).
+   */
+  poiseScale: number
   combo: ComboStep[]
   /** Q, E, R 슬롯에 들어가는 전용 스킬 */
   skills: [string, string, string]
@@ -527,11 +545,13 @@ export const WEAPONS: WeaponDef[] = [
     moveSpeedScale: 1,
     attackMoveScale: 0.12,
     comboWindow: 0.42,
+    // 만능형 — 어느 축에서도 1등이 아니지만 어느 축에서도 꼴찌가 아닙니다.
+    poiseScale: 1,
     skills: ['lunge_slash', 'whirlwind', 'blade_wave'],
     combo: [
-      { name: '1타', windup: 0.12, active: 0.08, recovery: 0.2, damage: 12, range: 2.3, arcDeg: 110, staminaCost: 11, hitstop: 0.055, trauma: 0.22, lunge: 1.5, knockback: 1.6 },
-      { name: '2타', windup: 0.1, active: 0.08, recovery: 0.22, damage: 14, range: 2.3, arcDeg: 120, staminaCost: 12, hitstop: 0.06, trauma: 0.26, lunge: 1.7, knockback: 1.8 },
-      { name: '3타(마무리)', windup: 0.22, active: 0.1, recovery: 0.42, damage: 27, range: 2.7, arcDeg: 150, staminaCost: 20, hitstop: 0.11, trauma: 0.5, lunge: 2.4, knockback: 4.2 },
+      { name: '1타', windup: 0.12, active: 0.08, recovery: 0.2, damage: 12, range: 2.3, arcDeg: 110, staminaCost: 10, hitstop: 0.055, trauma: 0.22, lunge: 1.5, knockback: 1.6 },
+      { name: '2타', windup: 0.1, active: 0.08, recovery: 0.22, damage: 14, range: 2.3, arcDeg: 120, staminaCost: 11, hitstop: 0.06, trauma: 0.26, lunge: 1.7, knockback: 1.8 },
+      { name: '3타(마무리)', windup: 0.22, active: 0.1, recovery: 0.42, damage: 27, range: 2.7, arcDeg: 150, staminaCost: 17, hitstop: 0.11, trauma: 0.5, lunge: 2.4, knockback: 4.2 },
     ],
   },
   {
@@ -542,10 +562,15 @@ export const WEAPONS: WeaponDef[] = [
     // 대검은 휘두르는 순간 거의 못 움직입니다. 이 수치 하나가 "무겁다"를 만듭니다.
     attackMoveScale: 0.04,
     comboWindow: 0.55,
+    /**
+     * 무너뜨리는 무기. 대신 스태미나를 크게 씁니다(아래 combo) —
+     * **한 번에 크게, 오래는 못 붙어 있는** 것이 이 무기의 거래입니다.
+     */
+    poiseScale: 1.7,
     skills: ['earthshatter', 'wide_cleave', 'leap_slam'],
     combo: [
-      { name: '1타', windup: 0.26, active: 0.11, recovery: 0.34, damage: 26, range: 3.1, arcDeg: 130, staminaCost: 18, hitstop: 0.09, trauma: 0.4, lunge: 1.6, knockback: 3.4 },
-      { name: '2타(마무리)', windup: 0.36, active: 0.13, recovery: 0.6, damage: 46, range: 3.5, arcDeg: 165, staminaCost: 30, hitstop: 0.15, trauma: 0.7, lunge: 2.2, knockback: 7.5 },
+      { name: '1타', windup: 0.26, active: 0.11, recovery: 0.34, damage: 26, range: 3.1, arcDeg: 130, staminaCost: 26, hitstop: 0.09, trauma: 0.4, lunge: 1.6, knockback: 3.4 },
+      { name: '2타(마무리)', windup: 0.36, active: 0.13, recovery: 0.6, damage: 46, range: 3.5, arcDeg: 165, staminaCost: 42, hitstop: 0.15, trauma: 0.7, lunge: 2.2, knockback: 7.5 },
     ],
   },
   {
@@ -556,12 +581,17 @@ export const WEAPONS: WeaponDef[] = [
     // 단검은 공격 중에도 꽤 움직입니다 — 치고 빠지는 리듬의 근거.
     attackMoveScale: 0.34,
     comboWindow: 0.36,
+    /**
+     * 거의 못 무너뜨립니다. 단검으로 무너뜨리려는 것은 이 무기의 답이
+     * 아닙니다 — 등 뒤를 잡고 **오래 붙어 있는** 것이 답입니다.
+     */
+    poiseScale: 0.5,
     skills: ['shadow_step', 'flurry', 'hamstring'],
     combo: [
-      { name: '1타', windup: 0.07, active: 0.06, recovery: 0.12, damage: 7, range: 1.9, arcDeg: 95, staminaCost: 6, hitstop: 0.035, trauma: 0.14, lunge: 1.1, knockback: 0.8 },
-      { name: '2타', windup: 0.06, active: 0.06, recovery: 0.12, damage: 8, range: 1.9, arcDeg: 95, staminaCost: 6, hitstop: 0.035, trauma: 0.15, lunge: 1.1, knockback: 0.8 },
-      { name: '3타', windup: 0.07, active: 0.06, recovery: 0.14, damage: 9, range: 2.0, arcDeg: 105, staminaCost: 7, hitstop: 0.04, trauma: 0.18, lunge: 1.3, knockback: 1 },
-      { name: '4타(마무리)', windup: 0.13, active: 0.08, recovery: 0.3, damage: 18, range: 2.3, arcDeg: 130, staminaCost: 13, hitstop: 0.08, trauma: 0.36, lunge: 2.0, knockback: 3 },
+      { name: '1타', windup: 0.07, active: 0.06, recovery: 0.12, damage: 7, range: 1.9, arcDeg: 95, staminaCost: 5, hitstop: 0.035, trauma: 0.14, lunge: 1.1, knockback: 0.8 },
+      { name: '2타', windup: 0.06, active: 0.06, recovery: 0.12, damage: 8, range: 1.9, arcDeg: 95, staminaCost: 5, hitstop: 0.035, trauma: 0.15, lunge: 1.1, knockback: 0.8 },
+      { name: '3타', windup: 0.07, active: 0.06, recovery: 0.14, damage: 9, range: 2.0, arcDeg: 105, staminaCost: 5, hitstop: 0.04, trauma: 0.18, lunge: 1.3, knockback: 1 },
+      { name: '4타(마무리)', windup: 0.13, active: 0.08, recovery: 0.3, damage: 18, range: 2.3, arcDeg: 130, staminaCost: 10, hitstop: 0.08, trauma: 0.36, lunge: 2.0, knockback: 3 },
     ],
   },
 ]

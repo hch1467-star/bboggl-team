@@ -81,6 +81,28 @@ export interface ControlContext {
 }
 
 const players = defineQuery(Player, Actor, Transform, Velocity, Stamina, Health, Loadout)
+
+/**
+ * 지금까지 쓴 스태미나의 **누적 합** — 무기 비교 프로브가 읽습니다.
+ *
+ * 프로브가 매 프레임 스태미나 값을 관측해서 감소분을 더하고 있었는데,
+ * 한 표본 사이에 "크게 쓰고 조금 회복"이 같이 일어나면 그만큼을 놓칩니다.
+ * 한 번에 크게 쓰는 무기(대검)일수록 덜 세어져서, **효율이 실제보다 좋아
+ * 보였습니다.** 쓴 쪽이 세는 것이 정확합니다.
+ */
+let staminaSpent = 0
+export function readStaminaSpent(): number {
+  return staminaSpent
+}
+export function resetStaminaSpent(): void {
+  staminaSpent = 0
+}
+function spendStamina(p: number, cost: number): void {
+  const used = Math.min(Stamina.value[p], cost)
+  staminaSpent += used
+  Stamina.value[p] = Math.max(0, Stamina.value[p] - cost)
+  Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
+}
 const finishable = defineQuery(Enemy, Transform, Health, Actor)
 
 /**
@@ -226,8 +248,7 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
   Actor.bufferedAttack[p] = 0
-  Stamina.value[p] = Math.max(0, Stamina.value[p] - c.staminaCost)
-  Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
+  spendStamina(p, c.staminaCost)
   // 스냅하지 않고 **목표만 정해 둡니다.** 선행동작 동안 수렴합니다(turnArrive).
   Player.faceRot[p] = rot
 
@@ -346,8 +367,7 @@ function beginDodge(p: number, dirX: number, dirZ: number): void {
   Player.dodgeDirX[p] = dirX
   Player.dodgeDirZ[p] = dirZ
   Player.dodgeElapsed[p] = 0
-  Stamina.value[p] = Math.max(0, Stamina.value[p] - PLAYER.dodge.staminaCost)
-  Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
+  spendStamina(p, PLAYER.dodge.staminaCost)
   Transform.rotY[p] = Math.atan2(dirX, dirZ)
   sfx.dodge()
 }

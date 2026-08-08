@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { RUNE_ORDER, SKILLS } from './config/arsenal'
+import { RUNE_ORDER, SKILLS, WEAPONS } from './config/arsenal'
 import {
   BOSS_ARENA,
   COMBAT,
@@ -104,6 +104,8 @@ import {
   finisherTarget,
   healEvents,
   playerControlSystem,
+  readStaminaSpent,
+  resetStaminaSpent,
   type ControlContext,
 } from './systems/playerControl'
 import {
@@ -379,6 +381,7 @@ class Game {
     setReachDistance(null)
     setBonfireReach(null)
     resetAttackTokens()
+    resetStaminaSpent()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -1793,6 +1796,8 @@ class Game {
     finishers: number
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
+    /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
+    staminaSpent: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -1801,6 +1806,7 @@ class Game {
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
+      staminaSpent: Number(readStaminaSpent().toFixed(1)),
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -2519,6 +2525,20 @@ declare global {
         count: number
       }
       breakEnemy: (entity: number) => void
+      weaponTable: () => {
+        id: string
+        name: string
+        comboLength: number
+        moveSpeedScale: number
+        attackMoveScale: number
+        comboWindow: number
+        comboDamage: number
+        comboStamina: number
+        comboSeconds: number
+        comboTrauma: number
+        poiseScale: number
+        maxRange: number
+      }[]
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -2565,6 +2585,7 @@ declare global {
         brokenDeaths: number
         finishers: number
         dodgeStamina: number
+        staminaSpent: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
@@ -2758,6 +2779,30 @@ window.__game = {
   breakEnemy: (entity: number) => {
     breakPoise(entity)
   },
+  /**
+   * 무기 3종의 제원 — **게임 데이터에서** 읽습니다.
+   *
+   * 프로브가 arsenal.ts 의 숫자를 베껴 적으면, 무기를 손보는 순간
+   * "무기가 서로 다른가"라는 검증이 조용히 옛 무기를 재게 됩니다.
+   */
+  weaponTable: () =>
+    WEAPONS.map((w) => ({
+      id: w.id,
+      name: w.name,
+      comboLength: w.combo.length,
+      moveSpeedScale: w.moveSpeedScale,
+      attackMoveScale: w.attackMoveScale,
+      comboWindow: w.comboWindow,
+      /** 콤보 한 바퀴의 합계 — 무기 성격이 가장 잘 드러나는 값들입니다. */
+      comboDamage: w.combo.reduce((a, c) => a + c.damage, 0),
+      comboStamina: w.combo.reduce((a, c) => a + c.staminaCost, 0),
+      comboSeconds: Number(
+        w.combo.reduce((a, c) => a + c.windup + c.active + c.recovery, 0).toFixed(3),
+      ),
+      comboTrauma: Number(w.combo.reduce((a, c) => a + c.trauma, 0).toFixed(3)),
+      poiseScale: w.poiseScale,
+      maxRange: Math.max(...w.combo.map((c) => c.range)),
+    })),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),

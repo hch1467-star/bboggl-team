@@ -128,6 +128,8 @@ export interface AttackSpec {
   noCrit?: boolean
   /** 처형인가 — 맞히면 무방비를 소모합니다. */
   finisher?: boolean
+  /** 무기별 강인도 배율 (arsenal.ts WeaponDef.poiseScale) */
+  poiseScale?: number
   /** 다단히트 횟수 */
   hits: number
   /** 판정 중심 (point 스킬용). 없으면 시전자 위치. */
@@ -165,6 +167,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       trauma: h.trauma,
       heavy: true,
       heavyBlow: true,
+      poiseScale: weapon.poiseScale,
       hits: 1,
       healSelf: 0,
     }
@@ -189,6 +192,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
        */
       noCrit: true,
       finisher: true,
+      poiseScale: weapon.poiseScale,
       hits: 1,
       healSelf: 0,
     }
@@ -203,6 +207,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     hitstop: c.hitstop,
     trauma: c.trauma,
     heavy: comboIndex === weapon.combo.length - 1,
+    poiseScale: weapon.poiseScale,
     hits: 1,
     healSelf: 0,
   }
@@ -221,6 +226,8 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
     hitstop: def.hitstop,
     trauma: def.trauma,
     heavy: def.damage >= 35,
+    // 무기 스킬(0~2)은 그 무기의 성격을 따릅니다. 룬(3~4)은 무기가 아니라 1배.
+    poiseScale: slot <= 2 ? weaponOf(e).poiseScale : 1,
     hits: Math.max(1, def.hits),
     originX: def.shape === 'point' ? Player.castX[e] : undefined,
     originZ: def.shape === 'point' ? Player.castZ[e] : undefined,
@@ -309,7 +316,8 @@ function applyPoise(t: number, spec: AttackSpec): void {
     : winding
       ? POISE.windupMultiplier
       : POISE.basicMultiplier
-  const dmg = spec.trauma * POISE.fromTrauma * multiplier
+  // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
+  const dmg = spec.trauma * POISE.fromTrauma * multiplier * (spec.poiseScale ?? 1)
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
