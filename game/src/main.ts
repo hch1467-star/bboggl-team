@@ -227,6 +227,10 @@ class Game {
   private finishers = 0
   /** 그중 **예고 중에** 끊긴 것 — 🟢 반격만이 초록을 끊는지 재는 값입니다. */
   private windupBreaks = 0
+  /** 무너진 순간의 체력 비율 합 — 평균을 내면 "붕괴가 언제 터지는가"가 나옵니다. */
+  private breakHpSum = 0
+  /** 무방비 상태 그대로 죽은 적의 수 — 처형까지 못 가고 정리된 횟수. */
+  private brokenDeaths = 0
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
   /** 적을 되살리려면 원본 배치가 필요합니다. */
@@ -813,6 +817,20 @@ class Game {
     for (const b of breakEvents) {
       this.poiseBreaks++
       if (b.duringWindup) this.windupBreaks++
+      /**
+       * **무너진 순간의 체력**을 기록합니다.
+       *
+       * 처형이 판당 1회에서 안 올라갑니다. 무방비 창은 87% 쓰고 있는데도요.
+       * 남은 가설은 하나입니다 — **무너진 적이 곧바로 평타에 죽어서** 처형까지
+       * 갈 일이 없다는 것. 그렇다면 처형이 아니라 **강인도가 언제 터지는가**가
+       * 문제입니다. 빈사에서만 터지는 붕괴는 보상이 아니라 사망 연출입니다.
+       *
+       * 세키로가 체간을 체력과 **따로** 둔 이유가 이것입니다: 체간은 체력이
+       * 많이 남았을 때도 터져야 "무너뜨리고 마무리한다"가 하나의 전술이 됩니다.
+       */
+      if (hasComponent(Health, b.entity) && Health.max[b.entity] > 0) {
+        this.breakHpSum += Math.max(0, Health.hp[b.entity]) / Health.max[b.entity]
+      }
       this.cam.addTrauma(0.5)
       requestHitstop(0.12)
       sfx.impact(true, true, b.x, b.z)
@@ -826,6 +844,10 @@ class Game {
     // ---- 4. 사망 처리 ----
     healthSystem()
     for (const death of deathEvents) {
+      // **무너진 채로 죽었는가** — 처형까지 못 가고 평타에 정리된 횟수입니다.
+      if (!death.isPlayer && hasComponent(Enemy, death.entity) && Enemy.brokenT[death.entity] > 0) {
+        this.brokenDeaths++
+      }
       if (death.isPlayer) {
         this.deathCount++
         this.cam.addTrauma(0.8)
@@ -1764,6 +1786,10 @@ class Game {
     enemyHits: number
     poiseBreaks: number
     windupBreaks: number
+    /** 무너진 순간의 평균 체력 비율(0~1) */
+    breakHpAvg: number
+    /** 무방비인 채로 죽은 적의 수 */
+    brokenDeaths: number
     finishers: number
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
@@ -1771,6 +1797,8 @@ class Game {
     return {
       poiseBreaks: this.poiseBreaks,
       windupBreaks: this.windupBreaks,
+      breakHpAvg: this.poiseBreaks > 0 ? Number((this.breakHpSum / this.poiseBreaks).toFixed(3)) : 0,
+      brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       deaths: this.deathCount,
@@ -2533,6 +2561,8 @@ declare global {
         enemyHits: number
         poiseBreaks: number
         windupBreaks: number
+        breakHpAvg: number
+        brokenDeaths: number
         finishers: number
         dodgeStamina: number
       }

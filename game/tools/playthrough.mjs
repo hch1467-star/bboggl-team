@@ -871,6 +871,8 @@ try {
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,
       /** 강인도 붕괴와 그 틈의 활용 */
       poiseBreaks: G.runStats().poiseBreaks,
+      breakHpAvg: G.runStats().breakHpAvg,
+      brokenDeaths: G.runStats().brokenDeaths,
       finisherReady: finisherReadySamples,
       finisherReadyIdle: finisherReadyIdleSamples,
       finishers: G.runStats().finishers,
@@ -984,6 +986,7 @@ try {
   }
   console.log(
     `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
+      `              무너진 순간의 평균 체력 ${Math.round(log.breakHpAvg * 100)}% · 무방비인 채로 죽은 적 ${log.brokenDeaths}마리\n` +
       `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 곧바로 누를 수 있던 프레임 ${log.finisherReadyIdle})`,
   )
   console.log('')

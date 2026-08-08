@@ -298,11 +298,18 @@ function applyPoise(t: number, spec: AttackSpec): void {
     Enemy.poiseIdleT[t] = 0
     return
   }
-  const dmg =
-    spec.trauma *
-    POISE.fromTrauma *
-    (winding ? POISE.windupMultiplier : 1) *
-    (spec.heavyBlow ? FOCUS.poiseMult : 1)
+  /**
+   * 배수는 **겹치지 않고 하나만** 고릅니다.
+   * 예고 중 강타가 ×2.5×2.2 = 5.5배가 되면 보스도 두 방에 무너집니다 —
+   * "둘 다 쓰면 두 배로 좋다"는 곱셈은 밸런스를 빠르게 무너뜨립니다.
+   * 평타는 `basicMultiplier` 로 크게 줄여, 끊는 수단에 값을 몰아줍니다.
+   */
+  const multiplier = spec.heavyBlow
+    ? FOCUS.poiseMult
+    : winding
+      ? POISE.windupMultiplier
+      : POISE.basicMultiplier
+  const dmg = spec.trauma * POISE.fromTrauma * multiplier
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
@@ -643,6 +650,22 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     }
 
     const killed = Health.hp[t] <= 0
+
+    /**
+     * **처형은 죽여도 처형입니다.**
+     *
+     * 이 기록이 `!killed` 안에 있었습니다. 그래서 처형이 적을 **죽이면**
+     * 한 번도 세어지지 않았습니다 — 자동 플레이가 매번 "처형 1회"로 찍혀서,
+     * 저는 "봇이 처형을 안 쓴다"는 **틀린 결론**을 두 라운드 동안 들고
+     * 있었습니다. 실제로는 잘 쓰고 있었고, 쓰면 대개 죽였을 뿐입니다.
+     * (세키로의 인살이 그렇듯, 마무리가 곧 마무리인 것이 자연스럽습니다.)
+     *
+     * 사건은 **일어난 자리에서, 결과와 무관하게** 기록해야 합니다.
+     */
+    if (spec.finisher && !targetIsPlayer && hasComponent(Enemy, t)) {
+      finisherEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+    }
+
     if (!killed) {
       if (targetIsPlayer) {
         // 플레이어는 강인도가 없습니다 — 맞으면 항상 밀립니다.
@@ -672,7 +695,6 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Enemy.poise[t] = enemyDef(Enemy.kind[t]).poiseMax
         Enemy.poiseIdleT[t] = 0
         if (Actor.state[t] === ActorState.Stagger) Actor.timer[t] = 0
-        finisherEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
       } else if (hasComponent(Enemy, t)) {
         applyPoise(t, spec)
       }
