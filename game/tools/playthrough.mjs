@@ -237,13 +237,33 @@ try {
 
     releaseAll()
     if (curRegion) regionLog.push({ name: curRegion, seconds: now() - regionStart })
+
+    /**
+     * 구역 경계에서는 이름이 **초 단위로 왔다 갔다** 합니다(실제 로그에서
+     * 버려진앞마당↔무너진성문이 20번 넘게 번갈아 찍혔습니다).
+     * 그대로 두면 목록이 길어져서 정작 "어디서 오래 걸렸나"가 안 보입니다.
+     * 1초 미만은 버리고, 이어지는 같은 이름은 합칩니다.
+     */
+    const merged = []
+    for (const r of regionLog) {
+      if (r.seconds < 1) continue
+      const last = merged[merged.length - 1]
+      if (last && last.name === r.name) last.seconds += r.seconds
+      else merged.push({ name: r.name, seconds: r.seconds })
+    }
+    const total = {}
+    for (const r of merged) total[r.name] = (total[r.name] ?? 0) + r.seconds
     const st = G.state()
     const em = G.emberInfo()
     bossKilled = !st.nearestEnemy || (G.bossEncounter() === null)
     return {
       elapsed: Number((now() - t0).toFixed(1)),
       deaths,
-      regionLog: regionLog.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
+      regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
+      regionTotal: Object.entries(total)
+        .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
+        .sort((a, b) => b.seconds - a.seconds),
+      hitLimit: now() - t0 >= LIMIT - 1,
       vialsUsed,
       restCount,
       bossSeen,
@@ -259,30 +279,36 @@ try {
     }
   }, TIME_LIMIT)
 
-  console.log(`  진행 시간   ${log.elapsed}초 (시뮬레이션)`)
-  console.log(`  사망        ${log.deaths}회`)
-  console.log(`  처치        ${log.kills}마리 · 남은 적 ${log.enemiesLeft}마리`)
-  console.log(`  보스        조우 ${log.bossSeen ? 'O' : 'X'}`)
-  console.log(`  성수병      ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
-  console.log(`  불티        ${log.embers}`)
-  console.log(`  체력        ${log.hp}`)
-
-  if (log.regionLog.length) {
-    console.log('\n  [구역별 소요]')
-    for (const r of log.regionLog) console.log(`    ${r.name.padEnd(12)} ${r.seconds}초`)
+  if (log.regionTotal.length) {
+    console.log('  [구역별 누적]')
+    for (const r of log.regionTotal) console.log(`    ${r.name.padEnd(12)} ${r.seconds}초`)
+    console.log('')
   }
   if (log.notes.length) {
-    console.log('\n  [사건]')
+    console.log('  [사건]')
     for (const n of log.notes) {
       const where = n.region ? ` @${n.region}` : ''
       const pos = n.x !== undefined ? ` (${n.x.toFixed(0)}, ${n.z.toFixed(0)})` : ''
       console.log(`    ${String(n.at).padStart(6)}초  ${n.what}${where}${pos}`)
     }
+    console.log('')
   }
   if (errors.length) {
-    console.log('\n  [콘솔 오류]')
+    console.log('  [콘솔 오류]')
     for (const e of errors.slice(0, 3)) console.log(`    ${e}`)
+    console.log('')
   }
+
+  // 요약은 **맨 마지막**에 찍습니다. 앞에 두면 tail 로 볼 때 잘립니다
+  // (실제로 첫 실행에서 요약이 통째로 안 보였습니다).
+  console.log('  ── 요약 ──────────────────────────────')
+  console.log(`  진행       ${log.elapsed}초${log.hitLimit ? ' (제한 도달 — 끝내지 못함)' : ''}`)
+  console.log(`  사망       ${log.deaths}회`)
+  console.log(`  처치       ${log.kills}마리 · 남은 적 ${log.enemiesLeft}마리`)
+  console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
+  console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
+  console.log(`  불티       ${log.embers}`)
+  console.log(`  체력       ${log.hp}`)
   console.log('')
 } finally {
   await browser.close()
