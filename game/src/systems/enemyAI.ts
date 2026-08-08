@@ -1,4 +1,4 @@
-import { BOSS, GRUNT } from '../config/balance'
+import { enemyDef } from '../config/enemies'
 import {
   Actor,
   ActorState,
@@ -114,7 +114,7 @@ function grantAttackTokens(
     if (!isAlive(e) || Actor.state[e] === ActorState.Dead) continue
     if (Actor.state[e] === ActorState.Attack) {
       busy++
-      const def = attackAt(Enemy.kind[e] === EnemyKind.Boss, Enemy.attackIndex[e])
+      const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
       if (def.arcDeg >= WIDE_ARC_DEG) wideBusy++
       continue
     }
@@ -163,9 +163,10 @@ export const phaseEvents: PhaseEvent[] = []
  * 한쪽에만 예고음을 넣거나 한쪽만 선행동작 배율을 빠뜨리는 식으로
  * 조용히 어긋납니다(4색 예고에서 이미 겪은 종류의 버그입니다).
  */
-export function chainIndexFor(isBoss: boolean, phaseIdx: number, attackIndex: number): number {
-  if (!isBoss) return NO_CHAIN
-  const list = attacksFor(isBoss)
+export function chainIndexFor(kind: number, phaseIdx: number, attackIndex: number): number {
+  // 연계는 보스 페이즈에만 있는 개념입니다. 다른 종류는 항상 "없음".
+  if (kind !== EnemyKind.Boss) return NO_CHAIN
+  const list = attacksFor(kind)
   const chainId = bossPhase(phaseIdx).chains?.[list[attackIndex]?.id ?? '']
   if (!chainId) return NO_CHAIN
   const idx = list.findIndex((a) => a.id === chainId)
@@ -174,12 +175,12 @@ export function chainIndexFor(isBoss: boolean, phaseIdx: number, attackIndex: nu
 
 function commitAttack(
   e: number,
-  isBoss: boolean,
+  kind: number,
   index: number,
   windupScale: number,
   chained = false,
 ): void {
-  const list = attacksFor(isBoss)
+  const list = attacksFor(kind)
   const atk = list[index]
   Enemy.attackIndex[e] = index
   Actor.state[e] = ActorState.Attack
@@ -190,7 +191,7 @@ function commitAttack(
   Enemy.chained[e] = chained ? 1 : 0
 
   // 이 패턴 뒤에 따라붙을 연계를 지금 정해 둡니다.
-  Enemy.chainNext[e] = chainIndexFor(isBoss, Enemy.phase[e], index)
+  Enemy.chainNext[e] = chainIndexFor(kind, Enemy.phase[e], index)
 
   /**
    * **예고음 — 4색이 곧 4개의 음입니다.**
@@ -232,8 +233,9 @@ export function enemyAiSystem(
 
     // 잡몹과 보스는 같은 코드를 쓰고 수치표만 갈아 끼웁니다.
     // 이렇게 해두면 새 적을 추가할 때 AI 코드를 건드릴 필요가 없습니다.
-    const isBoss = Enemy.kind[e] === EnemyKind.Boss
-    const cfg = isBoss ? BOSS : GRUNT
+    const kind = Enemy.kind[e]
+    const isBoss = kind === EnemyKind.Boss
+    const cfg = enemyDef(kind)
     const ph = bossPhase(isBoss ? Enemy.phase[e] : 0)
 
     /**
@@ -331,7 +333,7 @@ export function enemyAiSystem(
 
     if (Actor.state[e] === ActorState.Attack) {
       const phase = Actor.phase[e] as AttackPhase
-      const atk = attackAt(isBoss, Enemy.attackIndex[e])
+      const atk = attackAt(kind, Enemy.attackIndex[e])
 
       if (phase === AttackPhase.Windup) {
         turnToward(e, toPlayer, cfg.turnSpeedDeg * 0.3, dt)
@@ -370,7 +372,7 @@ export function enemyAiSystem(
           ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg)
           // 실제로 휘두르는 순간. 예고음(windup 시작)과 시간이 벌어져 있어서
           // "예고 → 발동" 두 박자가 귀로도 잡힙니다.
-          sfx.swing(isBoss ? 0.95 : 0.55, Transform.x[e], Transform.z[e])
+          sfx.swing(cfg.heavy ? 0.95 : 0.55, Transform.x[e], Transform.z[e])
         } else if (phase === AttackPhase.Active) {
           Actor.phase[e] = AttackPhase.Recovery
           Actor.timer[e] = atk.recovery
@@ -392,7 +394,7 @@ export function enemyAiSystem(
           if (next !== NO_CHAIN) {
             Enemy.chainNext[e] = NO_CHAIN
             Actor.cooldownT[e] = 0
-            commitAttack(e, isBoss, next, ph.windupScale, true)
+            commitAttack(e, kind, next, ph.windupScale, true)
           } else {
             Actor.cooldownT[e] = cfg.attackCooldown * ph.cooldownScale
           }
@@ -434,7 +436,7 @@ export function enemyAiSystem(
     // **공격 토큰**이 있어야 커밋할 수 있습니다(enemyAttacks.ts 설계 노트).
     // 토큰이 없는 적은 그냥 다음 판정으로 흘러가 노려보며 기다립니다.
     if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
-      const list = attacksFor(isBoss)
+      const list = attacksFor(kind)
       let picked = pickAttack(list, dist, combatRng.next(), ph.weights)
       // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
       // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
@@ -445,13 +447,38 @@ export function enemyAiSystem(
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
-        commitAttack(e, isBoss, list.indexOf(picked), ph.windupScale)
+        commitAttack(e, kind, list.indexOf(picked), ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
       }
     }
 
-    if (inRange) {
+    /**
+     * ── 거리 유지 (원거리 적) ──────────────────────────────────────
+     *
+     * `keepDistance` 가 있는 적은 그보다 가까워지면 **물러납니다.**
+     *
+     * 이 열 줄이 없으면 원거리 적이라는 개념 자체가 성립하지 않습니다.
+     * 얽는 자는 6m 사거리를 갖고 있지만, 접근 로직만 있으면 결국
+     * 플레이어 코앞까지 걸어와서 **체력 40짜리 약한 잡몹**이 됩니다.
+     * 그러면 "파랑을 가르친다"는 이 적의 존재 이유가 사라지고,
+     * 플레이어는 그냥 다른 적들과 같이 두들겨 패면 그만입니다.
+     *
+     * 물러나는 속도를 접근보다 느리게(0.85배) 둔 이유: 같은 속도면
+     * 플레이어가 **영원히 따라잡을 수 없습니다.** 쫓아가면 잡히지만
+     * 시간이 걸리는 것 — 그게 "먼저 뭘 죽일까"라는 판단을 만듭니다.
+     */
+    const keep = cfg.keepDistance ?? 0
+    const tooClose = keep > 0 && dist < keep
+
+    if (tooClose) {
+      const nx = dist > 0.0001 ? dx / dist : 0
+      const nz = dist > 0.0001 ? dz / dist : 0
+      const accel = 26 * dt
+      const back = cfg.moveSpeed * 0.85 * snareScale
+      Velocity.x[e] += clampMag(-nx * back - Velocity.x[e], accel)
+      Velocity.z[e] += clampMag(-nz * back - Velocity.z[e], accel)
+    } else if (inRange) {
       // 사거리 안이지만 쿨다운 중 — 제자리에서 노려봅니다.
       // 계속 파고들면 플레이어가 적 무리에 파묻혀 아무것도 안 보이게 됩니다.
       decayVelocity(e, dt, 8)

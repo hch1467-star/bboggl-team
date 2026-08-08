@@ -1,5 +1,6 @@
-import { BOSS, GRUNT, PLAYER, WORLD } from '../config/balance'
+import { PLAYER, WORLD } from '../config/balance'
 import { NO_CHAIN } from '../config/bossPhases'
+import { enemyDef, kindFromId } from '../config/enemies'
 import {
   Actor,
   ActorState,
@@ -20,7 +21,7 @@ import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
 import type { LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
-import { KIND_BOSS, KIND_GRUNT, KIND_PLAYER, KIND_TREASURE } from '../render/visuals'
+import { KIND_PLAYER, KIND_TREASURE, renderKindForEnemy } from '../render/visuals'
 
 /** 스폰 전용 RNG. 전투 RNG와 분리해야 재현성이 깨지지 않습니다. */
 const spawnRng = new Rng(20260807)
@@ -94,7 +95,7 @@ export function spawnPlayer(x = 0, z = 0): number {
 
 /** 잡몹과 보스는 같은 상태 기계를 공유합니다 — 수치와 외형만 다릅니다. */
 export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
-  const cfg = kind === EnemyKind.Boss ? BOSS : GRUNT
+  const cfg = enemyDef(kind)
   const e = createEntity()
   addComponent(Transform, e)
   addComponent(Velocity, e)
@@ -141,7 +142,7 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.chainNext[e] = NO_CHAIN
   Enemy.chained[e] = 0
   Status.snareT[e] = 0
-  Renderable.kind[e] = kind === EnemyKind.Boss ? KIND_BOSS : KIND_GRUNT
+  Renderable.kind[e] = renderKindForEnemy(kind)
   return e
 }
 
@@ -170,15 +171,34 @@ export function spawnTreasure(x: number, z: number): number {
  * 플레이어 바로 옆에 튀어나오면 "불공정하다"고 느껴지므로,
  * 항상 시야 안쪽 가장자리에서 걸어 들어오게 합니다.
  */
-export function spawnWave(count: number): number[] {
+export function spawnWave(count: number, wave = 1): number[] {
   const spawned: number[] = []
   const ringRadius = WORLD.arenaRadius * 0.82
   const baseAngle = spawnRng.next() * Math.PI * 2
+
+  /**
+   * ── 웨이브 구성 ────────────────────────────────────────────────
+   *
+   * 웨이브마다 색을 **하나씩** 늘립니다. 처음부터 네 종류를 다 쏟으면
+   * 플레이어는 무엇 때문에 죽었는지 구분하지 못하고, 그러면 배우지도 못합니다.
+   *
+   *   웨이브 1~2 : 잡몹만            🔴🟡  "구를까 걸을까"
+   *   웨이브 3~  : + 얽는 자          🔵     "묶이면 다음을 못 피한다"
+   *   웨이브 5~  : + 끄는 자          🟣     "거리는 안전지대가 아니다"
+   *
+   * 특수 적은 **한 종류당 최대 1마리**입니다. 얽는 자 셋이 번갈아 묶으면
+   * 그건 배우는 게 아니라 조작권을 잃는 것입니다.
+   */
+  const specials: EnemyKind[] = []
+  if (wave >= 3) specials.push(EnemyKind.Binder)
+  if (wave >= 5) specials.push(EnemyKind.Dragger)
+
   for (let i = 0; i < count; i++) {
     // 균등 분할 + 흔들림. 순수 랜덤만 쓰면 한쪽에 뭉쳐 스폰됩니다.
     const angle = baseAngle + (i / count) * Math.PI * 2 + spawnRng.range(-0.25, 0.25)
     const r = ringRadius * spawnRng.range(0.85, 1)
-    spawned.push(spawnGrunt(Math.cos(angle) * r, Math.sin(angle) * r))
+    const kind = i < specials.length ? specials[i] : EnemyKind.Grunt
+    spawned.push(spawnEnemy(kind, Math.cos(angle) * r, Math.sin(angle) * r))
   }
   return spawned
 }
@@ -209,8 +229,10 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
   let treasureTotal = 0
   for (const item of level.entities) {
     let e = -1
-    if (item.kind === 'grunt') e = spawnEnemy(EnemyKind.Grunt, item.x, item.z)
-    else if (item.kind === 'boss') e = spawnEnemy(EnemyKind.Boss, item.x, item.z)
+    // 적 종류는 표에서 찾습니다. if 사슬로 두면 새 적을 넣을 때마다
+    // 여기를 고쳐야 하고, 빠뜨리면 **레벨에 배치했는데 안 나오는** 버그가 됩니다.
+    const enemyKind = kindFromId(item.kind)
+    if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z)
     else if (item.kind === 'treasure') {
       e = spawnTreasure(item.x, item.z)
       treasureTotal++

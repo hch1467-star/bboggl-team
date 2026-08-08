@@ -3,6 +3,7 @@ import { RUNE_ORDER, SKILLS } from './config/arsenal'
 import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
+import { enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
   ActorState,
@@ -316,7 +317,7 @@ class Game {
   }
 
   private startWave(): void {
-    const ids = spawnWave(enemyCountForWave(this.wave))
+    const ids = spawnWave(enemyCountForWave(this.wave), this.wave)
     for (const e of ids) this.visuals.attach(e, Renderable.kind[e])
     this.hud.showBanner(`웨이브 ${this.wave}`, `적 ${ids.length}마리`, 1.6)
   }
@@ -757,14 +758,14 @@ class Game {
    * 원하는 색을 잡을 수 없습니다. 그래서 직접 지정할 수단을 둡니다.
    */
   debugForceAttack(entity: number, index: number): string {
-    const isBoss = Enemy.kind[entity] === EnemyKind.Boss
-    const list = attacksFor(isBoss)
+    const kind = Enemy.kind[entity]
+    const list = attacksFor(kind)
     const i = Math.min(Math.max(index, 0), list.length - 1)
     Enemy.attackIndex[entity] = i
     Enemy.aggro[entity] = 1
     // 강제 공격도 **정상 커밋과 같은 연계**를 달고 있어야 합니다.
     // 여기서 빠뜨리면 검증 도구가 보는 것과 실제 전투가 달라집니다.
-    Enemy.chainNext[entity] = chainIndexFor(isBoss, Enemy.phase[entity], i)
+    Enemy.chainNext[entity] = chainIndexFor(kind, Enemy.phase[entity], i)
     Actor.state[entity] = ActorState.Attack
     Actor.phase[entity] = AttackPhase.Windup
     // 예고 투명도는 **남은 시간 비율**로 계산됩니다(가득 찰수록 진해짐).
@@ -778,6 +779,26 @@ class Game {
       Transform.z[p] - Transform.z[entity],
     )
     return list[i].id
+  }
+
+  /** 지금 레벨에 살아 있는 적을 종류별로 셉니다. */
+  debugLevelRoster(): Record<string, number> {
+    const out: Record<string, number> = {}
+    const ids = enemyQuery.run()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const id = enemyDef(Enemy.kind[ids[i]]).id
+      out[id] = (out[id] ?? 0) + 1
+    }
+    return out
+  }
+
+  debugSpawnKind(id: string, x: number, z: number): number {
+    const kind = kindFromId(id)
+    if (kind === null) return -1
+    const e = spawnEnemy(kind, x, z)
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    this.visuals.attach(e, Renderable.kind[e])
+    return e
   }
 
   debugSpawnBoss(x: number, z: number): number {
@@ -806,7 +827,7 @@ class Game {
       attacking++
       if (Actor.phase[e] !== AttackPhase.Windup) continue
       telegraphing++
-      if (attackAt(Enemy.kind[e] === EnemyKind.Boss, Enemy.attackIndex[e]).arcDeg >= 180) {
+      if (attackAt(Enemy.kind[e], Enemy.attackIndex[e]).arcDeg >= 180) {
         wideTelegraphs++
       }
     }
@@ -1087,6 +1108,21 @@ declare global {
         cooldownScale: number
         windups: { id: string; seconds: number }[]
       }[]
+      /** 적 종류 검증용 — 표를 그대로 내보냅니다(스크립트가 수치를 베끼지 않도록). */
+      enemyRoster: () => {
+        id: string
+        name: string
+        maxHp: number
+        height: number
+        moveSpeed: number
+        attackRange: number
+        keepDistance?: number
+        attacks: { id: string; intent: number; color: string }[]
+      }[]
+      /** 지금 레벨에 배치된 적 종류별 마릿수. */
+      levelRoster: () => Record<string, number>
+      /** 종류를 id 문자열로 지정해 소환합니다. */
+      spawnEnemyKind: (id: string, x: number, z: number) => number
       /** 보스 페이즈 검증용 — 체력을 직접 깎고 상태를 읽습니다. */
       damageEntity: (entity: number, amount: number) => void
       enemyInfo: (entity: number) => {
@@ -1094,6 +1130,8 @@ declare global {
         max: number
         phase: number
         transitionT: number
+        x: number
+        z: number
         state: number
         /**
          * 지금 공격(예고 포함) 중인가.
@@ -1167,12 +1205,32 @@ window.__game = {
   effectiveSkill: (slot) => game.debugEffectiveSkill(slot),
   tripodInfo: () => game.debugTripodInfo(),
   toggleTripodPanel: () => game.debugToggleTripodPanel(),
+  enemyRoster: () =>
+    [EnemyKind.Grunt, EnemyKind.Binder, EnemyKind.Dragger, EnemyKind.Boss].map((k) => {
+      const d = enemyDef(k)
+      return {
+        id: d.id,
+        name: d.name,
+        maxHp: d.maxHp,
+        height: d.height,
+        moveSpeed: d.moveSpeed,
+        attackRange: d.attackRange,
+        keepDistance: d.keepDistance,
+        attacks: attacksFor(k).map((a) => ({
+          id: a.id,
+          intent: a.intent as number,
+          color: ['🔴', '🟡', '🔵', '🟣'][a.intent as number],
+        })),
+      }
+    }),
+  levelRoster: () => game.debugLevelRoster(),
+  spawnEnemyKind: (id, x, z) => game.debugSpawnKind(id, x, z),
   bossTuning: () =>
     BOSS_PHASES.map((ph) => ({
       name: ph.name,
       enterBelow: ph.enterBelow,
       cooldownScale: ph.cooldownScale,
-      windups: attacksFor(true).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
+      windups: attacksFor(EnemyKind.Boss).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
     })),
   damageEntity: (entity, amount) => {
     if (!isAlive(entity)) return
@@ -1180,17 +1238,19 @@ window.__game = {
   },
   enemyInfo: (entity) => {
     if (!isAlive(entity)) return null
-    const isBoss = Enemy.kind[entity] === EnemyKind.Boss
-    const list = attacksFor(isBoss)
+    const kind = Enemy.kind[entity]
+    const list = attacksFor(kind)
     const chain = Enemy.chainNext[entity]
     return {
       hp: Number(Health.hp[entity].toFixed(1)),
       max: Health.max[entity],
       phase: Enemy.phase[entity],
       transitionT: Number(Enemy.transitionT[entity].toFixed(3)),
+      x: Number(Transform.x[entity].toFixed(3)),
+      z: Number(Transform.z[entity].toFixed(3)),
       state: Actor.state[entity],
       attacking: Actor.state[entity] === ActorState.Attack,
-      attackId: attackAt(isBoss, Enemy.attackIndex[entity]).id,
+      attackId: attackAt(kind, Enemy.attackIndex[entity]).id,
       attackPhase: Actor.phase[entity],
       chainNext: chain === NO_CHAIN ? '' : (list[chain]?.id ?? ''),
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),

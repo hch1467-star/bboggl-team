@@ -129,9 +129,19 @@ export const Player = defineComponent({
 })
 
 /** 적 종류 (Enemy.kind) */
+/**
+ * 적 종류.
+ *
+ * **값을 바꾸지 마세요.** 레벨 파일과 세이브에 숫자로 저장됩니다.
+ * 새 종류는 항상 뒤에 추가합니다.
+ */
 export const enum EnemyKind {
   Grunt = 0,
   Boss = 1,
+  /** 🔵 얽는 자 — 원거리 속박만 겁니다. 파랑을 가르치는 적. */
+  Binder = 2,
+  /** 🟣 끄는 자 — 아주 먼 거리에서 끌어당기기만 합니다. 보라를 가르치는 적. */
+  Dragger = 3,
 }
 
 /** 적 전용 데이터 */

@@ -141,10 +141,16 @@ export const WIDE_ARC_DEG = 180
 /**
  * 잡몹 — 빨강과 노랑 두 가지만 씁니다.
  *
- * 왜 잡몹에 4색을 다 주지 않는가: 잡몹은 여럿이 동시에 달려듭니다. 네 종류가
- * 겹치면 바닥이 색 잔치가 되어 **읽을 수 없게** 됩니다. 읽히게 하려고 만든 장치가
- * 읽기를 방해하면 본말전도입니다. 잡몹은 두 색으로 "구를까 걸을까"만 묻고,
- * 네 색 전부를 읽는 훈련은 1:1로 붙는 **보스**에서 시킵니다.
+ * 왜 이 적에게 4색을 다 주지 않는가: 잡몹은 여럿이 동시에 달려듭니다. 한 마리가
+ * 네 종류를 다 쓰면 바닥이 색 잔치가 되어 **읽을 수 없게** 됩니다. 읽히게 하려고
+ * 만든 장치가 읽기를 방해하면 본말전도입니다.
+ *
+ * ── 대신 택한 규칙: **한 적은 한 가지 질문만** ──────────────────────
+ * 파랑·보라는 이 적이 아니라 **전용 적**이 가르칩니다(BINDER_ATTACKS,
+ * DRAGGER_ATTACKS). 그래서 플레이어는 "얽는 자를 보면 파랑"처럼
+ * **실루엣만 보고 대응을 정할 수 있습니다.** 색이 여러 마리에 흩어져 있어도
+ * 각각은 여전히 한 가지 질문만 던지므로 화면은 읽을 수 있는 상태로 남습니다.
+ * 보스는 그 넷을 혼자 다 쓰는 **종합 시험**입니다.
  */
 export const GRUNT_ATTACKS: EnemyAttackDef[] = [
   {
@@ -296,13 +302,83 @@ export function pickAttack(
   return null
 }
 
+/**
+ * 🔵 얽는 자 — 패턴이 **하나뿐**입니다.
+ *
+ * 일부러 하나만 줍니다. 여러 개를 주면 "얽는 자 = 파랑"이 흐려지고,
+ * 이 적의 존재 이유(색 하나를 확실히 가르치기)가 사라집니다.
+ * 부채꼴 45°로 좁게 잡은 것도 같은 이유입니다 — **옆으로 비키면 피해집니다.**
+ * 파랑의 정답이 "옆걸음"이라는 걸 몸으로 배우게 하려면 실제로 그래야 합니다.
+ */
+export const BINDER_ATTACKS: EnemyAttackDef[] = [
+  {
+    id: 'binder_web',
+    intent: AttackIntent.Snare,
+    windup: 0.85,
+    active: 0.14,
+    recovery: 0.9,
+    reach: 6.0,
+    arcDeg: 45,
+    damage: 6,
+    knockback: 0,
+    minRange: 0,
+    maxRange: 6.0,
+    weight: 1,
+    /**
+     * 1.4초. 보스의 속박(1.6초)보다 짧습니다.
+     * 잡몹 구간에서 배우는 단계이므로, 실수 대가를 보스보다 가볍게 둡니다.
+     */
+    snare: 1.4,
+  },
+]
+
+/**
+ * 🟣 끄는 자 — 역시 패턴 하나. 12m 갈고리뿐입니다.
+ *
+ * 예고 1.15초는 게임에서 가장 깁니다. 가장 멀리서 오는 공격이라
+ * **알아채는 데 드는 시간**까지 예고에 포함해야 공정합니다.
+ * 가까운 적은 화면 중앙에 있어 저절로 보이지만, 12m 밖은 눈이 가야 보입니다.
+ */
+export const DRAGGER_ATTACKS: EnemyAttackDef[] = [
+  {
+    id: 'dragger_hook',
+    intent: AttackIntent.Pull,
+    windup: 1.15,
+    active: 0.16,
+    recovery: 1.1,
+    reach: 12,
+    arcDeg: 40,
+    damage: 4,
+    knockback: 0,
+    minRange: 3,
+    maxRange: 12,
+    weight: 1,
+    /** 보스(15)보다 약합니다. 끌어당겨 놓고 직접 마무리하지는 못합니다. */
+    pull: 12,
+  },
+]
+
+/**
+ * 적 종류 → 패턴 목록.
+ *
+ * `isBoss` 불리언이었던 것을 표로 바꿨습니다. 불리언은 종류가 둘일 때만
+ * 성립하는데, 셋째가 생기는 순간 `isBoss ? A : B` 가 전부 조용히
+ * **"보스가 아니면 잡몹"** 으로 잘못 답합니다. 표는 그렇게 틀리지 않습니다.
+ */
+const ATTACKS_BY_KIND: Record<number, EnemyAttackDef[]> = {
+  0: GRUNT_ATTACKS,
+  1: BOSS_ATTACKS,
+  2: BINDER_ATTACKS,
+  3: DRAGGER_ATTACKS,
+}
+
 /** 이 적이 쓰는 패턴 목록. EnemyKind 값으로 찾습니다. */
-export function attacksFor(isBoss: boolean): EnemyAttackDef[] {
-  return isBoss ? BOSS_ATTACKS : GRUNT_ATTACKS
+export function attacksFor(kind: number): EnemyAttackDef[] {
+  return ATTACKS_BY_KIND[kind] ?? GRUNT_ATTACKS
 }
 
 /** 패턴을 인덱스로 저장하기 위한 조회 — ECS는 숫자만 담을 수 있습니다. */
-export function attackAt(isBoss: boolean, index: number): EnemyAttackDef {
-  const list = attacksFor(isBoss)
+export function attackAt(kind: number, index: number): EnemyAttackDef {
+  const list = attacksFor(kind)
   return list[Math.min(Math.max(index, 0), list.length - 1)]
 }

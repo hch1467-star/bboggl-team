@@ -1,18 +1,18 @@
 import type { SkillShape } from '../config/arsenal'
-import { BOSS, COMBAT, GRUNT, PLAYER } from '../config/balance'
+import { COMBAT, PLAYER } from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
   Body,
   Enemy,
-  EnemyKind,
   Health,
   Player,
   Status,
   Transform,
   Velocity,
 } from '../core/components'
+import { enemyDef } from '../config/enemies'
 import { attackAt } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -168,8 +168,9 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
  * 예고와 판정이 같은 데이터에서 나와야 색을 믿을 수 있습니다.
  */
 function enemySpec(e: number): AttackSpec {
-  const isBoss = Enemy.kind[e] === EnemyKind.Boss
-  const def = attackAt(isBoss, Enemy.attackIndex[e])
+  const kind = Enemy.kind[e]
+  const cfg = enemyDef(kind)
+  const def = attackAt(kind, Enemy.attackIndex[e])
   return {
     // 360°짜리 전방위 패턴은 각도 검사를 건너뛰도록 circle로 넘깁니다.
     shape: def.arcDeg >= 359 ? 'circle' : 'cone',
@@ -177,9 +178,9 @@ function enemySpec(e: number): AttackSpec {
     range: def.reach,
     arcDeg: def.arcDeg,
     knockback: def.knockback,
-    hitstop: isBoss ? 0.1 : 0.05,
-    trauma: isBoss ? 0.62 : 0.34,
-    heavy: isBoss,
+    hitstop: cfg.hitstop,
+    trauma: cfg.trauma,
+    heavy: cfg.heavy,
     hits: 1,
     healSelf: 0,
     snare: def.snare,
@@ -188,7 +189,7 @@ function enemySpec(e: number): AttackSpec {
 }
 
 function enemyStagger(e: number): number {
-  return Enemy.kind[e] === EnemyKind.Boss ? BOSS.hurtStagger : GRUNT.hurtStagger
+  return enemyDef(Enemy.kind[e]).hurtStagger
 }
 
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
@@ -245,7 +246,7 @@ function activeDurationOf(a: number): number {
     const weapon = weaponOf(a)
     return weapon.combo[Math.min(Actor.comboIndex[a], weapon.combo.length - 1)].active
   }
-  return Enemy.kind[a] === EnemyKind.Boss ? BOSS.active : GRUNT.active
+  return enemyDef(Enemy.kind[a]).active
 }
 
 function applyHit(a: number, spec: AttackSpec): void {

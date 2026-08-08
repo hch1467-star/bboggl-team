@@ -45,6 +45,8 @@ const SHORTCUTS: Record<string, Tool> = {
   Digit7: 'grunt',
   Digit8: 'treasure',
   Digit9: 'boss',
+  KeyB: 'binder',
+  KeyN: 'dragger',
   Digit0: 'delete',
 }
 
@@ -130,6 +132,9 @@ class Editor {
       grunt: new THREE.CapsuleGeometry(0.42, 0.9, 4, 8),
       treasure: new THREE.OctahedronGeometry(0.55),
       boss: new THREE.CapsuleGeometry(0.7, 1.5, 4, 10),
+      // 게임 안과 같은 실루엣 규칙 — 얽는 자는 가늘고 크게, 끄는 자는 낮고 넓게.
+      binder: new THREE.CapsuleGeometry(0.34, 1.3, 4, 8),
+      dragger: new THREE.CapsuleGeometry(0.55, 0.5, 4, 10),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()

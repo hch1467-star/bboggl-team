@@ -3,11 +3,13 @@ import { WEAPONS } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
 import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
+import { enemyDef } from '../config/enemies'
 import {
   Actor,
   ActorState,
   AttackPhase,
   Enemy,
+  EnemyKind,
   Health,
   Status,
   Loadout,
@@ -34,6 +36,29 @@ export const KIND_PLAYER = 0
 export const KIND_GRUNT = 1
 export const KIND_TREASURE = 2
 export const KIND_BOSS = 3
+export const KIND_BINDER = 4
+export const KIND_DRAGGER = 5
+
+/**
+ * EnemyKind → 렌더 종류.
+ *
+ * 두 개의 열거형이 나란히 있는 게 마음에 걸리지만, 렌더 종류는 적이 아닌 것
+ * (플레이어·보물)까지 담아야 해서 하나로 합칠 수 없습니다. 대신 **변환은
+ * 오직 이 함수 하나**로 몰아 두었습니다. 새 적을 추가할 때 여기 한 줄만
+ * 빠뜨리지 않으면 됩니다.
+ */
+export function renderKindForEnemy(kind: EnemyKind): number {
+  switch (kind) {
+    case EnemyKind.Boss:
+      return KIND_BOSS
+    case EnemyKind.Binder:
+      return KIND_BINDER
+    case EnemyKind.Dragger:
+      return KIND_DRAGGER
+    default:
+      return KIND_GRUNT
+  }
+}
 
 interface Visual {
   group: THREE.Group
@@ -173,6 +198,18 @@ function makeWeaponModel(weaponId: string): THREE.Group {
   return g
 }
 
+/** 적 종류 표에서 몸통 캡슐을 만듭니다 — 키·굵기가 곧 실루엣입니다. */
+function capsuleFor(kind: EnemyKind): THREE.CapsuleGeometry {
+  const cfg = enemyDef(kind)
+  return new THREE.CapsuleGeometry(cfg.radius, cfg.height - cfg.radius * 2, 6, 12)
+}
+
+/** 등 뒤(백어택) 구역 표시. 몸 크기에 맞춰 자동으로 커집니다. */
+function backZoneFor(kind: EnemyKind): THREE.BufferGeometry {
+  const cfg = enemyDef(kind)
+  return makeSectorGeometry(cfg.radius + 0.1, cfg.radius + 1.15, COMBAT.backArcDeg)
+}
+
 /** 무기를 든 팔이 쉬는 자세(라디안). 몸 오른쪽에 비스듬히 내려둔 상태. */
 const REST_SWING = 0.75
 const REST_TILT = 0.25
@@ -198,18 +235,22 @@ export class Visuals {
       [KIND_PLAYER]: new THREE.CapsuleGeometry(PLAYER.radius, PLAYER.height - PLAYER.radius * 2, 6, 14),
       [KIND_GRUNT]: new THREE.CapsuleGeometry(GRUNT.radius, GRUNT.height - GRUNT.radius * 2, 6, 12),
       [KIND_BOSS]: new THREE.CapsuleGeometry(BOSS.radius, BOSS.height - BOSS.radius * 2, 8, 16),
+      [KIND_BINDER]: capsuleFor(EnemyKind.Binder),
+      [KIND_DRAGGER]: capsuleFor(EnemyKind.Dragger),
       [KIND_TREASURE]: new THREE.OctahedronGeometry(0.42),
     }
     // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
     // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.
-    for (const isBoss of [false, true]) {
-      for (const def of attacksFor(isBoss)) {
+    for (const kind of [EnemyKind.Grunt, EnemyKind.Boss, EnemyKind.Binder, EnemyKind.Dragger]) {
+      for (const def of attacksFor(kind)) {
         this.telegraphGeos.set(def.id, makeSectorGeometry(0.35, def.reach, def.arcDeg))
       }
     }
     this.backZoneGeos = {
       [KIND_GRUNT]: makeSectorGeometry(GRUNT.radius + 0.1, GRUNT.radius + 1.15, COMBAT.backArcDeg),
       [KIND_BOSS]: makeSectorGeometry(BOSS.radius + 0.1, BOSS.radius + 1.5, COMBAT.backArcDeg),
+      [KIND_BINDER]: backZoneFor(EnemyKind.Binder),
+      [KIND_DRAGGER]: backZoneFor(EnemyKind.Dragger),
     }
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
     this.pillarGeo = makePillarGeometry()
@@ -243,13 +284,12 @@ export class Visuals {
 
     const isPlayer = kind === KIND_PLAYER
     const isBoss = kind === KIND_BOSS
-    const cfg = isPlayer ? PLAYER : isBoss ? BOSS : GRUNT
-    // 색 배정 규칙: **예고 4색(빨/노/파/보)과 캐릭터 색이 겹치면 안 됩니다.**
-    // 보스가 보라색이던 첫 판에서, 보라 예고(끌어당김)가 깔리자 보스 몸과 바닥이
-    // 같은 색으로 뭉쳐 어디가 보스이고 어디가 장판인지 구분이 안 됐습니다.
-    // 적은 붉은 계열로 묶고(적대 = 붉은색), 보스는 더 어둡게 눌러 잡몹과 구분합니다.
-    // 예고는 항상 바닥에 밝게 깔리므로 어두운 몸과 확실히 분리됩니다.
-    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : isBoss ? 0x7a2733 : 0xc0453f)
+    // 이 엔티티가 어떤 적인지. 색·크기·예고 도형이 전부 여기서 나옵니다.
+    const enemyKind: EnemyKind = hasComponent(Enemy, entity) ? Enemy.kind[entity] : EnemyKind.Grunt
+    const cfg = isPlayer ? PLAYER : enemyDef(enemyKind)
+    // 색 배정 규칙은 config/enemies.ts 의 ENEMY_DEFS 주석에 정리돼 있습니다.
+    // 요약: 적은 전부 붉은 계열, 종류는 명도·채도와 **실루엣**으로 가릅니다.
+    const baseColor = new THREE.Color(isPlayer ? 0x5fa8ff : enemyDef(enemyKind).color)
     const material = new THREE.MeshStandardMaterial({
       color: baseColor.clone(),
       roughness: 0.55,
@@ -336,7 +376,7 @@ export class Visuals {
         depthWrite: false,
         side: THREE.DoubleSide,
       })
-      const telegraph = new THREE.Mesh(this.telegraphGeos.get(attacksFor(isBoss)[0].id)!, telegraphMat)
+      const telegraph = new THREE.Mesh(this.telegraphGeos.get(attacksFor(enemyKind)[0].id)!, telegraphMat)
       telegraph.position.y = 0.04
       telegraph.renderOrder = 1
       telegraph.visible = false
@@ -532,8 +572,7 @@ export class Visuals {
         const winding = attacking && Actor.phase[e] === AttackPhase.Windup
         const striking = attacking && Actor.phase[e] === AttackPhase.Active
         if (winding || striking) {
-          const isBoss = Renderable.kind[e] === KIND_BOSS
-          const def = attackAt(isBoss, Enemy.attackIndex[e])
+          const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
           const geo = this.telegraphGeos.get(def.id)
           if (geo && v.telegraph.geometry !== geo) v.telegraph.geometry = geo
           v.telegraph.visible = true
@@ -702,8 +741,7 @@ export class Visuals {
       const step = weapon.combo[Math.min(Actor.comboIndex[e], weapon.combo.length - 1)]
       return (step.arcDeg * Math.PI) / 180
     }
-    const deg = Renderable.kind[e] === KIND_BOSS ? BOSS.attackArcDeg : GRUNT.attackArcDeg
-    return (deg * Math.PI) / 180
+    return (enemyDef(Enemy.kind[e]).attackArcDeg * Math.PI) / 180
   }
 
   private phaseDurationOf(e: number, phase: AttackPhase): number {
@@ -712,7 +750,7 @@ export class Visuals {
       const step = weapon.combo[Math.min(Actor.comboIndex[e], weapon.combo.length - 1)]
       return phase === AttackPhase.Windup ? step.windup : phase === AttackPhase.Active ? step.active : step.recovery
     }
-    const cfg = Renderable.kind[e] === KIND_BOSS ? BOSS : GRUNT
+    const cfg = enemyDef(Enemy.kind[e])
     return phase === AttackPhase.Windup ? cfg.windup : phase === AttackPhase.Active ? cfg.active : cfg.recovery
   }
 

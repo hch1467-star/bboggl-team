@@ -1,0 +1,122 @@
+/**
+ * 적 종류 표 — 종류 하나당 한 줄.
+ *
+ * ── 왜 이 파일이 생겼는가 ───────────────────────────────────────────
+ * 지금까지 코드 곳곳에 `isBoss ? BOSS : GRUNT` 가 흩어져 있었습니다.
+ * 불리언은 **종류가 정확히 둘일 때만** 성립합니다. 셋째가 생기는 순간
+ * 그 조건문들은 전부 조용히 **"보스가 아니면 잡몹"** 이라고 잘못 답합니다.
+ * 오류도 안 나고 화면도 그럴듯해서, 얽는 자가 잡몹의 체력·속도·공격을
+ * 그대로 쓰고 있어도 알아채기 어렵습니다.
+ *
+ * 그래서 새 적을 추가하기 **전에** 불리언을 표로 바꿨습니다.
+ * 새 적을 하나 더 넣을 때 손대야 하는 곳이 이 파일 한 줄이 되도록.
+ *
+ * (Unity 이식 노트: 이 표의 한 항목이 EnemyDefinition.asset 하나가 됩니다.)
+ */
+import { BINDER, BOSS, DRAGGER, GRUNT } from './balance'
+import { EnemyKind } from '../core/components'
+
+/**
+ * 모든 종류가 공통으로 갖는 수치.
+ *
+ * `keepDistance` 만 선택 항목입니다 — 근접 적에게는 의미가 없고,
+ * 0으로 두면 "거리 0을 유지한다"는 뜻이 되어 헷갈립니다.
+ */
+export interface EnemyDef {
+  /** 저장·표시용 식별자 */
+  id: string
+  name: string
+  maxHp: number
+  radius: number
+  height: number
+  moveSpeed: number
+  turnSpeedDeg: number
+  backReactionDelay: number
+  aggroRange: number
+  attackRange: number
+  attackCooldown: number
+  windup: number
+  active: number
+  recovery: number
+  damage: number
+  attackArcDeg: number
+  attackReach: number
+  knockback: number
+  hurtStagger: number
+  /** 몸 색. 예고 4색과 겹치면 안 됩니다(아래 주석 참고). */
+  color: number
+  /**
+   * 이 거리보다 가까우면 **물러납니다.** 없으면 근접형입니다.
+   * 원거리 적에게 이게 없으면 그냥 걸어 들어와 약한 잡몹이 됩니다.
+   */
+  keepDistance?: number
+  /** 타격했을 때의 손맛 배율 — 큰 적일수록 크게 */
+  hitstop: number
+  trauma: number
+  heavy: boolean
+}
+
+/**
+ * 몸 색 배정 규칙: **예고 4색(빨/노/파/보)과 겹치면 안 됩니다.**
+ *
+ * 보스가 보라색이던 첫 판에서, 보라 예고(끌어당김)가 깔리자 보스 몸과 바닥이
+ * 같은 색으로 뭉쳐 어디가 보스이고 어디가 장판인지 구분이 안 됐습니다.
+ * 그래서 적은 전부 **붉은 계열**로 묶고, 종류는 **명도와 채도**로 가릅니다.
+ *
+ * 색만으로 구분하게 두지도 않았습니다 — 키와 굵기(radius/height)를 함께
+ * 벌려서, 색이 안 보여도 **실루엣으로** 읽히게 했습니다.
+ *   잡몹   1.70m 보통 굵기 · 밝은 적색
+ *   얽는 자 2.05m 가늘고 큼 · 흐린 적색   ← 제일 키가 큼
+ *   끄는 자 1.55m 낮고 넓음 · 어두운 장미  ← 제일 납작함
+ *   보스   2.90m 아주 큼   · 어두운 진홍
+ */
+export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
+  [EnemyKind.Grunt]: {
+    id: 'grunt',
+    name: '잡몹',
+    ...GRUNT,
+    color: 0xc0453f,
+    hitstop: 0.05,
+    trauma: 0.34,
+    heavy: false,
+  },
+  [EnemyKind.Boss]: {
+    id: 'boss',
+    name: '보스',
+    ...BOSS,
+    color: 0x7a2733,
+    hitstop: 0.1,
+    trauma: 0.62,
+    heavy: true,
+  },
+  [EnemyKind.Binder]: {
+    id: 'binder',
+    name: '얽는 자',
+    ...BINDER,
+    color: 0x9c5f57,
+    hitstop: 0.05,
+    trauma: 0.3,
+    heavy: false,
+  },
+  [EnemyKind.Dragger]: {
+    id: 'dragger',
+    name: '끄는 자',
+    ...DRAGGER,
+    color: 0x7d3340,
+    hitstop: 0.05,
+    trauma: 0.3,
+    heavy: false,
+  },
+}
+
+export function enemyDef(kind: number): EnemyDef {
+  return ENEMY_DEFS[kind as EnemyKind] ?? ENEMY_DEFS[EnemyKind.Grunt]
+}
+
+/** 레벨 파일에 적힌 문자열 → EnemyKind. 없으면 null(적이 아님). */
+export function kindFromId(id: string): EnemyKind | null {
+  for (const k of [EnemyKind.Grunt, EnemyKind.Boss, EnemyKind.Binder, EnemyKind.Dragger]) {
+    if (ENEMY_DEFS[k].id === id) return k
+  }
+  return null
+}

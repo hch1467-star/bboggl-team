@@ -30,22 +30,48 @@ export const VOID = -1
 /** 높이 최댓값 — 에디터에서 실수로 무한히 올리는 것을 막습니다. */
 export const MAX_HEIGHT = 12
 
-export type EntityKind = 'spawn' | 'grunt' | 'treasure' | 'boss'
+/**
+ * 레벨에 놓을 수 있는 것들.
+ *
+ * 적 종류의 문자열은 `config/enemies.ts` 의 `EnemyDef.id` 와 **정확히 같아야**
+ * 합니다. 레벨에는 문자열로 저장하고 게임은 `kindFromId()` 로 되찾습니다.
+ * (숫자로 저장하지 않는 이유: 나중에 EnemyKind 순서를 바꾸면 예전 레벨의
+ *  적이 전부 다른 적으로 바뀝니다. 문자열은 그렇게 조용히 틀리지 않습니다.)
+ */
+export type EntityKind = 'spawn' | 'grunt' | 'treasure' | 'boss' | 'binder' | 'dragger'
 
-export const ENTITY_KINDS: EntityKind[] = ['spawn', 'grunt', 'treasure', 'boss']
+export const ENTITY_KINDS: EntityKind[] = [
+  'spawn',
+  'grunt',
+  'treasure',
+  'boss',
+  'binder',
+  'dragger',
+]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
   spawn: '시작 지점',
   grunt: '잡몹',
   treasure: '보물',
   boss: '보스',
+  binder: '얽는 자 🔵',
+  dragger: '끄는 자 🟣',
 }
 
+/**
+ * 에디터 마커 색.
+ *
+ * 게임 안의 몸 색과 달리 여기서는 **예고 색을 그대로 씁니다.**
+ * 에디터에는 예고 장판이 안 깔리므로 색이 뭉칠 일이 없고,
+ * 배치할 때는 "이 적이 무슨 색을 던지는가"가 가장 중요한 정보이기 때문입니다.
+ */
 export const ENTITY_COLOR: Record<EntityKind, number> = {
   spawn: 0x5fa8ff,
   grunt: 0xc0453f,
   treasure: 0xffd479,
   boss: 0xb45cff,
+  binder: 0x35a7ff,
+  dragger: 0xc061ff,
 }
 
 export interface LevelEntity {
