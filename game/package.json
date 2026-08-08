@@ -30,7 +30,8 @@
     "fall": "node tools/fall-probe.mjs",
     "counter": "node tools/counter-probe.mjs",
     "focus": "node tools/focus-probe.mjs",
-    "upgrade": "node tools/upgrade-probe.mjs"
+    "upgrade": "node tools/upgrade-probe.mjs",
+    "encounter": "node tools/encounter-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

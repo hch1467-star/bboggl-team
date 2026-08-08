@@ -9,6 +9,7 @@ import {
   FOCUS,
   KILL_FEEDBACK,
   LADDER_REACH,
+  LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
   POISE,
   TREASURE,
@@ -70,6 +71,7 @@ import {
   chainIndexFor,
   encounterEvents,
   enemyAiSystem,
+  setAggroRangeOverride,
   phaseEvents,
   resetAttackTokens,
   setEnemyAiEnabled,
@@ -336,6 +338,9 @@ class Game {
     resetTripods()
     this.tripodPanel.setOpen(false)
     setEnemyAiEnabled(true)
+    // 아레나는 종류별 기본값(55m)을 그대로 씁니다 — 좁히면 반경 21m에 소환된
+    // 적이 영원히 제자리에 섭니다. 레벨을 실제로 불러온 뒤에 방 단위로 덮습니다.
+    setAggroRangeOverride(0)
     resetAttackTokens()
     this.regions = []
     this.currentRegion = ''
@@ -356,6 +361,8 @@ class Game {
       setTerrain(this.terrain)
       this.arena.visible = false
 
+      // 존은 **방 단위**로 깨어납니다(balance.ts LEVEL_AGGRO_RANGE 설계 노트).
+      setAggroRangeOverride(LEVEL_AGGRO_RANGE)
       this.levelData = level
       const spawned = spawnFromLevel(level, this.terrain)
       this.bonfires = spawned.bonfires

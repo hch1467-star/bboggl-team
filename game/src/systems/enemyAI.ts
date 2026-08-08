@@ -59,6 +59,15 @@ import { time } from '../core/time'
  */
 let aiEnabled = true
 
+/**
+ * 0이면 종류별 기본값을 씁니다(아레나). 레벨 모드에서 방 단위 값으로 덮습니다.
+ */
+let aggroRangeOverride = 0
+
+export function setAggroRangeOverride(range: number): void {
+  aggroRangeOverride = range
+}
+
 export function setEnemyAiEnabled(enabled: boolean): void {
   aiEnabled = enabled
 }
@@ -462,7 +471,12 @@ export function enemyAiSystem(
       }
     }
 
-    if (Enemy.aggro[e] === 0 && dist <= cfg.aggroRange) Enemy.aggro[e] = 1
+    /**
+     * 레벨 모드에서는 **방 단위**로 좁힙니다(balance.ts LEVEL_AGGRO_RANGE 설계 노트).
+     * 종류별 값을 그대로 쓰면 존 전체가 한 번에 깨어나 한 줄로 걸어옵니다.
+     */
+    const range = aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, aggroRangeOverride) : cfg.aggroRange
+    if (Enemy.aggro[e] === 0 && dist <= range) Enemy.aggro[e] = 1
 
     if (Enemy.aggro[e] === 0) {
       decayVelocity(e, dt, 5)

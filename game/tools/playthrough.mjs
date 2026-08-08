@@ -126,6 +126,8 @@ try {
     /** 동시에 쫓기는 적 수의 시간 가중 합 — 평균을 내기 위해 */
     let aggroSum = 0
     let aggroSamples = 0
+    /** 그중 둘 이상과 붙어 있던 표본 수 */
+    let multiSamples = 0
     let lastHpSample = G.state().player.hp
     let bossSeen = false
     let bossKilled = false
@@ -141,11 +143,22 @@ try {
       if (p.hp < lastHpSample) damageTaken += lastHpSample - p.hp
       lastHpSample = p.hp
       if (p.hp < minHp) minHp = p.hp
+      /**
+       * **교전 중일 때만** 셉니다.
+       *
+       * 처음엔 전 구간 평균을 냈는데, 방 단위 어그로를 넣자 걷는 동안 0이
+       * 되어 평균이 오히려 **내려갔습니다**(1.22 → 1.09). 조합은 프로브에서
+       * 분명히 함께 깨어나는데도요. 재려던 것은 "얼마나 자주 여럿과 싸우나"인데
+       * 걷는 시간까지 섞으면 **어그로를 좁힐수록 좋아 보이는** 거꾸로 된 지표가 됩니다.
+       */
       {
-        const chasing = G.threats(16).filter((t) => t.aggro).length
+        const chasing = G.threats(12).filter((t) => t.aggro).length
         if (chasing > maxAggro) maxAggro = chasing
-        aggroSum += chasing
-        aggroSamples++
+        if (chasing > 0) {
+          aggroSum += chasing
+          aggroSamples++
+          if (chasing >= 2) multiSamples++
+        }
       }
 
       // ---- 구역 기록 ----
@@ -515,6 +528,7 @@ try {
       damageTaken: Number(damageTaken.toFixed(0)),
       maxAggro,
       avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
+      multiRatio: Number(((multiSamples / Math.max(1, aggroSamples)) * 100).toFixed(0)),
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
@@ -571,7 +585,9 @@ try {
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
-  console.log(`  동시 교전   평균 ${log.avgAggro}마리 · 최대 ${log.maxAggro}마리`)
+  console.log(
+    `  동시 교전   교전 중 평균 ${log.avgAggro}마리 · 둘 이상인 시간 ${log.multiRatio}% · 최대 ${log.maxAggro}마리`,
+  )
   console.log('')
 } finally {
   await browser.close()
