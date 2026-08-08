@@ -1,5 +1,5 @@
-import type { SkillShape } from '../config/arsenal'
-import { COMBAT, COUNTER, PLAYER, POISE } from '../config/balance'
+import { HEAVY_COMBO, heavyStep, type SkillShape } from '../config/arsenal'
+import { COMBAT, COUNTER, FOCUS, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -102,6 +102,8 @@ export interface AttackSpec {
   hitstop: number
   trauma: number
   heavy: boolean
+  /** 🥋 강타(집중 소모)인가 — 강인도를 크게 깎습니다. */
+  heavyBlow?: boolean
   /** 다단히트 횟수 */
   hits: number
   /** 판정 중심 (point 스킬용). 없으면 시전자 위치. */
@@ -123,6 +125,23 @@ const livingEnemies = defineQuery(Enemy, Health, Transform, Body, Actor)
 
 function comboSpec(e: number, comboIndex: number): AttackSpec {
   const weapon = weaponOf(e)
+  // 🥋 강타 — 콤보 마무리에서 파생시키고, 태운 집중만큼 세집니다.
+  if (comboIndex === HEAVY_COMBO) {
+    const h = heavyStep(weapon, Player.focusSpent[e])
+    return {
+      shape: 'cone',
+      damage: h.damage,
+      range: h.range,
+      arcDeg: h.arcDeg,
+      knockback: h.knockback,
+      hitstop: h.hitstop,
+      trauma: h.trauma,
+      heavy: true,
+      heavyBlow: true,
+      hits: 1,
+      healSelf: 0,
+    }
+  }
   const c = weapon.combo[Math.min(comboIndex, weapon.combo.length - 1)]
   return {
     shape: 'cone',
@@ -225,7 +244,11 @@ function applyPoise(t: number, spec: AttackSpec): void {
     Enemy.poiseIdleT[t] = 0
     return
   }
-  const dmg = spec.trauma * POISE.fromTrauma * (winding ? POISE.windupMultiplier : 1)
+  const dmg =
+    spec.trauma *
+    POISE.fromTrauma *
+    (winding ? POISE.windupMultiplier : 1) *
+    (spec.heavyBlow ? FOCUS.poiseMult : 1)
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
@@ -268,6 +291,9 @@ export const breakEvents: BreakEvent[] = []
 
 /** 🟢 반격이 성립한 순간. 무너짐과 **따로** 알립니다 — 다른 사건이기 때문입니다. */
 export const counterEvents: BreakEvent[] = []
+
+/** 🥋 완벽 회피 — 실제로 맞을 공격을 무적 프레임으로 넘긴 순간. */
+export const perfectDodgeEvents: BreakEvent[] = []
 
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
 export function currentSpec(a: number): AttackSpec | null {
@@ -370,7 +396,6 @@ function applyHit(a: number, spec: AttackSpec): void {
 
     if (Actor.state[t] === ActorState.Dead) continue
     if (Health.invulnT[t] > 0) continue
-    if (targetIsPlayer && isInIFrames(t)) continue
 
     const dx = Transform.x[t] - originX
     const dz = Transform.z[t] - originZ
@@ -401,6 +426,22 @@ function applyHit(a: number, spec: AttackSpec): void {
       const dot = (dx * fx + dz * fz) / dist
       const slack = Math.atan2(Body.radius[t], dist)
       if (dot < Math.cos(Math.min(Math.PI, halfArc + slack))) continue
+    }
+
+    /**
+     * ---- 🥋 완벽 회피 ----
+     *
+     * **기하 판정을 다 통과한 뒤에** 무적 프레임을 봅니다.
+     *
+     * 예전에는 판정 맨 앞에서 걸렀습니다. 그러면 "맞을 리도 없던 공격을
+     * 굴러 넘긴 것"과 "코앞의 일격을 정확히 넘긴 것"이 **구분되지 않습니다.**
+     * 집중을 주려면 후자만 세야 합니다 — 오공의 완벽 회피가 재밌는 이유가
+     * 바로 그 구분이기 때문입니다. 아무 때나 구르면 쌓이는 자원은
+     * 자원이 아니라 그냥 시간입니다.
+     */
+    if (targetIsPlayer && isInIFrames(t)) {
+      perfectDodgeEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+      continue
     }
 
     // 넉백 방향: point 스킬은 착탄점 바깥으로 밀어야 자연스럽습니다.
@@ -498,6 +539,22 @@ function applyHit(a: number, spec: AttackSpec): void {
       } else if (hasComponent(Enemy, t)) {
         applyPoise(t, spec)
       }
+    }
+
+    /**
+     * 🥋 집중 획득 — **기본 공격만** 쌓습니다.
+     *
+     * 스킬로도 쌓게 하면 "스킬 → 집중 → 강타 → 스킬"이 그냥 한 줄기 흐름이
+     * 되어 판단이 사라집니다. 오공에서 집중을 쌓는 것이 가벼운 공격인 이유가
+     * 이것입니다 — **위험한 근접 거리에 머문 대가**로 주는 자원입니다.
+     * 강타 자신도 쌓지 않습니다(태운 것을 도로 채우면 소모가 아닙니다).
+     */
+    if (
+      attackerIsPlayer &&
+      Actor.state[a] === ActorState.Attack &&
+      Actor.comboIndex[a] !== HEAVY_COMBO
+    ) {
+      Player.focus[a] = Math.min(FOCUS.max, Player.focus[a] + FOCUS.perLightHit)
     }
 
     hitEvents.push({

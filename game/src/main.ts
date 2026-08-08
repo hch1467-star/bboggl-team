@@ -6,6 +6,7 @@ import {
   COUNTER,
   EMBER,
   FALL,
+  FOCUS,
   KILL_FEEDBACK,
   LADDER_REACH,
   PLAYER as PLAYER_CFG,
@@ -58,6 +59,7 @@ import {
   breakPoise,
   counterEvents,
   countLivingEnemies,
+  perfectDodgeEvents,
   hitEvents,
   isBackAttack,
   isBehindPoint,
@@ -637,6 +639,23 @@ class Game {
     fallEvents.length = 0
 
     /**
+     * ---- 3.785 🥋 완벽 회피 ----
+     *
+     * **맞을 공격을 정확히 넘긴 순간에만** 옵니다(combat.ts 판정 주석 참고).
+     * 지금까지 구르기는 잘 써도 "안 맞았다"가 전부였습니다. 여기서 집중이
+     * 차오르면 회피가 **공격 준비**가 됩니다 — 오공이 완벽 회피에 집중을
+     * 주는 이유가 이것입니다.
+     */
+    for (const d of perfectDodgeEvents) {
+      Player.focus[p] = Math.min(FOCUS.max, Player.focus[p] + FOCUS.perPerfectDodge)
+      this.cam.addTrauma(0.18)
+      sfx.pickup()
+      this.vfx.spawnHitSpark(d.x, d.y + 1.1, d.z, 1.1)
+      this.hud.showBanner('완벽 회피', '집중 +1', 0.9)
+    }
+    perfectDodgeEvents.length = 0
+
+    /**
      * ---- 3.79 🟢 반격 성공 ----
      *
      * 일반 무너짐과 **따로** 알립니다. 같은 연출로 처리하면 플레이어는
@@ -784,6 +803,7 @@ class Game {
     // ---- 8. HUD ----
     this.hud.setVitals(Health.hp[p], Health.max[p], Stamina.value[p], Stamina.max[p])
     this.hud.setVials(Player.vials[p], Player.vialsMax[p])
+    this.hud.setFocus(Player.focus[p], FOCUS.max)
     this.hud.setEmbers(Player.embers[p])
     if (this.bossEntity >= 0 && isAlive(this.bossEntity) && Health.hp[this.bossEntity] > 0) {
       const b = this.bossEntity
@@ -2019,6 +2039,7 @@ declare global {
         attacking: boolean
         winding: boolean
         rotY: number
+        timer: number
         brokenT: number
         intent: number
         staggered: boolean
@@ -2040,6 +2061,15 @@ declare global {
       /** 🟢 반격 검증용 */
       counterInfo: () => { brokenTime: number; normalBrokenTime: number; damageMultiplier: number }
       counterCount: () => number
+      /** 🥋 집중 검증용 */
+      focusInfo: () => {
+        focus: number
+        max: number
+        perLightHit: number
+        perPerfectDodge: number
+        damagePerPoint: number
+      }
+      setFocus: (n: number) => void
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -2248,6 +2278,8 @@ window.__game = {
       winding:
         Actor.state[entity] === ActorState.Attack && Actor.phase[entity] === AttackPhase.Windup,
       rotY: Number(Transform.rotY[entity].toFixed(3)),
+      /** 현재 단계의 남은 시간(초) — 완벽 회피 타이밍을 재려면 필요합니다. */
+      timer: Number(Actor.timer[entity].toFixed(3)),
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       staggered: Actor.state[entity] === ActorState.Stagger,
@@ -2266,6 +2298,16 @@ window.__game = {
     damageMultiplier: COUNTER.damageMultiplier,
   }),
   counterCount: () => game.debugCounterCount(),
+  focusInfo: () => ({
+    focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
+    max: FOCUS.max,
+    perLightHit: FOCUS.perLightHit,
+    perPerfectDodge: FOCUS.perPerfectDodge,
+    damagePerPoint: FOCUS.damagePerPoint,
+  }),
+  setFocus: (n) => {
+    Player.focus[game.debugPlayerEntity()] = Math.max(0, Math.min(FOCUS.max, n))
+  },
   threats: (range) => game.debugThreats(range),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),

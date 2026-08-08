@@ -56,6 +56,18 @@
       /* 체력이 줄 때 뒤따라 내려오는 흰 잔상 — 얼마나 깎였는지 눈으로 보입니다. */
       #hpGhost { background: rgba(255, 235, 210, 0.35); transition: transform 420ms ease-out 180ms; }
       #stamFill { background: linear-gradient(90deg, #3f9d63, #66d492); }
+      /*
+        집중 구슬 — 체력/스태미나 바 바로 아래. 전투 중 시선이 가장 자주
+        머무는 곳이라, 여기 없으면 안 보는 자원이 됩니다.
+      */
+      #focusPips { display: flex; gap: 5px; margin-top: 6px; }
+      #focusPips i {
+        width: 14px; height: 14px; border-radius: 50%;
+        border: 1px solid rgba(150,175,220,0.35); background: rgba(8,10,15,0.7);
+        transition: background 90ms linear;
+      }
+      #focusPips i.on { background: radial-gradient(circle at 35% 30%, #ffe9a8, #f0a83c); border-color: #ffd479; }
+      #focusPips i.half { background: #f0a83c; }
       #vials { margin-top: 6px; font-size: 12px; color: #d8e2f0; letter-spacing: 0.02em; }
       #vials .dim { color: #7d8798; font-size: 11px; }
       #restHint {
@@ -291,6 +303,7 @@
               <span>스태미나</span><span id="stamText">100</span>
             </div>
           </div>
+          <div id="focusPips"></div>
           <div id="vials">
             성수병 <b id="vialText">3 / 3</b> <span class="dim">(X)</span>
             &nbsp;·&nbsp; 불티 <b id="emberText">0</b>
@@ -358,7 +371,7 @@
         <div id="controls">
           <div class="key"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</div>
           <div class="key"><kbd>마우스</kbd> 조준</div>
-          <div class="key"><kbd>좌클릭</kbd> 공격 (3타 콤보)</div>
+          <div class="key"><kbd>좌클릭</kbd> 공격 (집중 +) &nbsp; <kbd>우클릭</kbd> 강타 (집중 소모)</div>
           <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
           <div class="key"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 무기 교체</div>
           <div class="key"><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>

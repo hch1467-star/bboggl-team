@@ -263,8 +263,15 @@ try {
           moveToward(reachable.x - p.x, reachable.z - p.z)
         } else {
           releaseAll()
-          // 쿨이 돈 스킬이 있으면 씁니다. 없으면 기본 공격.
-          if (ready.length > 0) tap(ready[0].key)
+          /**
+           * 🥋 집중이 가득이면 강타로 태웁니다.
+           *
+           * 봇은 "지금 태울까 더 모을까"를 판단하지 못합니다. **가득 찼을 때만**
+           * 태우는 가장 단순한 규칙을 씁니다 — 이게 초보자의 하한선이고,
+           * 그래서 이 봇이 재는 것도 "가장 서투르게 써도 이 정도는 된다"입니다.
+           */
+          if (G.focusInfo().focus >= G.focusInfo().max) tap('Mouse2')
+          else if (ready.length > 0) tap(ready[0].key)
           else tap('Mouse0')
         }
         await sleep()
@@ -403,6 +410,7 @@ try {
       restCount: G.vialInfo().restCount,
       upgrades,
       counters: G.counterCount(),
+      focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
       ladderOpen: (G.shortcutInfo() ?? []).filter((l) => l.open).length,
       ladderTotal: (G.shortcutInfo() ?? []).length,
@@ -453,7 +461,7 @@ try {
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
   console.log(`  불티       ${log.embers} · 강화 ${log.upgrades}회`)
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
-  console.log(`  반격       ${log.counters}회 성공`)
+  console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   console.log(`  체력       ${log.hp}`)
   console.log('')
 } finally {

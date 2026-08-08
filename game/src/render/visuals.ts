@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { WEAPONS } from '../config/arsenal'
+import { HEAVY_COMBO, WEAPONS, heavyStep } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
 import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
@@ -270,7 +270,13 @@ export class Visuals {
     let geo = this.rangeGeos.get(key)
     if (!geo) {
       const w = WEAPONS.find((x) => x.id === weaponId) ?? WEAPONS[0]
-      const step = w.combo[Math.min(comboIndex, w.combo.length - 1)]
+      // 🥋 강타는 콤보 마무리보다 넓고 깁니다. 사거리 예고도 같은 데이터에서
+      // 나와야 "예고는 좁은데 실제로는 넓다" 같은 거짓말이 생기지 않습니다.
+      // (집중 소모량은 사거리에 영향이 없으므로 0으로 뽑습니다.)
+      const step =
+        comboIndex === HEAVY_COMBO
+          ? heavyStep(w, 0)
+          : w.combo[Math.min(comboIndex, w.combo.length - 1)]
       // **테두리만** 그립니다. 적 예고는 꽉 찬 부채꼴이라, 내 것도 채우면
       // 파랑 예고(속박)와 헷갈립니다 — 플레이어 캡슐도 파란색이라 더 그렇습니다.
       // 채우기 vs 선은 색보다 강한 구분이고, "내 사거리가 여기서 끝난다"는

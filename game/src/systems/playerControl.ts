@@ -1,5 +1,5 @@
-import { SKILL_KEY_CODES, type SkillDef } from '../config/arsenal'
-import { PLAYER, VIAL } from '../config/balance'
+import { HEAVY_COMBO, SKILL_KEY_CODES, heavyStep, type SkillDef } from '../config/arsenal'
+import { FOCUS, PLAYER, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
@@ -145,8 +145,23 @@ function clampMag(value: number, max: number): number {
   return value
 }
 
+/**
+ * 🥋 강타 — 모아 둔 집중을 **전부** 태웁니다.
+ *
+ * 일부만 쓰게 하지 않은 이유: "2점 중 1점만 쓰기" 같은 선택지를 열면
+ * 판단이 늘어나는 게 아니라 **매 순간 계산해야 할 것**이 늘어납니다.
+ * 오공도 모아둔 것을 한 번에 태웁니다. 결정은 "얼마나 쓸까"가 아니라
+ * **"지금 태울까, 더 모을까"** 하나로 충분합니다.
+ */
+function beginHeavy(p: number, aimRot: number): void {
+  Player.focusSpent[p] = Math.floor(Player.focus[p])
+  Player.focus[p] -= Player.focusSpent[p]
+  beginAttack(p, HEAVY_COMBO, aimRot)
+}
+
 function beginAttack(p: number, index: number, aimRot: number): void {
-  const c = weaponOf(p).combo[index]
+  const c =
+    index === HEAVY_COMBO ? heavyStep(weaponOf(p), Player.focusSpent[p]) : weaponOf(p).combo[index]
   // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
   // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
   const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
@@ -308,6 +323,9 @@ export function playerControlSystem(ctx: ControlContext): void {
   // 입력은 상태와 무관하게 매 프레임 한 번씩 소비합니다.
   // 상태 안에서 조건부로 읽으면 입력이 다음 프레임에 남아 뒤늦게 터집니다.
   const attackPressed = consumePress('Mouse0')
+  // 🥋 강타 — 우클릭. 지금까지 비어 있던 유일한 주요 입력이라, 새 키를
+  // 외우게 하지 않고도 "왼쪽은 쌓기, 오른쪽은 태우기"가 손에 붙습니다.
+  const heavyPressed = consumePress('Mouse2')
   const dodgePressed = consumePress('Space') || consumePress('ShiftLeft')
   const drinkPressed = consumePress('KeyX')
   let skillPressed = -1
@@ -476,6 +494,15 @@ export function playerControlSystem(ctx: ControlContext): void {
           else sfx.deny()
           break
         }
+        if (heavyPressed) {
+          // 집중이 없으면 거절음. 조용히 무시하면 "키가 씹혔나"와 구분이 안 됩니다.
+          if (Player.focus[p] >= 1 && Stamina.value[p] >= FOCUS.heavy.staminaCost) {
+            beginHeavy(p, aimRot)
+          } else {
+            sfx.deny()
+          }
+          break
+        }
         if (attackPressed && Stamina.value[p] >= weapon.combo[0].staminaCost) {
           beginAttack(p, 0, aimRot)
           break
@@ -495,7 +522,10 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (attackPressed) Actor.bufferedAttack[p] = 1
         moveScale = weapon.attackMoveScale
 
-        const combo = weapon.combo[Math.min(Actor.comboIndex[p], weapon.combo.length - 1)]
+        const combo =
+          Actor.comboIndex[p] === HEAVY_COMBO
+            ? heavyStep(weapon, Player.focusSpent[p])
+            : weapon.combo[Math.min(Actor.comboIndex[p], weapon.combo.length - 1)]
         const phase = Actor.phase[p] as AttackPhase
 
         // 후딜에서만 스킬/구르기로 탈출할 수 있습니다.
@@ -785,6 +815,15 @@ export function playerControlSystem(ctx: ControlContext): void {
 
 function endAttack(p: number, aimRot: number): void {
   const weapon = weaponOf(p)
+  // 강타는 **마무리**입니다. 뒤로 콤보가 이어지면 태운 자원의 무게가 사라집니다.
+  if (Actor.comboIndex[p] === HEAVY_COMBO) {
+    Actor.state[p] = ActorState.Idle
+    Actor.comboIndex[p] = 0
+    Actor.bufferedAttack[p] = 0
+    Actor.comboWindowT[p] = 0
+    Player.focusSpent[p] = 0
+    return
+  }
   const next = Actor.comboIndex[p] + 1
   const canChain =
     Actor.bufferedAttack[p] === 1 &&

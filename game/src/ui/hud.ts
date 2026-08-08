@@ -46,6 +46,7 @@ export class Hud {
   private readonly bossTicks = el<HTMLElement>('bossTicks')
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
+  private readonly focusPips = el<HTMLElement>('focusPips')
   private saveTimer: number | null = null
   /** 지금 표시 중인 보스 이름. 눈금을 다시 그릴지 판단합니다. */
   private bossShown = ''
@@ -142,6 +143,25 @@ export class Hud {
       this.shortcutHint.textContent = '사다리가 걷혀 있다 — 위에서만 내릴 수 있다'
       this.shortcutHint.style.color = '#9aa7b8'
     }
+  }
+
+  /**
+   * 🥋 집중 구슬.
+   *
+   * 숫자가 아니라 **구슬**로 보여줍니다. 전투 중에 읽을 것은 "몇 개인가"이지
+   * "2.34인가"가 아닙니다. 차오르는 중인 한 칸은 흐리게 — 다음 한 대면
+   * 채워진다는 것이 곁눈으로 보여야 "한 대 더 넣고 태우자"가 성립합니다.
+   */
+  setFocus(value: number, max: number): void {
+    const full = Math.floor(value)
+    const partial = value - full
+    let html = ''
+    for (let i = 0; i < max; i++) {
+      const on = i < full
+      const half = !on && i === full && partial > 0.05
+      html += `<i class="${on ? 'on' : half ? 'half' : ''}" style="${half ? `opacity:${(0.25 + partial * 0.5).toFixed(2)}` : ''}"></i>`
+    }
+    if (this.focusPips.innerHTML !== html) this.focusPips.innerHTML = html
   }
 
   setVials(left: number, max: number): void {

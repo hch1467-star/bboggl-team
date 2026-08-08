@@ -1,3 +1,5 @@
+import { FOCUS } from './balance'
+
 /**
  * 무기와 스킬 데이터.
  *
@@ -443,6 +445,36 @@ export interface ComboStep {
   lunge: number
   knockback: number
 }
+
+/**
+ * 강타(集中 소모) 한 방의 제원.
+ *
+ * 무기마다 따로 정의하지 않고 **콤보 마무리에서 파생**시킵니다.
+ * 무기가 셋인데 강타를 따로 적으면 세 벌을 따로 관리하게 되고, 대검만
+ * 고치고 단검을 빠뜨리는 날이 옵니다. 파생시키면 무기의 성격(대검은 넓고
+ * 느리게, 단검은 좁고 빠르게)이 강타에도 저절로 따라옵니다.
+ */
+export function heavyStep(weapon: WeaponDef, focusSpent: number): ComboStep {
+  const last = weapon.combo[weapon.combo.length - 1]
+  const h = FOCUS.heavy
+  return {
+    name: '강타',
+    windup: h.windup,
+    active: h.active,
+    recovery: h.recovery,
+    damage: last.damage * (1 + focusSpent * FOCUS.damagePerPoint),
+    range: last.range * h.rangeMult,
+    arcDeg: last.arcDeg + h.arcAdd,
+    staminaCost: h.staminaCost,
+    hitstop: h.hitstop,
+    trauma: h.trauma,
+    lunge: h.lunge,
+    knockback: h.knockback,
+  }
+}
+
+/** Actor.comboIndex 에 넣는 강타 표식. 콤보 길이(최대 4)와 절대 안 겹칩니다. */
+export const HEAVY_COMBO = 250
 
 export interface WeaponDef {
   id: string

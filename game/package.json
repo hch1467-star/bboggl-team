@@ -28,7 +28,8 @@
     "play": "node tools/playthrough.mjs",
     "map": "node tools/map-probe.mjs",
     "fall": "node tools/fall-probe.mjs",
-    "counter": "node tools/counter-probe.mjs"
+    "counter": "node tools/counter-probe.mjs",
+    "focus": "node tools/focus-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
