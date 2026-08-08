@@ -155,14 +155,29 @@ try {
     await window.__t.until(() => (window.__game.bossEncounter()?.selfHomeDist ?? 0) > 5, 20)
     const lured = window.__game.bossEncounter()
 
-    // 이탈 반경 밖으로 순간이동.
-    const p = window.__game.state().player
-    window.__game.teleportPlayer(p.x - hurt.leashRadius - 12, p.z)
-    await window.__t.until(() => (window.__game.bossEncounter()?.encounter ?? 0) === 3, 6)
+    /**
+     * **먼저 "잠깐 나갔다 오기"를 확인합니다.**
+     *
+     * 소울라이크에서 물러나 회복하고 복귀하는 것은 정상적인 플레이입니다.
+     * 거리만으로는 이 정상 후퇴와 도망을 구분할 수 없어서 **시간**을 씁니다.
+     * 유예 시간의 절반만 밖에 있다가 돌아오면 교전이 유지되어야 합니다.
+     */
+    const home = window.__game.state().player
+    const outX = home.x - hurt.leashRadius - 12
+    window.__game.teleportPlayer(outX, home.z)
+    await window.__t.runFor(hurt.leashGrace * 0.5)
+    const brief = window.__game.bossEncounter()
+    window.__game.teleportPlayer(home.x, home.z) // 복귀
+    await window.__t.runFor(0.4)
+    const returned = window.__game.bossEncounter()
+
+    // 이제 진짜 도망 — 유예 시간을 넘겨 밖에 머뭅니다.
+    window.__game.teleportPlayer(outX, home.z)
+    await window.__t.until(() => (window.__game.bossEncounter()?.encounter ?? 0) === 3, 10)
     const leashed = window.__game.bossEncounter()
     // 자리로 돌아가 초기화될 때까지.
     await window.__t.until(() => (window.__game.bossEncounter()?.encounter ?? 9) === 0, 30)
-    return { hurt, lured, leashed, reset: window.__game.bossEncounter() }
+    return { hurt, lured, brief, returned, leashed, reset: window.__game.bossEncounter() }
   })
   check(
     flee.hurt.hp < flee.hurt.maxHp && flee.hurt.phase > 0,
@@ -174,7 +189,17 @@ try {
     '보스가 자리에서 끌려나옴 (귀환을 관측하기 위한 준비)',
     `자리에서 ${flee.lured.selfHomeDist}m`,
   )
-  check(flee.leashed.encounter === 3, '이탈 반경을 넘으면 귀환 상태로', `상태 ${flee.leashed.encounter}`)
+  check(
+    flee.brief.encounter === 2 && flee.brief.leashT > 0,
+    '잠깐 나가는 것만으로는 포기하지 않음 (회복하러 물러날 여지)',
+    `유예 ${flee.hurt.leashGrace}초 중 ${flee.brief.leashT}초 경과 · 상태 ${flee.brief.encounter}`,
+  )
+  check(
+    flee.returned.leashT === 0,
+    '돌아오면 이탈 시간이 0으로 리셋됨',
+    `${flee.brief.leashT}초 → ${flee.returned.leashT}초`,
+  )
+  check(flee.leashed.encounter === 3, '유예를 넘겨 머물면 귀환 상태로', `상태 ${flee.leashed.encounter}`)
   check(
     flee.reset.encounter === 0 && flee.reset.hp === flee.reset.maxHp,
     '자리로 돌아가면 체력이 완전히 회복됨',

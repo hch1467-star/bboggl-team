@@ -106,7 +106,7 @@ try {
     let regionStart = t0
     let vialsUsed = 0
     let lastVials = G.vialInfo().vials
-    let restCount = 0
+    let upgrades = 0
     let bossSeen = false
     let bossKilled = false
     const notes = []
@@ -200,17 +200,23 @@ try {
       // 불은 지나가기만 해도 붙습니다(안전망). 여기서 멈추는 건
       // **회복이 필요할 때**뿐입니다 — 쉬면 적이 되살아나니까요.
       const fire = G.nearestBonfire()
-      if (fire && p.hp < 70) {
+      const em = G.emberInfo()
+      // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
+      // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
+      const canUpgrade = em.upgradeCost > 0 && em.embers >= em.upgradeCost
+      if (fire && (p.hp < 70 || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
         if (fd < 2.2) {
           releaseAll()
-          const before = vi.vials
+          if (canUpgrade) {
+            const maxBefore = vi.max
+            tap('KeyV')
+            await sleep()
+            if (G.vialInfo().max > maxBefore) upgrades++
+          }
           const until = now() + 2.5
           while (now() < until) await sleep()
-          if (G.vialInfo().vials > before) {
-            restCount++
-            lastVials = G.vialInfo().vials
-          }
+          lastVials = G.vialInfo().vials
           continue
         }
       }
@@ -265,7 +271,10 @@ try {
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
       vialsUsed,
-      restCount,
+      // 봇의 추측이 아니라 **게임이 센 값**입니다. 예전엔 "성수병이 늘었으면
+      // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
+      restCount: G.vialInfo().restCount,
+      upgrades,
       bossSeen,
       bossKilled,
       kills: st.kills,
@@ -307,7 +316,7 @@ try {
   console.log(`  처치       ${log.kills}마리 · 남은 적 ${log.enemiesLeft}마리`)
   console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
-  console.log(`  불티       ${log.embers}`)
+  console.log(`  불티       ${log.embers} · 강화 ${log.upgrades}회`)
   console.log(`  체력       ${log.hp}`)
   console.log('')
 } finally {

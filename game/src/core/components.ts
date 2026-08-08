@@ -202,6 +202,8 @@ export const Enemy = defineComponent({
   encounter: 'u8',
   /** 조우 연출 남은 시간(초) */
   introT: 'f32',
+  /** 플레이어가 이탈 반경 밖에 머문 시간(초). leashGrace 를 넘기면 포기합니다. */
+  leashT: 'f32',
 })
 
 /** 상태이상 — 지금은 속박 하나. 늘어나면 별도 컴포넌트로 나눕니다. */

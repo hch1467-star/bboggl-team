@@ -136,6 +136,8 @@ class Game {
   private levelH = 0
   /** 화톳불 좌표들. 엔티티가 아니라 좌표 목록입니다(부딪히지 않으므로). */
   private bonfires: Bonfire[] = []
+  /** 지금까지 쉰 횟수 — 자동 플레이 봇이 **추측하지 않고 읽도록** 노출합니다. */
+  private restCount = 0
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -1001,6 +1003,7 @@ class Game {
    * 되돌아가는 데 비용이 있어야 **"밀고 갈까"** 가 진짜 선택이 됩니다.
    */
   private restAt(p: number, fire: Bonfire): void {
+    this.restCount++
     Health.hp[p] = Health.max[p]
     Stamina.value[p] = Stamina.max[p]
     Player.vials[p] = Player.vialsMax[p]
@@ -1190,6 +1193,8 @@ class Game {
     selfHomeDist: number
     arenaRadius: number
     leashRadius: number
+    leashT: number
+    leashGrace: number
   } | null {
     const ids = enemyQuery.run()
     for (let i = 0; i < enemyQuery.count; i++) {
@@ -1211,6 +1216,8 @@ class Game {
         ),
         arenaRadius: BOSS_ARENA.radius,
         leashRadius: BOSS_ARENA.leashRadius,
+        leashT: Number(Enemy.leashT[e].toFixed(2)),
+        leashGrace: BOSS_ARENA.leashGrace,
       }
     }
     return null
@@ -1262,6 +1269,7 @@ class Game {
     bonfires: number
     hasRespawn: boolean
     restProgress: number
+    restCount: number
   } {
     const p = this.playerEntity
     return {
@@ -1273,6 +1281,7 @@ class Game {
       bonfires: this.bonfires.length,
       hasRespawn: Player.hasRespawn[p] === 1,
       restProgress: Number(Player.restT[p].toFixed(3)),
+      restCount: this.restCount,
     }
   }
 
@@ -1682,6 +1691,7 @@ declare global {
         bonfires: number
         hasRespawn: boolean
         restProgress: number
+        restCount: number
       }
       playerEntity: () => number
       setHp: (entity: number, hp: number) => void

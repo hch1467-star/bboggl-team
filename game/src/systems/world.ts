@@ -156,6 +156,7 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.homeZ[e] = z
   Enemy.encounter[e] = 0
   Enemy.introT[e] = 0
+  Enemy.leashT[e] = 0
   Status.snareT[e] = 0
   Renderable.kind[e] = renderKindForEnemy(kind)
   return e

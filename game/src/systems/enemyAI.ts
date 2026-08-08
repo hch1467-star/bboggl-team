@@ -400,8 +400,27 @@ export function enemyAiSystem(
       }
 
       const selfHome = Math.hypot(Transform.x[e] - Enemy.homeX[e], Transform.z[e] - Enemy.homeZ[e])
-      if (Enemy.encounter[e] === 2 && (homeDist > BOSS_ARENA.leashRadius || !playerAlive)) {
-        // 영역 밖으로 나갔습니다 — 귀환.
+      /**
+       * **거리만으로 판정하지 않습니다.**
+       *
+       * 자동 플레이에서 봇이 보스를 240초 동안 못 잡았는데, 원인이 여기였습니다:
+       * 체력이 낮아 물러나 회복하면 그 후퇴가 반경을 넘겨 보스가 초기화되고,
+       * 돌아오면 처음부터. 무한 반복이었습니다.
+       *
+       * "물러나서 회복하고 복귀"는 소울라이크의 **정상적인 플레이**이고,
+       * "때리고 도망"은 우리가 막으려던 것입니다. 거리로는 둘이 같아 보이지만
+       * **시간을 붙이면 갈립니다.** 잠깐 나갔다 오는 것은 허용합니다.
+       */
+      if (Enemy.encounter[e] === 2) {
+        if (homeDist > BOSS_ARENA.leashRadius) Enemy.leashT[e] += dt
+        else Enemy.leashT[e] = 0
+      }
+      if (
+        Enemy.encounter[e] === 2 &&
+        (Enemy.leashT[e] >= BOSS_ARENA.leashGrace || !playerAlive)
+      ) {
+        // 영역 밖에 계속 머물렀습니다 — 귀환.
+        Enemy.leashT[e] = 0
         Enemy.encounter[e] = 3
         Enemy.aggro[e] = 0
         Actor.state[e] = ActorState.Idle
@@ -424,6 +443,7 @@ export function enemyAiSystem(
           Enemy.poise[e] = cfg.poiseMax
           Enemy.brokenT[e] = 0
           Enemy.transitionT[e] = 0
+          Enemy.leashT[e] = 0
           decayVelocity(e, dt, 8)
           continue
         }
