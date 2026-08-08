@@ -97,6 +97,19 @@
       }
       #shortcutHint b { color: #d8ffb0; }
       /*
+        처형 안내 — 사다리 안내보다 위, 그리고 **눈에 띄게** 다릅니다.
+        무방비 창은 잡몹 기준 1.0초뿐입니다. 그 안에 읽고 판단해야 하므로,
+        차분한 안내가 아니라 **지금 이것을 하라**는 신호여야 합니다.
+      */
+      #finisherHint {
+        position: absolute; left: 50%; bottom: 224px; transform: translateX(-50%);
+        display: none; text-align: center; font-size: 14px; font-weight: 700;
+        color: #ffe9a8; letter-spacing: 1px;
+        background: rgba(40,20,10,0.78); padding: 6px 16px; border-radius: 8px;
+        border: 1px solid rgba(255,196,92,0.55); pointer-events: none; white-space: nowrap;
+        box-shadow: 0 0 18px rgba(255,170,60,0.28);
+      }
+      /*
         저체력 경고 — 화면 **가장자리**만 물들입니다.
         가운데를 덮으면 정작 읽어야 할 4색 예고를 가려서, 위험을 알리려던 것이
         위험을 못 보게 만듭니다. 가장자리는 시야의 주변부라 경고로는 충분하고
@@ -314,6 +327,9 @@
             &nbsp;·&nbsp; 정련석 <b id="stoneText" style="color:#9fd2ff">0</b>
           </div>
         </div>
+
+        <!-- 처형 안내 — 무방비인 적이 사거리 안에 있을 때만 -->
+        <div id="finisherHint">처형 — 왼클릭</div>
 
         <!-- 사다리 안내 — 내릴 수 있을 때, 그리고 **못 내리는 이유**도 알려줍니다 -->
         <div id="shortcutHint"></div>

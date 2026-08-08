@@ -6,6 +6,7 @@ import {
   COUNTER,
   EMBER,
   FALL,
+  FINISHER,
   FOCUS,
   KILL_FEEDBACK,
   LADDER_REACH,
@@ -59,6 +60,7 @@ import { KIND_TREASURE, Visuals } from './render/visuals'
 import {
   breakEvents,
   breakPoise,
+  finisherEvents,
   counterEvents,
   countLivingEnemies,
   perfectDodgeEvents,
@@ -72,11 +74,12 @@ import {
   encounterEvents,
   enemyAiSystem,
   setAggroRangeOverride,
+  setReachDistance,
   phaseEvents,
   resetAttackTokens,
   setEnemyAiEnabled,
 } from './systems/enemyAI'
-import { bonfireSystem, type Bonfire } from './systems/bonfire'
+import { bonfireSystem, setBonfireReach, type Bonfire } from './systems/bonfire'
 import { deathEvents, healthSystem } from './systems/health'
 import {
   SLOT_COUNT,
@@ -97,7 +100,12 @@ import {
   writeSave,
 } from './systems/save'
 import { fallEvents, physicsSystem, setTerrain } from './systems/physics'
-import { healEvents, playerControlSystem, type ControlContext } from './systems/playerControl'
+import {
+  finisherTarget,
+  healEvents,
+  playerControlSystem,
+  type ControlContext,
+} from './systems/playerControl'
 import {
   bossKey,
   enemyCountForWave,
@@ -208,6 +216,17 @@ class Game {
    */
   private enemySwings = 0
   private enemyHits = 0
+  /**
+   * 강인도 붕괴가 **실제로 몇 번 일어나는가** — 자동 플레이로 재기 위한 값입니다.
+   * 붕괴는 이 게임에서 가장 큰 보상(긴 무방비)인데, 한 판에 몇 번이나
+   * 일어나는지 아무도 재 본 적이 없었습니다. 드물면 시스템이 사실상 없는
+   * 것이고, 잦은데 활용을 못 하면 보상의 형태가 틀린 것입니다 — 답이 다릅니다.
+   */
+  private poiseBreaks = 0
+  /** 처형이 실제로 몇 번 나갔는가 — 무방비 창을 쓰게 됐는지 재는 값입니다. */
+  private finishers = 0
+  /** 그중 **예고 중에** 끊긴 것 — 🟢 반격만이 초록을 끊는지 재는 값입니다. */
+  private windupBreaks = 0
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
   /** 적을 되살리려면 원본 배치가 필요합니다. */
@@ -352,6 +371,9 @@ class Game {
     // 아레나는 종류별 기본값(55m)을 그대로 씁니다 — 좁히면 반경 21m에 소환된
     // 적이 영원히 제자리에 섭니다. 레벨을 실제로 불러온 뒤에 방 단위로 덮습니다.
     setAggroRangeOverride(0)
+    // 아레나에는 지형이 없으므로 직선거리로 되돌립니다.
+    setReachDistance(null)
+    setBonfireReach(null)
     resetAttackTokens()
     this.regions = []
     this.currentRegion = ''
@@ -374,6 +396,14 @@ class Game {
 
       // 존은 **방 단위**로 깨어납니다(balance.ts LEVEL_AGGRO_RANGE 설계 노트).
       setAggroRangeOverride(LEVEL_AGGRO_RANGE)
+      /**
+       * 그리고 그 "방 단위"는 **걸어야 하는 거리**로 잽니다.
+       * 직선으로 재면 벽 너머의 적이 깨어나 영원히 벽을 향해 걷습니다
+       * (terrain.ts buildPlayerField 설계 노트에 측정값이 있습니다).
+       */
+      const reach = (x: number, z: number) => this.terrain?.distanceToPlayer(x, z) ?? null
+      setReachDistance(reach)
+      setBonfireReach(reach)
       this.levelData = level
       const spawned = spawnFromLevel(level, this.terrain)
       this.bonfires = spawned.bonfires
@@ -515,6 +545,12 @@ class Game {
     if (consumePress('KeyT')) this.tripodPanel.toggle()
 
     // ---- 2. 시뮬레이션 ----
+    /**
+     * **플레이어까지의 거리장을 먼저 만듭니다.**
+     * 어그로와 화톳불 차단이 이 값을 씁니다(직선거리가 아니라 걷는 거리).
+     * 플레이어가 격자 칸을 옮길 때만 다시 계산합니다 — 대부분의 프레임은 캐시입니다.
+     */
+    this.terrain?.buildPlayerField(Transform.x[p], Transform.z[p])
     if (playerAlive) playerControlSystem(this.controlCtx)
     enemyAiSystem(p, playerAlive, this.controlCtx)
     physicsSystem()
@@ -641,6 +677,13 @@ class Game {
       }
     }
 
+    /** ---- 3.71 처형 안내 ---- */
+    //
+    // 무방비 창은 잡몹 기준 1.0초입니다. 안내가 없으면 창이 있는 줄도 모르고
+    // 지나갑니다 — 자동 플레이가 "무방비인 적 곁에서 실제로 때린 시간 44%"
+    // 라고 재 준 그 상태입니다.
+    this.hud.setFinisher(playerAlive && finisherTarget(p) >= 0)
+
     /** ---- 3.72 사다리(지름길) ---- */
     this.tryDropLadder(p, playerAlive)
 
@@ -748,7 +791,28 @@ class Game {
     //
     // 무너짐은 **긴 무방비**라는 큰 보상이라, 눈·귀·손 셋 다 써서 확실히 알립니다.
     // 못 알아채면 공짜 딜 창을 그냥 흘려보내게 됩니다.
+    /**
+     * ---- 처형 연출 ----
+     *
+     * 세키로의 인살, 오공의 처형이 공통으로 하는 일: **화면이 한 박자 멈춥니다.**
+     * 같은 피해라도 멈춤과 소리가 붙으면 "끝냈다"가 되고, 없으면 그냥 큰 숫자가
+     * 하나 뜬 것이 됩니다. 무방비를 소모하는 거래이므로 그만한 마침표가 필요합니다.
+     */
+    for (const f of finisherEvents) {
+      this.finishers++
+      this.cam.addTrauma(0.7)
+      requestHitstop(0.2)
+      sfx.impact(true, true, f.x, f.z)
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2
+        this.vfx.spawnHitSpark(f.x + Math.cos(a) * 0.75, f.y + 1.05, f.z + Math.sin(a) * 0.75, 1.6)
+      }
+    }
+    finisherEvents.length = 0
+
     for (const b of breakEvents) {
+      this.poiseBreaks++
+      if (b.duringWindup) this.windupBreaks++
       this.cam.addTrauma(0.5)
       requestHitstop(0.12)
       sfx.impact(true, true, b.x, b.z)
@@ -1698,8 +1762,17 @@ class Game {
     emberDecay: number
     enemySwings: number
     enemyHits: number
+    poiseBreaks: number
+    windupBreaks: number
+    finishers: number
+    /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
+    dodgeStamina: number
   } {
     return {
+      poiseBreaks: this.poiseBreaks,
+      windupBreaks: this.windupBreaks,
+      finishers: this.finishers,
+      dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -2409,6 +2482,15 @@ declare global {
       teleportPlayer: (x: number, z: number) => void
       nearestBonfire: () => { x: number; z: number } | null
       /** 사다리(지름길) 검증용 */
+      finisherInfo: () => {
+        ready: boolean
+        target: number
+        reach: number
+        damageMultiplier: number
+        staminaCost: number
+        count: number
+      }
+      breakEnemy: (entity: number) => void
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -2449,6 +2531,10 @@ declare global {
         emberDecay: number
         enemySwings: number
         enemyHits: number
+        poiseBreaks: number
+        windupBreaks: number
+        finishers: number
+        dodgeStamina: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
@@ -2624,6 +2710,24 @@ window.__game = {
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   nearestBonfire: () => game.debugNearestBonfire(),
+  /**
+   * 처형 검증용.
+   *
+   * `ready` 는 **게임이 판단한 값**입니다. 프로브가 "무방비 + 2.6m 안" 을
+   * 다시 계산하면 조건을 바꿨을 때 프로브만 옛 규칙으로 통과합니다.
+   */
+  finisherInfo: () => ({
+    ready: finisherTarget(game.debugPlayerEntity()) >= 0,
+    target: finisherTarget(game.debugPlayerEntity()),
+    reach: FINISHER.reach,
+    damageMultiplier: FINISHER.damageMultiplier,
+    staminaCost: FINISHER.staminaCost,
+    count: game.debugRunStats().finishers,
+  }),
+  /** 강인도를 즉시 부숩니다 — 무방비 상태를 만들어 놓고 재기 위한 훅. */
+  breakEnemy: (entity: number) => {
+    breakPoise(entity)
+  },
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),

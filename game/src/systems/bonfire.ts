@@ -62,6 +62,16 @@ const enemies = defineQuery(Enemy, Transform, Actor)
  * **실제 보상(체력·성수병 회복, 적 부활)은 이 함수가 하지 않습니다** —
  * 그건 레벨 데이터를 아는 게임 루프의 일입니다.
  */
+/**
+ * "저 적이 나에게 실제로 걸어올 수 있는가" — 게임 루프가 지형에서 꽂아 줍니다.
+ * 없으면(아레나) 직선거리로 되돌아갑니다.
+ */
+let reach: ((x: number, z: number) => number | null) | null = null
+
+export function setBonfireReach(fn: ((x: number, z: number) => number | null) | null): void {
+  reach = fn
+}
+
 export function bonfireSystem(p: number, fires: Bonfire[]): RestResult {
   const idle: RestResult = { rested: false, litNow: false, near: null, progress: 0, blocked: false }
   if (fires.length === 0) return idle
@@ -105,7 +115,18 @@ export function bonfireSystem(p: number, fires: Bonfire[]): RestResult {
     const e = ids[i]
     if (Actor.state[e] === ActorState.Dead) continue
     if (Enemy.aggro[e] === 0) continue
-    if (Math.hypot(Transform.x[e] - px, Transform.z[e] - pz) <= BONFIRE.safeRadius) {
+    /**
+     * ⚠️ **걸어야 하는 거리로 봅니다.**
+     *
+     * 직선거리로 재던 시절, 성벽마루 건너편(직선 12m · 경로 98m)의 적 하나가
+     * 폐허의 화톳불을 **영원히** 잠갔습니다. 화면에는 적이 하나도 안 보이는데
+     * "적이 가까워 쉴 수 없다"만 떠 있고, 플레이어가 할 수 있는 일이 없습니다.
+     * 자동 플레이가 그 자리에서 굳는 것으로 드러났습니다.
+     */
+    const d = reach
+      ? (reach(Transform.x[e], Transform.z[e]) ?? Infinity)
+      : Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
+    if (d <= BONFIRE.safeRadius) {
       blocked = true
       break
     }

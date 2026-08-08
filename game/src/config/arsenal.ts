@@ -1,4 +1,4 @@
-import { FOCUS } from './balance'
+import { FINISHER, FOCUS } from './balance'
 
 /**
  * 무기와 스킬 데이터.
@@ -475,6 +475,35 @@ export function heavyStep(weapon: WeaponDef, focusSpent: number): ComboStep {
 
 /** Actor.comboIndex 에 넣는 강타 표식. 콤보 길이(최대 4)와 절대 안 겹칩니다. */
 export const HEAVY_COMBO = 250
+
+/**
+ * 처형 — 무방비인 적에게만 나가는 한 방.
+ *
+ * 강타(heavyStep)와 **같은 방식**으로 콤보 마무리에서 파생시킵니다.
+ * 무기별 수치를 따로 적지 않는 이유가 여기 있습니다: 마무리 타가 이미
+ * 그 무기의 정체성(느림·묵직함 vs 빠름·가벼움)을 담고 있으므로,
+ * 처형도 그 성격을 그대로 물려받아야 무기를 바꾼 티가 납니다.
+ */
+export function finisherStep(weapon: WeaponDef): ComboStep {
+  const last = weapon.combo[weapon.combo.length - 1]
+  return {
+    name: '처형',
+    windup: FINISHER.windup,
+    active: FINISHER.active,
+    recovery: FINISHER.recovery,
+    damage: last.damage * FINISHER.damageMultiplier,
+    range: FINISHER.reach,
+    arcDeg: FINISHER.arcDeg,
+    staminaCost: FINISHER.staminaCost,
+    hitstop: FINISHER.hitstop,
+    trauma: FINISHER.trauma,
+    lunge: FINISHER.lunge,
+    knockback: FINISHER.knockback,
+  }
+}
+
+/** Actor.comboIndex 에 넣는 처형 표식. */
+export const FINISH_COMBO = 251
 
 export interface WeaponDef {
   id: string

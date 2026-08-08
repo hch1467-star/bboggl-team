@@ -46,6 +46,7 @@ export class Hud {
   private readonly bossTicks = el<HTMLElement>('bossTicks')
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
+  private readonly finisherHint = el<HTMLElement>('finisherHint')
   private readonly focusPips = el<HTMLElement>('focusPips')
   private readonly weaponUpgradeHint = el<HTMLElement>('weaponUpgradeHint')
   private readonly stoneText = el<HTMLElement>('stoneText')
@@ -192,6 +193,17 @@ export class Hud {
       this.shortcutHint.textContent = `사다리가 걷혀 있다 — 위에서만 내릴 수 있다${gain}`
       this.shortcutHint.style.color = '#9aa7b8'
     }
+  }
+
+  /**
+   * 처형 안내 — 무방비인 적이 사거리 안에 있을 때만.
+   *
+   * 창이 1.0초(잡몹)뿐이라 **눈에 띄어야** 합니다. 조용한 안내로 두면
+   * "무방비인 적 곁에서 실제로 때린 시간 44%" 라는 계측이 그대로 남습니다 —
+   * 보상이 있는데 있는 줄 모르는 상태입니다.
+   */
+  setFinisher(ready: boolean): void {
+    this.finisherHint.style.display = ready ? 'block' : 'none'
   }
 
   /**

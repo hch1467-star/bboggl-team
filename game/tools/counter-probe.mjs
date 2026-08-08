@@ -194,12 +194,18 @@ try {
     // 그냥 **아무 일도 안 일어난 것**이었습니다(강인도 0으로 드러났습니다).
     G.setHp(e, 100000)
     const base = G.counterCount()
-    let breaks = 0
+    /**
+     * ⚠️ **끊김은 게임이 셉니다.**
+     *
+     * 처음엔 8ms마다 `broken` 을 관측해서 전이를 셌습니다. 그런데 처형이
+     * 들어가면 무방비가 **즉시 닫혀서** 관측을 통째로 놓칩니다 —
+     * 실제로 "반격 1회 · 관측된 끊김 0회" 라는 앞뒤 안 맞는 결과가 나왔습니다.
+     * 사건은 사건이 일어난 자리(combat.ts breakPoise)에서 기록해야 합니다.
+     */
+    const baseWindupBreaks = G.runStats().windupBreaks
     let landed = 0
     const until = G.state().elapsed + 8
-    let wasBroken = false
     let wasActive = false
-    let wasWinding = false
     while (G.state().elapsed < until) {
       const s = G.enemyInfo(e)
       if (!s) break
@@ -207,10 +213,6 @@ try {
       // 처음엔 무너짐 전체를 셌는데, 예고가 아닐 때(쿨다운 중) 강인도가 차서
       // 무너지는 것은 지극히 정상입니다. 그것까지 세면 "반격만이 끊는다"가
       // 아니라 "이 적은 절대 안 무너진다"를 요구하게 됩니다 — 틀린 요구입니다.
-      const broken = s.brokenT > 0
-      if (broken && !wasBroken && wasWinding) breaks++
-      wasBroken = broken
-      wasWinding = s.winding
       const active = s.attacking && s.attackPhase === 1
       if (active && !wasActive) landed++
       wasActive = active
@@ -223,7 +225,12 @@ try {
       await new Promise((r) => setTimeout(r, 8))
     }
     const info = G.enemyInfo(e)
-    return { breaks, landed, counters: G.counterCount() - base, poiseMax: info?.poiseMax ?? 0 }
+    return {
+      breaks: G.runStats().windupBreaks - baseWindupBreaks,
+      landed,
+      counters: G.counterCount() - base,
+      poiseMax: info?.poiseMax ?? 0,
+    }
   })
   check(
     spam.breaks === spam.counters,

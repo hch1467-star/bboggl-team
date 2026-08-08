@@ -1,4 +1,4 @@
-import { HEAVY_COMBO, heavyStep, type SkillShape } from '../config/arsenal'
+import { FINISH_COMBO, HEAVY_COMBO, finisherStep, heavyStep, type SkillShape } from '../config/arsenal'
 import { COMBAT, COUNTER, FOCUS, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
@@ -124,6 +124,10 @@ export interface AttackSpec {
    * (반대로 범위 밖으로 굴러 나가면 여전히 안전합니다 — 막다른 길이 아닙니다.)
    */
   lingers?: boolean
+  /** 치명타·백어택 배수를 받지 않는다 (처형처럼 이미 큰 한 방). */
+  noCrit?: boolean
+  /** 처형인가 — 맞히면 무방비를 소모합니다. */
+  finisher?: boolean
   /** 다단히트 횟수 */
   hits: number
   /** 판정 중심 (point 스킬용). 없으면 시전자 위치. */
@@ -138,6 +142,9 @@ export interface AttackSpec {
 
 /** 현재 프레임에 발생한 타격들. 게임 루프가 읽고 비웁니다. */
 export const hitEvents: HitEvent[] = []
+
+/** 처형이 들어간 순간 — 연출과 계측이 읽습니다. */
+export const finisherEvents: { entity: number; x: number; y: number; z: number }[] = []
 
 const attackers = defineQuery(Transform, Actor)
 const targets = defineQuery(Transform, Body, Health)
@@ -158,6 +165,30 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       trauma: h.trauma,
       heavy: true,
       heavyBlow: true,
+      hits: 1,
+      healSelf: 0,
+    }
+  }
+  // 처형 — 무방비인 적에게만 나가는 한 방.
+  if (comboIndex === FINISH_COMBO) {
+    const f = finisherStep(weapon)
+    return {
+      shape: 'cone',
+      damage: f.damage * weaponDamageMult(e),
+      range: f.range,
+      arcDeg: f.arcDeg,
+      knockback: f.knockback,
+      hitstop: f.hitstop,
+      trauma: f.trauma,
+      heavy: true,
+      /**
+       * 처형은 **치명타 배수를 받지 않습니다.**
+       * 백어택 치명타와 겹치면 한 방에 전투가 끝나 버립니다 —
+       * 무방비인 적은 등을 잡기가 너무 쉬워서(안 돌아섭니다) 사실상 상시
+       * 중첩이 됩니다. 처형의 값은 배수가 아니라 **창을 소모하는 거래**입니다.
+       */
+      noCrit: true,
+      finisher: true,
       hits: 1,
       healSelf: 0,
     }
@@ -292,6 +323,16 @@ function applyPoise(t: number, spec: AttackSpec): void {
  */
 export function breakPoise(t: number): void {
   const cfg = enemyDef(Enemy.kind[t])
+  /**
+   * **끊긴 순간이 예고 중이었는가** — 상태를 바꾸기 전에 잡아 둡니다.
+   *
+   * 반격 프로브가 이걸 폴링(8ms마다 broken 관측)으로 세고 있었는데,
+   * 처형이 들어오면 무방비가 **즉시 닫혀서** 관측을 통째로 놓쳤습니다.
+   * "반격 1회 · 관측된 끊김 0회" 라는 앞뒤 안 맞는 결과가 그래서 나왔습니다.
+   * 사건은 사건이 일어난 자리에서 기록해야 합니다.
+   */
+  const duringWindup =
+    Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
   Enemy.poise[t] = cfg.poiseMax
   Enemy.poiseIdleT[t] = 0
   Enemy.brokenT[t] = Enemy.kind[t] === EnemyKind.Boss ? POISE.brokenTimeBoss : POISE.brokenTime
@@ -300,7 +341,13 @@ export function breakPoise(t: number): void {
   Actor.hitsLeft[t] = 0
   Actor.comboWindowT[t] = 0
   Actor.bufferedAttack[t] = 0
-  breakEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+  breakEvents.push({
+    entity: t,
+    x: Transform.x[t],
+    y: Transform.y[t],
+    z: Transform.z[t],
+    duringWindup,
+  })
 }
 
 /** 적이 무너진 순간. 게임 루프가 읽고 비웁니다. */
@@ -309,6 +356,8 @@ export interface BreakEvent {
   x: number
   y: number
   z: number
+  /** 끊긴 순간이 **예고 중**이었는가 (반격 프로브가 읽습니다) */
+  duringWindup?: boolean
 }
 export const breakEvents: BreakEvent[] = []
 
@@ -510,7 +559,7 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     const back =
       attackerIsPlayer && !targetIsPlayer && spec.shape === 'cone' && isBackAttack(a, t)
     const critChance = COMBAT.baseCritChance + (back ? COMBAT.backCritBonus : 0)
-    const crit = spec.damage > 0 && combatRng.chance(critChance)
+    const crit = !spec.noCrit && spec.damage > 0 && combatRng.chance(critChance)
 
     /**
      * ---- 🟢 반격 성립 판정 ----
@@ -547,7 +596,7 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       !isBehindPoint(Transform.x[a], Transform.z[a], Transform.x[t], Transform.z[t], Transform.rotY[t])
 
     let damage = spec.damage
-    if (back) damage *= COMBAT.backDamageMult
+    if (back && !spec.noCrit) damage *= COMBAT.backDamageMult
     if (crit) damage *= COMBAT.critMult
     if (countered) damage *= COUNTER.damageMultiplier
 
@@ -592,6 +641,20 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Enemy.brokenT[t] = COUNTER.brokenTime
         Actor.timer[t] = COUNTER.brokenTime
         counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+      } else if (spec.finisher && hasComponent(Enemy, t)) {
+        /**
+         * **처형은 무방비를 소모합니다.** 넣는 순간 적이 일어납니다.
+         *
+         * 이게 처형을 "공짜로 얹는 피해"가 아니라 **거래**로 만드는 지점입니다.
+         * 남은 창에서 두세 대 더 넣는 쪽을 고를 수도 있어야 선택이 생깁니다.
+         * 강인도도 가득 채워 돌려줍니다 — 안 그러면 일어나자마자 다시 무너져
+         * 처형이 무한히 이어집니다.
+         */
+        Enemy.brokenT[t] = 0
+        Enemy.poise[t] = enemyDef(Enemy.kind[t]).poiseMax
+        Enemy.poiseIdleT[t] = 0
+        if (Actor.state[t] === ActorState.Stagger) Actor.timer[t] = 0
+        finisherEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
       } else if (hasComponent(Enemy, t)) {
         applyPoise(t, spec)
       }

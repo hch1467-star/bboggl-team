@@ -207,6 +207,84 @@ export class Terrain {
     return s !== null && s.open
   }
 
+  /**
+   * ── 플레이어까지의 거리장 — **"저 적이 나에게 올 수 있는가"** ──────────
+   *
+   * 목표용 거리장(this.field)과 **따로** 둡니다. 목표는 보스, 이쪽은 플레이어라
+   * 매 프레임 번갈아 쓰면 캐시 키가 계속 바뀌어 BFS를 두 번씩 돌게 됩니다.
+   *
+   * ── 왜 필요해졌는가 ────────────────────────────────────────────
+   * 자동 플레이가 화톳불 앞에서 굳었습니다. 기록은 이랬습니다:
+   *
+   *     가까운적 12.4m 체력 46 **경로 98m**
+   *
+   * 성벽마루 **건너편**의 적이었습니다. 직선으로는 12m, 걸어서는 98m —
+   * 영원히 서로 닿을 수 없습니다. 그런데 어그로도, 화톳불의 "적이 가까워
+   * 쉴 수 없다"(14m)도 **직선거리**로 재고 있었습니다. 그래서 그 적은
+   * 깨어나 영원히 벽을 향해 걸었고, 화톳불은 영원히 잠겼습니다.
+   *
+   * 사람에게는 이렇게 보입니다: **화면에 적이 하나도 없는데 쉴 수가 없고,
+   * 왜 그런지 알 방법도 없습니다.** 수직 지도를 만든 순간 생긴 문제인데,
+   * 지도가 한 줄일 때는 직선거리와 걷는 거리가 거의 같아서 안 보였습니다.
+   *
+   * 거리장을 하나 더 두면 적 하나당 O(1)로 "진짜 거리"를 물어볼 수 있습니다.
+   * BFS는 플레이어가 **칸을 옮길 때만** 다시 돕니다(격자 2m).
+   */
+  private playerField: Int32Array | null = null
+  private playerFieldKey = ''
+
+  buildPlayerField(x: number, z: number): void {
+    const { w, h } = this.level
+    const t = worldToCell(x, z, w, h)
+    const key = `${t.cx},${t.cz}|${this.shortcuts.map((s) => (s.open ? 1 : 0)).join('')}`
+    if (key === this.playerFieldKey && this.playerField) return
+    this.playerFieldKey = key
+    this.playerField = this.floodFrom(t.cx, t.cz)
+  }
+
+  /**
+   * 그 자리에서 플레이어까지 **걸어야 하는 거리(m)**. 길이 없으면 null.
+   * `buildPlayerField` 를 먼저 부른 프레임에서만 유효합니다.
+   */
+  distanceToPlayer(x: number, z: number): number | null {
+    if (!this.playerField) return null
+    const { w, h } = this.level
+    const { cx, cz } = worldToCell(x, z, w, h)
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return null
+    const d = this.playerField[cz * w + cx]
+    return d < 0 ? null : d * CELL_SIZE
+  }
+
+  /** 한 칸에서 퍼져 나가는 BFS. 거리장 두 개가 같은 규칙을 쓰도록 함수로 뺐습니다. */
+  private floodFrom(tx: number, tz: number): Int32Array {
+    const { w, h } = this.level
+    const field = new Int32Array(w * h).fill(-1)
+    if (this.levelAtCell(tx, tz) === VOID) return field
+    field[tz * w + tx] = 0
+    let frontier: [number, number][] = [[tx, tz]]
+    while (frontier.length) {
+      const next: [number, number][] = []
+      for (const [cx, cz] of frontier) {
+        const d = field[cz * w + cx]
+        for (const [nx, nz] of [
+          [cx - 1, cz],
+          [cx + 1, cz],
+          [cx, cz - 1],
+          [cx, cz + 1],
+        ] as [number, number][]) {
+          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+          if (field[nz * w + nx] !== -1) continue
+          // **이웃에서 지금 칸으로** 올 수 있어야 합니다(오르막 방향 주의).
+          if (!this.canStepCell(nx, nz, cx, cz)) continue
+          field[nz * w + nx] = d + 1
+          next.push([nx, nz])
+        }
+      }
+      frontier = next
+    }
+    return field
+  }
+
   /** 목표 지점으로 향하는 거리장을 준비합니다. 같은 조건이면 다시 만들지 않습니다. */
   buildFlowField(targetX: number, targetZ: number): void {
     const { w, h } = this.level

@@ -100,6 +100,7 @@ try {
     let lastHp = 100
     let stuckSince = t0
     let lastPos = G.state().player
+    let lastKills = 0
     const regionLog = []
     let curRegion = ''
     let regionStart = t0
@@ -140,6 +141,18 @@ try {
     let bossKilled = false
     let clearedAt = 0
     const notes = []
+    /** 교전과 교전 사이의 빈 시간(초) 목록 */
+    const gaps = []
+    let wasInCombat = false
+    let lastCombatEnd = 0
+    /** 스태미나 압박 */
+    let minStamina = 100
+    let staminaSamples = 0
+    let lowStaminaSamples = 0
+    const dodgeCost = G.runStats().dodgeStamina
+    /** 무방비(강인도 붕괴)인 적이 곁에 있던 표본과, 그중 실제로 때린 표본 */
+    let brokenSamples = 0
+    let brokenUsedSamples = 0
 
     /**
      * ── 봇이 "무엇을 하고 있었는지" 를 남깁니다 ────────────────────────
@@ -172,6 +185,56 @@ try {
       const st = G.state()
       const vi = G.vialInfo()
       const p = st.player
+
+      /**
+       * ── 막힘 감지 — **모든 가지에서** 봅니다 ────────────────────────
+       *
+       * 예전에는 이 검사가 "목표 쪽으로 걷는" 가지 안에만 있었습니다.
+       * 그래서 봇이 **싸우다 갇히면** 아무 기록도 남지 않았습니다 —
+       * 실제로 두 판 연속 408초를 중앙 폐허에서 보내고 7마리만 잡았는데
+       * `[사건]` 이 통째로 비어 있었습니다. 계측기가 침묵한 것입니다.
+       *
+       * 판정도 바꿉니다. 제자리 전투는 정상이므로 위치만 보면 오탐이 납니다.
+       * **"움직이지도, 아무것도 죽이지도 못한 시간"** 을 봅니다.
+       */
+      {
+        const moved = Math.hypot(p.x - lastPos.x, p.z - lastPos.z)
+        const kills = G.runStats().kills
+        if (moved > 1.5 || kills > lastKills) {
+          lastPos = p
+          lastKills = kills
+          stuckSince = now()
+        } else if (now() - stuckSince > 25) {
+          const recent = new Map()
+          for (const a of recentActs) recent.set(a, (recent.get(a) ?? 0) + 1)
+          const near2 = st.nearestEnemy
+          const obj2 = G.objective()
+          const foe = near2 ? G.threats(9)[0] : null
+          notes.push({
+            at: Number((now() - t0).toFixed(1)),
+            what: '막힘 (25초간 이동도 처치도 없음)',
+            region: curRegion,
+            x: p.x,
+            z: p.z,
+            detail:
+              `직전 ${recentActs.length}프레임 [${[...recent.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([k, v]) => `${k}×${v}`)
+                .join(' ')}]` +
+              (obj2
+                ? ` · 목표 ${obj2.label} 걷는거리 ${obj2.walkDist.toFixed(0)}m`
+                : ' · 목표 없음') +
+              (near2
+                ? ` · 가까운적 ${near2.dist.toFixed(1)}m 체력 ${near2.hp.toFixed(0)} 경로 ${(G.pathStep(near2.x, near2.z)?.dist ?? -1).toFixed(0)}m`
+                : ' · 가까운 적 없음') +
+              (foe
+                ? ` · 그 적의 상태 ${JSON.stringify(G.enemyInfo(foe.entity))}`
+                : '') +
+              ` · 내 상태 ${st.player.state} 체력 ${p.hp.toFixed(0)} 스태미나 ${p.stamina.toFixed(0)} 성수병 ${vi.vials}`,
+          })
+          break
+        }
+      }
 
       // ---- 위험 계측 ----
       if (p.hp < lastHpSample) damageTaken += lastHpSample - p.hp
@@ -210,6 +273,57 @@ try {
           aggroSum += chasing
           aggroSamples++
           if (chasing >= 2) multiSamples++
+        }
+
+        /**
+         * ── 1. 전투 사이의 **빈 시간** ─────────────────────────────
+         *
+         * 가지 분포가 이렇게 나왔습니다: 목표이동 42% · 접근 27% · 공격 13%.
+         * **69%가 걷기**입니다. 그런데 "걷기가 많다"만으로는 고칠 곳을 모릅니다 —
+         * 소울류도 걷습니다. 다른 것은 **걷는 동안 위협이 있느냐**입니다.
+         * 방 단위 어그로(14m)를 넣은 뒤로 이 존의 걷기는 자는 적 옆을
+         * 지나가는 것이 되었을 수 있습니다. 그래서 "교전과 교전 사이가
+         * 몇 초나 비는가"를 직접 잽니다. 8초가 넘는 구간이 몇 개인지가
+         * 지도 밀도의 답이 됩니다.
+         */
+        const inCombat = chasing > 0
+        if (inCombat && !wasInCombat) {
+          if (lastCombatEnd > 0) gaps.push(now() - lastCombatEnd)
+          wasInCombat = true
+        } else if (!inCombat && wasInCombat) {
+          wasInCombat = false
+          lastCombatEnd = now()
+        }
+
+        /**
+         * ── 2. 스태미나가 **제약이 되는가** ────────────────────────
+         *
+         * 스태미나는 이미 구현돼 있습니다(회피 25, 회복 34/초). 그런데
+         * 봇은 예고만 보면 무조건 구르는데도 한 번도 안 죽습니다.
+         * 값이 커서 안 걸리는 것인지, 실제로 걸리는데도 버티는 것인지를
+         * 갈라야 방향이 정해집니다. 그래서 **"구르고 싶었는데 못 구른"**
+         * 횟수를 셉니다 — 이게 0이면 스태미나는 이 게임에 없는 것과 같습니다.
+         * 회피 비용은 게임에서 읽습니다(runStats().dodgeStamina).
+         */
+        if (p.stamina < minStamina) minStamina = p.stamina
+        if (inCombat) {
+          staminaSamples++
+          if (p.stamina < dodgeCost) lowStaminaSamples++
+        }
+
+        /**
+         * ── 3. 강인도 붕괴의 **틈을 쓰고 있는가** ──────────────────
+         *
+         * 붕괴는 이 게임에서 가장 큰 보상(긴 무방비)인데 별도 피해 배수가
+         * 없습니다. 그 판단이 옳으려면 **틈 동안 실제로 때리고 있어야** 합니다.
+         * 무방비인 적이 있는 프레임 중 봇이 때리는 프레임의 비율을 봅니다.
+         */
+        const brokenNear = G.threats(6).find((t) => t.entity !== undefined && G.enemyInfo(t.entity)?.broken)
+        if (brokenNear) {
+          brokenSamples++
+          // '처형' 도 창을 쓰는 행동입니다. 새 가지를 만들고 여기 안 넣으면
+          // 활용률이 **구조적으로 0%** 가 됩니다(실제로 그렇게 찍혔습니다).
+          if (act === '공격' || act === '반격' || act === '처형') brokenUsedSamples++
         }
       }
 
@@ -364,8 +478,37 @@ try {
           // 다가갈 때도 길을 따라갑니다 — 직선으로 가면 다시 절벽에 붙습니다.
           moveToward(reachable.x - p.x, reachable.z - p.z)
         } else {
-          markAct('공격')
           releaseAll()
+          /**
+           * 🗡️ **처형 안내가 떠 있으면 그것부터 누릅니다.**
+           *
+           * 처형을 넣고 첫 실행에서 **처형 0회**가 나왔습니다 — 붕괴는 41번
+           * 일어났는데도요. 원인은 봇이 쿨이 도는 스킬을 **항상 먼저** 쓰는
+           * 것이었습니다. 무방비 창(잡몹 1.0초)에 좌클릭을 누를 일이 없었습니다.
+           *
+           * 봇은 화면을 못 보지만, 이 봇의 원칙은 *"게임이 화면에 띄워 주는
+           * 것은 읽는다"* 입니다(초록 예고·사다리 안내도 같은 방식입니다).
+           * 처형 안내는 화면 한가운데 크게 뜨므로 사람이라면 반드시 봅니다.
+           * 판단은 게임이 한 값(finisherInfo().ready)을 그대로 씁니다 —
+           * 봇이 "무방비 + 2.6m"를 다시 계산하면 조건을 바꿀 때 조용히 어긋납니다.
+           */
+          /**
+           * ⚠️ **대기 상태일 때만** 누릅니다.
+           *
+           * 처음엔 안내가 떠 있으면 무조건 좌클릭하고 `continue` 했습니다.
+           * 그랬더니 공격 후딜·경직 중에도 이 가지로 빠져서, 봇이 그 전투
+           * 내내 **아무 공격도 안 하는** 상태가 됐습니다 — 처치가 45마리에서
+           * 7마리로 무너지고 존을 못 끝냈습니다. 처형이 아니라 **봇이 처형
+           * 가지에 갇힌 것**이었습니다.
+           * 지금 누를 수 없으면 조용히 평소 공격 규칙으로 내려갑니다.
+           */
+          if (G.finisherInfo().ready && st.player.state === 0) {
+            markAct('처형')
+            tap('Mouse0')
+            await sleep()
+            continue
+          }
+          markAct('공격')
           /**
            * 🥋 집중이 가득이면 강타로 태웁니다.
            *
@@ -431,16 +574,6 @@ try {
           }
         }
       }
-
-      // ---- 이동: 목표 쪽으로 ----
-      //
-      // **직선이 아니라 경로의 다음 한 걸음**을 따라갑니다. 지도가 원이 되면서
-      // 목표까지 직선으로 가면 성벽마루에 처박히기 때문입니다. 게임의 화살표도
-      // 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
-      const obj = G.objective()
-      if (!obj) break
-      markAct('목표이동')
-      moveToward(obj.stepX - p.x, obj.stepZ - p.z)
 
       /**
        * ---- 화톳불 ----
@@ -569,45 +702,29 @@ try {
         }
       }
 
-      // ---- 막힘 감지 ----
-      const moved = Math.hypot(p.x - lastPos.x, p.z - lastPos.z)
-      if (moved > 1.5) {
-        lastPos = p
-        stuckSince = now()
-      } else if (now() - stuckSince > 18) {
-        /**
-         * **막힌 순간의 상태를 통째로 남깁니다.**
-         *
-         * 좌표만 남겼을 때는 원인을 코드 읽기로 추측할 수밖에 없었습니다.
-         * 여기서 찍는 세 가지가 가설을 바로 갈라 줍니다:
-         *   · 가지 분포 — 싸우다 막혔나(공격/접근) vs 걷다 막혔나(목표이동)
-         *   · 목표와 다음 걸음 — 길찾기가 **벽을 가리키고** 있나
-         *   · 가까운 적과 그 도달 가능 여부 — 못 잡는 적에 붙어 있나
-         */
-        const recent = new Map()
-        for (const a of recentActs) recent.set(a, (recent.get(a) ?? 0) + 1)
-        const near2 = st.nearestEnemy
-        notes.push({
-          at: Number((now() - t0).toFixed(1)),
-          what: '막힘 (18초간 진행 없음)',
-          region: curRegion,
-          x: p.x,
-          z: p.z,
-          detail:
-            `직전 ${recentActs.length}프레임 [${[...recent.entries()]
-              .sort((a, b) => b[1] - a[1])
-              .map(([k, v]) => `${k}×${v}`)
-              .join(' ')}]` +
-            (obj
-              ? ` · 목표 ${obj.label}(${obj.x.toFixed(0)},${obj.z.toFixed(0)}) 걷는거리 ${obj.walkDist.toFixed(0)}m 다음걸음(${obj.stepX.toFixed(0)},${obj.stepZ.toFixed(0)})`
-              : ' · 목표 없음') +
-            (near2
-              ? ` · 가까운적 ${near2.dist.toFixed(1)}m 경로 ${(G.pathStep(near2.x, near2.z)?.dist ?? -1).toFixed(0)}m`
-              : ' · 가까운 적 없음') +
-            ` · 체력 ${p.hp.toFixed(0)} 성수병 ${vi.vials}`,
-        })
-        break
-      }
+      /**
+       * ---- 이동: 목표 쪽으로 (**마지막 수단**) ----
+       *
+       * **직선이 아니라 경로의 다음 한 걸음**을 따라갑니다. 지도가 원이 되면서
+       * 목표까지 직선으로 가면 성벽마루에 처박히기 때문입니다. 게임의 화살표도
+       * 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
+       *
+       * ⚠️ **이 가지는 반드시 맨 마지막이어야 합니다.**
+       * 예전에는 화톳불보다 **위에** 있었고, `continue` 도 하지 않았습니다.
+       * 그래서 한 프레임에 `moveToward` 가 **두 번** 불렸습니다 — 먼저 목표
+       * 쪽으로, 그다음 화톳불 쪽으로. 두 방향이 반대면 서로를 지웁니다.
+       *
+       * 중간 화톳불을 폐허(주 동선 위)로 옮기자 이 둘이 늘 반대 방향이 되어
+       * 봇이 화톳불 1m 앞에서 **제자리걸음**을 했습니다: 두 판 연속 408초 동안
+       * 7마리만 잡고 존을 못 끝냈습니다. 막힘 기록의 "직전 90프레임
+       * [목표이동×50 강화이동×40]" 이 그 절반씩을 그대로 보여 줬습니다.
+       *
+       * 한 프레임에는 **목적지가 하나**여야 합니다.
+       */
+      const obj = G.objective()
+      if (!obj) break
+      markAct('목표이동')
+      moveToward(obj.stepX - p.x, obj.stepZ - p.z)
 
       lastHp = p.hp
       await sleep()
@@ -642,6 +759,19 @@ try {
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
+      /** 전투 사이 빈 시간 — 지도 밀도의 답 */
+      gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
+      gapMax: gaps.length ? Number(Math.max(...gaps).toFixed(1)) : 0,
+      gapLong: gaps.filter((g) => g >= 8).length,
+      gapCount: gaps.length,
+      /** 스태미나가 실제로 제약이 되는가 */
+      minStamina: Number(minStamina.toFixed(0)),
+      dodgeCost,
+      lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,
+      /** 강인도 붕괴와 그 틈의 활용 */
+      poiseBreaks: G.runStats().poiseBreaks,
+      finishers: G.runStats().finishers,
+      brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
        * **시간이 어디로 갔는가** — 구역별 누적보다 이쪽이 원인에 가깝습니다.
        * 구역은 "어디에 있었나"만 말하지만, 가지는 "무엇을 하고 있었나"를 말합니다.
@@ -734,6 +864,15 @@ try {
   console.log(`  후퇴       근접(8m) 중 거리를 벌리던 시간 ${log.retreatRatio}%`)
   console.log(
     `  적의 공격   ${log.enemySwings}회 휘두름 · ${log.enemyHits}회 적중 (적중률 ${Math.round((log.enemyHits / Math.max(1, log.enemySwings)) * 100)}%)`,
+  )
+  console.log(
+    `  빈 시간     교전 사이 평균 ${log.gapAvg}초 · 최장 ${log.gapMax}초 · 8초 이상 ${log.gapLong}회 / ${log.gapCount}구간`,
+  )
+  console.log(
+    `  스태미나    최저 ${log.minStamina} · 교전 중 회피(${log.dodgeCost})를 못 낼 만큼 낮았던 시간 ${log.lowStaminaRatio}%`,
+  )
+  console.log(
+    `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%`,
   )
   console.log('')
 } finally {

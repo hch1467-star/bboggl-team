@@ -1,10 +1,18 @@
-import { HEAVY_COMBO, SKILL_KEY_CODES, heavyStep, type SkillDef } from '../config/arsenal'
-import { FOCUS, PLAYER, VIAL } from '../config/balance'
+import {
+  FINISH_COMBO,
+  HEAVY_COMBO,
+  SKILL_KEY_CODES,
+  finisherStep,
+  heavyStep,
+  type SkillDef,
+} from '../config/arsenal'
+import { FINISHER, FOCUS, PLAYER, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
   ActorState,
   AttackPhase,
+  Enemy,
   Health,
   Loadout,
   Player,
@@ -73,6 +81,7 @@ export interface ControlContext {
 }
 
 const players = defineQuery(Player, Actor, Transform, Velocity, Stamina, Health, Loadout)
+const finishable = defineQuery(Enemy, Transform, Health, Actor)
 
 /**
  * 회복이 실제로 들어간 순간. 게임 루프가 읽고 비웁니다.
@@ -159,9 +168,36 @@ function beginHeavy(p: number, aimRot: number): void {
   beginAttack(p, HEAVY_COMBO, aimRot)
 }
 
+/**
+ * 지금 처형할 수 있는 무방비 적 — 없으면 -1.
+ *
+ * **정면을 요구하지 않습니다.** 무방비인 적은 방향 개념이 없으니(안 돌아섭니다)
+ * 각도를 요구하면 "왜 안 되지"만 늘어납니다. 대신 거리는 짧게(2.6m) 둬서
+ * **다가가는 것 자체가 결정**이 되게 합니다 — 그 사이 옆의 적이 움직입니다.
+ */
+export function finisherTarget(p: number): number {
+  const ids = finishable.run()
+  let best = -1
+  let bestD: number = FINISHER.reach
+  for (let i = 0; i < finishable.count; i++) {
+    const e = ids[i]
+    if (Enemy.brokenT[e] <= 0) continue
+    if (Health.hp[e] <= 0) continue
+    const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
+    if (d > bestD) continue
+    bestD = d
+    best = e
+  }
+  return best
+}
+
 function beginAttack(p: number, index: number, aimRot: number): void {
   const c =
-    index === HEAVY_COMBO ? heavyStep(weaponOf(p), Player.focusSpent[p]) : weaponOf(p).combo[index]
+    index === HEAVY_COMBO
+      ? heavyStep(weaponOf(p), Player.focusSpent[p])
+      : index === FINISH_COMBO
+        ? finisherStep(weaponOf(p))
+        : weaponOf(p).combo[index]
   // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
   // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
   const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
@@ -503,9 +539,24 @@ export function playerControlSystem(ctx: ControlContext): void {
           }
           break
         }
-        if (attackPressed && Stamina.value[p] >= weapon.combo[0].staminaCost) {
-          beginAttack(p, 0, aimRot)
-          break
+        if (attackPressed) {
+          /**
+           * ---- 처형 ----
+           *
+           * **새 키를 만들지 않았습니다.** 소울류의 리포스트가 그렇듯 기본
+           * 공격이 상황에 따라 다른 것이 됩니다. 키를 하나 더 늘리면 초보자가
+           * 외울 것이 늘고, 정작 급한 순간에 안 눌립니다. 화면에는 "처형" 안내가
+           * 뜨므로 **무엇이 달라지는지는 보입니다.**
+           */
+          const fin = finisherTarget(p)
+          if (fin >= 0 && Stamina.value[p] >= FINISHER.staminaCost) {
+            beginAttack(p, FINISH_COMBO, aimRot)
+            break
+          }
+          if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
+            beginAttack(p, 0, aimRot)
+            break
+          }
         }
         /**
          * **거절음.** 지금까지 스태미나가 모자라면 아무 일도 안 일어났습니다.
@@ -525,7 +576,9 @@ export function playerControlSystem(ctx: ControlContext): void {
         const combo =
           Actor.comboIndex[p] === HEAVY_COMBO
             ? heavyStep(weapon, Player.focusSpent[p])
-            : weapon.combo[Math.min(Actor.comboIndex[p], weapon.combo.length - 1)]
+            : Actor.comboIndex[p] === FINISH_COMBO
+              ? finisherStep(weapon)
+              : weapon.combo[Math.min(Actor.comboIndex[p], weapon.combo.length - 1)]
         const phase = Actor.phase[p] as AttackPhase
 
         // 후딜에서만 스킬/구르기로 탈출할 수 있습니다.
@@ -815,8 +868,8 @@ export function playerControlSystem(ctx: ControlContext): void {
 
 function endAttack(p: number, aimRot: number): void {
   const weapon = weaponOf(p)
-  // 강타는 **마무리**입니다. 뒤로 콤보가 이어지면 태운 자원의 무게가 사라집니다.
-  if (Actor.comboIndex[p] === HEAVY_COMBO) {
+  // 강타와 처형은 **마무리**입니다. 뒤로 콤보가 이어지면 그 한 방의 무게가 사라집니다.
+  if (Actor.comboIndex[p] === HEAVY_COMBO || Actor.comboIndex[p] === FINISH_COMBO) {
     Actor.state[p] = ActorState.Idle
     Actor.comboIndex[p] = 0
     Actor.bufferedAttack[p] = 0

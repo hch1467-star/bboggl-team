@@ -64,6 +64,18 @@ let aiEnabled = true
  */
 let aggroRangeOverride = 0
 
+/**
+ * "저 적이 나에게 실제로 걸어올 수 있는가"를 물어보는 함수.
+ *
+ * 지형(거리장)이 있으면 게임 루프가 여기에 꽂아 줍니다. 없으면(아레나 모드)
+ * null 을 돌려주고, 그때는 예전처럼 직선거리를 씁니다.
+ */
+let reachDistance: ((x: number, z: number) => number | null) | null = null
+
+export function setReachDistance(fn: ((x: number, z: number) => number | null) | null): void {
+  reachDistance = fn
+}
+
 export function setAggroRangeOverride(range: number): void {
   aggroRangeOverride = range
 }
@@ -476,7 +488,23 @@ export function enemyAiSystem(
      * 종류별 값을 그대로 쓰면 존 전체가 한 번에 깨어나 한 줄로 걸어옵니다.
      */
     const range = aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, aggroRangeOverride) : cfg.aggroRange
-    if (Enemy.aggro[e] === 0 && dist <= range) Enemy.aggro[e] = 1
+    /**
+     * ⚠️ **직선거리가 아니라 걸어야 하는 거리로 깨웁니다.**
+     *
+     * 자동 플레이가 잡았습니다: 성벽마루 건너편의 적이 직선 12.4m 라고
+     * 깨어나 영원히 벽을 향해 걸었습니다(실제 경로는 98m). 그 적 하나가
+     * 근처 화톳불을 영원히 잠그기까지 했습니다 — 사람에게는 "화면에 적이
+     * 없는데 쉴 수가 없다"로 보입니다.
+     *
+     * 수직 지도를 만든 순간 생긴 문제입니다. 한 줄짜리 지도에서는 직선과
+     * 경로가 거의 같아서 드러나지 않았습니다.
+     */
+    // 지형이 없으면(아레나) 예전처럼 직선거리. 지형이 있는데 **길이 아예 없으면**
+    // 그 적은 나에게 올 수 없으므로 영원히 안 깨어납니다.
+    const effectiveDist = reachDistance
+      ? (reachDistance(Transform.x[e], Transform.z[e]) ?? Infinity)
+      : dist
+    if (Enemy.aggro[e] === 0 && effectiveDist <= range) Enemy.aggro[e] = 1
 
     if (Enemy.aggro[e] === 0) {
       decayVelocity(e, dt, 5)

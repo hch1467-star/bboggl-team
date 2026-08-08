@@ -32,7 +32,8 @@
     "focus": "node tools/focus-probe.mjs",
     "upgrade": "node tools/upgrade-probe.mjs",
     "encounter": "node tools/encounter-probe.mjs",
-    "sweep": "node tools/sweep-probe.mjs"
+    "sweep": "node tools/sweep-probe.mjs",
+    "finish": "node tools/finish-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
