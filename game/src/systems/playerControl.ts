@@ -680,11 +680,26 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (
           phase === AttackPhase.Recovery &&
           Actor.bufferedAttack[p] === 1 &&
-          Actor.timer[p] <= def.recovery * 0.5 &&
-          Stamina.value[p] >= weapon.combo[0].staminaCost
+          Actor.timer[p] <= def.recovery * 0.5
         ) {
-          beginAttack(p, 0, aimRot)
-          break
+          /**
+           * 스킬 후딜에서도 **처형**이 나갑니다 — 콤보 후딜과 같은 규칙입니다.
+           *
+           * 이게 빠져 있으면 스킬을 많이 쓰는 플레이일수록 처형을 못 봅니다.
+           * 실제로 자동 플레이가 그랬습니다: 무방비 창을 89%나 쓰면서도
+           * 처형은 한 판에 한 번. 스킬 동작 중에 적이 무너지면 그 창이
+           * 통째로 스킬 후딜에 먹혔기 때문입니다.
+           * "무너뜨렸으면 마무리할 수 있다"는 약속은 **무엇을 쓰던 중이었든**
+           * 지켜져야 합니다.
+           */
+          if (Stamina.value[p] >= FINISHER.staminaCost && finisherTarget(p) >= 0) {
+            beginAttack(p, FINISH_COMBO, aimRot)
+            break
+          }
+          if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
+            beginAttack(p, 0, aimRot)
+            break
+          }
         }
 
         // 후딜 후반에는 **다음 스킬로 바로 이어갈 수 있습니다.**
@@ -875,6 +890,36 @@ function endAttack(p: number, aimRot: number): void {
     Actor.bufferedAttack[p] = 0
     Actor.comboWindowT[p] = 0
     Player.focusSpent[p] = 0
+    return
+  }
+  /**
+   * ---- 콤보 도중에 적이 무너지면, 다음 타는 **처형**이 됩니다 ----
+   *
+   * ── 왜 이게 필요했는가 (계측이 답을 그대로 줬습니다) ──────────────
+   * 처형을 넣고 재 보니 한 판에 **붕괴 43회 · 처형 0~1회** 였습니다.
+   * 원인을 세어 보니 이렇게 나왔습니다:
+   *
+   *     처형 안내가 떠 있던 프레임 5355
+   *     그중 곧바로 누를 수 있던 프레임 **31** (0.6%)
+   *
+   * 안내는 충분히 떠 있었습니다. **누를 수 있는 순간이 없었을 뿐입니다.**
+   * 처형이 `Idle` 에서만 시작되는데, 싸우는 동안 플레이어는 거의 항상
+   * 공격·후딜 중이라 Idle 인 프레임이 사실상 없습니다.
+   *
+   * 소울류의 리포스트도, 세키로의 인살도 이 문제를 **선입력**으로 풉니다 —
+   * 휘두르는 중에 눌러 둔 것이 동작이 끝나는 순간 나갑니다. 우리에게는 이미
+   * 그 버퍼가 있습니다(스킬 선입력). 콤보로 이어질 자리에서 **무방비인 적이
+   * 사거리 안이면 다음 타를 처형으로 바꾸기만** 하면 됩니다.
+   *
+   * 그래서 새 키도, 새 상태도 늘리지 않습니다: 무너뜨린 그 손으로 이어서
+   * 누르면 처형이 나갑니다.
+   */
+  if (
+    Actor.bufferedAttack[p] === 1 &&
+    Stamina.value[p] >= FINISHER.staminaCost &&
+    finisherTarget(p) >= 0
+  ) {
+    beginAttack(p, FINISH_COMBO, aimRot)
     return
   }
   const next = Actor.comboIndex[p] + 1

@@ -335,6 +335,24 @@ export function breakPoise(t: number): void {
     Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
   Enemy.poise[t] = cfg.poiseMax
   Enemy.poiseIdleT[t] = 0
+  /**
+   * **무너뜨린 타격은 밀지 않습니다.**
+   *
+   * 이 프레임에 이미 들어간 넉백을 여기서 지웁니다(판정이 넉백 → 강인도
+   * 순서라 취소가 가장 단순합니다).
+   *
+   * ── 왜 ────────────────────────────────────────────────────────
+   * 처형을 넣고 재 보니 한 판에 **붕괴 43회 · 처형 1회** 였습니다.
+   * 무방비 창은 잡몹 1.0초인데, 무너뜨린 그 타격의 넉백이 적을 2~4m 밖으로
+   * 밀어냅니다. 그래서 창의 대부분이 **다시 걸어가는 시간**으로 사라집니다.
+   *
+   * 세키로의 체간 붕괴도, 소울의 리포스트도 적을 날려 보내지 않습니다.
+   * 무너진 적은 **그 자리에 주저앉아야** 합니다 — 그래야 "무너뜨렸다"가
+   * 곧바로 "지금 뭘 할 수 있다"로 이어집니다. 밀어내면 보상이 아니라
+   * 거리 재설정이 됩니다.
+   */
+  Velocity.kx[t] = 0
+  Velocity.kz[t] = 0
   Enemy.brokenT[t] = Enemy.kind[t] === EnemyKind.Boss ? POISE.brokenTimeBoss : POISE.brokenTime
   Actor.state[t] = ActorState.Stagger
   Actor.timer[t] = Enemy.brokenT[t]

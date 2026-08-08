@@ -138,6 +138,17 @@ try {
     let lastNearDist = 0
     let lastHpSample = G.state().player.hp
     let bossSeen = false
+    /** ── 보스전 계측 — 존의 절정 60초를 처음으로 재 봅니다 ── */
+    let bossStart = 0
+    let bossFightTime = 0
+    let bossPhaseSeen = 0
+    let bossDamageTaken = 0
+    let bossDamageDealt = 0
+    let bossMinHp = 100
+    let bossSamples = 0
+    let lastBossHp = 0
+    let bossMaxHp = 0
+    let bossKilledAt = 0
     let bossKilled = false
     let clearedAt = 0
     const notes = []
@@ -153,6 +164,9 @@ try {
     /** 무방비(강인도 붕괴)인 적이 곁에 있던 표본과, 그중 실제로 때린 표본 */
     let brokenSamples = 0
     let brokenUsedSamples = 0
+    /** 처형 안내가 떠 있던 표본 / 그중 곧바로 누를 수 있던(대기 상태) 표본 */
+    let finisherReadySamples = 0
+    let finisherReadyIdleSamples = 0
 
     /**
      * ── 봇이 "무엇을 하고 있었는지" 를 남깁니다 ────────────────────────
@@ -237,7 +251,16 @@ try {
       }
 
       // ---- 위험 계측 ----
-      if (p.hp < lastHpSample) damageTaken += lastHpSample - p.hp
+      /**
+       * ⚠️ 이 프레임에 받은 피해를 **변수로 남깁니다.**
+       *
+       * 보스전 피해를 여기 아래에서 다시 `lastHpSample - p.hp` 로 재려다
+       * **항상 0** 이 나왔습니다 — 이 줄에서 이미 `lastHpSample` 을 갱신해
+       * 버리기 때문입니다. 그대로 뒀으면 "보스가 68초 동안 한 대도 못
+       * 때렸다"는 **거짓 결론**을 그럴듯하게 보고할 뻔했습니다.
+       */
+      const frameDamage = Math.max(0, lastHpSample - p.hp)
+      damageTaken += frameDamage
       lastHpSample = p.hp
       if (p.hp < minHp) minHp = p.hp
       /**
@@ -318,6 +341,18 @@ try {
          * 없습니다. 그 판단이 옳으려면 **틈 동안 실제로 때리고 있어야** 합니다.
          * 무방비인 적이 있는 프레임 중 봇이 때리는 프레임의 비율을 봅니다.
          */
+        /**
+         * **처형 안내가 실제로 떠 있는 시간**을 셉니다.
+         *
+         * 붕괴 43회에 처형 1회였습니다. 원인이 둘 중 무엇인지 갈라야 합니다:
+         * 안내가 안 뜨는 것인가(창이 사거리 밖에서 소모됨), 떠 있는데 봇이
+         * 못 누르는 것인가(후딜·경직). 세어 보면 바로 갈립니다.
+         */
+        const fi = G.finisherInfo()
+        if (fi.ready) {
+          finisherReadySamples++
+          if (st.player.state === 0) finisherReadyIdleSamples++
+        }
         const brokenNear = G.threats(6).find((t) => t.entity !== undefined && G.enemyInfo(t.entity)?.broken)
         if (brokenNear) {
           brokenSamples++
@@ -409,7 +444,67 @@ try {
       const be = G.bossEncounter()
       if (be && be.encounter > 0 && !bossSeen) {
         bossSeen = true
+        bossStart = now()
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '보스 조우', region: curRegion })
+      }
+      /**
+       * ── 보스전을 **재는** 구간 ───────────────────────────────────
+       *
+       * 지금까지 보스에 대해 기록한 것은 "조우 O" 하나뿐이었습니다.
+       * 존의 절정 60초를 한 번도 재 본 적이 없다는 뜻입니다 —
+       * 3페이즈를 다 보는지, 몇 초 만에 끝나는지, 위험하기는 한지.
+       */
+      if (bossSeen && be && be.hp > 0) {
+        bossFightTime = now() - bossStart
+        if (be.phase + 1 > bossPhaseSeen) bossPhaseSeen = be.phase + 1
+        bossSamples++
+        const dmg = Math.max(0, lastBossHp - be.hp)
+        if (lastBossHp > 0) bossDamageDealt += dmg
+        lastBossHp = be.hp
+        bossMaxHp = be.maxHp
+        bossDamageTaken += frameDamage
+        if (p.hp < bossMinHp) bossMinHp = p.hp
+      } else if (bossSeen && !be && bossKilledAt === 0) {
+        // 보스가 사라졌습니다 = 처치. 시간은 **그 순간**으로 고정합니다.
+        bossKilledAt = now()
+        bossKilled = true
+        notes.push({
+          at: Number((now() - t0).toFixed(1)),
+          what: `수문장 처치 (교전 ${(now() - bossStart).toFixed(0)}초 · 본 페이즈 ${bossPhaseSeen})`,
+          region: curRegion,
+        })
+      }
+
+      /**
+       * 🗡️ **처형은 거리 검사보다 먼저 봅니다.**
+       *
+       * 처음엔 "가까운 적이 2.2m 안일 때"의 공격 가지 안에 넣었습니다.
+       * 그랬더니 한 판에 붕괴가 28번 일어나는데 처형은 **1회**였습니다.
+       * 이유는 단순했습니다 — 무너진 적은 **넉백으로 밀려나** 2.2m 밖에 있고,
+       * 그 1.0초 동안 봇은 "접근" 가지에서 걷고만 있었습니다.
+       *
+       * 안내가 떠 있다는 것 자체가 이미 **사거리(2.6m) 안**이라는 뜻입니다.
+       * 게임이 "지금 이걸 할 수 있다"고 말해 주는데 봇이 거리를 다시
+       * 계산해서 안 하는 것은, 계측기가 사람보다 못하게 구는 것입니다.
+       */
+      /**
+       * ⚠️ **대기 상태를 요구하지 않습니다.**
+       *
+       * 처음엔 `state === 0` 을 걸었습니다(후딜 중에 눌러도 씹혀서 봇이 그
+       * 가지에 갇혔던 적이 있어서). 그런데 세어 보니 안내가 떠 있던 5355
+       * 프레임 중 대기 상태는 **31 프레임(0.6%)** 이었습니다 — 조건이 아니라
+       * 사실상 금지였습니다.
+       * 지금은 게임이 선입력을 받아 콤보 다음 타를 처형으로 바꿔 주므로,
+       * 사람처럼 **그냥 누릅니다.**
+       */
+      if (G.finisherInfo().ready) {
+        markAct('처형')
+        const t = G.finisherInfo().target
+        const ts = t >= 0 ? G.entityState(t) : null
+        if (ts) G.aimAtWorld(ts.x, ts.z)
+        tap('Mouse0')
+        await sleep()
+        continue
       }
 
       /**
@@ -502,12 +597,6 @@ try {
            * 가지에 갇힌 것**이었습니다.
            * 지금 누를 수 없으면 조용히 평소 공격 규칙으로 내려갑니다.
            */
-          if (G.finisherInfo().ready && st.player.state === 0) {
-            markAct('처형')
-            tap('Mouse0')
-            await sleep()
-            continue
-          }
           markAct('공격')
           /**
            * 🥋 집중이 가득이면 강타로 태웁니다.
@@ -750,7 +839,7 @@ try {
     for (const r of merged) total[r.name] = (total[r.name] ?? 0) + r.seconds
     const st = G.state()
     const em = G.emberInfo()
-    bossKilled = !st.nearestEnemy || (G.bossEncounter() === null)
+    if (!bossKilled) bossKilled = bossSeen && G.bossEncounter() === null
     return {
       elapsed: Number((now() - t0).toFixed(1)),
       deaths: G.runStats().deaths,
@@ -759,6 +848,18 @@ try {
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
+      boss: {
+        fought: bossSeen,
+        // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
+        seconds: Number((bossKilledAt > 0 ? bossKilledAt - bossStart : bossFightTime).toFixed(1)),
+        phasesSeen: bossPhaseSeen,
+        damageTaken: Math.round(bossDamageTaken),
+        damageDealt: Math.round(bossDamageDealt),
+        maxHp: Math.round(bossMaxHp),
+        minHp: Math.round(bossMinHp),
+        killed: bossKilled,
+        samples: bossSamples,
+      },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
       gapMax: gaps.length ? Number(Math.max(...gaps).toFixed(1)) : 0,
@@ -770,6 +871,8 @@ try {
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,
       /** 강인도 붕괴와 그 틈의 활용 */
       poiseBreaks: G.runStats().poiseBreaks,
+      finisherReady: finisherReadySamples,
+      finisherReadyIdle: finisherReadyIdleSamples,
       finishers: G.runStats().finishers,
       brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
@@ -871,8 +974,17 @@ try {
   console.log(
     `  스태미나    최저 ${log.minStamina} · 교전 중 회피(${log.dodgeCost})를 못 낼 만큼 낮았던 시간 ${log.lowStaminaRatio}%`,
   )
+  if (log.boss.fought) {
+    console.log(
+      `  보스전      ${log.boss.seconds}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
+        `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}`,
+    )
+  } else {
+    console.log('  보스전      조우하지 못함')
+  }
   console.log(
-    `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%`,
+    `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
+      `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 곧바로 누를 수 있던 프레임 ${log.finisherReadyIdle})`,
   )
   console.log('')
 } finally {
