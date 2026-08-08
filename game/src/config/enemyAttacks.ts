@@ -210,7 +210,12 @@ export const GRUNT_ATTACKS: EnemyAttackDef[] = [
     id: 'grunt_sweep',
     intent: AttackIntent.Sweep,
     windup: 1.0,
-    active: 0.18,
+    /**
+     * **판정이 0.55초 머무릅니다.** 구르기 무적(0.24초)보다 확실히 깁니다.
+     * 그래야 "제자리에서 굴러 넘기기"가 안 되고, 표에 적어 둔 노랑의 정답
+     * (걸어서 이탈)이 실제로 유일한 답이 됩니다.
+     */
+    active: 0.55,
     recovery: 0.85,
     reach: 4.6,
     arcDeg: 200,
@@ -248,7 +253,8 @@ export const BOSS_ATTACKS: EnemyAttackDef[] = [
     id: 'boss_quake',
     intent: AttackIntent.Sweep,
     windup: 1.35,
-    active: 0.22,
+    // 잡몹보다 조금 더 오래 — 반경 7.5m 를 걸어서 빠져나올 시간이 필요합니다.
+    active: 0.7,
     recovery: 1.2,
     reach: 7.5,
     arcDeg: 360,

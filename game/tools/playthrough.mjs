@@ -128,11 +128,42 @@ try {
     let aggroSamples = 0
     /** 그중 둘 이상과 붙어 있던 표본 수 */
     let multiSamples = 0
+    /** 가까운 적이 있는 표본 수와, 그중 거리가 벌어지던 표본 수 */
+    let engageSamples = 0
+    let retreatSamples = 0
+    let lastNearDist = 0
     let lastHpSample = G.state().player.hp
     let bossSeen = false
     let bossKilled = false
     let clearedAt = 0
     const notes = []
+
+    /**
+     * ── 봇이 "무엇을 하고 있었는지" 를 남깁니다 ────────────────────────
+     *
+     * 지난 실행이 275초에 (54,18)에서 **18초간 진행 없음**으로 끝났습니다.
+     * 그런데 기록에 남은 건 좌표뿐이라, 원인을 놓고 세 가지 가설을 세워
+     * 코드를 읽으며 추측했습니다 — 길찾기가 벽을 가리켰나, 못 잡는 적에
+     * 붙었나, 화톳불과 목표 사이를 오갔나.
+     *
+     * 이 프로젝트에서 이미 여러 번 겪은 실패입니다: **계측기가 결과만
+     * 말하고 과정을 안 말하면, 남는 건 추측뿐입니다.** 그래서 매 프레임
+     * 어떤 가지를 탔는지 한 단어로 남기고, 막혔을 때 그 분포와 그 순간의
+     * 상태(목표·경로·가까운 적)를 통째로 적습니다.
+     *
+     * 이건 게임을 고치는 변경이 아니라 **다음 진단을 추측이 아니게 만드는**
+     * 변경입니다.
+     */
+    let act = '시작'
+    /** 최근 90 프레임의 가지 — 막혔을 때 되감아 봅니다. */
+    const recentActs = []
+    const actTotals = new Map()
+    const markAct = (name) => {
+      act = name
+      actTotals.set(name, (actTotals.get(name) ?? 0) + 1)
+      recentActs.push(name)
+      if (recentActs.length > 90) recentActs.shift()
+    }
 
     while (now() - t0 < LIMIT) {
       const st = G.state()
@@ -151,6 +182,24 @@ try {
        * 분명히 함께 깨어나는데도요. 재려던 것은 "얼마나 자주 여럿과 싸우나"인데
        * 걷는 시간까지 섞으면 **어그로를 좁힐수록 좋아 보이는** 거꾸로 된 지표가 됩니다.
        */
+      /**
+       * ── 후퇴로 넘기고 있는가 ──────────────────────────────────
+       *
+       * 조합을 설계해도 **물러나면 다 풀린다면** 아무 의미가 없습니다.
+       * 플레이어 5.4m/s vs 잡몹 3.0m/s 이므로 후퇴는 늘 성공합니다.
+       * 그래서 "가까운 적과의 거리가 늘어나는 시간"의 비율을 잽니다.
+       */
+      {
+        const n0 = st.nearestEnemy
+        if (n0 && n0.dist < 8) {
+          engageSamples++
+          if (lastNearDist > 0 && n0.dist > lastNearDist + 0.02) retreatSamples++
+          lastNearDist = n0.dist
+        } else {
+          lastNearDist = 0
+        }
+      }
+
       {
         const chasing = G.threats(12).filter((t) => t.aggro).length
         if (chasing > maxAggro) maxAggro = chasing
@@ -211,6 +260,7 @@ try {
       const near = st.nearestEnemy
       if (p.hp < 50 && vi.vials > 0) {
         if (!near || near.dist > 7) {
+          markAct('성수병')
           releaseAll()
           tap('KeyX')
           const until = now() + 1.1
@@ -219,6 +269,7 @@ try {
         }
         // 아직 붙어 있으면 반대 방향으로 도망칩니다(최대 3초).
         // 물러날 곳이 없으면(벽·절벽) 계속 뒷걸음질 쳐 봐야 시간만 버립니다.
+        markAct('후퇴(성수병)')
         const flee = now() + 3
         const fleeStart = { x: p.x, z: p.z }
         while (now() < flee) {
@@ -288,6 +339,7 @@ try {
          */
         const green = threats.find((t) => t.winding && t.intent === 4 && t.inFront && t.dist < 5.5)
         if (green && ready.length > 0) {
+          markAct('반격')
           G.aimAtWorld(green.x, green.z)
           tap(ready[0].key)
           await sleep()
@@ -298,15 +350,18 @@ try {
         // **가장 단순한 대응**만 합니다 — 이게 초보자의 하한선입니다.
         const danger = threats.some((t) => t.winding && t.intent !== 4 && t.dist < 6)
         if (danger) {
+          markAct('구르기')
           tap('Space')
           await sleep()
           continue
         }
 
         if (near.dist > 2.2) {
+          markAct('접근')
           // 다가갈 때도 길을 따라갑니다 — 직선으로 가면 다시 절벽에 붙습니다.
           moveToward(reachable.x - p.x, reachable.z - p.z)
         } else {
+          markAct('공격')
           releaseAll()
           /**
            * 🥋 집중이 가득이면 강타로 태웁니다.
@@ -330,12 +385,14 @@ try {
       // 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
       const obj = G.objective()
       if (!obj) break
+      markAct('목표이동')
       moveToward(obj.stepX - p.x, obj.stepZ - p.z)
 
       // ---- 사다리: 위에 서 있으면 내립니다 ----
       // 사람이라면 안내가 뜬 김에 누릅니다. 봇이 안 누르면 지름길이 열리는지
       // 아닌지를 이 실행으로는 알 수 없습니다.
       if (G.shortcutHint() === 'ready') {
+        markAct('사다리')
         releaseAll()
         tap('KeyV')
         await sleep()
@@ -371,6 +428,7 @@ try {
           // 성문 앞에서 133초를 헤맸고, 그 시간이 "지도가 어렵다"로 잘못
           // 기록될 뻔했습니다. 길찾기를 쓰는 쪽과 안 쓰는 쪽이 섞여 있으면
           // 계측이 거짓말을 합니다.
+          markAct('보급이동')
           const step = G.pathStep(fire.x, fire.z)
           if (step) moveToward(step.x - p.x, step.z - p.z)
           else moveToward(fire.x - p.x, fire.z - p.z)
@@ -379,6 +437,7 @@ try {
         }
         // 도착했으면 **쉴 때까지** 서 있습니다. 지나가며 잠깐 멈추는 것으로는
         // restTime 을 못 채웁니다.
+        markAct('휴식')
         releaseAll()
         const restedBy = now() + 6
         while (now() < restedBy) {
@@ -421,6 +480,7 @@ try {
            * 끝났습니다. 길찾기는 **벽을 돌아가는 용도**지 마지막 두 걸음용이
            * 아닙니다.
            */
+          markAct('강화이동')
           const useStraight = straight < 6
           const tx = useStraight ? fire.x : step.x
           const tz = useStraight ? fire.z : step.z
@@ -472,12 +532,36 @@ try {
         lastPos = p
         stuckSince = now()
       } else if (now() - stuckSince > 18) {
+        /**
+         * **막힌 순간의 상태를 통째로 남깁니다.**
+         *
+         * 좌표만 남겼을 때는 원인을 코드 읽기로 추측할 수밖에 없었습니다.
+         * 여기서 찍는 세 가지가 가설을 바로 갈라 줍니다:
+         *   · 가지 분포 — 싸우다 막혔나(공격/접근) vs 걷다 막혔나(목표이동)
+         *   · 목표와 다음 걸음 — 길찾기가 **벽을 가리키고** 있나
+         *   · 가까운 적과 그 도달 가능 여부 — 못 잡는 적에 붙어 있나
+         */
+        const recent = new Map()
+        for (const a of recentActs) recent.set(a, (recent.get(a) ?? 0) + 1)
+        const near2 = st.nearestEnemy
         notes.push({
           at: Number((now() - t0).toFixed(1)),
           what: '막힘 (18초간 진행 없음)',
           region: curRegion,
           x: p.x,
           z: p.z,
+          detail:
+            `직전 ${recentActs.length}프레임 [${[...recent.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, v]) => `${k}×${v}`)
+              .join(' ')}]` +
+            (obj
+              ? ` · 목표 ${obj.label}(${obj.x.toFixed(0)},${obj.z.toFixed(0)}) 걷는거리 ${obj.walkDist.toFixed(0)}m 다음걸음(${obj.stepX.toFixed(0)},${obj.stepZ.toFixed(0)})`
+              : ' · 목표 없음') +
+            (near2
+              ? ` · 가까운적 ${near2.dist.toFixed(1)}m 경로 ${(G.pathStep(near2.x, near2.z)?.dist ?? -1).toFixed(0)}m`
+              : ' · 가까운 적 없음') +
+            ` · 체력 ${p.hp.toFixed(0)} 성수병 ${vi.vials}`,
         })
         break
       }
@@ -515,6 +599,15 @@ try {
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
+      /**
+       * **시간이 어디로 갔는가** — 구역별 누적보다 이쪽이 원인에 가깝습니다.
+       * 구역은 "어디에 있었나"만 말하지만, 가지는 "무엇을 하고 있었나"를 말합니다.
+       * 걷는 데 대부분을 쓰고 있으면 지도 문제, 접근에 쓰고 있으면 길찾기 문제,
+       * 공격에 쓰고 있으면 밸런스 문제입니다.
+       */
+      actTotal: [...actTotals.entries()]
+        .map(([name, frames]) => ({ name, pct: Math.round((frames / Math.max(1, [...actTotals.values()].reduce((a, v) => a + v, 0))) * 100) }))
+        .sort((a, b) => b.pct - a.pct),
       vialsUsed,
       // 봇의 추측이 아니라 **게임이 센 값**입니다. 예전엔 "성수병이 늘었으면
       // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
@@ -529,6 +622,9 @@ try {
       maxAggro,
       avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
       multiRatio: Number(((multiSamples / Math.max(1, aggroSamples)) * 100).toFixed(0)),
+      retreatRatio: Number(((retreatSamples / Math.max(1, engageSamples)) * 100).toFixed(0)),
+      enemySwings: G.runStats().enemySwings,
+      enemyHits: G.runStats().enemyHits,
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
@@ -551,6 +647,9 @@ try {
     console.log('  [구역별 누적]')
     for (const r of log.regionTotal) console.log(`    ${r.name.padEnd(12)} ${r.seconds}초`)
     console.log('')
+    console.log('  [무엇을 하고 있었나]')
+    console.log(`    ${log.actTotal.map((a) => `${a.name} ${a.pct}%`).join(' · ')}`)
+    console.log('')
   }
   if (log.notes.length) {
     console.log('  [사건]')
@@ -558,6 +657,7 @@ try {
       const where = n.region ? ` @${n.region}` : ''
       const pos = n.x !== undefined ? ` (${n.x.toFixed(0)}, ${n.z.toFixed(0)})` : ''
       console.log(`    ${String(n.at).padStart(6)}초  ${n.what}${where}${pos}`)
+      if (n.detail) console.log(`            ${n.detail}`)
     }
     console.log('')
   }
@@ -587,6 +687,10 @@ try {
   console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
   console.log(
     `  동시 교전   교전 중 평균 ${log.avgAggro}마리 · 둘 이상인 시간 ${log.multiRatio}% · 최대 ${log.maxAggro}마리`,
+  )
+  console.log(`  후퇴       근접(8m) 중 거리를 벌리던 시간 ${log.retreatRatio}%`)
+  console.log(
+    `  적의 공격   ${log.enemySwings}회 휘두름 · ${log.enemyHits}회 적중 (적중률 ${Math.round((log.enemyHits / Math.max(1, log.enemySwings)) * 100)}%)`,
   )
   console.log('')
 } finally {

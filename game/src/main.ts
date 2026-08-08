@@ -199,6 +199,17 @@ class Game {
    * (죽어서 되살아난 것은 세지 않습니다 — balance.ts EMBER 설계 노트 참고)
    */
   private restGeneration = 0
+  /**
+   * 적이 **판정을 낸 횟수**와 그중 **플레이어에게 맞은 횟수**.
+   *
+   * 봇이 서서 싸우는데도(후퇴 3%) 총 피해가 148뿐이라, 남은 가능성은 둘입니다:
+   * 적이 안 휘두르거나, 휘두르는데 안 맞거나. **둘은 고칠 곳이 완전히 다릅니다** —
+   * 전자는 공격 빈도·토큰, 후자는 예고 시간·무적 프레임입니다.
+   */
+  private enemySwings = 0
+  private enemyHits = 0
+  /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
+  private readonly swungLastFrame = new Set<number>()
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -527,6 +538,7 @@ class Game {
        * 시스템 안쪽에서 따로 울리면 히트스톱만큼(최대 0.11초) 어긋나는데,
        * 그 정도면 사람은 "소리가 늦다"로 느낍니다.
        */
+      if (hit.victimIsPlayer && hit.damage > 0) this.enemyHits++
       if (hit.victimIsPlayer) {
         sfx.hurt()
       } else if (hit.damage > 0) {
@@ -605,6 +617,28 @@ class Game {
       if (rest.rested && rest.near) this.restAt(p, rest.near)
     } else {
       this.hud.setRest(false, 0, false)
+    }
+
+    /**
+     * 적이 **판정 단계에 진입한 횟수**를 셉니다.
+     * 예고만 띄우고 끊긴 것은 세지 않습니다 — 재려는 것은 "휘둘렀는가"입니다.
+     */
+    {
+      const ids = enemyQuery.run()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (Actor.state[e] !== ActorState.Attack) continue
+        if (Actor.phase[e] !== AttackPhase.Active) continue
+        if (this.swungLastFrame.has(e)) continue
+        this.enemySwings++
+      }
+      this.swungLastFrame.clear()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
+          this.swungLastFrame.add(e)
+        }
+      }
     }
 
     /** ---- 3.72 사다리(지름길) ---- */
@@ -1649,12 +1683,16 @@ class Game {
     kills: number
     restGeneration: number
     emberDecay: number
+    enemySwings: number
+    enemyHits: number
   } {
     return {
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
       restGeneration: this.restGeneration,
+      enemySwings: this.enemySwings,
+      enemyHits: this.enemyHits,
       emberDecay: Number(
         Math.max(EMBER.respawnFloor, EMBER.respawnDecay ** this.restGeneration).toFixed(3),
       ),
@@ -2393,6 +2431,8 @@ declare global {
         kills: number
         restGeneration: number
         emberDecay: number
+        enemySwings: number
+        enemyHits: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }

@@ -104,6 +104,26 @@ export interface AttackSpec {
   heavy: boolean
   /** 🥋 강타(집중 소모)인가 — 강인도를 크게 깎습니다. */
   heavyBlow?: boolean
+  /**
+   * 🟡 **판정이 active 구간 내내 남는가.**
+   *
+   * ── 왜 필요해졌는가 ────────────────────────────────────────────
+   * 자동 플레이로 재보니 적의 **적중률이 7%** 였습니다(74회 휘둘러 5회).
+   * 봇은 4색을 구분하지 못하고 **아무 예고에나 구르기만** 하는데도요.
+   *
+   * 원인은 판정이 active **첫 프레임에 한 번만** 나가는 것이었습니다.
+   * 구르기 무적이 0.24초라, 그 한 순간만 겹치면 **광역기도 제자리에서
+   * 넘어갑니다.** DESIGN.md 4색 표에 *"🟡 노랑 — 걸어서 이탈, 구르기로도
+   * 안쪽에 남습니다"* 라고 적어 뒀는데, 실제로는 성립하지 않고 있었습니다.
+   *
+   * 그러면 "색만 다르고 대응이 같으면 색은 장식"이라는 우리 규칙을
+   * 우리가 어기고 있는 셈입니다. 구르기 하나가 다섯 색의 정답이 됩니다.
+   *
+   * 판정이 **머무르게** 하면 규칙이 저절로 성립합니다. 무적으로 첫 순간을
+   * 넘겨도 장판이 아직 거기 있으니, **밖으로 나가는 것 말고는 답이 없습니다.**
+   * (반대로 범위 밖으로 굴러 나가면 여전히 안전합니다 — 막다른 길이 아닙니다.)
+   */
+  lingers?: boolean
   /** 다단히트 횟수 */
   hits: number
   /** 판정 중심 (point 스킬용). 없으면 시전자 위치. */
@@ -206,6 +226,8 @@ function enemySpec(e: number): AttackSpec {
     healSelf: 0,
     snare: def.snare,
     pull: def.pull,
+    // 🟡 광역만 머무릅니다. 다른 색은 "한 순간"이 정체성입니다.
+    lingers: def.intent === AttackIntent.Sweep,
   }
 }
 
@@ -333,7 +355,13 @@ export function resolveAttacks(): void {
       continue
     }
 
-    applyHit(a, spec)
+    const landed = applyHit(a, spec)
+    /**
+     * 머무는 판정은 **실제로 맞혔을 때만** 소모합니다.
+     * 안 맞았으면 active 가 끝날 때까지 매 프레임 다시 봅니다 —
+     * 그래서 무적으로 첫 순간을 넘겨도 장판은 아직 거기 있습니다.
+     */
+    if (spec.lingers && !landed) continue
     Actor.hitsLeft[a] = Math.max(0, Actor.hitsLeft[a] - 1)
     if (Actor.hitsLeft[a] > 0) {
       // 남은 타격을 active 구간에 균등 분배합니다.
@@ -353,7 +381,8 @@ function activeDurationOf(a: number): number {
   return enemyDef(Enemy.kind[a]).active
 }
 
-function applyHit(a: number, spec: AttackSpec): void {
+/** @returns 누군가를 실제로 때렸는가 (머무는 판정이 소모될지 판단합니다) */
+function applyHit(a: number, spec: AttackSpec): boolean {
   const attackerIsPlayer = hasComponent(Player, a)
 
   if (spec.healSelf > 0 && hasComponent(Health, a)) {
@@ -375,7 +404,7 @@ function applyHit(a: number, spec: AttackSpec): void {
     })
   }
 
-  if (spec.damage <= 0) return
+  if (spec.damage <= 0) return false
 
   const originX = spec.originX ?? Transform.x[a]
   const originZ = spec.originZ ?? Transform.z[a]
@@ -383,6 +412,7 @@ function applyHit(a: number, spec: AttackSpec): void {
   const fx = Math.sin(rot)
   const fz = Math.cos(rot)
   const halfArc = (spec.arcDeg * Math.PI) / 180 / 2
+  let landed = false
 
   const tids = targets.run()
   const tcount = targets.count
@@ -574,7 +604,9 @@ function applyHit(a: number, spec: AttackSpec): void {
       victimIsPlayer: targetIsPlayer,
       killed,
     })
+    landed = true
   }
+  return landed
 }
 
 /**
