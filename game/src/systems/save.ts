@@ -31,7 +31,7 @@
  * 저장이 오히려 방해가 됩니다.
  */
 
-import { EMBER, VIAL } from '../config/balance'
+import { EMBER, VIAL, WEAPON_UPGRADE } from '../config/balance'
 import { Loadout, Player } from '../core/components'
 import { exportTripods, importTripods, type TripodSaveData } from './tripod'
 
@@ -43,7 +43,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 4
+const SAVE_VERSION = 5
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -89,6 +89,14 @@ export interface SaveData {
    * (반대로 사다리를 타고 지나간 적들은 당연히 되살아납니다 — 그건 싸움입니다.)
    */
   ladders: string[]
+  /**
+   * 무기별 강화 단계 [무기0, 무기1, 무기2].
+   *
+   * 경계선의 "남기는 쪽"입니다. 불티를 태워서 얻은 것이고, 각인석과 같은
+   * 성장이기 때문입니다. 여기서 날리면 죽을 때마다 무기가 도로 +0이 되어
+   * **불티를 쓰는 것 자체가 손해**가 됩니다.
+   */
+  weaponLevels: number[]
 }
 
 /**
@@ -150,6 +158,9 @@ export function loadSave(levelId: string): SaveData | null {
       tripods: (d.tripods ?? { points: 0, unlocked: [], selections: {} }) as TripodSaveData,
       bosses: Array.isArray(d.bosses) ? d.bosses.filter((t) => typeof t === 'string') : [],
       ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
+      weaponLevels: Array.isArray(d.weaponLevels)
+        ? d.weaponLevels.slice(0, 3).map((v) => Number(v) || 0)
+        : [0, 0, 0],
       embers: Number(d.embers) || 0,
       vialsMax: Number(d.vialsMax) || 0,
     }
@@ -196,6 +207,7 @@ export function captureSave(
     rune1: Loadout.rune1[player],
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
+    weaponLevels: [Loadout.wLv0[player], Loadout.wLv1[player], Loadout.wLv2[player]],
     bosses: [...bosses],
     ladders: [...ladders],
     tripods: exportTripods(),
@@ -210,6 +222,10 @@ export function applySave(save: SaveData, player: number): void {
   Loadout.rune0[player] = save.rune0
   Loadout.rune1[player] = save.rune1
   Loadout.runesOwned[player] = save.runesOwned
+  const lv = save.weaponLevels ?? []
+  Loadout.wLv0[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[0] ?? 0)
+  Loadout.wLv1[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[1] ?? 0)
+  Loadout.wLv2[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[2] ?? 0)
   Player.embers[player] = save.embers
   // 0이면 예전 세이브 — 기본값을 그대로 둡니다(강화한 적이 없다는 뜻).
   if (save.vialsMax > 0) {

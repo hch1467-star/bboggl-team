@@ -13,6 +13,7 @@ import {
   POISE,
   TREASURE,
   VIAL,
+  WEAPON_UPGRADE,
   WORLD,
 } from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
@@ -75,7 +76,14 @@ import {
 } from './systems/enemyAI'
 import { bonfireSystem, type Bonfire } from './systems/bonfire'
 import { deathEvents, healthSystem } from './systems/health'
-import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
+import {
+  SLOT_COUNT,
+  grantRune,
+  setWeaponLevel,
+  skillForSlot,
+  weaponLevel,
+  weaponOf,
+} from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
 import {
   applySave,
@@ -409,7 +417,10 @@ class Game {
       const def = skillForSlot(p, i)
       slots.push({ name: def?.name ?? '', empty: !def })
     }
-    this.skillBar.setLoadout(weaponOf(p).name, slots)
+    // 강화 단계를 무기 이름에 붙입니다. 소울라이크가 "+3 롱소드"라고 쓰는 이유는
+    // **지금 내 무기가 얼마나 컸는지**가 매 순간 보여야 투자가 실감되기 때문입니다.
+    const lv = weaponLevel(p)
+    this.skillBar.setLoadout(lv > 0 ? `${weaponOf(p).name} +${lv}` : weaponOf(p).name, slots)
     this.tripodPanel.setPlayer(p)
   }
 
@@ -557,7 +568,9 @@ class Game {
 
     if (playerAlive && this.bonfires.length > 0) {
       const rest = bonfireSystem(p, this.bonfires)
-      this.tryUpgrade(p, rest.near !== null && !rest.blocked)
+      const atFire = rest.near !== null && !rest.blocked
+      this.tryUpgrade(p, atFire)
+      this.tryUpgradeWeapon(p, atFire)
       this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
       if (rest.litNow && rest.near) {
         // **닿기만 해도 부활 지점이 됩니다.** 회복·적 부활은 여전히 "쉬어야"
@@ -1287,6 +1300,41 @@ class Game {
     this.persistProgress()
   }
 
+  /**
+   * 무기 강화 — 화톳불에서 **B**.
+   *
+   * 성수병 강화(V)와 키를 나눈 이유: 둘은 성격이 반대인 선택이라 **한 화면에
+   * 나란히 보여야** 합니다. 하나의 키로 돌려 쓰게 하면 "지금 뭐가 걸려 있지"를
+   * 매번 확인해야 하고, 그 순간 선택이 아니라 조작이 됩니다.
+   *   V = 지금 죽지 않기 (생존)
+   *   B = 다음 구간을 빨리 넘기기 (공격)
+   */
+  private tryUpgradeWeapon(p: number, atFire: boolean): void {
+    const weaponIndex = Loadout.weapon[p]
+    const level = weaponLevel(p, weaponIndex)
+    const cost = level < WEAPON_UPGRADE.costs.length ? WEAPON_UPGRADE.costs[level] : -1
+    const maxed = level >= WEAPON_UPGRADE.maxLevel || cost < 0
+    this.hud.setWeaponUpgrade(atFire, maxed ? -1 : cost, Player.embers[p], level)
+    if (!atFire || maxed) return
+    if (!consumePress('KeyB')) return
+    if (Player.embers[p] < cost) {
+      sfx.deny()
+      this.hud.showBanner('불티가 모자라다', `${Player.embers[p]} / ${cost}`, 1.2)
+      return
+    }
+    Player.embers[p] -= cost
+    setWeaponLevel(p, weaponIndex, level + 1)
+    sfx.bossPhase()
+    this.cam.addTrauma(0.25)
+    this.hud.showBanner(
+      `${weaponOf(p).name} +${level + 1}`,
+      `피해 +${Math.round((level + 1) * WEAPON_UPGRADE.damagePerLevel * 100)}% · 불티 -${cost}`,
+      2.0,
+    )
+    this.refreshLoadout()
+    this.persistProgress()
+  }
+
   private clearDrop(): void {
     if (this.dropVisual) {
       this.visuals.removeObject(this.dropVisual)
@@ -1456,6 +1504,31 @@ class Game {
 
   debugCounterCount(): number {
     return this.counterCount
+  }
+
+  debugPersist(): void {
+    this.persistProgress()
+  }
+
+  debugWeaponUpgradeInfo(): {
+    weapon: number
+    level: number
+    maxLevel: number
+    nextCost: number
+    damagePerLevel: number
+    levels: number[]
+  } {
+    const p = this.playerEntity
+    const w = Loadout.weapon[p]
+    const level = weaponLevel(p, w)
+    return {
+      weapon: w,
+      level,
+      maxLevel: WEAPON_UPGRADE.maxLevel,
+      nextCost: level < WEAPON_UPGRADE.costs.length ? WEAPON_UPGRADE.costs[level] : -1,
+      damagePerLevel: WEAPON_UPGRADE.damagePerLevel,
+      levels: [Loadout.wLv0[p], Loadout.wLv1[p], Loadout.wLv2[p]],
+    }
   }
 
   debugRunStats(): { deaths: number; rests: number; kills: number } {
@@ -1932,6 +2005,7 @@ class Game {
       loadout: {
         weapon: weaponOf(p).id,
         weaponName: weaponOf(p).name,
+        weaponLevel: weaponLevel(p),
         comboLength: weaponOf(p).combo.length,
         runesOwned: Loadout.runesOwned[p],
         slots: Array.from({ length: SLOT_COUNT }, (_, i) => skillForSlot(p, i)?.id ?? null),
@@ -2115,6 +2189,17 @@ declare global {
         upgradeCost: number
       }
       setEmbers: (n: number) => void
+      /** 무기 강화 검증용 */
+      setWeaponLevel: (weapon: number, level: number) => void
+      saveNow: () => void
+      weaponUpgradeInfo: () => {
+        weapon: number
+        level: number
+        maxLevel: number
+        nextCost: number
+        damagePerLevel: number
+        levels: number[]
+      }
       killAllEnemies: () => number
       /** 회복 검증용 — 성수병/화톳불 상태 */
       vialInfo: () => {
@@ -2315,6 +2400,12 @@ window.__game = {
   bossEncounter: () => game.debugBossEncounter(),
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
+  weaponUpgradeInfo: () => game.debugWeaponUpgradeInfo(),
+  setWeaponLevel: (weapon, level) => {
+    setWeaponLevel(game.debugPlayerEntity(), weapon, level)
+    game.debugRefreshLoadout()
+  },
+  saveNow: () => game.debugPersist(),
   killAllEnemies: () => game.debugKillAll(),
   vialInfo: () => game.debugVialInfo(),
   playerEntity: () => game.debugPlayerEntity(),

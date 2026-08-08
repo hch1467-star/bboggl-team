@@ -47,6 +47,7 @@ export class Hud {
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
   private readonly focusPips = el<HTMLElement>('focusPips')
+  private readonly weaponUpgradeHint = el<HTMLElement>('weaponUpgradeHint')
   private saveTimer: number | null = null
   /** 지금 표시 중인 보스 이름. 눈금을 다시 그릴지 판단합니다. */
   private bossShown = ''
@@ -120,6 +121,28 @@ export class Hud {
     this.upgradeHint.innerHTML = ok
       ? `<b>V</b> 성수병 강화 — 불티 <b>${cost}</b>`
       : `성수병 강화 — 불티 ${embers} / <b>${cost}</b>`
+  }
+
+  /**
+   * 무기 강화 안내 — 성수병 강화 **바로 아래**에 나란히 둡니다.
+   *
+   * 둘을 한 화면에 같이 보여주는 것이 요점입니다. 화톳불 앞에서의 결정은
+   * "강화할까 말까"가 아니라 **"둘 중 무엇에 쓸까"** 이기 때문입니다.
+   * 하나씩 번갈아 보여주면 비교가 불가능해집니다.
+   */
+  setWeaponUpgrade(atFire: boolean, cost: number, embers: number, level: number): void {
+    if (!atFire) {
+      this.weaponUpgradeHint.textContent = ''
+      return
+    }
+    if (cost < 0) {
+      this.weaponUpgradeHint.textContent = `무기 강화 완료 (+${level})`
+      return
+    }
+    const ok = embers >= cost
+    this.weaponUpgradeHint.innerHTML = ok
+      ? `<b>B</b> 무기 강화 +${level} → +${level + 1} — 불티 <b>${cost}</b>`
+      : `무기 강화 +${level} → +${level + 1} — 불티 ${embers} / <b>${cost}</b>`
   }
 
   /**

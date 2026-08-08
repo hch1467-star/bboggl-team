@@ -18,7 +18,7 @@ import { AttackIntent, attackAt } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { time } from '../core/time'
-import { skillForSlot, weaponOf } from './loadout'
+import { skillForSlot, weaponDamageMult, weaponOf } from './loadout'
 
 /**
  * 타격 판정 — 플레이어와 적이 **같은 코드**를 씁니다.
@@ -130,7 +130,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     const h = heavyStep(weapon, Player.focusSpent[e])
     return {
       shape: 'cone',
-      damage: h.damage,
+      damage: h.damage * weaponDamageMult(e),
       range: h.range,
       arcDeg: h.arcDeg,
       knockback: h.knockback,
@@ -145,7 +145,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
   const c = weapon.combo[Math.min(comboIndex, weapon.combo.length - 1)]
   return {
     shape: 'cone',
-    damage: c.damage,
+    damage: c.damage * weaponDamageMult(e),
     range: c.range,
     arcDeg: c.arcDeg,
     knockback: c.knockback,
@@ -162,7 +162,8 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
   if (!def) return null
   return {
     shape: def.shape,
-    damage: def.damage,
+    // 무기 스킬(0~2)만 강화의 영향을 받습니다. 룬(3~4)은 무기가 아닙니다.
+    damage: def.damage * (slot <= 2 ? weaponDamageMult(e) : 1),
     range: def.range,
     arcDeg: def.arcDeg,
     knockback: def.knockback,

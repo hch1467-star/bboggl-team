@@ -1,6 +1,7 @@
 import { RUNE_ORDER, weaponAt, type SkillDef, type WeaponDef } from '../config/arsenal'
 import { resolveSkill } from './tripod'
 import { Loadout } from '../core/components'
+import { WEAPON_UPGRADE } from '../config/balance'
 import { time } from '../core/time'
 
 /**
@@ -17,6 +18,36 @@ import { time } from '../core/time'
 export const SLOT_COUNT = 5
 /** 이 번호부터가 룬 슬롯입니다. 무기 스킬 개수와 항상 같아야 합니다. */
 export const FIRST_RUNE_SLOT = 3
+
+/**
+ * 지금 든 무기의 강화 단계.
+ *
+ * 슬롯이 아니라 **무기 인덱스**로 찾습니다. 무기를 바꾸면 강화도 같이
+ * 바뀌어야 "무엇에 투자했는가"가 선택으로 남습니다.
+ */
+export function weaponLevel(e: number, weaponIndex = Loadout.weapon[e]): number {
+  if (weaponIndex === 1) return Loadout.wLv1[e]
+  if (weaponIndex === 2) return Loadout.wLv2[e]
+  return Loadout.wLv0[e]
+}
+
+export function setWeaponLevel(e: number, weaponIndex: number, level: number): void {
+  const v = Math.max(0, Math.min(WEAPON_UPGRADE.maxLevel, level))
+  if (weaponIndex === 1) Loadout.wLv1[e] = v
+  else if (weaponIndex === 2) Loadout.wLv2[e] = v
+  else Loadout.wLv0[e] = v
+}
+
+/**
+ * 강화가 곱해 주는 피해 배율.
+ *
+ * 기본 공격과 **그 무기의 스킬 세 개**에만 적용합니다. 룬 스킬(F·G)은
+ * 무기가 아니라 각인이라 영향을 받지 않습니다 — 이 구분이 있어야
+ * "무기를 키운다"와 "룬을 얻는다"가 서로 다른 성장으로 남습니다.
+ */
+export function weaponDamageMult(e: number): number {
+  return 1 + weaponLevel(e) * WEAPON_UPGRADE.damagePerLevel
+}
 
 export function weaponOf(e: number): WeaponDef {
   return weaponAt(Loadout.weapon[e])

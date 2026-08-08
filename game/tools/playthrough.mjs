@@ -106,6 +106,7 @@ try {
     let vialsUsed = 0
     let lastVials = G.vialInfo().vials
     let upgrades = 0
+    let weaponUps = 0
     let bossSeen = false
     let bossKilled = false
     let clearedAt = 0
@@ -312,7 +313,9 @@ try {
       const em = G.emberInfo()
       // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
       // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
-      const canUpgrade = em.upgradeCost > 0 && em.embers >= em.upgradeCost
+      const wu = G.weaponUpgradeInfo()
+      const canUpgradeWeapon = wu.nextCost > 0 && em.embers >= wu.nextCost
+      const canUpgrade = (em.upgradeCost > 0 && em.embers >= em.upgradeCost) || canUpgradeWeapon
       const needsSupply = vi.vials === 0 || p.hp < 45
       if (fire && needsSupply) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
@@ -338,15 +341,44 @@ try {
         lastVials = G.vialInfo().vials
         continue
       }
+      /**
+       * **강화할 수 있으면 화톳불로 일부러 갑니다.**
+       *
+       * 예전엔 "지나가다 2.2m 안에 들어오면"이었습니다. 그래서 봇은 불티
+       * 424를 들고도 강화 0회로 존을 끝냈고, 불티 경제가 도는지 **잴 수가
+       * 없었습니다.** 사람이라면 400을 들고 있으면 쓰러 갑니다.
+       * 다만 너무 멀면 안 갑니다 — 강화하러 존을 되돌아가는 것은 사람도 안 합니다.
+       */
+      if (fire && canUpgrade) {
+        const step = G.pathStep(fire.x, fire.z)
+        if (step && step.dist > 2.2 && step.dist < 45) {
+          moveToward(step.x - p.x, step.z - p.z)
+          await sleep()
+          continue
+        }
+      }
       if (fire && (p.hp < 70 || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
         if (fd < 2.2) {
           releaseAll()
-          if (canUpgrade) {
-            const maxBefore = vi.max
+          /**
+           * 봇은 **성수병 먼저, 남으면 무기**로 씁니다.
+           *
+           * 사람이라면 "지금 죽지 않는 것이 급한가, 다음 구간을 빨리 넘기고
+           * 싶은가"를 저울질하지만 봇은 그런 판단을 못 합니다. 가장 단순한
+           * 우선순위 하나만 씁니다 — 그리고 그게 초보자의 기본값이기도 합니다.
+           */
+          const maxBefore = vi.max
+          if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
             await sleep()
             if (G.vialInfo().max > maxBefore) upgrades++
+          }
+          const lvBefore = G.weaponUpgradeInfo().level
+          if (G.weaponUpgradeInfo().nextCost > 0 && G.emberInfo().embers >= G.weaponUpgradeInfo().nextCost) {
+            tap('KeyB')
+            await sleep()
+            if (G.weaponUpgradeInfo().level > lvBefore) weaponUps++
           }
           const until = now() + 2.5
           while (now() < until) await sleep()
@@ -409,6 +441,8 @@ try {
       // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
       restCount: G.vialInfo().restCount,
       upgrades,
+      weaponUps,
+      weaponLevels: G.weaponUpgradeInfo().levels,
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
@@ -459,7 +493,9 @@ try {
   console.log(`  처치       ${log.kills}마리 · 남은 적 ${log.enemiesLeft}마리`)
   console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
-  console.log(`  불티       ${log.embers} · 강화 ${log.upgrades}회`)
+  console.log(
+    `  불티       ${log.embers} · 성수병 강화 ${log.upgrades}회 · 무기 강화 ${log.weaponUps}회 [${log.weaponLevels.join('/')}]`,
+  )
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   console.log(`  체력       ${log.hp}`)
