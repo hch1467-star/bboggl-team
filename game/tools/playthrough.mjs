@@ -114,6 +114,9 @@ try {
     let fireCooldownUntil = 0
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
     let fireTripUntil = 0
+    /** 지름길을 열러 가는 것을 잠시 멈추는 시각 / 그 왕복의 제한 시각. */
+    let shortcutCooldownUntil = 0
+    let shortcutTripUntil = 0
     /**
      * ── 왜 안 죽는지를 재기 위한 값들 ──────────────────────────
      * 봇이 체력 100에 성수병 1개로 존을 끝냅니다. "쉽다"는 것만으로는
@@ -378,16 +381,6 @@ try {
         continue
       }
 
-      // ---- 이동: 목표 쪽으로 ----
-      //
-      // **직선이 아니라 경로의 다음 한 걸음**을 따라갑니다. 지도가 원이 되면서
-      // 목표까지 직선으로 가면 성벽마루에 처박히기 때문입니다. 게임의 화살표도
-      // 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
-      const obj = G.objective()
-      if (!obj) break
-      markAct('목표이동')
-      moveToward(obj.stepX - p.x, obj.stepZ - p.z)
-
       // ---- 사다리: 위에 서 있으면 내립니다 ----
       // 사람이라면 안내가 뜬 김에 누릅니다. 봇이 안 누르면 지름길이 열리는지
       // 아닌지를 이 실행으로는 알 수 없습니다.
@@ -398,6 +391,56 @@ try {
         await sleep()
         continue
       }
+
+      /**
+       * ---- 지름길: **싸면 들러서 엽니다** ----
+       *
+       * 네 판 내리 사다리 0/1 이었습니다. 봇은 위에 서면 반드시 누르게 짜여
+       * 있었으니, 문제는 **한 번도 위에 서지 않은 것**이었습니다. 재 보니
+       * 사다리 위 칸이 주 동선에서 100m 가까이 벗어나 있었습니다 — 지도를
+       * 고쳤고(9.5절), 이제 32m 곁길입니다.
+       *
+       * 그런데 봇은 여전히 목표만 봅니다. 사람은 안 그렇습니다. **한 번 더 올
+       * 것 같으면 지금 열어 둡니다.** 그 판단을 가장 단순한 규칙으로 옮깁니다:
+       *   "위 칸이 걸어서 40m 안이고, 여는 값보다 아끼는 값이 크면 들른다."
+       * 아끼는 값은 **게임이 지형에서 잰 값**(shortcutInfo().saving)입니다 —
+       * 봇에 미터를 베껴 적으면 지도를 바꾼 순간 거짓이 됩니다.
+       */
+      const closedShortcut = G.shortcutInfo().find((s) => !s.open && (s.saving ?? 0) > 20)
+      if (closedShortcut && now() >= shortcutCooldownUntil) {
+        const toTop = G.pathStep(closedShortcut.hiWorldX, closedShortcut.hiWorldZ)
+        if (toTop && toTop.dist <= 40) {
+          // 왕복에 제한을 겁니다 — 화톳불에서 배운 것과 같은 이유입니다.
+          // 도착 판정이 어긋나면 목표와 사다리 사이를 무한히 오갑니다.
+          if (shortcutTripUntil === 0) shortcutTripUntil = now() + 30
+          if (now() > shortcutTripUntil) {
+            shortcutCooldownUntil = now() + 90
+            shortcutTripUntil = 0
+          } else {
+            markAct('지름길이동')
+            const straight = Math.hypot(
+              closedShortcut.hiWorldX - p.x,
+              closedShortcut.hiWorldZ - p.z,
+            )
+            // 마지막 몇 미터는 직선 — 격자 길찾기는 목표에 붙으면 진동합니다.
+            const tx = straight < 6 ? closedShortcut.hiWorldX : toTop.x
+            const tz = straight < 6 ? closedShortcut.hiWorldZ : toTop.z
+            moveToward(tx - p.x, tz - p.z)
+            await sleep()
+            continue
+          }
+        }
+      }
+
+      // ---- 이동: 목표 쪽으로 ----
+      //
+      // **직선이 아니라 경로의 다음 한 걸음**을 따라갑니다. 지도가 원이 되면서
+      // 목표까지 직선으로 가면 성벽마루에 처박히기 때문입니다. 게임의 화살표도
+      // 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
+      const obj = G.objective()
+      if (!obj) break
+      markAct('목표이동')
+      moveToward(obj.stepX - p.x, obj.stepZ - p.z)
 
       /**
        * ---- 화톳불 ----

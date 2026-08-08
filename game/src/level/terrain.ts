@@ -49,6 +49,10 @@ export interface Shortcut {
   dirZ: number
   /** 내려져 있는가. 내려지면 양방향으로 통행 가능. */
   open: boolean
+  /** 걷힌 채로 돌아갔을 때 걸어야 하는 거리(m) — `shortcutSaving` 이 채웁니다. */
+  saving?: number | null
+  /** 위 값이 어떤 사다리 개폐 상태에서 계산된 것인지 (캐시 무효화용) */
+  savingSig?: string
   /**
    * 세이브 키 — 좌표 기반입니다.
    *
@@ -286,6 +290,77 @@ export class Terrain {
 
   openShortcutKeys(): string[] {
     return this.shortcuts.filter((s) => s.open).map((s) => s.key)
+  }
+
+  /**
+   * 이 지름길이 **아끼는 거리(m)** — 걷힌 상태에서 아래 칸에서 위 칸까지
+   * 걸어야 하는 거리. 내리고 나면 그게 한 칸(2m)이 됩니다.
+   *
+   * ── 왜 이 값을 화면에 띄우는가 ──────────────────────────────────
+   * 자동 플레이 네 판 내리 **사다리 0/1** 이었습니다. 열 수 있는데 아무도
+   * 안 열었습니다. 이유의 절반은 배치였고(고쳤습니다), 나머지 절반은
+   * **여는 값을 아무도 모른다**는 것이었습니다. 화면에는 "지름길이 열립니다"
+   * 라고만 떴는데, 그건 무엇을 얻는지가 아니라 무슨 일이 일어나는지입니다.
+   *
+   * 다크소울1이 지름길을 기억에 남기는 방식은 "여기 문이 있다"가 아니라
+   * **"아, 여기가 거기랑 이어져 있었구나"** 입니다. 그 깨달음을 숫자로
+   * 대신할 수는 없지만, 적어도 **되돌아온 거리를 눈앞에 보여줄 수는** 있습니다.
+   * 98m를 걸어 올라온 사람에게 "98m → 2m"는 설명이 필요 없는 문장입니다.
+   *
+   * ⚠️ 거리장(this.field)을 건드리지 않고 **따로** 계산합니다. 목표용 거리장과
+   *    번갈아 쓰면 캐시 키가 매 프레임 바뀌어 BFS를 두 번씩 돌게 됩니다.
+   *    값은 다른 사다리가 열릴 때만 변하므로 그때만 다시 잽니다.
+   */
+  shortcutSaving(s: Shortcut): number | null {
+    const sig = this.shortcuts.map((x) => (x.open ? 1 : 0)).join('')
+    if (s.savingSig === sig) return s.saving ?? null
+    const { w, h } = this.level
+    const dist = new Int32Array(w * h).fill(-1)
+    dist[s.hiZ * w + s.hiX] = 0
+    let frontier: [number, number][] = [[s.hiX, s.hiZ]]
+    let found: number | null = null
+    while (frontier.length && found === null) {
+      const next: [number, number][] = []
+      for (const [cx, cz] of frontier) {
+        const d = dist[cz * w + cx]
+        for (const [nx, nz] of [
+          [cx - 1, cz],
+          [cx + 1, cz],
+          [cx, cz - 1],
+          [cx, cz + 1],
+        ] as [number, number][]) {
+          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+          if (dist[nz * w + nx] !== -1) continue
+          // "이웃 → 지금 칸" 방향으로 판정합니다(거리장과 같은 이유).
+          // 단 **이 사다리는 없는 셈** 칩니다 — 아니면 자기 자신을 통해
+          // 2m 라는 동어반복이 나옵니다.
+          if (!this.canStepCellIgnoring(nx, nz, cx, cz, s)) continue
+          dist[nz * w + nx] = d + 1
+          if (nx === s.loX && nz === s.loZ) found = d + 1
+          next.push([nx, nz])
+        }
+      }
+      frontier = next
+    }
+    s.savingSig = sig
+    s.saving = found === null ? null : found * CELL_SIZE
+    return s.saving
+  }
+
+  private canStepCellIgnoring(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    skip: Shortcut,
+  ): boolean {
+    const to = this.levelAtCell(toX, toZ)
+    if (to === VOID) return false
+    const from = this.levelAtCell(fromX, fromZ)
+    if (from === VOID) return false
+    if (to - from <= MAX_CLIMB) return true
+    const s = this.shortcutBetween(fromX, fromZ, toX, toZ)
+    return s !== null && s !== skip && s.open
   }
 
   /** 두 칸을 잇는 사다리가 있으면 돌려줍니다(방향 무관). */

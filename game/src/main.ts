@@ -1273,7 +1273,10 @@ class Game {
       return
     }
     const { s, fromTop } = found
-    this.hud.setShortcut(s.open ? 'open' : fromTop ? 'ready' : 'locked')
+    this.hud.setShortcut(
+      s.open ? 'open' : fromTop ? 'ready' : 'locked',
+      s.open ? null : this.terrain.shortcutSaving(s),
+    )
     if (s.open || !fromTop) return
     /**
      * 키가 **V**인 이유: E는 이미 무기 스킬 2번입니다(실제로 E로 만들었다가
@@ -1284,11 +1287,18 @@ class Game {
      */
     if (!consumePress('KeyV')) return
 
+    // 배너에도 **잰 값**을 씁니다. "지름길이 열렸습니다"는 무슨 일이 일어났는지고,
+    // "98m가 2m가 됐습니다"는 무엇을 얻었는지입니다.
+    const saved = this.terrain.shortcutSaving(s)
     s.open = true
     this.syncLadderVisuals()
     sfx.pickup()
     this.cam.addTrauma(0.22)
-    this.hud.showBanner('사다리를 내렸다', '지름길이 열렸습니다', 2.2)
+    this.hud.showBanner(
+      '사다리를 내렸다',
+      saved !== null && saved > 6 ? `돌아오던 ${Math.round(saved)}m가 2m가 되었다` : '지름길이 열렸습니다',
+      2.4,
+    )
     this.persistProgress()
   }
 
@@ -1535,6 +1545,8 @@ class Game {
     loWorldZ: number
     hiWorldX: number
     hiWorldZ: number
+    /** 걷힌 채로 아래에서 위까지 돌아가야 하는 거리(m) — 지형에서 잰 값. */
+    saving: number | null
   }[] {
     if (!this.terrain) return []
     const { w, h } = this.terrain.level
@@ -1549,6 +1561,7 @@ class Game {
         loWorldZ: lo.z,
         hiWorldX: hi.x,
         hiWorldZ: hi.z,
+        saving: this.terrain!.shortcutSaving(s),
       }
     })
   }
@@ -2291,6 +2304,8 @@ declare global {
         attackPhase: number
         chainNext: string
         cooldownT: number
+        reactT: number
+        aggro: boolean
       } | null
       /**
        * 자동 플레이 봇용 훅.
@@ -2402,6 +2417,7 @@ declare global {
         loWorldZ: number
         hiWorldX: number
         hiWorldZ: number
+        saving: number | null
       }[]
       shortcutHint: () => 'ready' | 'locked' | 'open' | null
       walkTest: (fromX: number, fromZ: number, toX: number, toZ: number) => boolean
@@ -2557,6 +2573,9 @@ window.__game = {
       attackPhase: Actor.phase[entity],
       chainNext: chain === NO_CHAIN ? '' : (list[chain]?.id ?? ''),
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
+      /** 등 뒤를 잡혔을 때 "아직 못 알아챈" 남은 시간(초). 백어택 여유의 실체입니다. */
+      reactT: Number(Enemy.reactT[entity].toFixed(3)),
+      aggro: Enemy.aggro[entity] === 1,
     }
   },
   counterInfo: () => ({

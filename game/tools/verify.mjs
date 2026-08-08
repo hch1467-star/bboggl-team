@@ -10,7 +10,7 @@
  */
 import { preview } from 'vite'
 import { chromium } from 'playwright'
-import { existsSync, mkdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -18,6 +18,22 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const SHOTS = process.env.SHOT_DIR ?? path.join(ROOT, 'tools', 'shots')
 const PORT = 4173
 const VIEWPORT = { width: 1100, height: 690 }
+
+/**
+ * ⚠️ **레벨의 개수는 레벨 데이터에서 읽습니다 — 베껴 적지 않습니다.**
+ *
+ * 여기에는 원래 `treasureTotal === 4`, `regionCount === 8` 이 박혀 있었습니다.
+ * 그 뒤로 지도에 보물과 구역이 늘었는데도 검증은 통과했습니다 —
+ * `npm run verify` 가 **`dist/`(빌드 결과물)** 를 띄우기 때문에, 다시 빌드하지
+ * 않는 한 몇 주 전 지도를 검사하고 있었던 것입니다. 베낀 상수와 낡은 빌드가
+ * 서로를 가려 주고 있었습니다.
+ *
+ * 그래서 두 가지를 같이 고칩니다: 개수는 데이터에서 읽고(아래),
+ * verify 는 항상 빌드부터 합니다(package.json).
+ */
+const LEVEL = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
+const LEVEL_TREASURES = LEVEL.entities.filter((e) => e.kind === 'treasure').length
+const LEVEL_REGIONS = (LEVEL.regions ?? []).length
 
 // 컨테이너/CI에는 Playwright가 내려받은 브라우저가 없을 수 있어, 미리 설치된
 // Chromium 경로를 먼저 찾아봅니다.
@@ -96,6 +112,22 @@ async function main() {
       await sleep(60)
     }
     return false
+  }
+  /**
+   * **시뮬레이션 시간으로 기다립니다.**
+   *
+   * `sleep(1600)` 같은 벽시계 대기는 이 컨테이너에서 거짓입니다 — 게임이
+   * 실시간의 1/3~1/20로 흐르므로 1.6초를 기다려도 게임 안에서는 0.3초밖에
+   * 안 지납니다. 실제로 5회 다단히트 스킬이 "2회 명중"으로 찍혀 실패했습니다.
+   * 스킬이 아니라 **기다리는 방법이 틀린** 것이었습니다.
+   */
+  const simSleep = async (seconds, capMs = 60000) => {
+    const target = (await state()).elapsed + seconds
+    const cap = Date.now() + capMs
+    while (Date.now() < cap) {
+      if ((await state()).elapsed >= target) return
+      await sleep(20)
+    }
   }
   const shot = async (name) => {
     const file = path.join(SHOTS, `${name}.png`)
@@ -380,38 +412,60 @@ async function main() {
     check('3번 키로 쌍단검 교체 + 4타 콤보', s.loadout.weapon === 'daggers' && s.loadout.comboLength === 4, `${s.loadout.weaponName} ${s.loadout.comboLength}타`)
 
     // ---------- 7.7 다단히트 스킬이 실제로 여러 번 때리는가 ----------
-    // 쌍단검 E = 연속 찌르기(5회). 적의 체력 변화로 재면 그 사이 적이 죽거나 바뀌어
-    // 측정이 흔들립니다. 그래서 **명중 횟수 자체**를 셉니다.
+    /**
+     * 쌍단검 E = 연속 찌르기(5회). 체력 변화가 아니라 **명중 횟수 자체**를 셉니다.
+     *
+     * ── 왜 다시 썼는가 ────────────────────────────────────────────
+     * 예전에는 웨이브가 살아 있는 채로 "가장 가까운 적"에게 달려가 시전하고,
+     * 1.6초를 **벽시계로** 기다린 뒤 hitsDealt 차이를 셌습니다. 그래서 9회,
+     * 12회 같은 값이 나왔습니다 — 설계상 최대가 5회인데도요. 여러 적이 한
+     * 타격에 같이 맞은 것을 "다단히트"로 세고 있었던 것입니다.
+     *
+     * 즉 이 검사는 **통과하고 있었지만 재는 대상이 틀려 있었습니다.**
+     * 그래서 셋을 고칩니다:
+     *   · 표적을 **하나만** 남깁니다 (여럿에 맞은 것을 다단히트로 세지 않게)
+     *   · 표적이 **죽지 않게** 합니다 (죽으면 남은 타가 허공을 칩니다)
+     *   · 기다리는 것도 **시뮬레이션 시간**으로 (벽시계 1.6초 = 게임 0.3초)
+     */
     await page.evaluate(() => window.__game.reset())
     await sleep(400)
+    await page.evaluate(() => window.__game.clearEnemies())
+    await sleep(200)
+    const flurryTarget = await page.evaluate(() => {
+      const e = window.__game.spawnTestEnemy(0, 1.6, Math.PI)
+      window.__game.freezeEnemies(true)
+      window.__game.setHp(e, 100000) // 다단히트 도중에 죽지 않게
+      return e
+    })
     await tap('Digit3')
     await sleep(300)
-
-    let flurryHits = 0
-    const flurryStart = Date.now()
-    await press('KeyW')
-    while (Date.now() - flurryStart < 45000) {
-      const st = await state()
-      if (!st.nearestEnemy) break
-      await aimAt(st.nearestEnemy.x, st.nearestEnemy.z)
-      if (st.nearestEnemy.dist < 2.0) {
-        await release('KeyW')
-        const hitsBefore = st.hitsDealt
-        await tap('KeyE')
-        await sleep(1600)
-        const after = await state()
-        flurryHits = after.hitsDealt - hitsBefore
-        if (flurryHits > 0) break
-      } else {
-        await press('KeyW')
+    await aimAt(0, 1.6)
+    await waitIdle()
+    /**
+     * **어떤 슬롯이 다단히트인지도 게임에게 물어봅니다.**
+     * 처음엔 "E = 슬롯 2 = 연속 찌르기"라고 적어 두었는데 슬롯 2의 hits 는
+     * 1이었습니다. 키와 슬롯의 대응을 검증 스크립트가 외우고 있으면,
+     * 무기 구성을 바꾸는 순간 **엉뚱한 스킬을 재면서 통과**합니다.
+     */
+    const flurrySlot = await page.evaluate(() => {
+      for (const s of window.__game.slotCooldowns()) {
+        if (s.empty) continue
+        const spec = window.__game.effectiveSkill(s.slot)
+        if (Number(spec?.hits ?? 0) > 1) return { slot: s.slot, key: s.key, hits: Number(spec.hits) }
       }
-      await sleep(90)
-    }
-    await release('KeyW')
+      return null
+    })
+    const flurryBefore = (await state()).hitsDealt
+    if (flurrySlot) await tap(flurrySlot.key)
+    await simSleep(1.6)
+    const flurryHits = (await state()).hitsDealt - flurryBefore
+    await page.evaluate(() => window.__game.freezeEnemies(false))
+    void flurryTarget
+    const flurryExpected = flurrySlot?.hits ?? 0
     check(
-      '다단히트 스킬이 한 번의 시전으로 여러 번 명중',
-      flurryHits >= 3,
-      `한 번 시전에 ${flurryHits}회 명중 (설계상 최대 5회)`,
+      '다단히트 스킬이 한 번의 시전으로 설계한 횟수만큼 명중',
+      flurryExpected > 1 && flurryHits === flurryExpected,
+      `한 번 시전에 ${flurryHits}회 명중 (설계 ${flurryExpected}회 · ${flurrySlot?.key ?? '?'} · 표적 하나·무적)`,
     )
 
     // ---------- 7.75 스킬 선입력 버퍼 ----------
@@ -530,15 +584,32 @@ async function main() {
     // 7.8은 적을 얼려놓고 재므로 회전 속도를 아무리 빠르게 해도 통과합니다.
     // 그래서 여기서는 AI를 **살려두고**, 등 뒤에 선 순간부터 적이 돌아설 때까지
     // 몇 초가 걸리는지를 잽니다. 이 숫자가 곧 플레이어가 느끼는 "여유"입니다.
+    /**
+     * ⚠️ **시뮬레이션 시간으로 잽니다 — 벽시계로 재면 거짓이 됩니다.**
+     *
+     * 원래 이 검사는 `Date.now()` 로 쟀습니다. 그래서 이 컨테이너(GPU 없음,
+     * SwiftShader)에서 게임이 실시간의 1/3~1/20로 흐를 때, 실제로는 적이
+     * 1.7초 동안 등을 보이고 있어도 **벽시계로는 0.59초**로 찍혔습니다.
+     * 기준이 0.6초라 아슬아슬하게 실패했고, 장비가 바쁠 때만 깨지는
+     * "가끔 빨간 줄"이 되어 있었습니다. 게임이 아니라 계측기가 틀린
+     * 경우입니다 — 이 프로젝트에서 이미 여러 번 겪은 실패라 규칙으로 둡니다:
+     * **게임 안의 시간은 게임에게 물어봅니다.**
+     */
     await setupDummy(0)
     await page.evaluate(() => window.__game.freezeEnemies(false)) // AI를 깨웁니다
-    const t0 = Date.now()
+    const t0 = (await state()).elapsed
+    const reactAtStart = await page.evaluate(() => {
+      const t = window.__game.threats(30)[0]
+      return t ? window.__game.enemyInfo(t.entity)?.reactT : null
+    })
     let window0 = 0
-    while (Date.now() - t0 < 6000) {
+    const wallDeadline = Date.now() + 60000
+    while (Date.now() < wallDeadline) {
       const st = await state()
+      if (st.elapsed - t0 > 6) break
       if (st.nearestEnemy?.playerBehind !== true) break
-      window0 = (Date.now() - t0) / 1000
-      await sleep(50)
+      window0 = st.elapsed - t0
+      await sleep(20)
     }
     // 반응 지연 0.5초 + 150°/s로 180° 회전(1.2초) = 이론상 1.7초.
     // 측정 오차와 프레임률을 감안해 **0.6초 이상**이면 "여유가 생겼다"고 봅니다.
@@ -546,7 +617,7 @@ async function main() {
     check(
       '등 뒤에 섰을 때 적이 곧바로 돌아서지 않음',
       window0 >= 0.6,
-      `등 뒤 유지 ${window0.toFixed(2)}초`,
+      `등 뒤 유지 ${window0.toFixed(2)}초 (시뮬레이션 시간 · 시작 시 남은 반응 유예 ${reactAtStart ?? '?'}초)`,
     )
     await page.evaluate(() => window.__game.freezeEnemies(true))
 
@@ -684,7 +755,11 @@ async function main() {
     const zs = await zone.evaluate(() => window.__game.state())
     check('아무 옵션 없이 열면 번들 존이 실행됨', zs.source === 'bundled' && zs.levelMode, `source=${zs.source}`)
     check('존 이름이 표시됨', zs.levelName === '무너진 성문', `"${zs.levelName}"`)
-    check('존의 보물 4개가 배치됨', zs.treasureTotal === 4, `${zs.treasureTotal}개`)
+    check(
+      '존의 보물이 레벨 데이터와 같은 수로 배치됨',
+      zs.treasureTotal === LEVEL_TREASURES,
+      `게임 ${zs.treasureTotal}개 · 레벨 데이터 ${LEVEL_TREASURES}개`,
+    )
     /**
      * **개수를 베끼지 않습니다.** 예전엔 `=== 12` 로 박아 뒀는데, 적 종류를
      * 두 가지 추가하자마자 이 검사만 빨갛게 됐습니다 — 게임은 멀쩡한데
@@ -956,7 +1031,11 @@ async function main() {
     //
     // 미니맵을 쓰지 않기로 했으므로(DESIGN.md 기둥 4) 세 가지가 대신 답해야 합니다:
     // 구역 이름 · 한 줄 목표 · 목표를 가리키는 방향. 셋 다 확인합니다.
-    check('존에 이름 붙은 구역이 있음', zs.regionCount === 8, `${zs.regionCount}곳`)
+    check(
+      '존에 이름 붙은 구역이 레벨 데이터와 같은 수로 있음',
+      zs.regionCount === LEVEL_REGIONS && LEVEL_REGIONS >= 5,
+      `게임 ${zs.regionCount}곳 · 레벨 데이터 ${LEVEL_REGIONS}곳`,
+    )
     check('시작하자마자 현재 구역이 잡힘', zs.region === '버려진 앞마당', `"${zs.region}"`)
 
     // 화면에 실제로 글자가 떠 있는지까지 봅니다. 상태값만 맞고 HUD에 안 뜨면

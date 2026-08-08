@@ -177,26 +177,76 @@ try {
   // 동어반복이 되고, 실제로 처음에 그렇게 재서 단축 0m 를 그럴듯하게 놓쳤습니다.
   const boss = cellOf(level.entities.find((e) => e.kind === 'boss'))
   const CELL = 2
-  const startFire = level.entities
-    .filter((e) => e.kind === 'bonfire')
-    .map(cellOf)
-    .reduce((a, b) => (bfs(a, boss, maxClimb, false) > bfs(b, boss, maxClimb, false) ? a : b))
-  const closed = bfs(startFire, boss, maxClimb, false)
-  const opened = bfs(startFire, boss, maxClimb, true)
+  const fireCells = level.entities.filter((e) => e.kind === 'bonfire').map(cellOf)
+  const startFire = fireCells.reduce((a, b) =>
+    bfs(a, boss, maxClimb, false) > bfs(b, boss, maxClimb, false) ? a : b,
+  )
+  /**
+   * ⚠️ **재는 자리를 바꿨습니다 — 여기가 이 프로브의 핵심 수정입니다.**
+   *
+   * 예전엔 *가장 먼* 화톳불에서 쟀습니다. 그 숫자는 56m 단축으로 늘 통과했고,
+   * 자동 플레이는 네 판 내리 **사다리 0/1** 이었습니다. 둘 다 사실이었습니다.
+   *
+   * 화톳불마다 따로 재 보니 이랬습니다:
+   *   시작 화톳불   186m → 130m  (56m)
+   *   중간 화톳불    64m →  64m  (**0m**)
+   *   보스 앞 화톳불  28m →  28m  (**0m**)
+   *
+   * 지름길은 **되돌아 걷는 사람**의 장치인데, 되돌아 걷기가 시작되는 자리
+   * (= 죽으면 부활하는, 보스에서 가장 가까운 화톳불)가 벽 너머에 있었습니다.
+   * 가장 먼 화톳불에서 재는 것은 **아무도 시작하지 않는 지점에서 재는 것**
+   * 이었습니다. 그래서 기준을 **보스에서 가장 가까운 화톳불**로 바꿉니다.
+   */
+  const respawnFire = fireCells.reduce((a, b) =>
+    bfs(a, boss, maxClimb, false) < bfs(b, boss, maxClimb, false) ? a : b,
+  )
+  const closed = bfs(respawnFire, boss, maxClimb, false)
+  const opened = bfs(respawnFire, boss, maxClimb, true)
+  console.log(
+    `  [거리] 화톳불별 보스까지 — ` +
+      fireCells
+        .map((f) => {
+          const c = bfs(f, boss, maxClimb, false)
+          const o = bfs(f, boss, maxClimb, true)
+          return `(${f.cx},${f.cz}) ${c * CELL}→${o * CELL}m`
+        })
+        .join(' · ') +
+      `\n         가장 먼 화톳불 ${bfs(startFire, boss, maxClimb, false) * CELL}m · 부활 화톳불 ${closed * CELL}m\n`,
+  )
   check(
     Number.isFinite(closed),
     '사다리가 걷혀 있어도 보스까지 갈 길은 있다 (지름길이 필수가 아니다)',
-    `가장 먼 화톳불에서 ${closed * CELL}m`,
+    `부활 화톳불에서 ${closed * CELL}m`,
   )
   check(
     opened < closed,
-    '사다리를 내리면 보스까지가 실제로 짧아진다',
+    '**부활 화톳불에서** 보스까지가 실제로 짧아진다 (되걷는 사람에게 값이 있다)',
     `${closed * CELL}m → ${opened * CELL}m (${(closed - opened) * CELL}m 단축, ${Math.round((1 - opened / closed) * 100)}%)`,
   )
   check(
     (closed - opened) * CELL >= 40,
     '단축 폭이 체감될 만큼 크다 (40m 이상 — 걸어서 8초 이상)',
     `${(closed - opened) * CELL}m`,
+  )
+
+  /**
+   * **여는 값 < 아끼는 값** — 지름길이 지름길이기 위한 최소 조건.
+   *
+   * 이 검사가 없어서 오래 놓쳤습니다. 사다리 위 칸이 주 동선에서 100m 가까이
+   * 벗어나 있었고(시작→보스 192m, 시작→사다리 위칸 280m), 그래서 봇도 사람도
+   * 열러 가지 않았습니다. 다크소울1의 지름길은 **가던 길에서 잠깐 옆으로**
+   * 입니다 — 여는 데 드는 값이 아끼는 값보다 크면 그건 수집품이지 지름길이
+   * 아닙니다.
+   */
+  const hi = ladderLinks()[0]
+  const detour =
+    bfs(respawnFire, { cx: hi.hiX, cz: hi.hiZ }, maxClimb, false) +
+    bfs({ cx: hi.hiX, cz: hi.hiZ }, boss, maxClimb, false) -
+    closed
+  check(
+    detour * CELL < (closed - opened) * CELL,
+    '사다리를 열러 가는 값이 아끼는 값보다 작다 (가던 길에서 잠깐 옆으로)',
+    `추가로 걷는 거리 ${detour * CELL}m vs 매 판 아끼는 거리 ${(closed - opened) * CELL}m`,
   )
 
   // ---- 3. 걷힌 사다리는 못 오른다 ----

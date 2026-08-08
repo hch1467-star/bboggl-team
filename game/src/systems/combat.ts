@@ -344,9 +344,27 @@ export function resolveAttacks(): void {
     if (Actor.phase[a] !== AttackPhase.Active) continue
     if (Actor.hitsLeft[a] === 0) continue
 
+    /**
+     * ── 한 프레임에 **여러 타**가 나갈 수 있어야 합니다 ────────────────
+     *
+     * 원래는 프레임당 최대 한 타였습니다. 그래서 5회 다단히트(active 0.45초,
+     * 간격 0.09초)가 **초당 11프레임 미만**에서는 5회를 다 못 채웁니다.
+     * 검증 컨테이너(GPU 없음, 약 10fps)에서 재 보니 정확히 **4회**만
+     * 들어갔습니다 — 설계상 5회인데 20%가 조용히 사라지고 있었습니다.
+     *
+     * 이건 검증 환경만의 문제가 아닙니다. 저사양 기기나 순간적인 프레임
+     * 드랍에서 **스킬의 위력이 조용히 줄어듭니다.** 플레이어에게는 "가끔
+     * 딜이 덜 들어간다"로만 보이고 이유를 알 방법이 없습니다.
+     *
+     * 그래서 남은 시간(carry)을 들고 밀린 타격을 그 자리에서 몰아 칩니다.
+     * 프레임률이 판정을 바꾸지 않게 하는 것이 원칙입니다.
+     */
+    let carry = dt
     if (Actor.nextHitT[a] > 0) {
-      Actor.nextHitT[a] = Math.max(0, Actor.nextHitT[a] - dt)
-      continue
+      const used = Math.min(Actor.nextHitT[a], carry)
+      Actor.nextHitT[a] -= used
+      carry -= used
+      if (Actor.nextHitT[a] > 0) continue
     }
 
     const spec = currentSpec(a)
@@ -355,17 +373,24 @@ export function resolveAttacks(): void {
       continue
     }
 
-    const landed = applyHit(a, spec)
-    /**
-     * 머무는 판정은 **실제로 맞혔을 때만** 소모합니다.
-     * 안 맞았으면 active 가 끝날 때까지 매 프레임 다시 봅니다 —
-     * 그래서 무적으로 첫 순간을 넘겨도 장판은 아직 거기 있습니다.
-     */
-    if (spec.lingers && !landed) continue
-    Actor.hitsLeft[a] = Math.max(0, Actor.hitsLeft[a] - 1)
-    if (Actor.hitsLeft[a] > 0) {
+    // 한 프레임이 아무리 길어도 여기서 끝없이 돌지 않게 상한을 둡니다.
+    for (let guard = 0; guard < 16; guard++) {
+      const landed = applyHit(a, spec)
+      /**
+       * 머무는 판정은 **실제로 맞혔을 때만** 소모합니다.
+       * 안 맞았으면 active 가 끝날 때까지 매 프레임 다시 봅니다 —
+       * 그래서 무적으로 첫 순간을 넘겨도 장판은 아직 거기 있습니다.
+       */
+      if (spec.lingers && !landed) break
+      Actor.hitsLeft[a] = Math.max(0, Actor.hitsLeft[a] - 1)
+      if (Actor.hitsLeft[a] === 0) break
       // 남은 타격을 active 구간에 균등 분배합니다.
-      Actor.nextHitT[a] = activeDurationOf(a) / spec.hits
+      const interval = activeDurationOf(a) / spec.hits
+      if (carry < interval) {
+        Actor.nextHitT[a] = interval - carry
+        break
+      }
+      carry -= interval
     }
   }
 }

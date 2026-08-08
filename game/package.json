@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "verify": "node tools/verify.mjs",
+    "verify": "npm run build && node tools/verify.mjs",
     "vfx": "node tools/vfx-preview.mjs",
     "level": "node tools/level-preview.mjs",
     "skills": "node tools/skill-preview.mjs",

@@ -143,7 +143,23 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Actor.moveScale[e] = 1
   Enemy.kind[e] = kind
   Enemy.aggro[e] = 0
-  Enemy.reactT[e] = 0
+  /**
+   * **등 뒤 반응 유예를 처음부터 채워 둡니다.**
+   *
+   * 0으로 두면 이런 일이 벌어집니다: 이 유예는 "정면에 있을 때마다 다시
+   * 채워지는" 값이라, **한 번도 플레이어를 정면으로 본 적이 없는 적**은
+   * 유예가 0인 채로 시작합니다. 즉 아직 눈치채지 못한 적일수록 등 뒤를
+   * 잡았을 때 **더 빨리** 돌아섭니다 — 정확히 거꾸로입니다.
+   *
+   * 계측이 잡아냈습니다. 등 뒤 유예를 시뮬레이션 시간으로 재도록 고치자
+   * 1.7초여야 할 값이 **0.47초**로 나왔습니다(180°를 150°/s로 돌기 시작한
+   * 시각 그대로). 벽시계로 재던 동안에는 0.59초로 부풀려져 기준(0.6초)을
+   * 아슬아슬하게 넘나들며 "가끔 실패하는 검사"로 보였습니다.
+   *
+   * 소울류에서 눈치 못 챈 적의 등을 잡는 것은 가장 기본적인 보상입니다.
+   * 그 상황이 가장 불리하면 안 됩니다.
+   */
+  Enemy.reactT[e] = cfg.backReactionDelay
   Enemy.attackIndex[e] = 0
   Enemy.phase[e] = 0
   Enemy.transitionT[e] = 0

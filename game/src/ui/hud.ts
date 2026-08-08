@@ -169,17 +169,27 @@ export class Hud {
    * 많이 인용된 문장 — *"닿지 않는 사다리는 위쪽을 아직 못 봤다는 뜻"* — 이
    * 플레이어에게 전달되지 않습니다. 안 되는 이유를 말해 주는 것이 안내입니다.
    */
-  setShortcut(state: 'ready' | 'locked' | 'open' | null): void {
+  /**
+   * @param saving 걷힌 채로 돌아갈 때 걸어야 하는 거리(m). 모르면 null.
+   *
+   * 예전에는 *"지름길이 열립니다"* 라고만 띄웠습니다. 그건 **무슨 일이
+   * 일어나는지**이지 **무엇을 얻는지**가 아닙니다. 98m를 걸어 올라온 사람에게
+   * "98m → 2m"는 설명이 필요 없는 문장입니다. 숫자는 하드코딩이 아니라
+   * 지형에서 실제로 잰 값입니다 — 지도를 바꾸면 문구가 따라옵니다.
+   */
+  setShortcut(state: 'ready' | 'locked' | 'open' | null, saving: number | null = null): void {
     if (state === null || state === 'open') {
       this.shortcutHint.style.display = 'none'
       return
     }
     this.shortcutHint.style.display = 'block'
+    const gain =
+      saving !== null && saving > 6 ? ` — 돌아오면 ${Math.round(saving)}m, 여기서 내리면 2m` : ''
     if (state === 'ready') {
-      this.shortcutHint.innerHTML = '<b>V</b> 사다리를 내린다 — 지름길이 열립니다'
+      this.shortcutHint.innerHTML = `<b>V</b> 사다리를 내린다${gain || ' — 지름길이 열립니다'}`
       this.shortcutHint.style.color = '#c9f0a8'
     } else {
-      this.shortcutHint.textContent = '사다리가 걷혀 있다 — 위에서만 내릴 수 있다'
+      this.shortcutHint.textContent = `사다리가 걷혀 있다 — 위에서만 내릴 수 있다${gain}`
       this.shortcutHint.style.color = '#9aa7b8'
     }
   }
