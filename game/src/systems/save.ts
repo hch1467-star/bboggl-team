@@ -43,7 +43,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 3
+const SAVE_VERSION = 4
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -81,6 +81,14 @@ export interface SaveData {
    * (일반 적은 반대로 반드시 되살아나야 합니다 — 위 표 참고.)
    */
   bosses: string[]
+  /**
+   * 내려둔 사다리의 위치 키.
+   *
+   * 경계선의 "남기는 쪽"입니다. 지름길은 **알아낸 것**이라 보물과 같은 편에 섭니다.
+   * 다시 켤 때마다 걷혀 있으면, 세계의 생김새를 파악한 성과를 매번 빼앗는 셈입니다.
+   * (반대로 사다리를 타고 지나간 적들은 당연히 되살아납니다 — 그건 싸움입니다.)
+   */
+  ladders: string[]
 }
 
 /**
@@ -141,6 +149,7 @@ export function loadSave(levelId: string): SaveData | null {
       treasures: Array.isArray(d.treasures) ? d.treasures.filter((t) => typeof t === 'string') : [],
       tripods: (d.tripods ?? { points: 0, unlocked: [], selections: {} }) as TripodSaveData,
       bosses: Array.isArray(d.bosses) ? d.bosses.filter((t) => typeof t === 'string') : [],
+      ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
       embers: Number(d.embers) || 0,
       vialsMax: Number(d.vialsMax) || 0,
     }
@@ -176,6 +185,7 @@ export function captureSave(
   treasures: Set<string>,
   now: number,
   bosses: ReadonlySet<string> = new Set(),
+  ladders: readonly string[] = [],
 ): SaveData {
   return {
     version: SAVE_VERSION,
@@ -187,6 +197,7 @@ export function captureSave(
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
     bosses: [...bosses],
+    ladders: [...ladders],
     tripods: exportTripods(),
     embers: Player.embers[player],
     vialsMax: Player.vialsMax[player],

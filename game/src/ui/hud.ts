@@ -45,6 +45,7 @@ export class Hud {
   private readonly bossFill = el<HTMLDivElement>('bossFill')
   private readonly bossTicks = el<HTMLElement>('bossTicks')
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
+  private readonly shortcutHint = el<HTMLElement>('shortcutHint')
   private saveTimer: number | null = null
   /** 지금 표시 중인 보스 이름. 눈금을 다시 그릴지 판단합니다. */
   private bossShown = ''
@@ -118,6 +119,29 @@ export class Hud {
     this.upgradeHint.innerHTML = ok
       ? `<b>V</b> 성수병 강화 — 불티 <b>${cost}</b>`
       : `성수병 강화 — 불티 ${embers} / <b>${cost}</b>`
+  }
+
+  /**
+   * 사다리 안내.
+   *
+   * `locked`(아래에서 올려다봄)일 때 안내를 **끄지 않는** 것이 핵심입니다.
+   * 여기서 침묵하면 걷힌 사다리는 그냥 지형 장식이 되고, 조사에서 가장
+   * 많이 인용된 문장 — *"닿지 않는 사다리는 위쪽을 아직 못 봤다는 뜻"* — 이
+   * 플레이어에게 전달되지 않습니다. 안 되는 이유를 말해 주는 것이 안내입니다.
+   */
+  setShortcut(state: 'ready' | 'locked' | 'open' | null): void {
+    if (state === null || state === 'open') {
+      this.shortcutHint.style.display = 'none'
+      return
+    }
+    this.shortcutHint.style.display = 'block'
+    if (state === 'ready') {
+      this.shortcutHint.innerHTML = '<b>V</b> 사다리를 내린다 — 지름길이 열립니다'
+      this.shortcutHint.style.color = '#c9f0a8'
+    } else {
+      this.shortcutHint.textContent = '사다리가 걷혀 있다 — 위에서만 내릴 수 있다'
+      this.shortcutHint.style.color = '#9aa7b8'
+    }
   }
 
   setVials(left: number, max: number): void {

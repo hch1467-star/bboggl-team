@@ -1,6 +1,15 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
-import { BOSS_ARENA, COMBAT, EMBER, KILL_FEEDBACK, TREASURE, VIAL, WORLD } from './config/balance'
+import {
+  BOSS_ARENA,
+  COMBAT,
+  EMBER,
+  KILL_FEEDBACK,
+  LADDER_REACH,
+  TREASURE,
+  VIAL,
+  WORLD,
+} from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { enemyDef, kindFromId } from './config/enemies'
@@ -23,7 +32,16 @@ import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
 import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
-import { loadLevelFromStorage, worldToCell, type LevelData, type LevelRegion } from './level/format'
+import {
+  CELL_SIZE,
+  HEIGHT_STEP,
+  MAX_CLIMB,
+  cellToWorld,
+  loadLevelFromStorage,
+  worldToCell,
+  type LevelData,
+  type LevelRegion,
+} from './level/format'
 import { DEFAULT_LEVEL_ID, loadBundledLevel } from './levels'
 import { Terrain } from './level/terrain'
 import { QuarterViewCamera } from './render/camera'
@@ -136,8 +154,17 @@ class Game {
   private levelH = 0
   /** 화톳불 좌표들. 엔티티가 아니라 좌표 목록입니다(부딪히지 않으므로). */
   private bonfires: Bonfire[] = []
+  private ladderVisuals: { setOpen: (open: boolean) => void }[] = []
   /** 지금까지 쉰 횟수 — 자동 플레이 봇이 **추측하지 않고 읽도록** 노출합니다. */
   private restCount = 0
+  /**
+   * 죽은 횟수. 이것도 게임이 셉니다.
+   *
+   * 봇은 "체력이 0인 프레임"을 보고 죽음을 셌는데, 부활이 **같은 프레임에**
+   * 끝나서 그 프레임이 존재하지 않았습니다. 그래서 봇은 사망 0회라고
+   * 보고하면서 불티가 280에서 32로 줄어 있었습니다 — 계측기가 거짓말을 한 것입니다.
+   */
+  private deathCount = 0
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -245,6 +272,8 @@ class Game {
     phaseEvents.length = 0
     healEvents.length = 0
     this.visuals.clearBonfires()
+    this.visuals.clearLadders()
+    this.ladderVisuals = []
     this.clearDrop()
     this.bossEntity = -1
     sfx.stopMusic()
@@ -299,6 +328,7 @@ class Game {
       const spawned = spawnFromLevel(level, this.terrain)
       this.bonfires = spawned.bonfires
       for (const f of this.bonfires) this.visuals.addBonfire(f.x, f.y, f.z)
+      this.ladderVisuals = this.terrain.shortcuts.map((s) => this.visuals.addLadder(s))
       this.playerEntity = spawned.player
       this.visuals.attach(this.playerEntity, Renderable.kind[this.playerEntity])
       for (const e of spawned.entities) this.visuals.attach(e, Renderable.kind[e])
@@ -315,6 +345,10 @@ class Game {
         applySave(save, this.playerEntity)
         this.takenTreasures = new Set(save.treasures)
         this.defeatedBosses = new Set(save.bosses)
+        // 내려둔 사다리는 남습니다. **지름길은 지식의 보상**이라, 게임을 껐다
+        // 켰다고 다시 걷히면 알아낸 것을 빼앗는 셈이 됩니다.
+        this.terrain.applyOpenShortcuts(save.ladders)
+        this.syncLadderVisuals()
         // 이미 먹은 보물은 아예 치웁니다. 남겨두면 다시 먹혀서 각인석이 무한정 생깁니다.
         this.removeTakenTreasures()
         // 이미 잡은 보스도 치웁니다. 안 하면 게임을 다시 켤 때마다 보스가
@@ -529,6 +563,9 @@ class Game {
       this.hud.setRest(false, 0, false)
     }
 
+    /** ---- 3.72 사다리(지름길) ---- */
+    this.tryDropLadder(p, playerAlive)
+
     /**
      * ---- 3.75 보스 조우 ----
      *
@@ -574,6 +611,7 @@ class Game {
     healthSystem()
     for (const death of deathEvents) {
       if (death.isPlayer) {
+        this.deathCount++
         this.cam.addTrauma(0.8)
         requestHitstop(0.22)
         sfx.death(true)
@@ -750,9 +788,36 @@ class Game {
 
     // --- 목표: 보스 → 남은 보물 → 남은 적 순 ---
     const objective = this.findObjective(px, pz)
+
+    /**
+     * **화살표는 걸어갈 수 있는 방향을 가리켜야 합니다.**
+     *
+     * 예전에는 목표를 직선으로 가리켰습니다. 지도가 한 줄일 때는 그게 맞았지만,
+     * 성벽마루로 길을 돌아가게 만든 순간 화살표가 벽을 뚫고 가라고 가리키게
+     * 되었습니다. 돌아가는 설계를 넣었으면 **안내도 같이 돌아가야** 합니다.
+     * 안 그러면 플레이어에게는 설계가 아니라 버그로 보입니다.
+     *
+     * 거리도 직선이 아니라 **실제로 걸어야 하는 거리**로 바꿉니다. 이쪽이
+     * 정직할 뿐 아니라, 사다리를 내리는 순간 숫자가 뚝 떨어지는 것이
+     * 지름길의 값어치를 그 자리에서 보여줍니다.
+     */
+    let guideX = objective?.x ?? px
+    let guideZ = objective?.z ?? pz
+    let shownDist = objective?.dist ?? 0
+    if (objective && this.terrain) {
+      this.terrain.buildFlowField(objective.x, objective.z)
+      const step = this.terrain.nextStepToward(px, pz)
+      if (step) {
+        guideX = step.x
+        guideZ = step.z
+      }
+      const walk = this.terrain.pathDistance(px, pz)
+      if (walk !== null) shownDist = walk
+    }
+
     this.hud.setNavigation(
       this.currentRegion,
-      objective ? `목표: ${objective.label} (${objective.dist.toFixed(0)}m)` : '목표: 완료',
+      objective ? `목표: ${objective.label} (${shownDist.toFixed(0)}m)` : '목표: 완료',
     )
 
     // --- 지면 화살표: 목표가 멀 때만. 가까우면 눈으로 보이므로 방해만 됩니다. ---
@@ -760,7 +825,7 @@ class Game {
     this.guide.visible = showGuide
     if (showGuide && objective) {
       this.guide.position.set(px, Transform.y[p] + 0.06, pz)
-      this.guide.rotation.y = Math.atan2(objective.x - px, objective.z - pz)
+      this.guide.rotation.y = Math.atan2(guideX - px, guideZ - pz)
       // 앞으로 흘러가는 파도. 정지한 화살표보다 방향이 훨씬 잘 읽힙니다.
       for (let i = 0; i < this.guideMaterials.length; i++) {
         const t = (time.elapsed * 1.25 - i * 0.26) % 1
@@ -904,6 +969,7 @@ class Game {
         this.takenTreasures,
         time.elapsed,
         this.defeatedBosses,
+        this.terrain?.openShortcutKeys() ?? [],
       ),
     )
     this.hud.flashSaved(ok)
@@ -1002,6 +1068,57 @@ class Game {
    * 되어, 성수병을 충전식으로 만든 이유가 통째로 사라집니다.
    * 되돌아가는 데 비용이 있어야 **"밀고 갈까"** 가 진짜 선택이 됩니다.
    */
+  /**
+   * 사다리를 내립니다 — **위에 서 있을 때만.**
+   *
+   * 조사에서 반복해 나온 문장이 결론을 그대로 말해 줍니다:
+   * *"닿지 않는 사다리가 보이면 그 위쪽을 아직 다 못 본 것이다."*
+   * 아래에서도 열 수 있게 하면 이 문장이 성립하지 않게 되고, 걷힌 사다리는
+   * 정보가 아니라 그냥 잠긴 문이 됩니다. 그래서 아래에서는 **왜 안 되는지**만
+   * 알려주고 열어주지 않습니다.
+   *
+   * 화톳불(자동으로 붙음)과 달리 버튼을 요구하는 이유: 지름길이 열리는 순간은
+   * 이 게임에서 **탐험이 보상받는 유일한 순간**입니다. 모르고 지나가면
+   * 보상이 아니라 우연이 됩니다.
+   */
+  private tryDropLadder(p: number, playerAlive: boolean): void {
+    if (!this.terrain || !playerAlive || this.terrain.shortcuts.length === 0) {
+      this.hud.setShortcut(null)
+      return
+    }
+    const found = this.terrain.shortcutNear(Transform.x[p], Transform.z[p], LADDER_REACH)
+    if (!found) {
+      this.hud.setShortcut(null)
+      return
+    }
+    const { s, fromTop } = found
+    this.hud.setShortcut(s.open ? 'open' : fromTop ? 'ready' : 'locked')
+    if (s.open || !fromTop) return
+    /**
+     * 키가 **V**인 이유: E는 이미 무기 스킬 2번입니다(실제로 E로 만들었다가
+     * 프로브에서 사다리 대신 스킬이 나갔습니다). 새 키를 하나 더 늘리는 대신
+     * 화톳불 강화와 같은 V를 씁니다 — V는 "이 자리에서 할 수 있는 일" 하나로
+     * 묶입니다. 화톳불과 사다리가 같은 자리에 있을 일은 없고(사다리는 절벽
+     * 경계, 화톳불은 트인 바닥), 만에 하나 겹치면 강화가 먼저 소비합니다.
+     */
+    if (!consumePress('KeyV')) return
+
+    s.open = true
+    this.syncLadderVisuals()
+    sfx.pickup()
+    this.cam.addTrauma(0.22)
+    this.hud.showBanner('사다리를 내렸다', '지름길이 열렸습니다', 2.2)
+    this.persistProgress()
+  }
+
+  private syncLadderVisuals(): void {
+    if (!this.terrain) return
+    for (let i = 0; i < this.ladderVisuals.length; i++) {
+      const s = this.terrain.shortcuts[i]
+      if (s) this.ladderVisuals[i].setOpen(s.open)
+    }
+  }
+
   private restAt(p: number, fire: Bonfire): void {
     this.restCount++
     Health.hp[p] = Health.max[p]
@@ -1154,6 +1271,55 @@ class Game {
     this.cam.snapTo(x, z)
   }
 
+  /** 사다리 상태 — 프로브가 상수를 베끼지 않고 게임에서 읽도록. */
+  debugShortcutInfo(): {
+    key: string
+    open: boolean
+    rise: number
+    loWorldX: number
+    loWorldZ: number
+    hiWorldX: number
+    hiWorldZ: number
+  }[] {
+    if (!this.terrain) return []
+    const { w, h } = this.terrain.level
+    return this.terrain.shortcuts.map((s) => {
+      const lo = cellToWorld(s.loX, s.loZ, w, h)
+      const hi = cellToWorld(s.hiX, s.hiZ, w, h)
+      return {
+        key: s.key,
+        open: s.open,
+        rise: Math.round((s.hiY - s.loY) / HEIGHT_STEP),
+        loWorldX: lo.x,
+        loWorldZ: lo.z,
+        hiWorldX: hi.x,
+        hiWorldZ: hi.z,
+      }
+    })
+  }
+
+  /** 지금 화면에 뜬 사다리 안내 상태. */
+  debugShortcutHint(): 'ready' | 'locked' | 'open' | null {
+    if (!this.terrain) return null
+    const p = this.playerEntity
+    const found = this.terrain.shortcutNear(Transform.x[p], Transform.z[p], LADDER_REACH)
+    if (!found) return null
+    return found.s.open ? 'open' : found.fromTop ? 'ready' : 'locked'
+  }
+
+  /** 두 지점 사이를 걸어서 통과할 수 있는가 — 게임의 통행 규칙 그대로. */
+  debugWalkTest(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
+    return this.terrain?.canWalk(fromX, fromZ, toX, toZ) ?? false
+  }
+
+  debugTerrainInfo(): { maxClimb: number; heightStep: number; cellSize: number } {
+    return { maxClimb: MAX_CLIMB, heightStep: HEIGHT_STEP, cellSize: CELL_SIZE }
+  }
+
+  debugRunStats(): { deaths: number; rests: number; kills: number } {
+    return { deaths: this.deathCount, rests: this.restCount, kills: this.kills }
+  }
+
   debugNearestBonfire(): { x: number; z: number } | null {
     const p = this.playerEntity
     let best: { x: number; z: number } | null = null
@@ -1177,9 +1343,36 @@ class Game {
     }
   }
 
-  debugObjective(): { x: number; z: number; label: string; dist: number } | null {
+  debugObjective(): {
+    x: number
+    z: number
+    label: string
+    dist: number
+    /** 다음에 향할 지점 — 벽을 돌아가는 경로의 한 걸음. 길이 없으면 목표와 같습니다. */
+    stepX: number
+    stepZ: number
+    /** 실제로 걸어야 하는 거리(m). 길이 없으면 직선 거리. */
+    walkDist: number
+  } | null {
     const p = this.playerEntity
-    return this.findObjective(Transform.x[p], Transform.z[p])
+    const px = Transform.x[p]
+    const pz = Transform.z[p]
+    const o = this.findObjective(px, pz)
+    if (!o) return null
+    let stepX = o.x
+    let stepZ = o.z
+    let walkDist = o.dist
+    if (this.terrain) {
+      this.terrain.buildFlowField(o.x, o.z)
+      const step = this.terrain.nextStepToward(px, pz)
+      if (step) {
+        stepX = step.x
+        stepZ = step.z
+      }
+      const d = this.terrain.pathDistance(px, pz)
+      if (d !== null) walkDist = d
+    }
+    return { ...o, stepX, stepZ, walkDist }
   }
 
   debugBossEncounter(): {
@@ -1657,7 +1850,15 @@ declare global {
        */
       cameraAxes: () => { forwardX: number; forwardZ: number; rightX: number; rightZ: number }
       /** 지금 목표 지점(길안내와 **같은 계산**). 없으면 null. */
-      objective: () => { x: number; z: number; label: string; dist: number } | null
+      objective: () => {
+        x: number
+        z: number
+        label: string
+        dist: number
+        stepX: number
+        stepZ: number
+        walkDist: number
+      } | null
       /** 보스 조우 검증용 */
       bossEncounter: () => {
         entity: number
@@ -1699,6 +1900,21 @@ declare global {
       setVials: (n: number) => void
       teleportPlayer: (x: number, z: number) => void
       nearestBonfire: () => { x: number; z: number } | null
+      /** 사다리(지름길) 검증용 */
+      shortcutInfo: () => {
+        key: string
+        open: boolean
+        rise: number
+        loWorldX: number
+        loWorldZ: number
+        hiWorldX: number
+        hiWorldZ: number
+      }[]
+      shortcutHint: () => 'ready' | 'locked' | 'open' | null
+      walkTest: (fromX: number, fromZ: number, toX: number, toZ: number) => boolean
+      terrainInfo: () => { maxClimb: number; heightStep: number; cellSize: number }
+      /** 봇이 추측하지 않고 읽는 실행 통계 */
+      runStats: () => { deaths: number; rests: number; kills: number }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
       resetProgress: () => void
@@ -1833,6 +2049,11 @@ window.__game = {
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   nearestBonfire: () => game.debugNearestBonfire(),
+  shortcutInfo: () => game.debugShortcutInfo(),
+  shortcutHint: () => game.debugShortcutHint(),
+  walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
+  terrainInfo: () => game.debugTerrainInfo(),
+  runStats: () => game.debugRunStats(),
   saveInfo: () => game.debugSaveInfo(),
   resetProgress: () => game.resetProgress(),
   audio: {

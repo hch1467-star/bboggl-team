@@ -4,6 +4,7 @@ import {
   HEIGHT_STEP,
   MAX_CLIMB,
   VOID,
+  cellToWorld,
   type LevelData,
   worldToCell,
 } from './format'
@@ -13,6 +14,50 @@ const CHUNK = 12
 
 /** 이 거리 안의 높은 덩어리만 반투명 대상이 됩니다(m). */
 const OCCLUSION_RANGE = 26
+
+/**
+ * 사다리 — **일방통행 낙차를 양방향 지름길로 바꾸는 장치.**
+ *
+ * NRFTW의 지도가 재밌는 이유를 조사해 보면 거의 다 이 하나로 모입니다:
+ * *"위에서 걷어차 내린 사다리가 아까 지나온 곳으로 이어진다."*
+ * 다크소울1이 만든 **루프백 지름길**을 사다리 하나로 압축한 것입니다.
+ *
+ * 왜 이게 재미인가 — 지름길은 **시간을 줄여주는 편의**가 아니라 **지식의 보상**입니다.
+ * 길이 짧아진 게 아니라, 내가 이 세계의 생김새를 알아냈다는 증거가 지형에 남습니다.
+ * 그래서 자동으로 열리면 안 되고, **위에서만** 내릴 수 있어야 합니다:
+ *   · 아래에서 올려다본 걷힌 사다리 = "저 위로 가는 길이 아직 있다"는 **말 없는 안내**
+ *   · 위에서 내리는 순간 = "내가 저기서 여기까지 왔구나"라는 **연결의 확인**
+ * 조사 중 가장 많이 인용된 문장이 이것이었습니다 —
+ * *"닿지 않는 사다리가 보이면, 그 위쪽을 아직 다 못 본 것이다."*
+ */
+export interface Shortcut {
+  /** 아래쪽 칸(격자) */
+  loX: number
+  loZ: number
+  /** 위쪽 칸(격자) */
+  hiX: number
+  hiZ: number
+  /** 두 칸의 경계 월드 좌표 — 연출과 상호작용 판정에 씁니다. */
+  x: number
+  z: number
+  /** 아래 칸의 지면 높이(m) */
+  loY: number
+  /** 위 칸의 지면 높이(m) */
+  hiY: number
+  /** 아래에서 위로 향하는 방향(정규화 XZ) */
+  dirX: number
+  dirZ: number
+  /** 내려져 있는가. 내려지면 양방향으로 통행 가능. */
+  open: boolean
+  /**
+   * 세이브 키 — 좌표 기반입니다.
+   *
+   * 배열 인덱스로 저장하면 레벨에 사다리를 하나 추가하는 순간 예전 세이브의
+   * "열린 사다리"가 **다른 사다리로 조용히 옮겨갑니다.** 보스 격파 기록을
+   * 좌표로 저장한 것과 같은 이유입니다.
+   */
+  key: string
+}
 
 interface Chunk {
   mesh: THREE.Mesh
@@ -41,12 +86,215 @@ export class Terrain {
   readonly maxLevel: number
   private readonly chunks: Chunk[] = []
   readonly group = new THREE.Group()
+  /** 이 레벨의 사다리들. 레벨 데이터의 'ladder' 엔티티에서 만들어집니다. */
+  readonly shortcuts: Shortcut[] = []
 
   constructor(readonly level: LevelData) {
     let max = 0
     for (const v of level.heights) if (v > max) max = v
     this.maxLevel = max
     this.build()
+    this.buildShortcuts()
+  }
+
+  // ---- 사다리 -----------------------------------------------------------
+
+  /**
+   * 'ladder' 엔티티를 통행 링크로 바꿉니다.
+   *
+   * 레벨에는 **아래쪽 칸에** 사다리를 놓습니다. 위쪽 칸은 이웃 넷 중 **가장 높은
+   * 칸**으로 자동 결정합니다.
+   *
+   * 왜 방향을 데이터로 받지 않는가: 에디터에서 각도를 맞춰 놓는 일은 초보가
+   * 틀리기 쉽고, 틀려도 화면에서 안 보입니다(사다리가 허공을 향해 서 있어도
+   * 그럴듯해 보입니다). 지형에서 유도하면 **틀릴 수가 없습니다.**
+   */
+  private buildShortcuts(): void {
+    const { w, h } = this.level
+    for (const e of this.level.entities) {
+      if (e.kind !== 'ladder') continue
+      const { cx, cz } = worldToCell(e.x, e.z, w, h)
+      const lo = this.levelAtCell(cx, cz)
+      if (lo === VOID) {
+        console.warn(`사다리가 바닥 없는 칸(${cx},${cz})에 있습니다 — 무시합니다.`)
+        continue
+      }
+      let best = lo
+      let bx = cx
+      let bz = cz
+      for (const [nx, nz] of [
+        [cx - 1, cz],
+        [cx + 1, cz],
+        [cx, cz - 1],
+        [cx, cz + 1],
+      ]) {
+        const v = this.levelAtCell(nx, nz)
+        if (v !== VOID && v > best) {
+          best = v
+          bx = nx
+          bz = nz
+        }
+      }
+      if (best - lo <= MAX_CLIMB) {
+        // 걸어서 오를 수 있는 단차에 사다리를 놓으면 아무 일도 안 합니다.
+        // 조용히 두면 "왜 지름길이 안 열리지"로 몇 시간을 잃게 됩니다.
+        console.warn(`사다리(${cx},${cz})가 걸어서 오를 수 있는 단차에 있습니다 — 지름길이 되지 않습니다.`)
+        continue
+      }
+      const loW = cellToWorld(cx, cz, w, h)
+      const hiW = cellToWorld(bx, bz, w, h)
+      const dx = hiW.x - loW.x
+      const dz = hiW.z - loW.z
+      const len = Math.hypot(dx, dz) || 1
+      this.shortcuts.push({
+        loX: cx,
+        loZ: cz,
+        hiX: bx,
+        hiZ: bz,
+        x: (loW.x + hiW.x) / 2,
+        z: (loW.z + hiW.z) / 2,
+        loY: lo * HEIGHT_STEP,
+        hiY: best * HEIGHT_STEP,
+        dirX: dx / len,
+        dirZ: dz / len,
+        open: false,
+        key: `${cx},${cz}`,
+      })
+    }
+  }
+
+  /** 세이브에서 읽은 열린 사다리 목록을 반영합니다. */
+  applyOpenShortcuts(keys: readonly string[]): void {
+    const set = new Set(keys)
+    for (const s of this.shortcuts) s.open = set.has(s.key)
+  }
+
+  // ---- 길찾기 -----------------------------------------------------------
+
+  /**
+   * 목표까지의 **거리장(distance field)**.
+   *
+   * ── 왜 필요해졌는가 ────────────────────────────────────────────
+   * 화면의 목표 화살표는 원래 목표를 **직선으로** 가리켰습니다. 지도가 서→동
+   * 한 줄일 때는 그래도 맞았습니다. 그런데 지도를 원으로 만들면서 성벽마루가
+   * 길을 막자, 화살표가 **벽을 뚫고 가라고 가리키게** 되었습니다.
+   * 길을 돌아가게 만들었으면 안내도 돌아가야 합니다. 안 그러면 "돌아가는 길"이
+   * 설계가 아니라 그냥 버그로 읽힙니다.
+   *
+   * ── 왜 A*가 아니라 거리장인가 ──────────────────────────────────
+   * 목표는 하나(보스)인데 물어보는 쪽은 매 프레임입니다. 목표에서 한 번
+   * 물을 흘려 놓으면(BFS) 그 뒤로는 **이웃 넷 중 제일 낮은 칸**을 고르는
+   * 것으로 끝납니다 — 매 프레임 O(1). 격자가 88×72=6336칸이라 다시 만드는
+   * 비용도 무시할 수준이고, 목표 칸이나 사다리 상태가 바뀔 때만 다시 만듭니다.
+   *
+   * 방향이 중요합니다: 오르막은 한쪽으로만 통하므로(내려가기는 자유, 오르기는
+   * 제한) **목표에서 거꾸로** 퍼뜨리되 판정은 "이웃 → 지금 칸"으로 겁니다.
+   */
+  private field: Int32Array | null = null
+  private fieldKey = ''
+
+  private canStepCell(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
+    const to = this.levelAtCell(toX, toZ)
+    if (to === VOID) return false
+    const from = this.levelAtCell(fromX, fromZ)
+    if (from === VOID) return false
+    if (to - from <= MAX_CLIMB) return true
+    const s = this.shortcutBetween(fromX, fromZ, toX, toZ)
+    return s !== null && s.open
+  }
+
+  /** 목표 지점으로 향하는 거리장을 준비합니다. 같은 조건이면 다시 만들지 않습니다. */
+  buildFlowField(targetX: number, targetZ: number): void {
+    const { w, h } = this.level
+    const t = worldToCell(targetX, targetZ, w, h)
+    const key = `${t.cx},${t.cz}|${this.shortcuts.map((s) => (s.open ? 1 : 0)).join('')}`
+    if (key === this.fieldKey && this.field) return
+    this.fieldKey = key
+
+    const field = new Int32Array(w * h).fill(-1)
+    if (this.levelAtCell(t.cx, t.cz) === VOID) {
+      this.field = field
+      return
+    }
+    field[t.cz * w + t.cx] = 0
+    let frontier = [[t.cx, t.cz] as [number, number]]
+    while (frontier.length) {
+      const next: [number, number][] = []
+      for (const [cx, cz] of frontier) {
+        const d = field[cz * w + cx]
+        for (const [nx, nz] of [
+          [cx - 1, cz],
+          [cx + 1, cz],
+          [cx, cz - 1],
+          [cx, cz + 1],
+        ] as [number, number][]) {
+          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+          if (field[nz * w + nx] !== -1) continue
+          // **이웃에서 지금 칸으로** 올 수 있어야 합니다(오르막 방향 주의).
+          if (!this.canStepCell(nx, nz, cx, cz)) continue
+          field[nz * w + nx] = d + 1
+          next.push([nx, nz])
+        }
+      }
+      frontier = next
+    }
+    this.field = field
+  }
+
+  /**
+   * 지금 자리에서 목표로 향하는 **다음 한 걸음**의 월드 좌표.
+   * 길이 없으면 null — 그때는 부르는 쪽이 직선으로 되돌아가면 됩니다.
+   */
+  nextStepToward(x: number, z: number): { x: number; z: number } | null {
+    if (!this.field) return null
+    const { w, h } = this.level
+    const { cx, cz } = worldToCell(x, z, w, h)
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return null
+    const here = this.field[cz * w + cx]
+    if (here < 0) return null
+    if (here === 0) return null
+    let best = here
+    let bx = cx
+    let bz = cz
+    for (const [nx, nz] of [
+      [cx - 1, cz],
+      [cx + 1, cz],
+      [cx, cz - 1],
+      [cx, cz + 1],
+    ] as [number, number][]) {
+      if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+      const d = this.field[nz * w + nx]
+      if (d < 0 || d >= best) continue
+      if (!this.canStepCell(cx, cz, nx, nz)) continue
+      best = d
+      bx = nx
+      bz = nz
+    }
+    if (bx === cx && bz === cz) return null
+    return cellToWorld(bx, bz, w, h)
+  }
+
+  /** 목표까지 실제로 걸어야 하는 거리(m). 길이 없으면 null. */
+  pathDistance(x: number, z: number): number | null {
+    if (!this.field) return null
+    const { w, h } = this.level
+    const { cx, cz } = worldToCell(x, z, w, h)
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return null
+    const d = this.field[cz * w + cx]
+    return d < 0 ? null : d * CELL_SIZE
+  }
+
+  openShortcutKeys(): string[] {
+    return this.shortcuts.filter((s) => s.open).map((s) => s.key)
+  }
+
+  /** 두 칸을 잇는 사다리가 있으면 돌려줍니다(방향 무관). */
+  private shortcutBetween(aX: number, aZ: number, bX: number, bZ: number): Shortcut | null {
+    for (const s of this.shortcuts) {
+      if (s.loX === aX && s.loZ === aZ && s.hiX === bX && s.hiZ === bZ) return s
+      if (s.loX === bX && s.loZ === bZ && s.hiX === aX && s.hiZ === aZ) return s
+    }
+    return null
   }
 
   // ---- 질의 -------------------------------------------------------------
@@ -90,7 +338,41 @@ export class Terrain {
     if (to === VOID) return false
     const from = this.levelAtWorld(fromX, fromZ)
     if (from === VOID) return true // 이미 이상한 곳에 있다면 탈출은 허용
-    return to - from <= MAX_CLIMB
+    if (to - from <= MAX_CLIMB) return true
+    // 못 오를 단차라도 **내려진 사다리**가 그 두 칸을 이어 주면 오를 수 있습니다.
+    // 사다리가 없거나 아직 걷혀 있으면 여기서 막힙니다.
+    if (this.shortcuts.length === 0) return false
+    const { w, h } = this.level
+    const a = worldToCell(fromX, fromZ, w, h)
+    const b = worldToCell(toX, toZ, w, h)
+    const s = this.shortcutBetween(a.cx, a.cz, b.cx, b.cz)
+    return s !== null && s.open
+  }
+
+  /**
+   * 플레이어가 지금 내릴 수 있는 사다리.
+   *
+   * **위쪽 칸에 서 있어야만** 내릴 수 있습니다 — 이게 이 장치의 전부입니다.
+   * 아래에서도 올릴 수 있게 하면 걷힌 사다리가 주는 "저 위에 길이 있다"는
+   * 정보가 사라지고, 그냥 상호작용 버튼 하나가 됩니다.
+   */
+  shortcutNear(x: number, z: number, reach: number): { s: Shortcut; fromTop: boolean } | null {
+    const { w, h } = this.level
+    const cell = worldToCell(x, z, w, h)
+    let best: { s: Shortcut; fromTop: boolean } | null = null
+    let bestD = reach
+    for (const s of this.shortcuts) {
+      const d = Math.hypot(s.x - x, s.z - z)
+      if (d > bestD) continue
+      // 칸으로도 판정합니다. 거리만 보면 낙차 위아래가 XZ상 가까워서
+      // 어느 쪽에 서 있는지 구분이 안 됩니다.
+      const onTop = cell.cx === s.hiX && cell.cz === s.hiZ
+      const onBottom = cell.cx === s.loX && cell.cz === s.loZ
+      if (!onTop && !onBottom) continue
+      bestD = d
+      best = { s, fromTop: onTop }
+    }
+    return best
   }
 
   /**

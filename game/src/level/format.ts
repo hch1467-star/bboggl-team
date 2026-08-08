@@ -46,6 +46,7 @@ export type EntityKind =
   | 'binder'
   | 'dragger'
   | 'bonfire'
+  | 'ladder'
 
 export const ENTITY_KINDS: EntityKind[] = [
   'spawn',
@@ -55,6 +56,7 @@ export const ENTITY_KINDS: EntityKind[] = [
   'binder',
   'dragger',
   'bonfire',
+  'ladder',
 ]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
@@ -65,6 +67,7 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   binder: '얽는 자 🔵',
   dragger: '끄는 자 🟣',
   bonfire: '화톳불',
+  ladder: '사다리(지름길)',
 }
 
 /**
@@ -82,6 +85,7 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   binder: 0x35a7ff,
   dragger: 0xc061ff,
   bonfire: 0xffa93c,
+  ladder: 0x9ee37d,
 }
 
 export interface LevelEntity {

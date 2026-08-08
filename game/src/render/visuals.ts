@@ -229,6 +229,7 @@ export class Visuals {
   private readonly hpBarGeo: THREE.PlaneGeometry
   private readonly pillarGeo: THREE.BufferGeometry
   private readonly bonfireFlames: THREE.Mesh[] = []
+  private readonly ladderGroups: THREE.Group[] = []
   private readonly dropRings: THREE.Mesh[] = []
 
   constructor(
@@ -912,6 +913,79 @@ export class Visuals {
       if (parent) this.scene.remove(parent)
     }
     this.bonfireFlames.length = 0
+  }
+
+  /**
+   * 사다리 — 걷힌 모습과 내려진 모습이 **멀리서 실루엣만 봐도** 달라야 합니다.
+   *
+   * 쿼터뷰에서 1m는 화면 31px입니다. 색만 바꾸면 색약인 사람에게도, 화면이
+   * 어두운 사람에게도 안 보입니다. 그래서 **형태**를 바꿉니다:
+   *   · 걷힌 상태 = 절벽 **위 가장자리에 눕혀 놓은 짧은 묶음** (가로 실루엣)
+   *   · 내려진 상태 = 절벽면을 따라 아래까지 내려온 **긴 세로 실루엣**
+   * 아래에서 올려다보면 걷힌 사다리가 난간 너머로 삐죽 보입니다 — 이게
+   * "저 위에 아직 못 가본 길이 있다"는 안내입니다.
+   */
+  addLadder(s: {
+    x: number
+    z: number
+    loY: number
+    hiY: number
+    dirX: number
+    dirZ: number
+    open: boolean
+  }): { setOpen: (open: boolean) => void } {
+    const g = new THREE.Group()
+    g.position.set(s.x, 0, s.z)
+    // 아래에서 위로 향하는 방향을 바라보게 회전 — 사다리 면이 절벽에 붙습니다.
+    g.rotation.y = Math.atan2(s.dirX, s.dirZ)
+
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6a3f, roughness: 0.88 })
+    const rise = Math.max(0.9, s.hiY - s.loY)
+
+    // ---- 내려진 사다리 ----
+    const deployed = new THREE.Group()
+    const railGeo = new THREE.BoxGeometry(0.12, rise + 0.6, 0.12)
+    for (const off of [-0.32, 0.32]) {
+      const rail = new THREE.Mesh(railGeo, wood)
+      rail.position.set(off, s.loY + (rise + 0.6) / 2, 0)
+      rail.castShadow = true
+      deployed.add(rail)
+    }
+    const rungGeo = new THREE.BoxGeometry(0.76, 0.08, 0.08)
+    const rungs = Math.max(2, Math.round(rise / 0.42))
+    for (let i = 0; i <= rungs; i++) {
+      const rung = new THREE.Mesh(rungGeo, wood)
+      rung.position.set(0, s.loY + 0.3 + (i / rungs) * rise, 0)
+      deployed.add(rung)
+    }
+
+    // ---- 걷힌 사다리 ---- 위 가장자리에 눕혀 둔 묶음
+    const folded = new THREE.Group()
+    const bundle = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.26, 0.44), wood)
+    bundle.position.set(0, s.hiY + 0.13, 0.35)
+    bundle.castShadow = true
+    const strap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.86, 0.1, 0.1),
+      new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.9 }),
+    )
+    strap.position.set(0, s.hiY + 0.28, 0.35)
+    folded.add(bundle, strap)
+
+    g.add(deployed, folded)
+    this.scene.add(g)
+    this.ladderGroups.push(g)
+
+    const setOpen = (open: boolean) => {
+      deployed.visible = open
+      folded.visible = !open
+    }
+    setOpen(s.open)
+    return { setOpen }
+  }
+
+  clearLadders(): void {
+    for (const g of this.ladderGroups) this.scene.remove(g)
+    this.ladderGroups.length = 0
   }
 
   dispose(): void {

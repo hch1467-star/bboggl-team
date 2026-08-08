@@ -97,7 +97,6 @@ try {
     }
 
     const t0 = now()
-    let deaths = 0
     let lastHp = 100
     let stuckSince = t0
     let lastPos = G.state().player
@@ -124,8 +123,12 @@ try {
       }
 
       // ---- 죽음 ----
+      //
+      // 죽은 횟수는 **게임이 셉니다**(runStats). 예전에는 "체력이 0인 프레임"을
+      // 봇이 직접 셌는데, 화톳불 부활이 같은 프레임에 끝나서 그런 프레임이
+      // 아예 없었습니다. 그래서 사망 0회로 보고하면서 불티는 280 → 32 로
+      // 줄어 있었습니다 — 계측기가 조용히 거짓말을 하고 있었던 것입니다.
       if (p.hp <= 0 || st.gameOver) {
-        deaths++
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '사망', region: curRegion, x: p.x, z: p.z })
         releaseAll()
         // 화톳불 부활은 자동입니다. 게임 오버(부활 지점 없음)면 여기서 끝.
@@ -192,9 +195,23 @@ try {
       }
 
       // ---- 이동: 목표 쪽으로 ----
+      //
+      // **직선이 아니라 경로의 다음 한 걸음**을 따라갑니다. 지도가 원이 되면서
+      // 목표까지 직선으로 가면 성벽마루에 처박히기 때문입니다. 게임의 화살표도
+      // 같은 값을 씁니다 — 봇과 사람이 같은 안내를 보게 두는 것이 요점입니다.
       const obj = G.objective()
       if (!obj) break
-      moveToward(obj.x - p.x, obj.z - p.z)
+      moveToward(obj.stepX - p.x, obj.stepZ - p.z)
+
+      // ---- 사다리: 위에 서 있으면 내립니다 ----
+      // 사람이라면 안내가 뜬 김에 누릅니다. 봇이 안 누르면 지름길이 열리는지
+      // 아닌지를 이 실행으로는 알 수 없습니다.
+      if (G.shortcutHint() === 'ready') {
+        releaseAll()
+        tap('KeyV')
+        await sleep()
+        continue
+      }
 
       // ---- 화톳불: 지나가다 체력이 낮으면 쉽니다 ----
       // 불은 지나가기만 해도 붙습니다(안전망). 여기서 멈추는 건
@@ -264,7 +281,7 @@ try {
     bossKilled = !st.nearestEnemy || (G.bossEncounter() === null)
     return {
       elapsed: Number((now() - t0).toFixed(1)),
-      deaths,
+      deaths: G.runStats().deaths,
       regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
       regionTotal: Object.entries(total)
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
@@ -275,6 +292,8 @@ try {
       // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
       restCount: G.vialInfo().restCount,
       upgrades,
+      ladderOpen: (G.shortcutInfo() ?? []).filter((l) => l.open).length,
+      ladderTotal: (G.shortcutInfo() ?? []).length,
       bossSeen,
       bossKilled,
       kills: st.kills,
@@ -317,6 +336,7 @@ try {
   console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
   console.log(`  불티       ${log.embers} · 강화 ${log.upgrades}회`)
+  console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
   console.log(`  체력       ${log.hp}`)
   console.log('')
 } finally {

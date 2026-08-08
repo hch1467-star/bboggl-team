@@ -69,6 +69,18 @@
       #upgradeHint b { color: #ffd479; }
       #restFill { background: linear-gradient(90deg, #ffa93c, #ffd479); }
       /*
+        사다리 안내 — 화톳불 안내보다 **한 칸 위**에 둡니다.
+        둘이 동시에 뜰 일은 거의 없지만, 겹쳐서 하나가 가려지면
+        "왜 지름길이 안 열리지"로 몇 분을 잃게 됩니다.
+      */
+      #shortcutHint {
+        position: absolute; left: 50%; bottom: 190px; transform: translateX(-50%);
+        display: none; text-align: center; font-size: 12px; color: #c9f0a8;
+        background: rgba(12,14,20,0.72); padding: 6px 14px; border-radius: 8px;
+        border: 1px solid rgba(158,227,125,0.3); pointer-events: none; white-space: nowrap;
+      }
+      #shortcutHint b { color: #d8ffb0; }
+      /*
         저체력 경고 — 화면 **가장자리**만 물들입니다.
         가운데를 덮으면 정작 읽어야 할 4색 예고를 가려서, 위험을 알리려던 것이
         위험을 못 보게 만듭니다. 가장자리는 시야의 주변부라 경고로는 충분하고
@@ -285,6 +297,9 @@
           </div>
         </div>
 
+        <!-- 사다리 안내 — 내릴 수 있을 때, 그리고 **못 내리는 이유**도 알려줍니다 -->
+        <div id="shortcutHint"></div>
+
         <!-- 화톳불 안내 — 가까이 갔을 때만 뜹니다 -->
         <div id="restHint">
           <b id="restLabel">화톳불</b>
@@ -349,7 +364,7 @@
           <div class="key"><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>
           <div class="key"><kbd>T</kbd> 트라이포드</div>
           <div class="key"><kbd>X</kbd> 성수병 (회복)</div>
-          <div class="key"><kbd>V</kbd> 화톳불에서 강화</div>
+          <div class="key"><kbd>V</kbd> 화톳불 강화 · 사다리 내리기</div>
           <div class="key"><kbd>M</kbd> 소리 끄기/켜기</div>
           <a class="key" href="./?mode=arena" style="color: #9fd2ff; text-decoration: none"
             >⚔ 전투 시험장</a

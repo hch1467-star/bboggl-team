@@ -137,6 +137,10 @@ class Editor {
       binder: new THREE.CapsuleGeometry(0.34, 1.3, 4, 8),
       dragger: new THREE.CapsuleGeometry(0.55, 0.5, 4, 10),
       bonfire: new THREE.ConeGeometry(0.6, 1.1, 6),
+      // 사다리는 **아래쪽 칸**에 놓습니다(위 칸은 지형에서 자동으로 정해집니다).
+      // 마커를 납작한 판으로 둔 이유: 서 있는 기둥으로 만들면 벽에 붙었을 때
+      // 어느 칸에 놓았는지가 안 보입니다.
+      ladder: new THREE.BoxGeometry(1.1, 0.18, 0.5),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()
