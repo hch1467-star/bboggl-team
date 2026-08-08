@@ -39,6 +39,8 @@ export class Hud {
   private readonly restLabel = el<HTMLElement>('restLabel')
   private readonly restFill = el<HTMLDivElement>('restFill')
   private readonly lowHp = el<HTMLDivElement>('lowHp')
+  private readonly emberText = el<HTMLElement>('emberText')
+  private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private saveTimer: number | null = null
 
   private fpsAccum = 0
@@ -66,6 +68,29 @@ export class Hud {
   }
 
   /** 아레나 모드와 레벨 모드는 보여줄 정보가 다릅니다. */
+  setEmbers(n: number): void {
+    this.emberText.textContent = String(n)
+  }
+
+  /**
+   * 화톳불 앞에서만 강화 안내를 띄웁니다.
+   * @param cost -1 이면 더 올릴 수 없는 상태입니다.
+   */
+  setUpgrade(atFire: boolean, cost: number, embers: number): void {
+    if (!atFire) {
+      this.upgradeHint.textContent = ''
+      return
+    }
+    if (cost < 0) {
+      this.upgradeHint.textContent = '성수병 강화 완료'
+      return
+    }
+    const ok = embers >= cost
+    this.upgradeHint.innerHTML = ok
+      ? `<b>V</b> 성수병 강화 — 불티 <b>${cost}</b>`
+      : `성수병 강화 — 불티 ${embers} / <b>${cost}</b>`
+  }
+
   setVials(left: number, max: number): void {
     this.vialText.textContent = `${left} / ${max}`
     // 다 떨어졌으면 붉게 — 숫자를 읽지 않아도 "없다"가 보여야 합니다.

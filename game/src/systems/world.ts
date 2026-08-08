@@ -85,6 +85,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   Player.respawnX[e] = x
   Player.respawnZ[e] = z
   Player.hasRespawn[e] = 0
+  Player.embers[e] = 0
   // 시작 장비: 롱소드, 룬 없음. 룬은 탐험(보물)으로 얻습니다 — 기둥 4의
   // "성장 = 새로운 걸 할 수 있게 되는 것"을 시스템으로 강제하는 지점입니다.
   Loadout.weapon[e] = 0

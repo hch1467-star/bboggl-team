@@ -227,6 +227,7 @@ export class Visuals {
   private readonly hpBarGeo: THREE.PlaneGeometry
   private readonly pillarGeo: THREE.BufferGeometry
   private readonly bonfireFlames: THREE.Mesh[] = []
+  private readonly dropRings: THREE.Mesh[] = []
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -528,6 +529,7 @@ export class Visuals {
    */
   sync(playerX: number, playerZ: number): void {
     this.syncBonfires()
+    this.syncDrops()
     const ids = this.query.run()
     for (let i = 0; i < this.query.count; i++) {
       const e = ids[i]
@@ -802,6 +804,67 @@ export class Visuals {
       const t = time.elapsed * 7 + i * 1.7
       f.scale.set(1 + Math.sin(t) * 0.09, 1 + Math.sin(t * 1.4) * 0.16, 1 + Math.cos(t) * 0.09)
       ;(f.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.18 * (0.5 + 0.5 * Math.sin(t * 0.9))
+    }
+  }
+
+  /**
+   * 죽은 자리에 떨어진 불티 표식.
+   *
+   * **화톳불과 색이 같습니다(주황).** 헷갈릴 것 같지만 오히려 반대입니다 —
+   * 둘 다 "저기로 가야 한다"는 같은 뜻이고, 형태(원뿔 불꽃 vs 낮게 깔린 고리)와
+   * 크기가 확실히 달라서 가까이 가면 바로 구분됩니다.
+   * 색을 하나 더 늘리면 4색 예고 체계와 충돌할 위험만 커집니다.
+   */
+  addEmberDrop(x: number, y: number, z: number): THREE.Object3D {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.95, 20).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({
+        color: 0xffb24a,
+        transparent: true,
+        opacity: 0.75,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    )
+    ring.position.y = 0.05
+    ring.renderOrder = 2
+    // 멀리서도 보이는 낮은 기둥. 보물(8.5m)보다 훨씬 짧게 둡니다 —
+    // 되찾는 자리는 이미 "내가 죽은 곳"이라 대충 어딘지 알고 있습니다.
+    const beam = new THREE.Mesh(
+      this.pillarGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xffb24a,
+        transparent: true,
+        opacity: 0.4,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexColors: true,
+        side: THREE.BackSide,
+      }),
+    )
+    beam.scale.set(0.8, 0.55, 0.8)
+    beam.position.y = (PILLAR_HEIGHT * 0.55) / 2
+    beam.renderOrder = 2
+    g.add(ring, beam)
+    this.scene.add(g)
+    this.dropRings.push(ring)
+    return g
+  }
+
+  removeObject(obj: THREE.Object3D): void {
+    this.scene.remove(obj)
+    this.dropRings.length = 0
+  }
+
+  private syncDrops(): void {
+    for (const r of this.dropRings) {
+      const t = time.elapsed * 3.2
+      const k = 1 + Math.sin(t) * 0.14
+      r.scale.set(k, k, k)
+      ;(r.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.2 * (0.5 + 0.5 * Math.sin(t))
     }
   }
 

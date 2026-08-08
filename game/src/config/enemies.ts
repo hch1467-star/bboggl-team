@@ -50,6 +50,14 @@ export interface EnemyDef {
    * 원거리 적에게 이게 없으면 그냥 걸어 들어와 약한 잡몹이 됩니다.
    */
   keepDistance?: number
+  /**
+   * 처치했을 때 주는 불티.
+   *
+   * **위험 대비**로 매깁니다. 얽는 자·끄는 자는 체력이 낮아 죽이기는 쉽지만,
+   * 살려두면 전투 전체가 어려워집니다. 그래서 잡몹보다 많이 줍니다 —
+   * "먼저 뭘 죽일까"라는 판단에 **보상까지 얹어** 방향을 분명히 합니다.
+   */
+  ember: number
   /** 타격했을 때의 손맛 배율 — 큰 적일수록 크게 */
   hitstop: number
   trauma: number
@@ -75,6 +83,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'grunt',
     name: '잡몹',
     ...GRUNT,
+    ember: 8,
     color: 0xc0453f,
     hitstop: 0.05,
     trauma: 0.34,
@@ -84,6 +93,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'boss',
     name: '보스',
     ...BOSS,
+    ember: 220,
     color: 0x7a2733,
     hitstop: 0.1,
     trauma: 0.62,
@@ -93,6 +103,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'binder',
     name: '얽는 자',
     ...BINDER,
+    ember: 14,
     color: 0x9c5f57,
     hitstop: 0.05,
     trauma: 0.3,
@@ -102,6 +113,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'dragger',
     name: '끄는 자',
     ...DRAGGER,
+    ember: 14,
     color: 0x7d3340,
     hitstop: 0.05,
     trauma: 0.3,

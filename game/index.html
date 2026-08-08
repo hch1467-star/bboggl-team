@@ -65,6 +65,8 @@
         border: 1px solid rgba(255,169,60,0.35); pointer-events: none;
       }
       #restHint .bar { width: 140px; height: 5px; margin-top: 5px; }
+      #upgradeHint { margin-top: 5px; font-size: 11.5px; color: #cdd7e6; }
+      #upgradeHint b { color: #ffd479; }
       #restFill { background: linear-gradient(90deg, #ffa93c, #ffd479); }
       /*
         저체력 경고 — 화면 **가장자리**만 물들입니다.
@@ -262,11 +264,18 @@
               <span>스태미나</span><span id="stamText">100</span>
             </div>
           </div>
-          <div id="vials">성수병 <b id="vialText">3 / 3</b> <span class="dim">(X)</span></div>
+          <div id="vials">
+            성수병 <b id="vialText">3 / 3</b> <span class="dim">(X)</span>
+            &nbsp;·&nbsp; 불티 <b id="emberText">0</b>
+          </div>
         </div>
 
         <!-- 화톳불 안내 — 가까이 갔을 때만 뜹니다 -->
-        <div id="restHint"><b id="restLabel">화톳불</b><div class="bar"><div class="fill" id="restFill"></div></div></div>
+        <div id="restHint">
+          <b id="restLabel">화톳불</b>
+          <div class="bar"><div class="fill" id="restFill"></div></div>
+          <div id="upgradeHint"></div>
+        </div>
 
         <!-- 저체력 경고. 체력이 낮을수록 붉게 맥동합니다. -->
         <div id="lowHp"></div>
@@ -312,6 +321,7 @@
           <div class="key"><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>
           <div class="key"><kbd>T</kbd> 트라이포드</div>
           <div class="key"><kbd>X</kbd> 성수병 (회복)</div>
+          <div class="key"><kbd>V</kbd> 화톳불에서 강화</div>
           <div class="key"><kbd>M</kbd> 소리 끄기/켜기</div>
           <a class="key" href="./?mode=arena" style="color: #9fd2ff; text-decoration: none"
             >⚔ 전투 시험장</a

@@ -139,6 +139,8 @@ export const Player = defineComponent({
   respawnZ: 'f32',
   /** 부활 지점이 정해졌는가(0=아직 화톳불을 만난 적 없음) */
   hasRespawn: 'u8',
+  /** 가진 불티. 죽으면 전부 그 자리에 떨어집니다. */
+  embers: 'u32',
 })
 
 /** 적 종류 (Enemy.kind) */

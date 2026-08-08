@@ -31,7 +31,8 @@
  * 저장이 오히려 방해가 됩니다.
  */
 
-import { Loadout } from '../core/components'
+import { EMBER, VIAL } from '../config/balance'
+import { Loadout, Player } from '../core/components'
 import { exportTripods, importTripods, type TripodSaveData } from './tripod'
 
 /**
@@ -42,7 +43,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 1
+const SAVE_VERSION = 2
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -59,6 +60,19 @@ export interface SaveData {
   /** 이미 먹은 보물의 위치 키 */
   treasures: string[]
   tripods: TripodSaveData
+  /**
+   * 가진 불티와 성수병 강화 단계.
+   *
+   * **경계선의 어느 쪽인가**: 둘 다 "얻은 것"입니다.
+   *  · 성수병 강화는 트라이포드와 같은 성장이라 당연히 남습니다.
+   *  · 불티는 고민스러웠지만 남기기로 했습니다. 안 남기면 "게임을 끄기 전에
+   *    반드시 다 써야 한다"가 되어, 아껴 두는 선택 자체가 불가능해집니다.
+   *
+   * 떨어뜨린 표식은 **남기지 않습니다.** 그건 전투 상태에 가깝고,
+   * 다시 켰을 때 적이 전부 부활한 자리로 되찾으러 가는 건 불합리합니다.
+   */
+  embers: number
+  vialsMax: number
 }
 
 /**
@@ -118,6 +132,8 @@ export function loadSave(levelId: string): SaveData | null {
       runesOwned: Number(d.runesOwned) || 0,
       treasures: Array.isArray(d.treasures) ? d.treasures.filter((t) => typeof t === 'string') : [],
       tripods: (d.tripods ?? { points: 0, unlocked: [], selections: {} }) as TripodSaveData,
+      embers: Number(d.embers) || 0,
+      vialsMax: Number(d.vialsMax) || 0,
     }
   } catch {
     return null
@@ -161,6 +177,8 @@ export function captureSave(
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
     tripods: exportTripods(),
+    embers: Player.embers[player],
+    vialsMax: Player.vialsMax[player],
   }
 }
 
@@ -170,5 +188,11 @@ export function applySave(save: SaveData, player: number): void {
   Loadout.rune0[player] = save.rune0
   Loadout.rune1[player] = save.rune1
   Loadout.runesOwned[player] = save.runesOwned
+  Player.embers[player] = save.embers
+  // 0이면 예전 세이브 — 기본값을 그대로 둡니다(강화한 적이 없다는 뜻).
+  if (save.vialsMax > 0) {
+    Player.vialsMax[player] = Math.min(EMBER.vialMax, Math.max(VIAL.charges, save.vialsMax))
+    Player.vials[player] = Player.vialsMax[player]
+  }
   importTripods(save.tripods)
 }

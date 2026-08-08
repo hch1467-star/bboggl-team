@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { RUNE_ORDER, SKILLS } from './config/arsenal'
-import { COMBAT, KILL_FEEDBACK, TREASURE, WORLD } from './config/balance'
+import { COMBAT, EMBER, KILL_FEEDBACK, TREASURE, VIAL, WORLD } from './config/balance'
 import { attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { enemyDef, kindFromId } from './config/enemies'
@@ -129,6 +129,14 @@ class Game {
   private bonfires: Bonfire[] = []
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
+  /**
+   * 죽은 자리에 떨어뜨린 불티. **항상 하나뿐**입니다.
+   *
+   * 여러 개가 쌓이면 "나중에 한꺼번에 줍지 뭐"가 되어 손실이 실감나지 않습니다.
+   * 하나만 두면 **되찾으러 가다가 또 죽는 것이 진짜 손실**이 됩니다.
+   */
+  private drop: { x: number; y: number; z: number; amount: number } | null = null
+  private dropVisual: THREE.Object3D | null = null
   /** 이 레벨의 세이브 칸 식별자. 아레나면 빈 문자열(저장하지 않음). */
   private saveId = ''
   /** 이미 먹은 보물의 위치 키. 세이브에서 복원되고, 새로 먹을 때마다 추가됩니다. */
@@ -222,6 +230,7 @@ class Game {
     phaseEvents.length = 0
     healEvents.length = 0
     this.visuals.clearBonfires()
+    this.clearDrop()
     this.bonfires = []
     this.levelData = null
 
@@ -471,8 +480,11 @@ class Game {
      * 시스템은 레벨 데이터를 몰라야 하기 때문입니다(적을 되살리려면 원본 배치가
      * 필요한데, 그건 게임 루프만 갖고 있습니다).
      */
+    if (playerAlive) this.collectDrop(p)
+
     if (playerAlive && this.bonfires.length > 0) {
       const rest = bonfireSystem(p, this.bonfires)
+      this.tryUpgrade(p, rest.near !== null && !rest.blocked)
       this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
       if (rest.rested && rest.near) this.restAt(p, rest.near)
     } else {
@@ -498,10 +510,15 @@ class Game {
           this.respawnAtBonfire(p)
           continue
         }
+        this.dropEmbers(p)
         this.gameOver = true
         this.hud.showGameOver(this.kills, this.wave)
       } else {
         this.kills++
+        // 처치 보상. 이게 없으면 전투를 전부 지나쳐 달리는 게 최적이 됩니다.
+        const gain = enemyDef(Enemy.kind[death.entity]).ember
+        Player.embers[p] += gain
+        this.vfx.spawnDamage(death.x, Transform.y[death.entity] + 1.3, death.z, gain, { heal: true })
         requestHitstop(KILL_FEEDBACK.hitstop)
         this.cam.addTrauma(KILL_FEEDBACK.trauma)
         // 보스는 더 낮고 길게 꺼집니다 — 처치의 무게가 소리 길이로 구분됩니다.
@@ -575,6 +592,7 @@ class Game {
     // ---- 8. HUD ----
     this.hud.setVitals(Health.hp[p], Health.max[p], Stamina.value[p], Stamina.max[p])
     this.hud.setVials(Player.vials[p], Player.vialsMax[p])
+    this.hud.setEmbers(Player.embers[p])
     // 맥동은 **실시간**(realDt) 축으로 돕니다 — 히트스톱 중에도 경고는 살아 있어야
     // 합니다. 화면이 멈춘 그 순간이 정확히 "위험하다"를 알려야 할 때입니다.
     this.hud.setLowHp(
@@ -892,8 +910,81 @@ class Game {
     this.persistProgress()
   }
 
+  /**
+   * 죽은 자리에 가진 불티를 전부 떨어뜨립니다.
+   *
+   * **그냥 사라지게 하지 않는 이유**: 사라지면 그건 벌일 뿐입니다.
+   * 되찾으러 가는 길이 있어야 긴장이 생깁니다 — 죽은 자리로 돌아가는
+   * 그 한 번의 이동이 이 시스템이 만들어내는 가장 중요한 순간입니다.
+   *
+   * 표식이 이미 있으면 **덮어씁니다.** 여러 개가 쌓이면 손실이 실감나지 않고,
+   * 되찾으러 가다가 또 죽는 것이 진짜 손실이 되어야 합니다.
+   */
+  private dropEmbers(p: number): void {
+    const amount = Player.embers[p]
+    this.clearDrop()
+    if (amount <= 0) return
+    Player.embers[p] = 0
+    this.drop = { x: Transform.x[p], y: Transform.y[p], z: Transform.z[p], amount }
+    this.dropVisual = this.visuals.addEmberDrop(this.drop.x, this.drop.y, this.drop.z)
+  }
+
+  /**
+   * 화톳불 앞에서 **V** 로 성수병을 강화합니다.
+   *
+   * 왜 하필 성수병인가: 방금 만든 회복 시스템에 직접 이어지고, **생존력**
+   * 강화라 죽을수록 다음 시도가 쉬워집니다. 좌절을 푸는 밸브 역할입니다.
+   * 공격력에 붓게 하면 "약해서 죽었으니 더 죽어야 강해진다"가 되어 반대로 갑니다.
+   *
+   * 상한(6개)을 둔 이유: 무한히 늘리면 회복이 다시 공짜가 되어,
+   * 성수병을 충전식으로 만든 이유가 사라집니다.
+   */
+  private tryUpgrade(p: number, atFire: boolean): void {
+    const step = Player.vialsMax[p] - VIAL.charges
+    const cost = step < EMBER.vialUpgradeCosts.length ? EMBER.vialUpgradeCosts[step] : -1
+    const maxed = Player.vialsMax[p] >= EMBER.vialMax || cost < 0
+    this.hud.setUpgrade(atFire, maxed ? -1 : cost, Player.embers[p])
+    if (!atFire || maxed) return
+    if (!consumePress('KeyV')) return
+    if (Player.embers[p] < cost) {
+      sfx.deny()
+      this.hud.showBanner('불티가 모자라다', `${Player.embers[p]} / ${cost}`, 1.2)
+      return
+    }
+    Player.embers[p] -= cost
+    Player.vialsMax[p] += 1
+    Player.vials[p] = Player.vialsMax[p]
+    sfx.bossPhase()
+    this.cam.addTrauma(0.25)
+    this.hud.showBanner('성수병 강화', `충전 ${Player.vialsMax[p]}개 · 불티 -${cost}`, 2.0)
+    this.persistProgress()
+  }
+
+  private clearDrop(): void {
+    if (this.dropVisual) {
+      this.visuals.removeObject(this.dropVisual)
+      this.dropVisual = null
+    }
+    this.drop = null
+  }
+
+  /** 떨어뜨린 자리에 닿으면 되찾습니다. */
+  private collectDrop(p: number): void {
+    if (!this.drop) return
+    const d = Math.hypot(this.drop.x - Transform.x[p], this.drop.z - Transform.z[p])
+    if (Math.abs(this.drop.y - Transform.y[p]) > 2.2) return
+    if (d > TREASURE.pickupRadius + 0.6) return
+    Player.embers[p] += this.drop.amount
+    this.vfx.spawnDamage(this.drop.x, this.drop.y + 1.1, this.drop.z, this.drop.amount, { heal: true })
+    this.vfx.spawnHitSpark(this.drop.x, this.drop.y + 0.8, this.drop.z, 1.6)
+    sfx.pickup()
+    this.hud.showBanner('불티를 되찾았다', `+${this.drop.amount}`, 1.4)
+    this.clearDrop()
+  }
+
   /** 죽었을 때 마지막으로 쉰 화톳불에서 다시 시작합니다. */
   private respawnAtBonfire(p: number): void {
+    this.dropEmbers(p)
     Actor.state[p] = ActorState.Idle
     Actor.timer[p] = 0
     Health.hp[p] = Health.max[p]
@@ -951,6 +1042,43 @@ class Game {
       }
     }
     return best
+  }
+
+  debugEmberInfo(): {
+    embers: number
+    vialsMax: number
+    drop: { x: number; z: number; amount: number } | null
+    upgradeCost: number
+  } {
+    const p = this.playerEntity
+    const step = Player.vialsMax[p] - VIAL.charges
+    const cost =
+      Player.vialsMax[p] >= EMBER.vialMax || step >= EMBER.vialUpgradeCosts.length
+        ? -1
+        : EMBER.vialUpgradeCosts[step]
+    return {
+      embers: Player.embers[p],
+      vialsMax: Player.vialsMax[p],
+      drop: this.drop ? { x: this.drop.x, z: this.drop.z, amount: this.drop.amount } : null,
+      upgradeCost: cost,
+    }
+  }
+
+  debugSetEmbers(n: number): void {
+    Player.embers[this.playerEntity] = Math.max(0, n)
+  }
+
+  /** 살아 있는 적을 전부 죽입니다 — 처치 보상이 실제로 붙는지 보려고. */
+  debugKillAll(): number {
+    const ids = enemyQuery.run()
+    let n = 0
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (Actor.state[e] === ActorState.Dead) continue
+      Health.hp[e] = 0
+      n++
+    }
+    return n
   }
 
   debugVialInfo(): {
@@ -1328,6 +1456,15 @@ declare global {
         chainNext: string
         cooldownT: number
       } | null
+      /** 불티 검증용 */
+      emberInfo: () => {
+        embers: number
+        vialsMax: number
+        drop: { x: number; z: number; amount: number } | null
+        upgradeCost: number
+      }
+      setEmbers: (n: number) => void
+      killAllEnemies: () => number
       /** 회복 검증용 — 성수병/화톳불 상태 */
       vialInfo: () => {
         vials: number
@@ -1456,6 +1593,9 @@ window.__game = {
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
     }
   },
+  emberInfo: () => game.debugEmberInfo(),
+  setEmbers: (n) => game.debugSetEmbers(n),
+  killAllEnemies: () => game.debugKillAll(),
   vialInfo: () => game.debugVialInfo(),
   playerEntity: () => game.debugPlayerEntity(),
   enemyCount: () => countLivingEnemies(),
