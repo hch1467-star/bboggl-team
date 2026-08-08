@@ -30,7 +30,14 @@ import { QuarterViewCamera } from './render/camera'
 import { createScene } from './render/scene'
 import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
-import { countLivingEnemies, hitEvents, isBackAttack, isBehindPoint, resolveAttacks } from './systems/combat'
+import {
+  breakEvents,
+  countLivingEnemies,
+  hitEvents,
+  isBackAttack,
+  isBehindPoint,
+  resolveAttacks,
+} from './systems/combat'
 import {
   chainIndexFor,
   enemyAiSystem,
@@ -54,6 +61,7 @@ import {
 import { physicsSystem, setTerrain } from './systems/physics'
 import { healEvents, playerControlSystem, type ControlContext } from './systems/playerControl'
 import {
+  bossKey,
   enemyCountForWave,
   respawnLevelEnemies,
   spawnEnemy,
@@ -141,6 +149,8 @@ class Game {
   private saveId = ''
   /** 이미 먹은 보물의 위치 키. 세이브에서 복원되고, 새로 먹을 때마다 추가됩니다. */
   private takenTreasures = new Set<string>()
+  /** 이미 잡은 보스의 위치 키. 화톳불에서 쉬어도 되살아나지 않습니다. */
+  private defeatedBosses = new Set<string>()
   /** 플레이어가 적중시킨 누적 타격 수/피해량 — 다단히트 같은 것을 검증할 때 씁니다. */
   private hitsDealt = 0
   private damageDealt = 0
@@ -231,6 +241,7 @@ class Game {
     healEvents.length = 0
     this.visuals.clearBonfires()
     this.clearDrop()
+    this.defeatedBosses = new Set()
     this.bonfires = []
     this.levelData = null
 
@@ -295,8 +306,12 @@ class Game {
       if (save) {
         applySave(save, this.playerEntity)
         this.takenTreasures = new Set(save.treasures)
+        this.defeatedBosses = new Set(save.bosses)
         // 이미 먹은 보물은 아예 치웁니다. 남겨두면 다시 먹혀서 각인석이 무한정 생깁니다.
         this.removeTakenTreasures()
+        // 이미 잡은 보스도 치웁니다. 안 하면 게임을 다시 켤 때마다 보스가
+        // 되살아나서 "보스는 부활하지 않는다"는 규칙이 반쪽이 됩니다.
+        this.removeDefeatedBosses()
       }
       this.treasuresFound = this.takenTreasures.size
 
@@ -491,6 +506,21 @@ class Game {
       this.hud.setRest(false, 0, false)
     }
 
+    // ---- 3.8 무너짐 연출 ----
+    //
+    // 무너짐은 **긴 무방비**라는 큰 보상이라, 눈·귀·손 셋 다 써서 확실히 알립니다.
+    // 못 알아채면 공짜 딜 창을 그냥 흘려보내게 됩니다.
+    for (const b of breakEvents) {
+      this.cam.addTrauma(0.5)
+      requestHitstop(0.12)
+      sfx.impact(true, true, b.x, b.z)
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2
+        this.vfx.spawnHitSpark(b.x + Math.cos(a) * 0.9, b.y + 1.0, b.z + Math.sin(a) * 0.9, 1.3)
+      }
+    }
+    breakEvents.length = 0
+
     // ---- 4. 사망 처리 ----
     healthSystem()
     for (const death of deathEvents) {
@@ -515,6 +545,13 @@ class Game {
         this.hud.showGameOver(this.kills, this.wave)
       } else {
         this.kills++
+        if (Enemy.kind[death.entity] === EnemyKind.Boss) {
+          // 보스는 부활하지 않습니다 — 앞으로 나아갔다는 유일한 표지입니다.
+          this.defeatedBosses.add(bossKey(death.x, death.z))
+          // 즉시 저장합니다. 여기서 안 하면 게임을 끄고 켤 때 보스가 되살아나
+          // "진행의 표지"라는 이 규칙 자체가 무너집니다.
+          this.persistProgress()
+        }
         // 처치 보상. 이게 없으면 전투를 전부 지나쳐 달리는 게 최적이 됩니다.
         const gain = enemyDef(Enemy.kind[death.entity]).ember
         Player.embers[p] += gain
@@ -753,6 +790,22 @@ class Game {
    * 보물 자체를 지우는 편이 "먹었지만 안 보이게"보다 낫습니다. 빛기둥과
    * 길안내 목표 계산이 전부 살아 있는 보물만 보면 되기 때문입니다.
    */
+  private removeDefeatedBosses(): void {
+    if (this.defeatedBosses.size === 0) return
+    const ids = enemyQuery.run()
+    const doomed: number[] = []
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (Enemy.kind[e] !== EnemyKind.Boss) continue
+      if (!this.defeatedBosses.has(bossKey(Transform.x[e], Transform.z[e]))) continue
+      doomed.push(e)
+    }
+    for (const e of doomed) {
+      this.visuals.detach(e)
+      destroyEntity(e)
+    }
+  }
+
   private removeTakenTreasures(): void {
     const ids = pickups.run()
     // 순회 중에 엔티티를 지우므로 먼저 모아 둡니다.
@@ -781,7 +834,13 @@ class Game {
   private persist(): void {
     if (!this.saveId || this.playerEntity < 0) return
     const ok = writeSave(
-      captureSave(this.saveId, this.playerEntity, this.takenTreasures, time.elapsed),
+      captureSave(
+        this.saveId,
+        this.playerEntity,
+        this.takenTreasures,
+        time.elapsed,
+        this.defeatedBosses,
+      ),
     )
     this.hud.flashSaved(ok)
   }
@@ -898,7 +957,7 @@ class Game {
         this.visuals.detach(e)
         destroyEntity(e)
       }
-      const fresh = respawnLevelEnemies(this.levelData, this.terrain)
+      const fresh = respawnLevelEnemies(this.levelData, this.terrain, this.defeatedBosses)
       for (const e of fresh) this.visuals.attach(e, Renderable.kind[e])
       revived = fresh.length
       resetAttackTokens()
@@ -1006,7 +1065,7 @@ class Game {
         this.visuals.detach(e)
         destroyEntity(e)
       }
-      const fresh = respawnLevelEnemies(this.levelData, this.terrain)
+      const fresh = respawnLevelEnemies(this.levelData, this.terrain, this.defeatedBosses)
       for (const e of fresh) this.visuals.attach(e, Renderable.kind[e])
       revived = fresh.length
       resetAttackTokens()
@@ -1451,6 +1510,10 @@ declare global {
          * 바꿨을 때 조용히 틀립니다 — 실제로 이 프로브가 그렇게 실패했습니다.
          */
         attacking: boolean
+        staggered: boolean
+        broken: boolean
+        poise: number
+        poiseMax: number
         attackId: string
         attackPhase: number
         chainNext: string
@@ -1477,6 +1540,7 @@ declare global {
         restProgress: number
       }
       playerEntity: () => number
+      setHp: (entity: number, hp: number) => void
       enemyCount: () => number
       setVials: (n: number) => void
       teleportPlayer: (x: number, z: number) => void
@@ -1587,6 +1651,10 @@ window.__game = {
       z: Number(Transform.z[entity].toFixed(3)),
       state: Actor.state[entity],
       attacking: Actor.state[entity] === ActorState.Attack,
+      staggered: Actor.state[entity] === ActorState.Stagger,
+      broken: Enemy.brokenT[entity] > 0,
+      poise: Number(Enemy.poise[entity].toFixed(1)),
+      poiseMax: enemyDef(Enemy.kind[entity]).poiseMax,
       attackId: attackAt(kind, Enemy.attackIndex[entity]).id,
       attackPhase: Actor.phase[entity],
       chainNext: chain === NO_CHAIN ? '' : (list[chain]?.id ?? ''),
@@ -1598,6 +1666,11 @@ window.__game = {
   killAllEnemies: () => game.debugKillAll(),
   vialInfo: () => game.debugVialInfo(),
   playerEntity: () => game.debugPlayerEntity(),
+  setHp: (entity, hp) => {
+    if (!isAlive(entity)) return
+    Health.max[entity] = Math.max(Health.max[entity], hp)
+    Health.hp[entity] = hp
+  },
   enemyCount: () => countLivingEnemies(),
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),

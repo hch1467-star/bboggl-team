@@ -149,6 +149,9 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.transitionT[e] = 0
   Enemy.chainNext[e] = NO_CHAIN
   Enemy.chained[e] = 0
+  Enemy.poise[e] = cfg.poiseMax
+  Enemy.poiseIdleT[e] = 0
+  Enemy.brokenT[e] = 0
   Status.snareT[e] = 0
   Renderable.kind[e] = renderKindForEnemy(kind)
   return e
@@ -218,6 +221,14 @@ export function enemyCountForWave(wave: number): number {
   )
 }
 
+/**
+ * 보스 하나를 가리키는 키. 보물과 같은 이유로 **위치 기반**입니다 —
+ * 배열 인덱스를 쓰면 레벨을 편집할 때 다른 보스가 잡힌 것으로 바뀝니다.
+ */
+export function bossKey(x: number, z: number): string {
+  return `${Math.round(x * 10)}:${Math.round(z * 10)}`
+}
+
 export interface SpawnedLevel {
   player: number
   entities: number[]
@@ -232,11 +243,24 @@ export interface SpawnedLevel {
  * 보물은 되살리지 않습니다. 보물이 다시 나오면 각인석을 무한정 캘 수 있어서
  * 성장이 "탐험의 보상"이 아니라 "왕복 횟수"가 됩니다.
  */
-export function respawnLevelEnemies(level: LevelData, terrain: Terrain): number[] {
+export function respawnLevelEnemies(
+  level: LevelData,
+  terrain: Terrain,
+  /**
+   * 이미 잡은 보스의 위치 키(`treasureKey` 와 같은 형식).
+   *
+   * **보스는 부활하지 않습니다.** 소울라이크에서 보스가 안 살아나는 건 인심이
+   * 아니라 **진행의 표지**이기 때문입니다. 되살아나면 화톳불에서 쉴 때마다
+   * 존이 처음으로 되돌아가서, 앞으로 나아갔다는 사실 자체가 사라집니다.
+   * (실제로 그랬습니다 — 보스를 잡고 쉬면 보스가 다시 서 있었습니다.)
+   */
+  defeatedBosses?: ReadonlySet<string>,
+): number[] {
   const out: number[] = []
   for (const item of level.entities) {
     const kind = kindFromId(item.kind)
     if (kind === null) continue
+    if (kind === EnemyKind.Boss && defeatedBosses?.has(bossKey(item.x, item.z))) continue
     const e = spawnEnemy(kind, item.x, item.z)
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     out.push(e)

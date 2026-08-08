@@ -43,7 +43,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 2
+const SAVE_VERSION = 3
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -73,6 +73,14 @@ export interface SaveData {
    */
   embers: number
   vialsMax: number
+  /**
+   * 이미 잡은 보스의 위치 키.
+   *
+   * 경계선의 "남기는 쪽"입니다. 보스 처치는 **진행 그 자체**라서,
+   * 다시 켤 때마다 되살아나면 앞으로 나아갔다는 사실이 사라집니다.
+   * (일반 적은 반대로 반드시 되살아나야 합니다 — 위 표 참고.)
+   */
+  bosses: string[]
 }
 
 /**
@@ -132,6 +140,7 @@ export function loadSave(levelId: string): SaveData | null {
       runesOwned: Number(d.runesOwned) || 0,
       treasures: Array.isArray(d.treasures) ? d.treasures.filter((t) => typeof t === 'string') : [],
       tripods: (d.tripods ?? { points: 0, unlocked: [], selections: {} }) as TripodSaveData,
+      bosses: Array.isArray(d.bosses) ? d.bosses.filter((t) => typeof t === 'string') : [],
       embers: Number(d.embers) || 0,
       vialsMax: Number(d.vialsMax) || 0,
     }
@@ -166,6 +175,7 @@ export function captureSave(
   player: number,
   treasures: Set<string>,
   now: number,
+  bosses: ReadonlySet<string> = new Set(),
 ): SaveData {
   return {
     version: SAVE_VERSION,
@@ -176,6 +186,7 @@ export function captureSave(
     rune1: Loadout.rune1[player],
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
+    bosses: [...bosses],
     tripods: exportTripods(),
     embers: Player.embers[player],
     vialsMax: Player.vialsMax[player],

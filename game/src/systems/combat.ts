@@ -1,11 +1,12 @@
 import type { SkillShape } from '../config/arsenal'
-import { COMBAT, PLAYER } from '../config/balance'
+import { COMBAT, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
   Body,
   Enemy,
+  EnemyKind,
   Health,
   Player,
   Status,
@@ -188,9 +189,52 @@ function enemySpec(e: number): AttackSpec {
   }
 }
 
-function enemyStagger(e: number): number {
-  return enemyDef(Enemy.kind[e]).hurtStagger
+/**
+ * 적의 강인도를 깎고, 다 깎였으면 무너뜨립니다.
+ *
+ * ── 왜 "맞으면 무조건 경직"을 버렸는가 ──────────────────────────
+ * 측정 결과, 계속 때리기만 하면 **보스가 14초 동안 단 한 번도 공격하지
+ * 못했습니다**(3회 → 0회). 3페이즈도 4색 연계도 왼클릭 연타 하나에
+ * 전부 무의미했습니다.
+ *
+ * ── 그렇다고 끊기를 없애지는 않았습니다 ────────────────────────
+ * **예고(Windup) 중에 맞으면 강인도가 2.5배로 깎입니다.**
+ * "아무 때나 연타"는 막히고 "예고를 읽고 끊기"는 살아 있습니다 —
+ * 오히려 타이밍을 요구하므로 4색을 읽을 이유가 하나 더 늘어납니다.
+ *
+ * 강인도 피해를 `trauma` 에서 뽑는 이유는 balance.ts POISE 주석 참고
+ * (같은 뜻의 숫자를 두 벌 두지 않기 위해서입니다).
+ */
+function applyPoise(t: number, spec: AttackSpec): void {
+  const cfg = enemyDef(Enemy.kind[t])
+  const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
+  const dmg = spec.trauma * POISE.fromTrauma * (winding ? POISE.windupMultiplier : 1)
+
+  Enemy.poiseIdleT[t] = 0
+  Enemy.poise[t] -= dmg
+  if (Enemy.poise[t] > 0) return
+
+  // ---- 무너짐 ----
+  // 긴 무방비 자체가 공격의 보상입니다. 별도의 피해 배수는 붙이지 않았습니다 —
+  // 백어택 치명타와 겹치면 한 번의 실수로 전투가 끝나 버립니다.
+  Enemy.poise[t] = cfg.poiseMax
+  Enemy.brokenT[t] = Enemy.kind[t] === EnemyKind.Boss ? POISE.brokenTimeBoss : POISE.brokenTime
+  Actor.state[t] = ActorState.Stagger
+  Actor.timer[t] = Enemy.brokenT[t]
+  Actor.hitsLeft[t] = 0
+  Actor.comboWindowT[t] = 0
+  Actor.bufferedAttack[t] = 0
+  breakEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
 }
+
+/** 적이 무너진 순간. 게임 루프가 읽고 비웁니다. */
+export interface BreakEvent {
+  entity: number
+  x: number
+  y: number
+  z: number
+}
+export const breakEvents: BreakEvent[] = []
 
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
 export function currentSpec(a: number): AttackSpec | null {
@@ -368,12 +412,17 @@ function applyHit(a: number, spec: AttackSpec): void {
 
     const killed = Health.hp[t] <= 0
     if (!killed) {
-      // 경직: 공격 중이던 적도 끊깁니다 = 플레이어가 선공으로 흐름을 끊을 수 있음
-      Actor.state[t] = ActorState.Stagger
-      Actor.timer[t] = targetIsPlayer ? PLAYER.hurtStagger : enemyStagger(t)
-      Actor.hitsLeft[t] = 0
-      Actor.comboWindowT[t] = 0
-      Actor.bufferedAttack[t] = 0
+      if (targetIsPlayer) {
+        // 플레이어는 강인도가 없습니다 — 맞으면 항상 밀립니다.
+        // 있으면 "맞아도 되는 순간"이 생겨서 예고를 읽을 이유가 줄어듭니다.
+        Actor.state[t] = ActorState.Stagger
+        Actor.timer[t] = PLAYER.hurtStagger
+        Actor.hitsLeft[t] = 0
+        Actor.comboWindowT[t] = 0
+        Actor.bufferedAttack[t] = 0
+      } else if (hasComponent(Enemy, t)) {
+        applyPoise(t, spec)
+      }
     }
 
     hitEvents.push({

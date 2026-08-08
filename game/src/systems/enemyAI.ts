@@ -28,6 +28,7 @@ import {
   bossPhase,
   phaseForHp,
 } from '../config/bossPhases'
+import { POISE } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -290,6 +291,19 @@ export function enemyAiSystem(
     }
 
     if (Actor.cooldownT[e] > 0) Actor.cooldownT[e] = Math.max(0, Actor.cooldownT[e] - dt)
+
+    /**
+     * ── 강인도 회복 ────────────────────────────────────────────────
+     *
+     * 한동안 안 맞으면 차오릅니다. 회복이 없으면 전투가 길어질수록 누적만
+     * 되어서 **결국 무조건 무너지는 것**이 되고, 그건 예전의 "무조건 경직"과
+     * 결과가 같습니다. 회복이 있어야 "한 번에 몰아쳐야 무너뜨린다"가 됩니다.
+     */
+    if (Enemy.brokenT[e] > 0) Enemy.brokenT[e] = Math.max(0, Enemy.brokenT[e] - dt)
+    Enemy.poiseIdleT[e] += dt
+    if (Enemy.poiseIdleT[e] >= POISE.regenDelay && Enemy.poise[e] < cfg.poiseMax) {
+      Enemy.poise[e] = Math.min(cfg.poiseMax, Enemy.poise[e] + POISE.regenPerSec * dt)
+    }
 
     /**
      * 🔵 속박 (쌍단검의 '발목 긋기').

@@ -57,6 +57,15 @@ export interface EnemyDef {
    * 살려두면 전투 전체가 어려워집니다. 그래서 잡몹보다 많이 줍니다 —
    * "먼저 뭘 죽일까"라는 판단에 **보상까지 얹어** 방향을 분명히 합니다.
    */
+  /**
+   * 강인도. 이만큼 깎이면 무너집니다.
+   *
+   * 기준: 롱소드 기본 콤보 3타의 강인도 피해 합이 약 30입니다.
+   *   잡몹 30    — 한 콤보를 온전히 넣으면 무너짐
+   *   특수 20    — 더 쉽게 끊김(원거리 적을 끊는 건 쉬워야 함)
+   *   보스 105   — 세 콤보 이상. 예고 중에 끊으면 훨씬 빨라집니다.
+   */
+  poiseMax: number
   ember: number
   /** 타격했을 때의 손맛 배율 — 큰 적일수록 크게 */
   hitstop: number
@@ -83,6 +92,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'grunt',
     name: '잡몹',
     ...GRUNT,
+    poiseMax: 30,
     ember: 8,
     color: 0xc0453f,
     hitstop: 0.05,
@@ -93,6 +103,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'boss',
     name: '보스',
     ...BOSS,
+    poiseMax: 105,
     ember: 220,
     color: 0x7a2733,
     hitstop: 0.1,
@@ -103,6 +114,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'binder',
     name: '얽는 자',
     ...BINDER,
+    poiseMax: 20,
     ember: 14,
     color: 0x9c5f57,
     hitstop: 0.05,
@@ -113,6 +125,7 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     id: 'dragger',
     name: '끄는 자',
     ...DRAGGER,
+    poiseMax: 20,
     ember: 14,
     color: 0x7d3340,
     hitstop: 0.05,

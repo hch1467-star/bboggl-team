@@ -81,6 +81,8 @@ interface Visual {
   /** 머리 위 체력바 (적 전용) */
   hpBar?: THREE.Group
   hpFill?: THREE.Mesh
+  /** 강인도 게이지 (적 전용) */
+  poiseFill?: THREE.Mesh
   /** 등 뒤(백어택) 구역 표시 */
   backZone?: THREE.Mesh
   backZoneMat?: THREE.MeshBasicMaterial
@@ -421,6 +423,32 @@ export class Visuals {
       fill.scale.set(barW, isBoss ? 0.16 : 0.1, 1)
       fill.position.set(-barW / 2, 0, 0.001)
       fill.renderOrder = 11
+      /**
+       * 강인도 게이지 — 체력바 **아래에 얇게** 붙입니다.
+       *
+       * 보이지 않으면 "언제 몰아쳐야 무너지는가"를 판단할 수 없고, 그러면
+       * 무너짐은 우연히 일어나는 일이 됩니다. 판단이 되려면 보여야 합니다.
+       *
+       * 체력바보다 얇고 흰 계열인 이유: 체력이 **주 정보**이기 때문입니다.
+       * 같은 굵기·같은 채도로 두면 둘 중 뭘 봐야 하는지 헷갈립니다.
+       */
+      const poiseBg = new THREE.Mesh(
+        this.hpBarGeo,
+        new THREE.MeshBasicMaterial({ color: 0x11151c, depthTest: false, transparent: true, opacity: 0.75 }),
+      )
+      poiseBg.scale.set(barW, isBoss ? 0.1 : 0.07, 1)
+      poiseBg.position.set(-barW / 2, isBoss ? -0.17 : -0.12, 0)
+      poiseBg.renderOrder = 10
+      const poiseFill = new THREE.Mesh(
+        this.hpBarGeo,
+        new THREE.MeshBasicMaterial({ color: 0xdfe7f2, depthTest: false }),
+      )
+      poiseFill.scale.set(barW, isBoss ? 0.075 : 0.05, 1)
+      poiseFill.position.set(-barW / 2, isBoss ? -0.17 : -0.12, 0.001)
+      poiseFill.renderOrder = 11
+      hpBar.add(poiseBg, poiseFill)
+      visual.poiseFill = poiseFill
+
       hpBar.add(bg, fill)
 
       /**
@@ -601,6 +629,16 @@ export class Visuals {
         const near = d < COMBAT.backIndicatorRange && Actor.state[e] !== ActorState.Dead
         v.backZone.visible = near
         if (near) v.backZoneMat.opacity = 0.42 * (1 - d / COMBAT.backIndicatorRange)
+      }
+
+      if (v.poiseFill && hasComponent(Enemy, e)) {
+        const cfg = enemyDef(Enemy.kind[e])
+        const t = cfg.poiseMax > 0 ? Math.max(0, Enemy.poise[e]) / cfg.poiseMax : 1
+        v.poiseFill.scale.x = (v.group.userData.barWidth as number) * t
+        // 무너진 동안에는 금빛으로 — "지금이 그 창이다"를 놓치면 안 됩니다.
+        const mat = v.poiseFill.material as THREE.MeshBasicMaterial
+        if (Enemy.brokenT[e] > 0) mat.color.setHex(0xffc966)
+        else mat.color.setHex(0xdfe7f2)
       }
 
       if (v.hpBar && v.hpFill) {
