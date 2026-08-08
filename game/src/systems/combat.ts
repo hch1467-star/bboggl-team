@@ -206,7 +206,6 @@ function enemySpec(e: number): AttackSpec {
  * (같은 뜻의 숫자를 두 벌 두지 않기 위해서입니다).
  */
 function applyPoise(t: number, spec: AttackSpec): void {
-  const cfg = enemyDef(Enemy.kind[t])
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
   const dmg = spec.trauma * POISE.fromTrauma * (winding ? POISE.windupMultiplier : 1)
 
@@ -214,10 +213,23 @@ function applyPoise(t: number, spec: AttackSpec): void {
   Enemy.poise[t] -= dmg
   if (Enemy.poise[t] > 0) return
 
-  // ---- 무너짐 ----
-  // 긴 무방비 자체가 공격의 보상입니다. 별도의 피해 배수는 붙이지 않았습니다 —
-  // 백어택 치명타와 겹치면 한 번의 실수로 전투가 끝나 버립니다.
+  breakPoise(t)
+}
+
+/**
+ * 강인도를 즉시 깨뜨립니다.
+ *
+ * 공격으로 깎아서 0이 된 경우와, 낙하처럼 **공격이 아닌 이유**로 무너지는
+ * 경우가 같은 결과여야 합니다. 두 군데에 같은 코드를 적으면 한쪽만 고치는
+ * 날이 반드시 옵니다.
+ *
+ * 긴 무방비 자체가 보상입니다. 별도의 피해 배수는 붙이지 않았습니다 —
+ * 백어택 치명타와 겹치면 한 번의 실수로 전투가 끝나 버립니다.
+ */
+export function breakPoise(t: number): void {
+  const cfg = enemyDef(Enemy.kind[t])
   Enemy.poise[t] = cfg.poiseMax
+  Enemy.poiseIdleT[t] = 0
   Enemy.brokenT[t] = Enemy.kind[t] === EnemyKind.Boss ? POISE.brokenTimeBoss : POISE.brokenTime
   Actor.state[t] = ActorState.Stagger
   Actor.timer[t] = Enemy.brokenT[t]

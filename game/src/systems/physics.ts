@@ -1,7 +1,8 @@
-import { WORLD } from '../config/balance'
+import { FALL, WORLD } from '../config/balance'
 import { Actor, ActorState, Body, Player, Transform, Velocity } from '../core/components'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { time } from '../core/time'
+import { VOID } from '../level/format'
 import type { Terrain } from '../level/terrain'
 
 /**
@@ -22,6 +23,23 @@ const bodies = defineQuery(Transform, Body, Velocity)
 const KNOCKBACK_DECAY = 7
 
 /**
+ * 이 프레임에 떨어진 것들. 게임 루프가 읽고 비웁니다.
+ *
+ * 물리는 **피해를 주지 않습니다.** 여기서 체력을 깎으면 물리가 전투 규칙을
+ * 알아야 하고(무적 프레임·강인도·연출), 시스템 경계가 무너집니다.
+ * 물리는 "얼마나 떨어졌다"만 말하고, 그 값을 무엇으로 바꿀지는 게임 루프가 정합니다.
+ */
+export interface FallEvent {
+  entity: number
+  /** 떨어진 높이(지형 단계) */
+  steps: number
+  x: number
+  y: number
+  z: number
+}
+export const fallEvents: FallEvent[] = []
+
+/**
  * 현재 지형. 레벨을 불러오면 설정되고, 아레나 모드에서는 null 입니다.
  * null 이면 원형 아레나 경계로 대신 막습니다.
  */
@@ -38,6 +56,7 @@ export function getTerrain(): Terrain | null {
 export function physicsSystem(): void {
   const dt = time.dt
   if (dt <= 0) return
+  fallEvents.length = 0
 
   const ids = bodies.run()
   const count = bodies.count
@@ -93,11 +112,26 @@ export function physicsSystem(): void {
 
     if (terrain) {
       // 지형이 있으면 절벽과 단차가 벽 역할을 합니다.
+      const beforeLevel = terrain.levelAtWorld(fromX, fromZ)
       const resolved = terrain.resolveMove(fromX, fromZ, toX, toZ)
       Transform.x[e] = resolved.x
       Transform.z[e] = resolved.z
       // 지면에 붙입니다. 계단을 오르내릴 때 캐릭터가 자연스럽게 따라 올라갑니다.
       Transform.y[e] = terrain.groundYAt(resolved.x, resolved.z)
+
+      /**
+       * 한 프레임에 지형 단계가 뚝 떨어졌으면 **떨어진 것**입니다.
+       *
+       * 낙하를 따로 시뮬레이션하지 않는 이유: 우리 캐릭터는 이미 매 프레임
+       * 지면에 붙습니다(공중이라는 상태가 없습니다). 굳이 중력과 체공을
+       * 넣으면 쿼터뷰에서 조작감만 나빠지고, 얻는 것은 연출 0.3초뿐입니다.
+       * "단계가 내려갔다"만으로 필요한 판단이 전부 됩니다.
+       */
+      const afterLevel = terrain.levelAtWorld(resolved.x, resolved.z)
+      const steps = beforeLevel - afterLevel
+      if (beforeLevel !== VOID && afterLevel !== VOID && steps > FALL.freeSteps) {
+        fallEvents.push({ entity: e, steps, x: resolved.x, y: Transform.y[e], z: resolved.z })
+      }
       // 벽에 막혔으면 그 방향 속도를 없앱니다. 안 그러면 벽에 붙어 진동합니다.
       if (resolved.x === fromX && Math.abs(toX - fromX) > 0.0001) {
         Velocity.x[e] = 0

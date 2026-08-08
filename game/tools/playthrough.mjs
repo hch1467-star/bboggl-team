@@ -159,7 +159,9 @@ try {
           continue
         }
         // 아직 붙어 있으면 반대 방향으로 도망칩니다(최대 3초).
+        // 물러날 곳이 없으면(벽·절벽) 계속 뒷걸음질 쳐 봐야 시간만 버립니다.
         const flee = now() + 3
+        const fleeStart = { x: p.x, z: p.z }
         while (now() < flee) {
           const s2 = G.state()
           const n2 = s2.nearestEnemy
@@ -167,6 +169,11 @@ try {
           if (s2.player.hp <= 0) break
           moveToward(s2.player.x - n2.x, s2.player.z - n2.z)
           await sleep()
+        }
+        const moved = Math.hypot(G.state().player.x - fleeStart.x, G.state().player.z - fleeStart.z)
+        if (moved < 1) {
+          // 벽에 몰렸습니다. 마시는 것을 포기하고 그냥 싸웁니다.
+          notes.push({ at: Number((now() - t0).toFixed(1)), what: '벽에 몰려 후퇴 실패', region: curRegion })
         }
         continue
       }
@@ -213,14 +220,47 @@ try {
         continue
       }
 
-      // ---- 화톳불: 지나가다 체력이 낮으면 쉽니다 ----
-      // 불은 지나가기만 해도 붙습니다(안전망). 여기서 멈추는 건
-      // **회복이 필요할 때**뿐입니다 — 쉬면 적이 되살아나니까요.
+      /**
+       * ---- 화톳불 ----
+       *
+       * **이전 판에서 봇은 휴식 0회였습니다.** 성수병 8개를 썼는데 보급받은
+       * 유일한 경로가 죽음이었습니다(죽으면 3개로 리필). 자원 없이 계속
+       * 싸우는 봇의 시간을 지도 탓으로 돌릴 뻔했습니다.
+       *
+       * 원인은 조건이 **"지나가다 마침 가까우면"** 이었기 때문입니다. 사람은
+       * 그렇게 놀지 않습니다 — 성수병이 떨어지면 **일부러 화톳불로 되돌아갑니다.**
+       * 그래서 자원이 바닥나면 목표를 잠시 화톳불로 바꿉니다.
+       */
       const fire = G.nearestBonfire()
       const em = G.emberInfo()
       // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
       // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
       const canUpgrade = em.upgradeCost > 0 && em.embers >= em.upgradeCost
+      const needsSupply = vi.vials === 0 || p.hp < 45
+      if (fire && needsSupply) {
+        const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
+        if (fd > 2.2) {
+          // **길찾기로** 되돌아갑니다. 직선으로 걸어가게 뒀더니 벽에 걸려
+          // 성문 앞에서 133초를 헤맸고, 그 시간이 "지도가 어렵다"로 잘못
+          // 기록될 뻔했습니다. 길찾기를 쓰는 쪽과 안 쓰는 쪽이 섞여 있으면
+          // 계측이 거짓말을 합니다.
+          const step = G.pathStep(fire.x, fire.z)
+          if (step) moveToward(step.x - p.x, step.z - p.z)
+          else moveToward(fire.x - p.x, fire.z - p.z)
+          await sleep()
+          continue
+        }
+        // 도착했으면 **쉴 때까지** 서 있습니다. 지나가며 잠깐 멈추는 것으로는
+        // restTime 을 못 채웁니다.
+        releaseAll()
+        const restedBy = now() + 6
+        while (now() < restedBy) {
+          if (G.vialInfo().vials > 0 && G.state().player.hp > 70) break
+          await sleep()
+        }
+        lastVials = G.vialInfo().vials
+        continue
+      }
       if (fire && (p.hp < 70 || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
         if (fd < 2.2) {

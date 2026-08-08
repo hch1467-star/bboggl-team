@@ -26,7 +26,8 @@
     "poise": "node tools/poise-probe.mjs",
     "arena": "node tools/arena-probe.mjs",
     "play": "node tools/playthrough.mjs",
-    "map": "node tools/map-probe.mjs"
+    "map": "node tools/map-probe.mjs",
+    "fall": "node tools/fall-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

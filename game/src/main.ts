@@ -4,8 +4,10 @@ import {
   BOSS_ARENA,
   COMBAT,
   EMBER,
+  FALL,
   KILL_FEEDBACK,
   LADDER_REACH,
+  PLAYER as PLAYER_CFG,
   TREASURE,
   VIAL,
   WORLD,
@@ -26,9 +28,10 @@ import {
   Stamina,
   Status,
   Transform,
+  Velocity,
 } from './core/components'
 import { AttackPhase } from './core/components'
-import { defineQuery, destroyEntity, isAlive, resetWorld } from './core/ecs'
+import { defineQuery, destroyEntity, hasComponent, isAlive, resetWorld } from './core/ecs'
 import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
@@ -50,6 +53,7 @@ import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
 import {
   breakEvents,
+  breakPoise,
   countLivingEnemies,
   hitEvents,
   isBackAttack,
@@ -77,7 +81,7 @@ import {
   treasureKey,
   writeSave,
 } from './systems/save'
-import { physicsSystem, setTerrain } from './systems/physics'
+import { fallEvents, physicsSystem, setTerrain } from './systems/physics'
 import { healEvents, playerControlSystem, type ControlContext } from './systems/playerControl'
 import {
   bossKey,
@@ -591,6 +595,41 @@ class Game {
       this.hud.showBanner(ev.name, '물러설 곳이 없다', 2.2)
     }
     encounterEvents.length = 0
+
+    /**
+     * ---- 3.78 낙하 ----
+     *
+     * 물리는 "몇 단 떨어졌다"만 알려주고, **그것을 무엇으로 바꿀지는 여기서**
+     * 정합니다. 물리가 체력을 깎기 시작하면 무적 프레임·강인도·연출을 전부
+     * 알아야 해서 시스템 경계가 무너집니다.
+     *
+     * 적에게는 피해보다 **무너짐**이 본체입니다. 절벽 옆 싸움에서 넉백으로
+     * 밀어 떨어뜨리면 적이 무방비로 착지하고, 그 틈이 보상입니다.
+     * 즉사시키지 않는 이유: 2.7m 낙하로 적이 죽으면 모든 전투가
+     * "절벽으로 유인하기" 하나로 수렴합니다.
+     */
+    for (const f of fallEvents) {
+      if (!isAlive(f.entity) || Actor.state[f.entity] === ActorState.Dead) continue
+      const dmg = Health.max[f.entity] * (f.steps - FALL.freeSteps) * FALL.damagePerStep
+      Health.hp[f.entity] -= dmg
+      Health.flashT[f.entity] = 0.12
+      this.vfx.spawnDamage(f.x, f.y + 1.3, f.z, Math.round(dmg))
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2
+        this.vfx.spawnHitSpark(f.x + Math.cos(a) * 0.7, f.y + 0.15, f.z + Math.sin(a) * 0.7, 0.9)
+      }
+      sfx.impact(true, false, f.x, f.z)
+      if (f.entity === p) {
+        // 플레이어는 강인도가 없어 늘 비틀거립니다. 착지도 같은 규칙을 씁니다.
+        Actor.state[p] = ActorState.Stagger
+        Actor.timer[p] = PLAYER_CFG.hurtStagger
+        this.cam.addTrauma(FALL.trauma)
+        requestHitstop(FALL.hitstop)
+      } else if (FALL.breaksPoise && hasComponent(Enemy, f.entity)) {
+        breakPoise(f.entity)
+      }
+    }
+    fallEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -1307,13 +1346,65 @@ class Game {
     return found.s.open ? 'open' : found.fromTop ? 'ready' : 'locked'
   }
 
+  /**
+   * 임의의 목표로 향하는 **다음 한 걸음**.
+   *
+   * 자동 플레이 봇이 화톳불로 되돌아갈 때 필요합니다. 직선으로 걸어가게
+   * 두었더니 벽에 걸려 성문 앞에서 133초를 헤맸고, 그 시간이 지도가 어려운
+   * 탓으로 잘못 기록될 뻔했습니다. **길찾기를 쓰는 쪽과 안 쓰는 쪽이 섞여
+   * 있으면 계측이 거짓말을 합니다.**
+   */
+  debugPathStep(toX: number, toZ: number): { x: number; z: number; dist: number } | null {
+    if (!this.terrain) return null
+    const p = this.playerEntity
+    this.terrain.buildFlowField(toX, toZ)
+    const step = this.terrain.nextStepToward(Transform.x[p], Transform.z[p])
+    const dist = this.terrain.pathDistance(Transform.x[p], Transform.z[p])
+    if (!step) return dist === 0 ? { x: toX, z: toZ, dist: 0 } : null
+    return { x: step.x, z: step.z, dist: dist ?? 0 }
+  }
+
   /** 두 지점 사이를 걸어서 통과할 수 있는가 — 게임의 통행 규칙 그대로. */
   debugWalkTest(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
     return this.terrain?.canWalk(fromX, fromZ, toX, toZ) ?? false
   }
 
-  debugTerrainInfo(): { maxClimb: number; heightStep: number; cellSize: number } {
-    return { maxClimb: MAX_CLIMB, heightStep: HEIGHT_STEP, cellSize: CELL_SIZE }
+  debugTerrainInfo(): {
+    maxClimb: number
+    heightStep: number
+    cellSize: number
+    fallFreeSteps: number
+    fallDamagePerStep: number
+  } {
+    return {
+      maxClimb: MAX_CLIMB,
+      heightStep: HEIGHT_STEP,
+      cellSize: CELL_SIZE,
+      fallFreeSteps: FALL.freeSteps,
+      fallDamagePerStep: FALL.damagePerStep,
+    }
+  }
+
+  /** 특정 엔티티의 상태를 그대로 읽습니다 — 낙하 검증용. */
+  debugEntityState(e: number): {
+    hp: number
+    maxHp: number
+    level: number
+    state: number
+    brokenT: number
+    x: number
+    z: number
+  } | null {
+    if (!isAlive(e)) return null
+    return {
+      hp: Number(Health.hp[e].toFixed(2)),
+      maxHp: Health.max[e],
+      level: this.terrain?.levelAtWorld(Transform.x[e], Transform.z[e]) ?? 0,
+      state: Actor.state[e],
+      brokenT: Number((hasComponent(Enemy, e) ? Enemy.brokenT[e] : 0).toFixed(2)),
+      x: Number(Transform.x[e].toFixed(2)),
+      z: Number(Transform.z[e].toFixed(2)),
+    }
   }
 
   debugRunStats(): { deaths: number; rests: number; kills: number } {
@@ -1912,7 +2003,25 @@ declare global {
       }[]
       shortcutHint: () => 'ready' | 'locked' | 'open' | null
       walkTest: (fromX: number, fromZ: number, toX: number, toZ: number) => boolean
-      terrainInfo: () => { maxClimb: number; heightStep: number; cellSize: number }
+      pathStep: (toX: number, toZ: number) => { x: number; z: number; dist: number } | null
+      terrainInfo: () => {
+        maxClimb: number
+        heightStep: number
+        cellSize: number
+        fallFreeSteps: number
+        fallDamagePerStep: number
+      }
+      entityState: (e: number) => {
+        hp: number
+        maxHp: number
+        level: number
+        state: number
+        brokenT: number
+        x: number
+        z: number
+      } | null
+      teleportEntity: (e: number, x: number, z: number) => void
+      pushEntity: (e: number, vx: number, vz: number) => void
       /** 봇이 추측하지 않고 읽는 실행 통계 */
       runStats: () => { deaths: number; rests: number; kills: number }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
@@ -2052,7 +2161,24 @@ window.__game = {
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
+  pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
   terrainInfo: () => game.debugTerrainInfo(),
+  entityState: (e) => game.debugEntityState(e),
+  teleportEntity: (e, x, z) => {
+    if (!isAlive(e)) return
+    Transform.x[e] = x
+    Transform.z[e] = z
+  },
+  /**
+   * 넉백을 그대로 흉내 냅니다 — 낙하 검증은 **밀려서 떨어지는 것**을 재야
+   * 하므로, 좌표를 옮겨 놓는 것으로는 검증이 되지 않습니다(순간이동은
+   * 물리를 거치지 않아 낙하로 잡히지 않습니다).
+   */
+  pushEntity: (e, vx, vz) => {
+    if (!isAlive(e)) return
+    Velocity.kx[e] += vx
+    Velocity.kz[e] += vz
+  },
   runStats: () => game.debugRunStats(),
   saveInfo: () => game.debugSaveInfo(),
   resetProgress: () => game.resetProgress(),
