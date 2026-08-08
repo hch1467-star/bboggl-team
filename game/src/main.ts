@@ -245,6 +245,7 @@ class Game {
     this.visuals.clearBonfires()
     this.clearDrop()
     this.bossEntity = -1
+    sfx.stopMusic()
     encounterEvents.length = 0
     this.defeatedBosses = new Set()
     this.bonfires = []
@@ -410,6 +411,9 @@ class Game {
     // 월드 좌표를 그대로 쓰면 쿼터뷰 45° 때문에 화면 왼쪽 적이 오른쪽에서
     // 들립니다 — 보이는 위치와 들리는 위치가 어긋나면 정보가 아니라 방해입니다.
     sfx.setListener(Transform.x[p], Transform.z[p], this.cam.right.x, this.cam.right.z)
+    // 음악은 **realDt** 축입니다 — 히트스톱으로 게임이 멈춰도 흘러야 합니다
+    // (VFX·카메라와 같은 규칙, core/time.ts 설계 노트).
+    sfx.tickMusic(time.realDt)
 
     // ---- 1.4 음소거 (M) ----
     if (consumePress('KeyM')) {
@@ -469,6 +473,8 @@ class Game {
      * 알아도 **무엇이 바뀌었는지 모르면** 결국 맞아 보고 배우게 됩니다.
      */
     for (const ev of phaseEvents) {
+      // 페이즈가 오르면 음악도 거세집니다 — 숫자를 안 봐도 단계가 귀에 들립니다.
+      sfx.startMusic(ev.phase + 1)
       this.hud.showBanner(ev.banner, ev.desc, 3.2)
       this.cam.addTrauma(0.95)
       requestHitstop(0.16)
@@ -521,12 +527,16 @@ class Game {
      */
     for (const ev of encounterEvents) {
       if (ev.name === '') {
-        // 귀환 = 교전 종료. 체력바를 내립니다.
+        // 귀환 = 교전 종료. 체력바를 내리고 음악도 끕니다.
         this.bossEntity = -1
+        sfx.stopMusic()
         this.hud.showBanner('놓쳤다', '보스가 자리로 돌아갑니다', 1.8)
         continue
       }
       this.bossEntity = ev.entity
+      // 음악은 **여기서만** 시작됩니다. 탐험 구간의 침묵이 설계이므로
+      // (core/audio.ts 설계 노트), 조우 자체가 하나의 신호가 됩니다.
+      sfx.startMusic(1)
       this.cam.addTrauma(0.55)
       sfx.bossPhase()
       this.hud.showBanner(ev.name, '물러설 곳이 없다', 2.2)
@@ -555,6 +565,7 @@ class Game {
         this.cam.addTrauma(0.8)
         requestHitstop(0.22)
         sfx.death(true)
+        sfx.stopMusic()
         /**
          * **불을 붙인 화톳불이 있으면 게임 오버가 아니라 부활입니다.**
          *
@@ -573,6 +584,7 @@ class Game {
       } else {
         this.kills++
         if (Enemy.kind[death.entity] === EnemyKind.Boss) {
+          sfx.stopMusic()
           // 보스는 부활하지 않습니다 — 앞으로 나아갔다는 유일한 표지입니다.
           this.defeatedBosses.add(bossKey(death.x, death.z))
           // 즉시 저장합니다. 여기서 안 하면 게임을 끄고 켤 때 보스가 되살아나
@@ -1647,6 +1659,7 @@ declare global {
         unlock: () => void
         state: () => { ready: boolean; state: string; voices: number; muted: boolean }
         level: () => number
+        music: () => { level: number; voices: number }
         cue: (name: string, a?: number, b?: number) => void
       }
     }
@@ -1773,6 +1786,7 @@ window.__game = {
     unlock: () => sfx.unlock(),
     state: () => sfx.debugState(),
     level: () => sfx.debugLevel(),
+    music: () => sfx.debugMusic(),
     cue: (name, a = 0, b = 0) => {
       switch (name) {
         case 'swing':

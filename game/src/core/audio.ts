@@ -154,6 +154,173 @@ class Sfx {
     }
   }
 
+  // ────────────────────────────────────────────────────────────────
+  // 보스 음악
+  // ────────────────────────────────────────────────────────────────
+  //
+  // ── 왜 보스전에만 음악이 있는가 ─────────────────────────────────
+  // 처음엔 탐험용 앰비언스도 넣으려 했는데, 참고 자료가 반대를 가리켰습니다.
+  // 소울라이크에서 탐험 구간의 **침묵은 빈틈이 아니라 설계**입니다:
+  //   1. 조용해야 보스 음악이 **대비**로 살아납니다. 계속 깔려 있으면
+  //      보스가 시작돼도 "음악이 바뀌었네" 정도가 됩니다.
+  //   2. 탐험 중에는 소리가 **정보**입니다. 4색 예고음·발소리를 들어야 하는데
+  //      그 위에 음악을 깔면 우리가 애써 만든 단서를 우리가 덮게 됩니다.
+  //
+  // 그래서 음악은 **보스 영역에 들어선 순간에만** 시작됩니다.
+  // 조우 자체가 하나의 신호가 되는 셈입니다.
+  //
+  // ── 예고음을 가리지 않기 위한 규칙 ──────────────────────────────
+  // 예고음은 90~1980Hz에 걸쳐 있고 **짧은 전이음**입니다. 음악을
+  //   · 낮게(드론 55~165Hz) 깔고
+  //   · 지속음 위주로 두고
+  //   · 음량을 효과음보다 확실히 낮게
+  // 잡으면, 짧고 날카로운 예고음이 그 위로 뚫고 나옵니다.
+  // 선율을 넣지 않은 것도 같은 이유입니다 — 중음에서 예고음과 다툽니다.
+
+  private musicGain: GainNode | null = null
+  private musicVoices: { osc: OscillatorNode; gain: GainNode }[] = []
+  /** 0 = 꺼짐, 1~3 = 페이즈. 페이즈가 오르면 음악도 거세집니다. */
+  private musicLevel = 0
+  /** 다음 박까지 남은 시간(초). 게임 루프가 realDt로 굴립니다. */
+  private beatT = 0
+
+  /**
+   * 보스 음악을 켭니다. 이미 켜져 있으면 세기만 바꿉니다.
+   * @param level 1~3 (보스 페이즈 + 1)
+   */
+  startMusic(level: number): void {
+    const want = Math.max(1, Math.min(3, level))
+    if (this.musicLevel === want) return
+    if (!this.ctx || !this.master || this.failed) return
+    if (this.ctx.state !== 'running') return
+
+    if (this.musicLevel === 0) {
+      try {
+        this.musicGain = this.ctx.createGain()
+        this.musicGain.gain.value = 0.0001
+        this.musicGain.connect(this.master)
+        // 2초에 걸쳐 서서히 올라옵니다 — 갑자기 튀어나오면 놀람이지 긴장이 아닙니다.
+        this.musicGain.gain.exponentialRampToValueAtTime(0.34, this.ctx.currentTime + 2)
+        this.beatT = 0
+      } catch {
+        return
+      }
+    }
+    this.musicLevel = want
+    this.rebuildDrone()
+  }
+
+  stopMusic(): void {
+    if (this.musicLevel === 0) return
+    this.musicLevel = 0
+    const g = this.musicGain
+    const ctx = this.ctx
+    this.musicGain = null
+    const voices = this.musicVoices
+    this.musicVoices = []
+    if (!g || !ctx) return
+    try {
+      // 1.2초에 걸쳐 사라집니다. 뚝 끊기면 "버그"로 들립니다.
+      g.gain.cancelScheduledValues(ctx.currentTime)
+      g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), ctx.currentTime)
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.2)
+      for (const v of voices) v.osc.stop(ctx.currentTime + 1.3)
+    } catch {
+      /* 이미 멈춘 노드 — 무시 */
+    }
+  }
+
+  /**
+   * 드론(지속 저음)을 페이즈에 맞춰 다시 쌓습니다.
+   *
+   * 1단계 근음만 → 2단계 5도 추가 → 3단계 **단2도** 추가.
+   * 단2도는 서양 음악에서 가장 불안한 음정입니다. 3단계가
+   * "이제 사냥당한다"는 구간이므로 화음 자체를 어긋나게 둡니다.
+   */
+  private rebuildDrone(): void {
+    if (!this.ctx || !this.musicGain) return
+    for (const v of this.musicVoices) {
+      try {
+        v.osc.stop(this.ctx.currentTime + 0.4)
+      } catch {
+        /* 무시 */
+      }
+    }
+    this.musicVoices = []
+
+    const root = 55 // A1 — 예고음의 가장 낮은 대역(90Hz)보다도 아래
+    const notes: { hz: number; gain: number; type: OscillatorType }[] = [
+      { hz: root, gain: 0.5, type: 'sawtooth' },
+      { hz: root * 2, gain: 0.22, type: 'triangle' },
+    ]
+    if (this.musicLevel >= 2) notes.push({ hz: root * 3, gain: 0.16, type: 'triangle' })
+    if (this.musicLevel >= 3) notes.push({ hz: root * 2 * 1.06, gain: 0.13, type: 'sawtooth' })
+
+    for (const n of notes) {
+      try {
+        const osc = this.ctx.createOscillator()
+        osc.type = n.type
+        osc.frequency.value = n.hz
+        const g = this.ctx.createGain()
+        g.gain.value = 0.0001
+        g.gain.exponentialRampToValueAtTime(n.gain, this.ctx.currentTime + 1.2)
+        // 저역만 남깁니다 — 중음에 남아 있으면 예고음과 다툽니다.
+        const lp = this.ctx.createBiquadFilter()
+        lp.type = 'lowpass'
+        lp.frequency.value = 340
+        osc.connect(lp)
+        lp.connect(g)
+        g.connect(this.musicGain)
+        osc.start()
+        this.musicVoices.push({ osc, gain: g })
+      } catch {
+        /* 노드 하나 실패해도 나머지는 살립니다 */
+      }
+    }
+  }
+
+  /**
+   * 박자를 굴립니다. 게임 루프가 **realDt**로 매 프레임 부릅니다.
+   *
+   * WebAudio 자체 스케줄러 대신 게임 루프를 쓰는 이유: 히트스톱으로 게임이
+   * 멈춰도 음악은 계속 흘러야 하는데, realDt 축이 정확히 그 축입니다
+   * (VFX·카메라와 같은 규칙 — core/time.ts 설계 노트).
+   */
+  tickMusic(realDt: number): void {
+    if (this.musicLevel === 0 || !this.musicGain || !this.ctx) return
+    // 페이즈가 오를수록 빨라집니다 — 숫자를 안 봐도 단계가 귀에 들립니다.
+    const bpm = [0, 78, 92, 108][this.musicLevel]
+    const beat = 60 / bpm
+    this.beatT -= realDt
+    if (this.beatT > 0) return
+    this.beatT += beat
+
+    // 박마다 낮은 북. 4박에 한 번은 조금 높게 — 마디가 잡힙니다.
+    const accent = Math.random() < 0.25
+    try {
+      const t0 = this.ctx.currentTime
+      const osc = this.ctx.createOscillator()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(accent ? 132 : 88, t0)
+      osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.22)
+      const g = this.ctx.createGain()
+      g.gain.setValueAtTime(0.0001, t0)
+      g.gain.exponentialRampToValueAtTime(accent ? 0.42 : 0.3, t0 + 0.004)
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.26)
+      osc.connect(g)
+      g.connect(this.musicGain)
+      osc.start(t0)
+      osc.stop(t0 + 0.3)
+    } catch {
+      /* 무시 */
+    }
+  }
+
+  /** 자동 검증용 — 음악 상태 */
+  debugMusic(): { level: number; voices: number } {
+    return { level: this.musicLevel, voices: this.musicVoices.length }
+  }
+
   /** 화면 기준 좌우 패닝을 계산하려면 플레이어 위치와 카메라 우측 벡터가 필요합니다. */
   setListener(x: number, z: number, rightX: number, rightZ: number): void {
     this.listener.x = x

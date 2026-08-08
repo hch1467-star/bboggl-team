@@ -35,7 +35,14 @@ const server = await createServer({ root: '.', server: { port: PORT }, logLevel:
 await server.listen()
 const browser = await chromium.launch({
   executablePath: execPath,
-  args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  args: [
+    '--no-sandbox',
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+    '--enable-unsafe-swiftshader',
+    // 음악 검사를 하려면 자동재생 정책을 꺼야 합니다(audio-probe.mjs 와 같은 이유).
+    '--autoplay-policy=no-user-gesture-required',
+  ],
 })
 
 try {
@@ -174,6 +181,49 @@ try {
     `${flee.hurt.hp} → ${flee.reset.hp}`,
   )
   check(flee.reset.phase === 0, '페이즈도 1단계로 되돌아감', `${flee.reset.phase + 1}단계`)
+
+  // ---- 4. 보스 음악 ----
+  //
+  // 탐험 구간은 **의도적으로 조용합니다**(core/audio.ts 설계 노트).
+  // 그래서 "음악이 있다"보다 **"보스전에만 있다"**가 확인할 것입니다.
+  console.log('')
+  const music = await page.evaluate(async () => {
+    window.__game.audio.unlock()
+    await new Promise((r) => setTimeout(r, 300))
+    const ready = window.__game.audio.state().state === 'running'
+    if (!ready) return { ready: false }
+
+    await window.__t.setup(40) // 영역 밖 — 탐험 상태
+    await window.__t.runFor(1)
+    const exploring = window.__game.audio.music()
+
+    await window.__t.setup(10) // 영역 안 — 조우
+    await window.__t.until(() => window.__game.audio.music().level > 0, 6)
+    const fighting = window.__game.audio.music()
+
+    // 페이즈를 올리면 음악도 세져야 합니다.
+    const b = window.__game.bossEncounter().entity
+    window.__game.damageEntity(b, window.__game.bossEncounter().maxHp * 0.4)
+    await window.__t.until(() => window.__game.audio.music().level > 1, 8)
+    const phase2 = window.__game.audio.music()
+
+    // 보스를 죽이면 멎어야 합니다.
+    window.__game.damageEntity(b, 99999)
+    await window.__t.until(() => window.__game.audio.music().level === 0, 6)
+    return { ready: true, exploring, fighting, phase2, after: window.__game.audio.music() }
+  })
+  if (!music.ready) {
+    console.log('  ⚠️  오디오가 running 이 아니라 음악 검사를 건너뜁니다.')
+  } else {
+    check(music.exploring.level === 0, '탐험 중에는 음악이 없음 (침묵이 설계)', `단계 ${music.exploring.level}`)
+    check(music.fighting.level >= 1, '보스 조우에서 음악이 시작됨', `단계 ${music.fighting.level} · 드론 ${music.fighting.voices}개`)
+    check(
+      music.phase2.level > music.fighting.level && music.phase2.voices > music.fighting.voices,
+      '페이즈가 오르면 음악도 거세짐 (드론이 쌓임)',
+      `${music.fighting.level}단계 드론 ${music.fighting.voices}개 → ${music.phase2.level}단계 드론 ${music.phase2.voices}개`,
+    )
+    check(music.after.level === 0, '보스를 잡으면 음악이 멎음', `단계 ${music.after.level}`)
+  }
 
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
