@@ -192,6 +192,11 @@ class Game {
    * 보물 5 + 보스 2 = 7이었습니다. 숫자가 안 맞으면 **추측하지 말고 세야** 합니다.
    */
   private stonesEarned = 0
+  /**
+   * **자발적으로** 쉰 횟수. 되살아난 적의 불티 보상이 이만큼 체감합니다.
+   * (죽어서 되살아난 것은 세지 않습니다 — balance.ts EMBER 설계 노트 참고)
+   */
+  private restGeneration = 0
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -763,7 +768,16 @@ class Game {
           Player.stones[p] += WEAPON_UPGRADE.stonePerBoss
           this.stonesEarned += WEAPON_UPGRADE.stonePerBoss
         }
-        const gain = enemyDef(Enemy.kind[death.entity]).ember
+        /**
+         * 되살아난 적일수록 덜 줍니다. 보스는 예외 — 부활하지 않으므로
+         * 체감시킬 이유가 없고, 존의 마지막 보상이 쉰 횟수에 따라
+         * 달라지면 "언제 쉬었나"가 보스 보상을 좌우하게 됩니다.
+         */
+        const decay =
+          Enemy.kind[death.entity] === EnemyKind.Boss
+            ? 1
+            : Math.max(EMBER.respawnFloor, EMBER.respawnDecay ** this.restGeneration)
+        const gain = Math.max(1, Math.round(enemyDef(Enemy.kind[death.entity]).ember * decay))
         Player.embers[p] += gain
         this.vfx.spawnDamage(death.x, Transform.y[death.entity] + 1.3, death.z, gain, { heal: true })
         requestHitstop(KILL_FEEDBACK.hitstop)
@@ -1247,6 +1261,7 @@ class Game {
 
   private restAt(p: number, fire: Bonfire): void {
     this.restCount++
+    this.restGeneration++
     Health.hp[p] = Health.max[p]
     Stamina.value[p] = Stamina.max[p]
     Player.vials[p] = Player.vialsMax[p]
@@ -1273,7 +1288,20 @@ class Game {
 
     this.cam.addTrauma(0.2)
     sfx.bossPhase()
-    this.hud.showBanner('화톳불에서 쉬었다', `성수병 ${Player.vialsMax[p]}개 · 적 ${revived}마리 부활`, 2.2)
+    /**
+     * **체감률을 배너에 적습니다.**
+     *
+     * 조용히 줄이면 플레이어는 "왜 불티가 안 모이지"만 느끼고 이유를 모릅니다.
+     * 규칙은 숨기는 순간 불공정이 됩니다 — 4색 예고를 만든 원칙 그대로입니다.
+     */
+    const decayPct = Math.round(
+      Math.max(EMBER.respawnFloor, EMBER.respawnDecay ** this.restGeneration) * 100,
+    )
+    this.hud.showBanner(
+      '화톳불에서 쉬었다',
+      `성수병 ${Player.vialsMax[p]}개 · 적 ${revived}마리 부활 · 불티 ${decayPct}%`,
+      2.2,
+    )
     this.persistProgress()
   }
 
@@ -1608,8 +1636,22 @@ class Game {
     }
   }
 
-  debugRunStats(): { deaths: number; rests: number; kills: number } {
-    return { deaths: this.deathCount, rests: this.restCount, kills: this.kills }
+  debugRunStats(): {
+    deaths: number
+    rests: number
+    kills: number
+    restGeneration: number
+    emberDecay: number
+  } {
+    return {
+      deaths: this.deathCount,
+      rests: this.restCount,
+      kills: this.kills,
+      restGeneration: this.restGeneration,
+      emberDecay: Number(
+        Math.max(EMBER.respawnFloor, EMBER.respawnDecay ** this.restGeneration).toFixed(3),
+      ),
+    }
   }
 
   debugNearestBonfire(): { x: number; z: number } | null {
@@ -1985,6 +2027,7 @@ class Game {
     dist: number
     /** AttackIntent. -1 = 공격 중이 아님 */
     intent: number
+    aggro: boolean
     winding: boolean
     /** 내가 이 적의 정면에 있는가 (반격 가능 방향) */
     inFront: boolean
@@ -2005,6 +2048,8 @@ class Game {
         z: Number(Transform.z[e].toFixed(2)),
         dist: Number(d.toFixed(2)),
         intent: attacking ? attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent : -1,
+        /** 나를 쫓고 있는가 — "몇 마리를 동시에 상대하는가"를 재려면 필요합니다. */
+        aggro: Enemy.aggro[e] === 1,
         winding: attacking && Actor.phase[e] === AttackPhase.Windup,
         inFront: !isBehindPoint(
           Transform.x[p],
@@ -2228,6 +2273,7 @@ declare global {
         z: number
         dist: number
         intent: number
+        aggro: boolean
         winding: boolean
         inFront: boolean
         hp: number
@@ -2334,7 +2380,13 @@ declare global {
       teleportEntity: (e: number, x: number, z: number) => void
       pushEntity: (e: number, vx: number, vz: number) => void
       /** 봇이 추측하지 않고 읽는 실행 통계 */
-      runStats: () => { deaths: number; rests: number; kills: number }
+      runStats: () => {
+        deaths: number
+        rests: number
+        kills: number
+        restGeneration: number
+        emberDecay: number
+      }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
       resetProgress: () => void

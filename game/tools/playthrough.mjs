@@ -114,6 +114,19 @@ try {
     let fireCooldownUntil = 0
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
     let fireTripUntil = 0
+    /**
+     * ── 왜 안 죽는지를 재기 위한 값들 ──────────────────────────
+     * 봇이 체력 100에 성수병 1개로 존을 끝냅니다. "쉽다"는 것만으로는
+     * 무엇을 고쳐야 할지 알 수 없습니다. **받은 피해가 없는 것인지,
+     * 받고도 회복이 넉넉한 것인지**를 갈라야 방향이 정해집니다.
+     */
+    let minHp = 100
+    let damageTaken = 0
+    let maxAggro = 0
+    /** 동시에 쫓기는 적 수의 시간 가중 합 — 평균을 내기 위해 */
+    let aggroSum = 0
+    let aggroSamples = 0
+    let lastHpSample = G.state().player.hp
     let bossSeen = false
     let bossKilled = false
     let clearedAt = 0
@@ -123,6 +136,17 @@ try {
       const st = G.state()
       const vi = G.vialInfo()
       const p = st.player
+
+      // ---- 위험 계측 ----
+      if (p.hp < lastHpSample) damageTaken += lastHpSample - p.hp
+      lastHpSample = p.hp
+      if (p.hp < minHp) minHp = p.hp
+      {
+        const chasing = G.threats(16).filter((t) => t.aggro).length
+        if (chasing > maxAggro) maxAggro = chasing
+        aggroSum += chasing
+        aggroSamples++
+      }
 
       // ---- 구역 기록 ----
       if (st.region && st.region !== curRegion) {
@@ -487,6 +511,10 @@ try {
       weaponLevels: G.weaponUpgradeInfo().levels,
       stones: G.weaponUpgradeInfo().stones,
       stonesEarned: G.weaponUpgradeInfo().earnedStones,
+      minHp: Number(minHp.toFixed(1)),
+      damageTaken: Number(damageTaken.toFixed(0)),
+      maxAggro,
+      avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
@@ -542,7 +570,8 @@ try {
   )
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
-  console.log(`  체력       ${log.hp}`)
+  console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
+  console.log(`  동시 교전   평균 ${log.avgAggro}마리 · 최대 ${log.maxAggro}마리`)
   console.log('')
 } finally {
   await browser.close()

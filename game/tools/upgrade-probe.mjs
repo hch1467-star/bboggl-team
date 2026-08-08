@@ -299,6 +299,62 @@ try {
     `쉬기 전 ${bossRevive.before ? '살아있음' : '없음'} → 쉰 뒤 ${bossRevive.after ? '부활함' : '없음'}`,
   )
 
+  /**
+   * ---- 9. 되살아난 적은 불티를 덜 준다 ----
+   *
+   * 자동 플레이가 존을 사망 0회로 끝내는 이유를 재보니 이랬습니다:
+   *
+   *     총 받은 피해 205 (최대 체력의 2배) · 최저 체력 26.8 · **휴식 4회**
+   *
+   * 맞긴 맞는데 **회복이 피해보다 훨씬 넉넉**했습니다. 휴식 4회 = 완전 회복
+   * 4번이고 그게 공짜였습니다. 소울라이크에서 쉬는 대가는 "적이 되살아난다"인데,
+   * 우리는 적을 잡으면 불티가 나오므로 그게 **벌이 아니라 보상**이었습니다.
+   *
+   * 여기서 재는 것: 쉴수록 수확이 실제로 줄어드는가, 그리고 **바닥이 있는가**
+   * (0으로 떨어지면 되살아난 적이 완전한 낭비가 되어 지나치는 게 정답이 됩니다).
+   */
+  const decay = await page.evaluate(async () => {
+    const G = window.__game
+    const out = []
+    for (let i = 0; i < 5; i++) {
+      out.push({
+        gen: G.runStats().restGeneration,
+        decay: G.runStats().emberDecay,
+      })
+      G.forceRespawnEnemies()
+      await window.__t.runFor(0.3)
+    }
+    return out
+  })
+  // 앞선 검사들이 이미 쉬었으므로 **세대가 0에서 시작한다고 가정하면 안 됩니다.**
+  // (처음에 그렇게 적어서 멀쩡한 기능이 실패로 나왔습니다.)
+  // 재야 할 것은 절대값이 아니라 **단조 감소**입니다.
+  check(
+    decay[1].decay < decay[0].decay,
+    '쉴수록 되살아난 적의 불티가 줄어든다',
+    decay.map((d) => `${d.gen}회:${Math.round(d.decay * 100)}%`).join(' → '),
+  )
+  const last = decay[decay.length - 1].decay
+  check(last > 0, '아무리 쉬어도 바닥이 있다 (되살아난 적이 완전한 낭비가 되지 않게)', `${Math.round(last * 100)}%`)
+
+  // ---- 10. 죽어서 되살아난 것은 세대를 올리지 않는다 ----
+  //
+  // 죽을수록 벌이가 줄면 못하는 사람이 영영 못 따라옵니다.
+  // 대가는 **스스로 고른 휴식**에만 붙습니다.
+  const byDeath = await page.evaluate(async () => {
+    const G = window.__game
+    const before = G.runStats().restGeneration
+    G.setHp(G.playerEntity(), 1)
+    G.damageEntity(G.playerEntity(), 9999)
+    await window.__t.runFor(1.2)
+    return { before, after: G.runStats().restGeneration }
+  })
+  check(
+    byDeath.after === byDeath.before,
+    '죽어서 적이 되살아나도 불티 체감은 커지지 않는다 (못하는 사람을 더 때리지 않게)',
+    `세대 ${byDeath.before} → ${byDeath.after}`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {
