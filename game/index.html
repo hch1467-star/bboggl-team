@@ -81,6 +81,8 @@
       #upgradeHint b { color: #ffd479; }
       #weaponUpgradeHint { margin-top: 3px; font-size: 11.5px; color: #cdd7e6; }
       #weaponUpgradeHint b { color: #9fd2ff; }
+      /* 모자란 자원은 밑줄 + 붉게. 색만으로는 색약인 사람에게 안 보입니다. */
+      #weaponUpgradeHint u { color: #ff8a7a; text-decoration: underline; }
       #restFill { background: linear-gradient(90deg, #ffa93c, #ffd479); }
       /*
         사다리 안내 — 화톳불 안내보다 **한 칸 위**에 둡니다.
@@ -309,6 +311,7 @@
           <div id="vials">
             성수병 <b id="vialText">3 / 3</b> <span class="dim">(X)</span>
             &nbsp;·&nbsp; 불티 <b id="emberText">0</b>
+            &nbsp;·&nbsp; 정련석 <b id="stoneText" style="color:#9fd2ff">0</b>
           </div>
         </div>
 

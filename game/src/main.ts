@@ -184,6 +184,14 @@ class Game {
   private deathCount = 0
   /** 🟢 반격 성공 횟수 — 프로브와 봇이 추측하지 않고 읽습니다. */
   private counterCount = 0
+  /**
+   * 이번 실행에서 **번** 정련석의 총합.
+   *
+   * 가진 개수만 보면 쓴 것이 안 보여서 "얼마나 나왔는가"를 알 수 없습니다.
+   * 자동 플레이에서 가진 6개 + 쓴 4개 = 10개가 나왔는데 존의 상한은
+   * 보물 5 + 보스 2 = 7이었습니다. 숫자가 안 맞으면 **추측하지 말고 세야** 합니다.
+   */
+  private stonesEarned = 0
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -733,13 +741,28 @@ class Game {
         this.kills++
         if (Enemy.kind[death.entity] === EnemyKind.Boss) {
           sfx.stopMusic()
-          // 보스는 부활하지 않습니다 — 앞으로 나아갔다는 유일한 표지입니다.
-          this.defeatedBosses.add(bossKey(death.x, death.z))
+          /**
+           * 보스는 부활하지 않습니다 — 앞으로 나아갔다는 유일한 표지입니다.
+           *
+           * **죽은 자리가 아니라 원래 자리(home)로 기록합니다.**
+           * 예전에는 `death.x/z` 를 썼는데, 보스는 플레이어를 쫓아 움직이므로
+           * 자기 자리에서 죽는 일이 거의 없습니다. 그러면 키가 레벨 데이터의
+           * 배치 좌표와 안 맞아서 **화톳불에서 쉴 때마다 되살아났습니다.**
+           *
+           * 조용한 버그였습니다. 화면상으로는 "적이 부활했다"로만 보이고,
+           * 규칙이 깨진 줄은 알 수가 없습니다. 정련석 누적량을 세기 시작하고서야
+           * 드러났습니다 — 존 상한이 7개인데 **9개**가 나왔습니다.
+           */
+          this.defeatedBosses.add(bossKey(Enemy.homeX[death.entity], Enemy.homeZ[death.entity]))
           // 즉시 저장합니다. 여기서 안 하면 게임을 끄고 켤 때 보스가 되살아나
           // "진행의 표지"라는 이 규칙 자체가 무너집니다.
           this.persistProgress()
         }
         // 처치 보상. 이게 없으면 전투를 전부 지나쳐 달리는 게 최적이 됩니다.
+        if (Enemy.kind[death.entity] === EnemyKind.Boss) {
+          Player.stones[p] += WEAPON_UPGRADE.stonePerBoss
+          this.stonesEarned += WEAPON_UPGRADE.stonePerBoss
+        }
         const gain = enemyDef(Enemy.kind[death.entity]).ember
         Player.embers[p] += gain
         this.vfx.spawnDamage(death.x, Transform.y[death.entity] + 1.3, death.z, gain, { heal: true })
@@ -817,6 +840,7 @@ class Game {
     this.hud.setVitals(Health.hp[p], Health.max[p], Stamina.value[p], Stamina.max[p])
     this.hud.setVials(Player.vials[p], Player.vialsMax[p])
     this.hud.setFocus(Player.focus[p], FOCUS.max)
+    this.hud.setStones(Player.stones[p])
     this.hud.setEmbers(Player.embers[p])
     if (this.bossEntity >= 0 && isAlive(this.bossEntity) && Health.hp[this.bossEntity] > 0) {
       const b = this.bossEntity
@@ -980,6 +1004,9 @@ class Game {
 
       Pickup.taken[e] = 1
       this.treasuresFound++
+      // 정련석 — 무기 강화에만 쓰는 탐험 전용 재료. 파밍으로는 얻을 수 없습니다.
+      Player.stones[p] += WEAPON_UPGRADE.stonePerTreasure
+      this.stonesEarned += WEAPON_UPGRADE.stonePerTreasure
       this.takenTreasures.add(treasureKey(Transform.x[e], Transform.z[e]))
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
@@ -1313,22 +1340,47 @@ class Game {
     const weaponIndex = Loadout.weapon[p]
     const level = weaponLevel(p, weaponIndex)
     const cost = level < WEAPON_UPGRADE.costs.length ? WEAPON_UPGRADE.costs[level] : -1
+    const stoneCost = level < WEAPON_UPGRADE.stoneCosts.length ? WEAPON_UPGRADE.stoneCosts[level] : -1
     const maxed = level >= WEAPON_UPGRADE.maxLevel || cost < 0
-    this.hud.setWeaponUpgrade(atFire, maxed ? -1 : cost, Player.embers[p], level)
+    this.hud.setWeaponUpgrade(
+      atFire,
+      maxed ? -1 : cost,
+      Player.embers[p],
+      level,
+      stoneCost,
+      Player.stones[p],
+    )
     if (!atFire || maxed) return
     if (!consumePress('KeyB')) return
+    /**
+     * **정련석을 먼저 봅니다.**
+     *
+     * 불티가 모자란 것은 "더 싸우면 된다"이고, 정련석이 모자란 것은
+     * **"더 찾아야 한다"** 입니다. 둘은 플레이어가 해야 할 일이 다르므로
+     * 메시지도 달라야 합니다. 한 줄로 뭉뚱그리면 무엇을 하라는 건지 모릅니다.
+     */
+    if (Player.stones[p] < stoneCost) {
+      sfx.deny()
+      this.hud.showBanner(
+        '정련석이 모자라다',
+        `${Player.stones[p]} / ${stoneCost} · 보물과 보스에서만 나온다`,
+        1.6,
+      )
+      return
+    }
     if (Player.embers[p] < cost) {
       sfx.deny()
       this.hud.showBanner('불티가 모자라다', `${Player.embers[p]} / ${cost}`, 1.2)
       return
     }
+    Player.stones[p] -= stoneCost
     Player.embers[p] -= cost
     setWeaponLevel(p, weaponIndex, level + 1)
     sfx.bossPhase()
     this.cam.addTrauma(0.25)
     this.hud.showBanner(
       `${weaponOf(p).name} +${level + 1}`,
-      `피해 +${Math.round((level + 1) * WEAPON_UPGRADE.damagePerLevel * 100)}% · 불티 -${cost}`,
+      `피해 +${Math.round((level + 1) * WEAPON_UPGRADE.damagePerLevel * 100)}% · 불티 -${cost} · 정련석 -${stoneCost}`,
       2.0,
     )
     this.refreshLoadout()
@@ -1510,11 +1562,32 @@ class Game {
     this.persistProgress()
   }
 
+  debugTreasurePositions(): { x: number; z: number; taken: boolean }[] {
+    const ids = pickups.run()
+    const out: { x: number; z: number; taken: boolean }[] = []
+    for (let i = 0; i < pickups.count; i++) {
+      const e = ids[i]
+      out.push({
+        x: Number(Transform.x[e].toFixed(2)),
+        z: Number(Transform.z[e].toFixed(2)),
+        taken: Pickup.taken[e] === 1,
+      })
+    }
+    return out
+  }
+
+  debugForceRespawn(): void {
+    if (this.playerEntity >= 0) this.restAt(this.playerEntity, { x: 0, y: 0, z: 0, lit: true } as Bonfire)
+  }
+
   debugWeaponUpgradeInfo(): {
     weapon: number
     level: number
     maxLevel: number
     nextCost: number
+    nextStoneCost: number
+    stones: number
+    earnedStones: number
     damagePerLevel: number
     levels: number[]
   } {
@@ -1526,6 +1599,10 @@ class Game {
       level,
       maxLevel: WEAPON_UPGRADE.maxLevel,
       nextCost: level < WEAPON_UPGRADE.costs.length ? WEAPON_UPGRADE.costs[level] : -1,
+      earnedStones: this.stonesEarned,
+      nextStoneCost:
+        level < WEAPON_UPGRADE.stoneCosts.length ? WEAPON_UPGRADE.stoneCosts[level] : -1,
+      stones: Player.stones[p],
       damagePerLevel: WEAPON_UPGRADE.damagePerLevel,
       levels: [Loadout.wLv0[p], Loadout.wLv1[p], Loadout.wLv2[p]],
     }
@@ -2197,9 +2274,15 @@ declare global {
         level: number
         maxLevel: number
         nextCost: number
+        nextStoneCost: number
+        stones: number
+        earnedStones: number
         damagePerLevel: number
         levels: number[]
       }
+      setStones: (n: number) => void
+      treasurePositions: () => { x: number; z: number; taken: boolean }[]
+      forceRespawnEnemies: () => void
       killAllEnemies: () => number
       /** 회복 검증용 — 성수병/화톳불 상태 */
       vialInfo: () => {
@@ -2401,6 +2484,11 @@ window.__game = {
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
   weaponUpgradeInfo: () => game.debugWeaponUpgradeInfo(),
+  treasurePositions: () => game.debugTreasurePositions(),
+  forceRespawnEnemies: () => game.debugForceRespawn(),
+  setStones: (n) => {
+    Player.stones[game.debugPlayerEntity()] = Math.max(0, n)
+  },
   setWeaponLevel: (weapon, level) => {
     setWeaponLevel(game.debugPlayerEntity(), weapon, level)
     game.debugRefreshLoadout()

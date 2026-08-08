@@ -43,7 +43,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 5
+const SAVE_VERSION = 6
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -97,6 +97,13 @@ export interface SaveData {
    * **불티를 쓰는 것 자체가 손해**가 됩니다.
    */
   weaponLevels: number[]
+  /**
+   * 가진 정련석.
+   *
+   * 불티와 달리 **죽어도 잃지 않으므로** 여기 남기는 것에 망설임이 없습니다.
+   * 파밍으로 못 얻는 것을 잃게 하면 되찾을 방법이 없어 막다른 길이 됩니다.
+   */
+  stones: number
 }
 
 /**
@@ -158,6 +165,7 @@ export function loadSave(levelId: string): SaveData | null {
       tripods: (d.tripods ?? { points: 0, unlocked: [], selections: {} }) as TripodSaveData,
       bosses: Array.isArray(d.bosses) ? d.bosses.filter((t) => typeof t === 'string') : [],
       ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
+      stones: Number(d.stones) || 0,
       weaponLevels: Array.isArray(d.weaponLevels)
         ? d.weaponLevels.slice(0, 3).map((v) => Number(v) || 0)
         : [0, 0, 0],
@@ -208,6 +216,7 @@ export function captureSave(
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
     weaponLevels: [Loadout.wLv0[player], Loadout.wLv1[player], Loadout.wLv2[player]],
+    stones: Player.stones[player],
     bosses: [...bosses],
     ladders: [...ladders],
     tripods: exportTripods(),
@@ -227,6 +236,7 @@ export function applySave(save: SaveData, player: number): void {
   Loadout.wLv1[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[1] ?? 0)
   Loadout.wLv2[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[2] ?? 0)
   Player.embers[player] = save.embers
+  Player.stones[player] = save.stones ?? 0
   // 0이면 예전 세이브 — 기본값을 그대로 둡니다(강화한 적이 없다는 뜻).
   if (save.vialsMax > 0) {
     Player.vialsMax[player] = Math.min(EMBER.vialMax, Math.max(VIAL.charges, save.vialsMax))

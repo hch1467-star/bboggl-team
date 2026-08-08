@@ -48,6 +48,7 @@ export class Hud {
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
   private readonly focusPips = el<HTMLElement>('focusPips')
   private readonly weaponUpgradeHint = el<HTMLElement>('weaponUpgradeHint')
+  private readonly stoneText = el<HTMLElement>('stoneText')
   private saveTimer: number | null = null
   /** 지금 표시 중인 보스 이름. 눈금을 다시 그릴지 판단합니다. */
   private bossShown = ''
@@ -130,7 +131,14 @@ export class Hud {
    * "강화할까 말까"가 아니라 **"둘 중 무엇에 쓸까"** 이기 때문입니다.
    * 하나씩 번갈아 보여주면 비교가 불가능해집니다.
    */
-  setWeaponUpgrade(atFire: boolean, cost: number, embers: number, level: number): void {
+  setWeaponUpgrade(
+    atFire: boolean,
+    cost: number,
+    embers: number,
+    level: number,
+    stoneCost: number,
+    stones: number,
+  ): void {
     if (!atFire) {
       this.weaponUpgradeHint.textContent = ''
       return
@@ -139,10 +147,18 @@ export class Hud {
       this.weaponUpgradeHint.textContent = `무기 강화 완료 (+${level})`
       return
     }
-    const ok = embers >= cost
-    this.weaponUpgradeHint.innerHTML = ok
-      ? `<b>B</b> 무기 강화 +${level} → +${level + 1} — 불티 <b>${cost}</b>`
-      : `무기 강화 +${level} → +${level + 1} — 불티 ${embers} / <b>${cost}</b>`
+    const okE = embers >= cost
+    const okS = stones >= stoneCost
+    // 모자란 쪽만 붉게 — "무엇이 부족한가"가 한눈에 보여야 다음 행동이 정해집니다.
+    const emberPart = okE ? `불티 <b>${cost}</b>` : `<u>불티 ${embers}/${cost}</u>`
+    const stonePart = okS ? `정련석 <b>${stoneCost}</b>` : `<u>정련석 ${stones}/${stoneCost}</u>`
+    const key = okE && okS ? '<b>B</b> ' : ''
+    this.weaponUpgradeHint.innerHTML = `${key}무기 강화 +${level} → +${level + 1} — ${emberPart} · ${stonePart}`
+  }
+
+  /** 가진 정련석 — 불티 옆에 나란히. 둘이 다른 자원임이 보여야 합니다. */
+  setStones(n: number): void {
+    this.stoneText.textContent = String(n)
   }
 
   /**

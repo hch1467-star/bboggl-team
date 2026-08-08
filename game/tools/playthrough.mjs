@@ -112,6 +112,8 @@ try {
     const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
     let fireCooldownUntil = 0
+    /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
+    let fireTripUntil = 0
     let bossSeen = false
     let bossKilled = false
     let clearedAt = 0
@@ -319,7 +321,10 @@ try {
       // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
       // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
       const wu = G.weaponUpgradeInfo()
-      const canUpgradeWeapon = wu.nextCost > 0 && em.embers >= wu.nextCost
+      // 정련석까지 있어야 강화가 됩니다. 불티만 보고 화톳불로 가면
+      // 도착해서 아무것도 못 하고 그 자리를 맴돕니다.
+      const canUpgradeWeapon =
+        wu.nextCost > 0 && em.embers >= wu.nextCost && wu.stones >= wu.nextStoneCost
       const canUpgrade = (em.upgradeCost > 0 && em.embers >= em.upgradeCost) || canUpgradeWeapon
       const needsSupply = vi.vials === 0 || p.hp < 45
       if (fire && needsSupply) {
@@ -357,7 +362,20 @@ try {
       if (fire && canUpgrade && now() >= fireCooldownUntil) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
-        if (step && step.dist < 45 && straight > 1.6) {
+        /**
+         * **왕복 자체에 제한 시간을 겁니다.**
+         *
+         * 처음엔 "도착해서 강화한 뒤"에만 쿨다운을 걸었습니다. 그런데 도착
+         * 판정이 어긋나거나(적이 가까워 못 쉬는 등) 강화가 실패하면 쿨다운이
+         * 영영 안 걸려서, 봇이 화톳불과 목표 사이를 무한히 오갑니다 —
+         * 실제로 계단에서 336초를 맴돌았습니다.
+         * 결과와 무관하게 **한 번 시도했으면 한동안 안 갑니다.**
+         */
+        if (fireTripUntil === 0) fireTripUntil = now() + 25
+        if (now() > fireTripUntil) {
+          fireCooldownUntil = now() + 60
+          fireTripUntil = 0
+        } else if (step && step.dist < 45 && straight > 1.6) {
           /**
            * **마지막 몇 미터는 직선으로 갑니다.**
            *
@@ -373,8 +391,11 @@ try {
           await sleep()
           continue
         }
-        // 붙었는데도 못 쓰는 상황이면(적이 가까워 막힘 등) 한동안 포기합니다.
-        if (straight <= 1.6) fireCooldownUntil = now() + 40
+        else {
+          // 붙었는데도 못 쓰는 상황이면(적이 가까워 막힘 등) 한동안 포기합니다.
+          fireCooldownUntil = now() + 60
+          fireTripUntil = 0
+        }
       }
       if (fire && (p.hp < 70 || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
@@ -391,17 +412,16 @@ try {
             tap('KeyV')
             await sleep()
           }
-          if (
-            G.weaponUpgradeInfo().nextCost > 0 &&
-            G.emberInfo().embers >= G.weaponUpgradeInfo().nextCost
-          ) {
+          const w2 = G.weaponUpgradeInfo()
+          if (w2.nextCost > 0 && G.emberInfo().embers >= w2.nextCost && w2.stones >= w2.nextStoneCost) {
             tap('KeyB')
             await sleep()
           }
           // 한 번 들렀으면 한동안 다시 오지 않습니다. 안 그러면 아직 살 수 있는
           // 강화가 남아 있는 한 화톳불과 목표 사이를 영원히 오갑니다
           // (실제로 그렇게 막혀서 139초에 실행이 끝났습니다).
-          fireCooldownUntil = now() + 40
+          fireCooldownUntil = now() + 60
+          fireTripUntil = 0
           const until = now() + 2.5
           while (now() < until) await sleep()
           lastVials = G.vialInfo().vials
@@ -465,6 +485,8 @@ try {
       upgrades: G.vialInfo().max - startVialMax,
       weaponUps: G.weaponUpgradeInfo().levels.reduce((a, v, i) => a + (v - startWeaponLevels[i]), 0),
       weaponLevels: G.weaponUpgradeInfo().levels,
+      stones: G.weaponUpgradeInfo().stones,
+      stonesEarned: G.weaponUpgradeInfo().earnedStones,
       counters: G.counterCount(),
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
@@ -516,7 +538,7 @@ try {
   console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
   console.log(
-    `  불티       ${log.embers} · 성수병 강화 ${log.upgrades}회 · 무기 강화 ${log.weaponUps}회 [${log.weaponLevels.join('/')}]`,
+    `  불티       ${log.embers} · 정련석 ${log.stones}(누적 ${log.stonesEarned}) · 성수병 강화 ${log.upgrades}회 · 무기 강화 ${log.weaponUps}회 [${log.weaponLevels.join('/')}]`,
   )
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)

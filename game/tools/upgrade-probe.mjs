@@ -15,7 +15,7 @@
  *
  * ⚠️ 수치를 베껴 적지 않습니다. WEAPON_UPGRADE 설정을 게임에서 읽습니다.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -24,6 +24,7 @@ import { createServer } from 'vite'
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5199
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
+const level = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
 
 let pass = 0
 let fail = 0
@@ -186,6 +187,7 @@ try {
   })
   await page.reload()
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 30000 })
+  await harness() // 새로고침하면 window.__t 가 사라집니다.
   const reloaded = await page.evaluate(() => window.__game.weaponUpgradeInfo().levels)
   check(
     reloaded[0] === saved[0] && saved[0] === 2,
@@ -193,26 +195,108 @@ try {
     `[${saved.join(', ')}] → [${reloaded.join(', ')}]`,
   )
 
-  // ---- 5. 불티가 실제로 모자란가 ----
-  //
-  // 이게 이 시스템을 넣은 **이유** 그 자체입니다. 한 판에서 버는 불티로
-  // 전부 강화할 수 있으면, 소비처를 만들어도 자원은 여전히 남아돕니다.
-  const totalCost = await page.evaluate(() => {
+  /**
+   * ---- 5. 정련석 — **비용이 아니라 획득의 한계가 희소성을 만듭니다** ----
+   *
+   * 처음엔 "한 판 벌이(364)로는 총비용(1750)을 못 낸다"를 근거로 삼았습니다.
+   * 그 검사는 통과했지만 **결론이 틀렸습니다.** 봇이 화톳불을 제대로 쓰게
+   * 고치자 같은 판에서 처치가 21 → 59로 늘었습니다 — 쉬면 적이 되살아나므로
+   * 파밍은 무제한입니다. 실측으로 초당 3.53 불티, 만렙까지 **210초만 더**
+   * 파밍하면 됐습니다.
+   *
+   * 그래서 재는 것을 바꿉니다: 불티가 아니라 **정련석의 총량**이 존을
+   * 다 털어도 만렙에 못 미치는가.
+   */
+  const stoneMath = await page.evaluate(() => {
     const G = window.__game
     let sum = 0
+    const w = G.weaponUpgradeInfo().weapon
     for (let lv = 0; lv < G.weaponUpgradeInfo().maxLevel; lv++) {
-      G.setWeaponLevel(G.weaponUpgradeInfo().weapon, lv)
-      sum += G.weaponUpgradeInfo().nextCost
+      G.setWeaponLevel(w, lv)
+      sum += G.weaponUpgradeInfo().nextStoneCost
     }
-    G.setWeaponLevel(G.weaponUpgradeInfo().weapon, 0)
+    G.setWeaponLevel(w, 0)
     return sum
   })
-  /** 자동 플레이 한 판에서 실제로 번 불티(직전 측정값). */
-  const RUN_EMBERS = 364
+  const treasures = level.entities.filter((e) => e.kind === 'treasure').length
+  const bosses = level.entities.filter((e) => e.kind === 'boss').length
+  const perTreasure = 1
+  const perBoss = 2
+  const zoneTotal = treasures * perTreasure + bosses * perBoss
   check(
-    totalCost > RUN_EMBERS * 2,
-    '한 판 벌이로는 무기 하나도 다 못 올린다 (자원이 모자란 자원이 됨)',
-    `총 ${totalCost} 불티 vs 한 판 벌이 ${RUN_EMBERS}`,
+    zoneTotal < stoneMath,
+    '존을 다 털어도 무기 하나를 만렙까지 못 올린다 (다음 존이 줄 것이 남아야)',
+    `존 전체 정련석 ${zoneTotal}개 (보물 ${treasures} + 보스 ${bosses}×${perBoss}) vs 만렙 ${stoneMath}개`,
+  )
+
+  /**
+   * ---- 6. **잡몹**을 아무리 잡아도 정련석은 안 나온다 ----
+   *
+   * 이게 이 자원의 존재 이유입니다. 잡몹은 쉬면 되살아나므로 무제한입니다 —
+   * 거기서 나오면 정련석도 결국 시간으로 살 수 있는 것이 됩니다.
+   *
+   * 처음엔 "적을 잡아도 안 나온다"로 적었다가 프로브가 2개를 잡아냈습니다.
+   * 보스가 섞여 있었기 때문입니다 — 그건 **설계대로**입니다(보스는 부활하지
+   * 않으므로 존당 1회뿐). 기능이 아니라 **제 주장이 부정확**했던 경우입니다.
+   */
+  const byFarming = await page.evaluate(async () => {
+    const G = window.__game
+    G.setStones(0)
+    const before = G.weaponUpgradeInfo().stones
+    const p = G.state().player
+    let killed = 0
+    for (let round = 0; round < 3; round++) {
+      const spawned = []
+      for (let i = 0; i < 4; i++) spawned.push(G.spawnEnemyKind('grunt', p.x + 6 + i, p.z + 4))
+      await window.__t.runFor(0.3)
+      for (const e of spawned) G.damageEntity(e, 99999)
+      await window.__t.runFor(0.4)
+      killed += spawned.length
+    }
+    return { before, after: G.weaponUpgradeInfo().stones, killed }
+  })
+  check(
+    byFarming.after === byFarming.before,
+    '잡몹을 아무리 잡아도 정련석은 나오지 않는다 (시간으로 살 수 없는 자원)',
+    `${byFarming.killed}마리 처치 · 정련석 ${byFarming.before} → ${byFarming.after}`,
+  )
+
+  // ---- 7. 보스는 정확히 정해진 만큼만, 그리고 한 번만 줍니다 ----
+  const byBoss = await page.evaluate(async () => {
+    const G = window.__game
+    G.setStones(0)
+    const b = G.bossEncounter()
+    if (!b) return null
+    G.damageEntity(b.entity, 99999)
+    await window.__t.runFor(0.6)
+    return G.weaponUpgradeInfo().stones
+  })
+  check(
+    byBoss === 2,
+    '보스 처치는 정련석을 정해진 만큼 준다',
+    `정련석 ${byBoss}개`,
+  )
+
+  /**
+   * ---- 8. 보스는 쉬어도 부활하지 않는다 ----
+   *
+   * 이 검사가 없어서 **조용히 깨져 있었습니다.** 격파 기록을 "죽은 자리"
+   * 좌표로 저장했는데 보스는 플레이어를 쫓아 움직이므로, 자기 자리에서
+   * 죽지 않으면 키가 배치 좌표와 안 맞아 화톳불에서 쉴 때마다 되살아났습니다.
+   * 화면에는 "적이 부활했다"로만 보여서 눈으로는 못 잡습니다 —
+   * 정련석 누적량이 존 상한 7개를 넘어 **9개**가 나오고서야 드러났습니다.
+   */
+  const bossRevive = await page.evaluate(async () => {
+    const G = window.__game
+    const before = G.bossEncounter()
+    G.forceRespawnEnemies()
+    await window.__t.runFor(0.6)
+    return { before: before !== null, after: G.bossEncounter() !== null }
+  })
+  check(
+    bossRevive.before === false && bossRevive.after === false,
+    '한 번 잡은 보스는 쉬어도 부활하지 않는다 (진행의 표지가 유지됨)',
+    `쉬기 전 ${bossRevive.before ? '살아있음' : '없음'} → 쉰 뒤 ${bossRevive.after ? '부활함' : '없음'}`,
   )
 
   console.log('')
