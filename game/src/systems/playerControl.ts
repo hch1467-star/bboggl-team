@@ -1,5 +1,5 @@
 import { SKILL_KEY_CODES, type SkillDef } from '../config/arsenal'
-import { PLAYER } from '../config/balance'
+import { PLAYER, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
@@ -73,6 +73,18 @@ export interface ControlContext {
 }
 
 const players = defineQuery(Player, Actor, Transform, Velocity, Stamina, Health, Loadout)
+
+/**
+ * 회복이 실제로 들어간 순간. 게임 루프가 읽고 비웁니다.
+ * (연출은 시스템 밖에서 — hitEvents / deathEvents 와 같은 규약입니다.)
+ */
+export interface HealEvent {
+  x: number
+  y: number
+  z: number
+  amount: number
+}
+export const healEvents: HealEvent[] = []
 
 const DEG = Math.PI / 180
 
@@ -256,6 +268,24 @@ function beginSkill(
   })
 }
 
+/**
+ * 성수병을 마시기 시작합니다.
+ *
+ * **충전은 여기서 즉시 깎습니다.** 회복이 들어가는 순간이 아니라요.
+ * 이 한 줄이 이 시스템의 핵심입니다 — 마시다가 맞으면 병만 날아갑니다.
+ * 회복 시점에 깎으면 "맞으면 취소되고 병도 돌아온다"가 되어,
+ * 아무 때나 눌러도 손해가 없는 **판단 없는 버튼**이 됩니다.
+ */
+function beginDrink(p: number): void {
+  Actor.state[p] = ActorState.Drink
+  Actor.phase[p] = AttackPhase.Windup
+  Actor.timer[p] = VIAL.windup
+  Actor.bufferedAttack[p] = 0
+  Actor.comboIndex[p] = 0
+  Player.vials[p] = Math.max(0, Player.vials[p] - 1)
+  sfx.cast(0)
+}
+
 function beginDodge(p: number, dirX: number, dirZ: number): void {
   Actor.state[p] = ActorState.Dodge
   Actor.timer[p] = PLAYER.dodge.duration
@@ -279,6 +309,7 @@ export function playerControlSystem(ctx: ControlContext): void {
   // 상태 안에서 조건부로 읽으면 입력이 다음 프레임에 남아 뒤늦게 터집니다.
   const attackPressed = consumePress('Mouse0')
   const dodgePressed = consumePress('Space') || consumePress('ShiftLeft')
+  const drinkPressed = consumePress('KeyX')
   let skillPressed = -1
   for (let i = 0; i < SKILL_KEY_CODES.length; i++) {
     if (consumePress(SKILL_KEY_CODES[i])) {
@@ -438,6 +469,13 @@ export function playerControlSystem(ctx: ControlContext): void {
           beginDodge(p, dx, dz)
           break
         }
+        if (drinkPressed) {
+          // 체력이 가득이어도 마실 수 있게 둡니다. "가득이라 안 마셔짐"은
+          // 다급한 순간에 **키가 씹힌 것과 구분되지 않습니다.**
+          if (Player.vials[p] > 0) beginDrink(p)
+          else sfx.deny()
+          break
+        }
         if (attackPressed && Stamina.value[p] >= weapon.combo[0].staminaCost) {
           beginAttack(p, 0, aimRot)
           break
@@ -474,6 +512,21 @@ export function playerControlSystem(ctx: ControlContext): void {
             const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
             beginDodge(p, dx, dz)
             break
+          }
+          /**
+           * 후딜에서는 **성수병으로도** 빠져나갈 수 있습니다.
+           *
+           * Idle 에서만 마실 수 있게 두면 전투 중에는 사실상 못 마십니다 —
+           * 공격 후딜이 계속 이어지기 때문입니다. 검증에서 X를 12번 눌러
+           * 3병 중 1병밖에 못 쓴 것이 정확히 이 증상이었습니다.
+           * 스킬·회피 탈출과 **같은 자리**에 두어 규칙을 하나로 유지합니다.
+           */
+          if (drinkPressed) {
+            if (Player.vials[p] > 0) {
+              beginDrink(p)
+              break
+            }
+            sfx.deny()
           }
         }
 
@@ -562,6 +615,24 @@ export function playerControlSystem(ctx: ControlContext): void {
           }
         }
 
+
+        /**
+         * 후딜 후반에는 **성수병으로도** 빠져나갈 수 있습니다.
+         *
+         * Idle 에서만 마실 수 있게 두면, 전투 중에는 사실상 못 마십니다 —
+         * 공격/스킬 후딜이 계속 이어지기 때문입니다. 검증에서 X를 12번 눌러
+         * 3병 중 1병밖에 못 쓴 것이 정확히 이 증상이었습니다.
+         * 회피·스킬 이어가기와 **같은 규칙**(후딜 절반 이후)을 씁니다 —
+         * 규칙이 하나면 외울 것도 하나입니다.
+         */
+        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * 0.5) {
+          if (Player.vials[p] > 0) {
+            beginDrink(p)
+            break
+          }
+          sfx.deny()
+        }
+
         // 후딜 후반에는 회피로도 빠져나갈 수 있습니다(기본 공격과 같은 규칙).
         if (
           phase === AttackPhase.Recovery &&
@@ -639,6 +710,33 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (Player.dodgeElapsed[p] >= d.duration) {
           Actor.state[p] = ActorState.Idle
           Player.dodgeCooldownT[p] = d.cooldown
+        }
+        break
+      }
+
+      /**
+       * 마시는 중 — **무적 프레임이 없습니다.**
+       *
+       * 회피(0.42초 중 0.24초 무적)와 정반대로 설계했습니다. 회피는 "맞지 않기"
+       * 위한 행동이고, 회복은 **"맞지 않을 자리를 먼저 만든 다음"** 하는
+       * 행동이어야 합니다. 무적을 붙이면 회복이 곧 회피가 되어, 예고를 읽는
+       * 대신 체력이 닳을 때마다 눌러 버리는 게 최적이 됩니다.
+       *
+       * 걸을 수는 있지만 35% 속도입니다. 완전히 못 움직이면 광역 예고
+       * (🟡 4.6m)가 뜬 순간 확정으로 맞아서, 회복이 도박이 아니라 자살이 됩니다.
+       */
+      case ActorState.Drink: {
+        Actor.timer[p] -= dt
+        moveScale = VIAL.moveScale
+        if (Actor.timer[p] <= 0) {
+          if (Actor.phase[p] === AttackPhase.Windup) {
+            Actor.phase[p] = AttackPhase.Recovery
+            Actor.timer[p] = VIAL.recovery
+            Health.hp[p] = Math.min(Health.max[p], Health.hp[p] + VIAL.heal)
+            healEvents.push({ x: Transform.x[p], y: Transform.y[p], z: Transform.z[p], amount: VIAL.heal })
+          } else {
+            Actor.state[p] = ActorState.Idle
+          }
         }
         break
       }

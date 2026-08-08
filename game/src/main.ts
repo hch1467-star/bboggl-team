@@ -38,6 +38,7 @@ import {
   resetAttackTokens,
   setEnemyAiEnabled,
 } from './systems/enemyAI'
+import { bonfireSystem, type Bonfire } from './systems/bonfire'
 import { deathEvents, healthSystem } from './systems/health'
 import { SLOT_COUNT, grantRune, skillForSlot, weaponOf } from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
@@ -51,8 +52,16 @@ import {
   writeSave,
 } from './systems/save'
 import { physicsSystem, setTerrain } from './systems/physics'
-import { playerControlSystem, type ControlContext } from './systems/playerControl'
-import { enemyCountForWave, spawnEnemy, spawnFromLevel, spawnGrunt, spawnPlayer, spawnWave } from './systems/world'
+import { healEvents, playerControlSystem, type ControlContext } from './systems/playerControl'
+import {
+  enemyCountForWave,
+  respawnLevelEnemies,
+  spawnEnemy,
+  spawnFromLevel,
+  spawnGrunt,
+  spawnPlayer,
+  spawnWave,
+} from './systems/world'
 import { Hud } from './ui/hud'
 import { SkillBar } from './ui/skillbar'
 import { TripodPanel } from './ui/tripodPanel'
@@ -116,6 +125,10 @@ class Game {
   private currentRegion = ''
   private levelW = 0
   private levelH = 0
+  /** 화톳불 좌표들. 엔티티가 아니라 좌표 목록입니다(부딪히지 않으므로). */
+  private bonfires: Bonfire[] = []
+  /** 적을 되살리려면 원본 배치가 필요합니다. */
+  private levelData: LevelData | null = null
   /** 이 레벨의 세이브 칸 식별자. 아레나면 빈 문자열(저장하지 않음). */
   private saveId = ''
   /** 이미 먹은 보물의 위치 키. 세이브에서 복원되고, 새로 먹을 때마다 추가됩니다. */
@@ -207,6 +220,10 @@ class Game {
     hitEvents.length = 0
     deathEvents.length = 0
     phaseEvents.length = 0
+    healEvents.length = 0
+    this.visuals.clearBonfires()
+    this.bonfires = []
+    this.levelData = null
 
     if (this.terrain) {
       this.scene.remove(this.terrain.group)
@@ -250,7 +267,10 @@ class Game {
       setTerrain(this.terrain)
       this.arena.visible = false
 
+      this.levelData = level
       const spawned = spawnFromLevel(level, this.terrain)
+      this.bonfires = spawned.bonfires
+      for (const f of this.bonfires) this.visuals.addBonfire(f.x, f.y, f.z)
       this.playerEntity = spawned.player
       this.visuals.attach(this.playerEntity, Renderable.kind[this.playerEntity])
       for (const e of spawned.entities) this.visuals.attach(e, Renderable.kind[e])
@@ -436,14 +456,49 @@ class Game {
     }
     phaseEvents.length = 0
 
+    // ---- 3.6 회복 연출 ----
+    for (const h of healEvents) {
+      this.vfx.spawnDamage(h.x, h.y + 0.9, h.z, h.amount, { heal: true })
+      this.vfx.spawnHitSpark(h.x, h.y + 0.8, h.z, 1.1)
+      sfx.pickup()
+    }
+    healEvents.length = 0
+
+    /**
+     * ---- 3.7 화톳불 ----
+     *
+     * 판정은 systems/bonfire.ts 가 하고, **보상은 여기서** 줍니다.
+     * 시스템은 레벨 데이터를 몰라야 하기 때문입니다(적을 되살리려면 원본 배치가
+     * 필요한데, 그건 게임 루프만 갖고 있습니다).
+     */
+    if (playerAlive && this.bonfires.length > 0) {
+      const rest = bonfireSystem(p, this.bonfires)
+      this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
+      if (rest.rested && rest.near) this.restAt(p, rest.near)
+    } else {
+      this.hud.setRest(false, 0, false)
+    }
+
     // ---- 4. 사망 처리 ----
     healthSystem()
     for (const death of deathEvents) {
       if (death.isPlayer) {
-        this.gameOver = true
         this.cam.addTrauma(0.8)
         requestHitstop(0.22)
         sfx.death(true)
+        /**
+         * **불을 붙인 화톳불이 있으면 게임 오버가 아니라 부활입니다.**
+         *
+         * 레벨 전체를 처음부터 다시 걷게 만드는 것은 벌이 아니라 **지루함**입니다.
+         * 소울라이크가 죽음을 견딜 만하게 만드는 방법이 정확히 이것입니다 —
+         * 잃는 것은 진도가 아니라 **그 구간의 시도**뿐입니다.
+         * (아직 화톳불을 못 만났으면 예전대로 게임 오버입니다.)
+         */
+        if (Player.hasRespawn[p] === 1) {
+          this.respawnAtBonfire(p)
+          continue
+        }
+        this.gameOver = true
         this.hud.showGameOver(this.kills, this.wave)
       } else {
         this.kills++
@@ -519,6 +574,13 @@ class Game {
 
     // ---- 8. HUD ----
     this.hud.setVitals(Health.hp[p], Health.max[p], Stamina.value[p], Stamina.max[p])
+    this.hud.setVials(Player.vials[p], Player.vialsMax[p])
+    // 맥동은 **실시간**(realDt) 축으로 돕니다 — 히트스톱 중에도 경고는 살아 있어야
+    // 합니다. 화면이 멈춘 그 순간이 정확히 "위험하다"를 알려야 할 때입니다.
+    this.hud.setLowHp(
+      Health.hp[p] / Math.max(1, Health.max[p]),
+      0.5 + 0.5 * Math.sin(time.elapsed * 6.5),
+    )
     if (this.levelMode) {
       this.hud.setLevelProgress(this.levelName, enemiesLeft, this.treasuresFound, this.treasureTotal)
     } else {
@@ -790,6 +852,128 @@ class Game {
       out[id] = (out[id] ?? 0) + 1
     }
     return out
+  }
+
+  /**
+   * 화톳불에서 쉽니다 — 체력·성수병 회복 + **적 부활** + 부활 지점 지정.
+   *
+   * 적을 되살리는 것이 이 기능의 핵심입니다. 없으면 "화톳불 왕복 = 공짜 회복"이
+   * 되어, 성수병을 충전식으로 만든 이유가 통째로 사라집니다.
+   * 되돌아가는 데 비용이 있어야 **"밀고 갈까"** 가 진짜 선택이 됩니다.
+   */
+  private restAt(p: number, fire: Bonfire): void {
+    Health.hp[p] = Health.max[p]
+    Stamina.value[p] = Stamina.max[p]
+    Player.vials[p] = Player.vialsMax[p]
+    Player.respawnX[p] = fire.x
+    Player.respawnZ[p] = fire.z
+    Player.hasRespawn[p] = 1
+
+    let revived = 0
+    if (this.levelData && this.terrain) {
+      // 살아 있는 적을 먼저 치우고 원본 배치대로 다시 만듭니다.
+      // 안 치우면 쉴 때마다 적이 두 배씩 늘어납니다.
+      const ids = enemyQuery.run()
+      const doomed: number[] = []
+      for (let i = 0; i < enemyQuery.count; i++) doomed.push(ids[i])
+      for (const e of doomed) {
+        this.visuals.detach(e)
+        destroyEntity(e)
+      }
+      const fresh = respawnLevelEnemies(this.levelData, this.terrain)
+      for (const e of fresh) this.visuals.attach(e, Renderable.kind[e])
+      revived = fresh.length
+      resetAttackTokens()
+    }
+
+    this.cam.addTrauma(0.2)
+    sfx.bossPhase()
+    this.hud.showBanner('화톳불에서 쉬었다', `성수병 ${Player.vialsMax[p]}개 · 적 ${revived}마리 부활`, 2.2)
+    this.persistProgress()
+  }
+
+  /** 죽었을 때 마지막으로 쉰 화톳불에서 다시 시작합니다. */
+  private respawnAtBonfire(p: number): void {
+    Actor.state[p] = ActorState.Idle
+    Actor.timer[p] = 0
+    Health.hp[p] = Health.max[p]
+    Health.invulnT[p] = 1.2
+    Stamina.value[p] = Stamina.max[p]
+    Player.vials[p] = Player.vialsMax[p]
+    Status.snareT[p] = 0
+    Transform.x[p] = Player.respawnX[p]
+    Transform.z[p] = Player.respawnZ[p]
+    if (this.terrain) Transform.y[p] = this.terrain.groundYAt(Transform.x[p], Transform.z[p])
+    this.cam.snapTo(Transform.x[p], Transform.z[p])
+
+    let revived = 0
+    if (this.levelData && this.terrain) {
+      const ids = enemyQuery.run()
+      const doomed: number[] = []
+      for (let i = 0; i < enemyQuery.count; i++) doomed.push(ids[i])
+      for (const e of doomed) {
+        this.visuals.detach(e)
+        destroyEntity(e)
+      }
+      const fresh = respawnLevelEnemies(this.levelData, this.terrain)
+      for (const e of fresh) this.visuals.attach(e, Renderable.kind[e])
+      revived = fresh.length
+      resetAttackTokens()
+    }
+    this.hud.showBanner('다시 일어섰다', `화톳불에서 부활 · 적 ${revived}마리 부활`, 2.2)
+  }
+
+  debugPlayerEntity(): number {
+    return this.playerEntity
+  }
+
+  debugSetVials(n: number): void {
+    Player.vials[this.playerEntity] = Math.max(0, Math.min(255, n))
+  }
+
+  debugTeleport(x: number, z: number): void {
+    const p = this.playerEntity
+    Transform.x[p] = x
+    Transform.z[p] = z
+    if (this.terrain) Transform.y[p] = this.terrain.groundYAt(x, z)
+    this.cam.snapTo(x, z)
+  }
+
+  debugNearestBonfire(): { x: number; z: number } | null {
+    const p = this.playerEntity
+    let best: { x: number; z: number } | null = null
+    let bestD = Infinity
+    for (const f of this.bonfires) {
+      const d = Math.hypot(f.x - Transform.x[p], f.z - Transform.z[p])
+      if (d < bestD) {
+        bestD = d
+        best = { x: f.x, z: f.z }
+      }
+    }
+    return best
+  }
+
+  debugVialInfo(): {
+    vials: number
+    max: number
+    hp: number
+    state: number
+    drinking: boolean
+    bonfires: number
+    hasRespawn: boolean
+    restProgress: number
+  } {
+    const p = this.playerEntity
+    return {
+      vials: Player.vials[p],
+      max: Player.vialsMax[p],
+      hp: Number(Health.hp[p].toFixed(1)),
+      state: Actor.state[p],
+      drinking: Actor.state[p] === ActorState.Drink,
+      bonfires: this.bonfires.length,
+      hasRespawn: Player.hasRespawn[p] === 1,
+      restProgress: Number(Player.restT[p].toFixed(3)),
+    }
   }
 
   debugSpawnKind(id: string, x: number, z: number): number {
@@ -1144,6 +1328,22 @@ declare global {
         chainNext: string
         cooldownT: number
       } | null
+      /** 회복 검증용 — 성수병/화톳불 상태 */
+      vialInfo: () => {
+        vials: number
+        max: number
+        hp: number
+        state: number
+        drinking: boolean
+        bonfires: number
+        hasRespawn: boolean
+        restProgress: number
+      }
+      playerEntity: () => number
+      enemyCount: () => number
+      setVials: (n: number) => void
+      teleportPlayer: (x: number, z: number) => void
+      nearestBonfire: () => { x: number; z: number } | null
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
       resetProgress: () => void
@@ -1256,6 +1456,12 @@ window.__game = {
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
     }
   },
+  vialInfo: () => game.debugVialInfo(),
+  playerEntity: () => game.debugPlayerEntity(),
+  enemyCount: () => countLivingEnemies(),
+  setVials: (n) => game.debugSetVials(n),
+  teleportPlayer: (x, z) => game.debugTeleport(x, z),
+  nearestBonfire: () => game.debugNearestBonfire(),
   saveInfo: () => game.debugSaveInfo(),
   resetProgress: () => game.resetProgress(),
   audio: {

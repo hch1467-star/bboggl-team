@@ -34,6 +34,11 @@ export class Hud {
   private readonly bannerSub = el<HTMLDivElement>('bannerSub')
   readonly restartButton = el<HTMLButtonElement>('restart')
   private readonly saveText = el<HTMLElement>('saveText')
+  private readonly vialText = el<HTMLElement>('vialText')
+  private readonly restHint = el<HTMLDivElement>('restHint')
+  private readonly restLabel = el<HTMLElement>('restLabel')
+  private readonly restFill = el<HTMLDivElement>('restFill')
+  private readonly lowHp = el<HTMLDivElement>('lowHp')
   private saveTimer: number | null = null
 
   private fpsAccum = 0
@@ -61,6 +66,33 @@ export class Hud {
   }
 
   /** 아레나 모드와 레벨 모드는 보여줄 정보가 다릅니다. */
+  setVials(left: number, max: number): void {
+    this.vialText.textContent = `${left} / ${max}`
+    // 다 떨어졌으면 붉게 — 숫자를 읽지 않아도 "없다"가 보여야 합니다.
+    this.vialText.style.color = left === 0 ? '#ff6b5e' : '#ffd479'
+  }
+
+  /**
+   * 저체력 경고.
+   *
+   * 40% 아래에서 시작해 0에 가까울수록 진해집니다. 문턱을 두는 이유:
+   * 항상 조금씩 보이면 배경이 되어 **경고로 작동하지 않습니다.**
+   * 맥동은 CSS가 아니라 여기서 값으로 넣습니다 — 애니메이션은 실시간으로
+   * 도는데 게임은 히트스톱 중 멈추므로, 둘이 어긋나면 화면이 따로 놉니다.
+   */
+  setLowHp(ratio: number, pulse: number): void {
+    const t = ratio >= 0.4 ? 0 : 1 - ratio / 0.4
+    this.lowHp.style.opacity = t <= 0 ? '0' : String(0.25 + t * (0.5 + 0.25 * pulse))
+  }
+
+  setRest(near: boolean, progress: number, blocked: boolean): void {
+    this.restHint.style.display = near ? 'block' : 'none'
+    if (!near) return
+    this.restLabel.textContent = blocked ? '적이 가까워 쉴 수 없다' : '화톳불 — 가만히 서 있으면 쉰다'
+    this.restLabel.style.color = blocked ? '#ff8a7a' : '#ffd9a0'
+    this.restFill.style.width = `${Math.round(progress * 100)}%`
+  }
+
   setMode(mode: 'arena' | 'level'): void {
     this.arenaStats.style.display = mode === 'arena' ? '' : 'none'
     this.levelStats.style.display = mode === 'level' ? '' : 'none'

@@ -38,7 +38,14 @@ export const MAX_HEIGHT = 12
  * (숫자로 저장하지 않는 이유: 나중에 EnemyKind 순서를 바꾸면 예전 레벨의
  *  적이 전부 다른 적으로 바뀝니다. 문자열은 그렇게 조용히 틀리지 않습니다.)
  */
-export type EntityKind = 'spawn' | 'grunt' | 'treasure' | 'boss' | 'binder' | 'dragger'
+export type EntityKind =
+  | 'spawn'
+  | 'grunt'
+  | 'treasure'
+  | 'boss'
+  | 'binder'
+  | 'dragger'
+  | 'bonfire'
 
 export const ENTITY_KINDS: EntityKind[] = [
   'spawn',
@@ -47,6 +54,7 @@ export const ENTITY_KINDS: EntityKind[] = [
   'boss',
   'binder',
   'dragger',
+  'bonfire',
 ]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
@@ -56,6 +64,7 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   boss: '보스',
   binder: '얽는 자 🔵',
   dragger: '끄는 자 🟣',
+  bonfire: '화톳불',
 }
 
 /**
@@ -72,6 +81,7 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   boss: 0xb45cff,
   binder: 0x35a7ff,
   dragger: 0xc061ff,
+  bonfire: 0xffa93c,
 }
 
 export interface LevelEntity {

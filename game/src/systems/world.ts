@@ -1,6 +1,7 @@
-import { PLAYER, WORLD } from '../config/balance'
+import { PLAYER, VIAL, WORLD } from '../config/balance'
 import { NO_CHAIN } from '../config/bossPhases'
 import { enemyDef, kindFromId } from '../config/enemies'
+import type { Bonfire } from './bonfire'
 import {
   Actor,
   ActorState,
@@ -78,6 +79,12 @@ export function spawnPlayer(x = 0, z = 0): number {
   Player.dodgeCooldownT[e] = 0
   Player.castX[e] = 0
   Player.castZ[e] = 0
+  Player.vials[e] = VIAL.charges
+  Player.vialsMax[e] = VIAL.charges
+  Player.restT[e] = 0
+  Player.respawnX[e] = x
+  Player.respawnZ[e] = z
+  Player.hasRespawn[e] = 0
   // 시작 장비: 롱소드, 룬 없음. 룬은 탐험(보물)으로 얻습니다 — 기둥 4의
   // "성장 = 새로운 걸 할 수 있게 되는 것"을 시스템으로 강제하는 지점입니다.
   Loadout.weapon[e] = 0
@@ -214,6 +221,26 @@ export interface SpawnedLevel {
   player: number
   entities: number[]
   treasureTotal: number
+  /** 레벨에 놓인 화톳불 좌표들 */
+  bonfires: Bonfire[]
+}
+
+/**
+ * 레벨의 적만 다시 만듭니다 — **화톳불에서 쉬었을 때** 씁니다.
+ *
+ * 보물은 되살리지 않습니다. 보물이 다시 나오면 각인석을 무한정 캘 수 있어서
+ * 성장이 "탐험의 보상"이 아니라 "왕복 횟수"가 됩니다.
+ */
+export function respawnLevelEnemies(level: LevelData, terrain: Terrain): number[] {
+  const out: number[] = []
+  for (const item of level.entities) {
+    const kind = kindFromId(item.kind)
+    if (kind === null) continue
+    const e = spawnEnemy(kind, item.x, item.z)
+    Transform.y[e] = terrain.groundYAt(item.x, item.z)
+    out.push(e)
+  }
+  return out
 }
 
 /**
@@ -226,8 +253,18 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
   Transform.y[player] = terrain.groundYAt(Transform.x[player], Transform.z[player])
 
   const entities: number[] = []
+  const bonfires: Bonfire[] = []
   let treasureTotal = 0
   for (const item of level.entities) {
+    if (item.kind === 'bonfire') {
+      bonfires.push({
+        x: item.x,
+        y: terrain.groundYAt(item.x, item.z),
+        z: item.z,
+        lit: false,
+      })
+      continue
+    }
     let e = -1
     // 적 종류는 표에서 찾습니다. if 사슬로 두면 새 적을 넣을 때마다
     // 여기를 고쳐야 하고, 빠뜨리면 **레벨에 배치했는데 안 나오는** 버그가 됩니다.
@@ -241,5 +278,5 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     entities.push(e)
   }
-  return { player, entities, treasureTotal }
+  return { player, entities, treasureTotal, bonfires }
 }

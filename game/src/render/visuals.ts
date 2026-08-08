@@ -226,6 +226,7 @@ export class Visuals {
   private readonly backZoneGeos: Record<number, THREE.BufferGeometry>
   private readonly hpBarGeo: THREE.PlaneGeometry
   private readonly pillarGeo: THREE.BufferGeometry
+  private readonly bonfireFlames: THREE.Mesh[] = []
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -526,6 +527,7 @@ export class Visuals {
    * @param playerX,playerZ 등 뒤 표시·빛기둥 감쇠 판단에 쓰는 플레이어 위치
    */
   sync(playerX: number, playerZ: number): void {
+    this.syncBonfires()
     const ids = this.query.run()
     for (let i = 0; i < this.query.count; i++) {
       const e = ids[i]
@@ -752,6 +754,63 @@ export class Visuals {
     }
     const cfg = enemyDef(Enemy.kind[e])
     return phase === AttackPhase.Windup ? cfg.windup : phase === AttackPhase.Active ? cfg.active : cfg.recovery
+  }
+
+  /**
+   * 화톳불 — 엔티티가 아니라 **장식 오브젝트**로 만듭니다.
+   *
+   * ECS 엔티티로 두면 물리·전투 질의가 매 프레임 훑고 지나가는데, 화톳불은
+   * 부딪히지도 맞지도 않으므로 전부 낭비입니다. 위치 목록만 있으면 되는
+   * 것을 엔티티로 만들면 시스템마다 "이건 화톳불이니 건너뛰기"가 늘어납니다.
+   */
+  addBonfire(x: number, y: number, z: number): THREE.Group {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    // 장작 — 낮고 어두운 받침
+    const logs = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.7, 0.34, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a22, roughness: 0.9 }),
+    )
+    logs.position.y = 0.17
+    logs.castShadow = true
+    // 불꽃 — 가산 합성이라 어두운 배경에서 확실히 튑니다.
+    // 보물 빛기둥과 달리 **짧게(1.5m)** 둡니다. 길면 화면을 가로막는데,
+    // 화톳불은 안전지대라 오히려 주변이 잘 보여야 합니다.
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.42, 1.5, 7),
+      new THREE.MeshBasicMaterial({
+        color: 0xffa93c,
+        transparent: true,
+        opacity: 0.62,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    flame.position.y = 1.0
+    flame.renderOrder = 2
+    g.add(logs, flame)
+    this.bonfireFlames.push(flame)
+    this.scene.add(g)
+    return g
+  }
+
+  /** 불꽃이 흔들립니다 — 정지한 불은 불로 안 보입니다. */
+  private syncBonfires(): void {
+    for (let i = 0; i < this.bonfireFlames.length; i++) {
+      const f = this.bonfireFlames[i]
+      // 위상을 인덱스로 어긋내야 여러 화톳불이 한 몸처럼 뛰지 않습니다.
+      const t = time.elapsed * 7 + i * 1.7
+      f.scale.set(1 + Math.sin(t) * 0.09, 1 + Math.sin(t * 1.4) * 0.16, 1 + Math.cos(t) * 0.09)
+      ;(f.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.18 * (0.5 + 0.5 * Math.sin(t * 0.9))
+    }
+  }
+
+  clearBonfires(): void {
+    for (const f of this.bonfireFlames) {
+      const parent = f.parent
+      if (parent) this.scene.remove(parent)
+    }
+    this.bonfireFlames.length = 0
   }
 
   dispose(): void {

@@ -55,6 +55,8 @@ export const enum ActorState {
   Dead = 4,
   /** 스킬 시전. 기본 공격과 같은 windup/active/recovery 3단 구조를 씁니다. */
   Skill = 5,
+  /** 성수병을 마시는 중. 무적 프레임이 **없는** 것이 핵심입니다. */
+  Drink = 6,
 }
 
 /** 공격 단계 값 (Actor.phase) */
@@ -126,6 +128,17 @@ export const Player = defineComponent({
    */
   faceRot: 'f32',
   dodgeCooldownT: 'f32',
+  /** 남은 성수병 충전 수 */
+  vials: 'u8',
+  /** 최대 충전 수 — 나중에 보물로 늘릴 여지를 남겨 둡니다. */
+  vialsMax: 'u8',
+  /** 화톳불 앞에서 가만히 있은 시간(초). BONFIRE.restTime 을 넘기면 휴식. */
+  restT: 'f32',
+  /** 마지막으로 쉰 화톳불의 좌표 — 죽으면 여기서 다시 시작합니다. */
+  respawnX: 'f32',
+  respawnZ: 'f32',
+  /** 부활 지점이 정해졌는가(0=아직 화톳불을 만난 적 없음) */
+  hasRespawn: 'u8',
 })
 
 /** 적 종류 (Enemy.kind) */
