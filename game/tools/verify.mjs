@@ -685,7 +685,19 @@ async function main() {
     check('아무 옵션 없이 열면 번들 존이 실행됨', zs.source === 'bundled' && zs.levelMode, `source=${zs.source}`)
     check('존 이름이 표시됨', zs.levelName === '무너진 성문', `"${zs.levelName}"`)
     check('존의 보물 4개가 배치됨', zs.treasureTotal === 4, `${zs.treasureTotal}개`)
-    check('존의 적 12마리(잡몹 11 + 보스 1)가 배치됨', zs.enemiesLeft === 12, `${zs.enemiesLeft}마리`)
+    /**
+     * **개수를 베끼지 않습니다.** 예전엔 `=== 12` 로 박아 뒀는데, 적 종류를
+     * 두 가지 추가하자마자 이 검사만 빨갛게 됐습니다 — 게임은 멀쩡한데
+     * 테스트가 낡은 것이었죠. 이런 실패가 쌓이면 결국 아무도 안 봅니다.
+     * 레벨 파일에 적힌 대로 나왔는지를 **데이터끼리** 비교합니다.
+     */
+    const roster = await zone.evaluate(() => window.__game.levelRoster())
+    const rosterTotal = Object.values(roster).reduce((a, b) => a + b, 0)
+    check(
+      '레벨 파일에 배치된 적이 전부 등장함',
+      zs.enemiesLeft === rosterTotal && rosterTotal > 0,
+      `${zs.enemiesLeft}마리 — ${Object.entries(roster).map(([k, v]) => `${k} ${v}`).join(' · ')}`,
+    )
     check('시작 지점이 바닥 위(높이 2)', zs.player.terrainLevel === 2, `높이 단계 ${zs.player.terrainLevel}`)
     check('시작 지점 근처에는 적이 없음', (zs.nearestEnemy?.dist ?? 99) > 8, `가장 가까운 적 ${zs.nearestEnemy?.dist}m`)
     // 룬 슬롯은 이제 3, 4번입니다(0~2가 무기 스킬 3개).
@@ -921,9 +933,14 @@ async function main() {
       `피해 ${beforeReload.skill.damage} -> ${afterReload.skill.damage}`,
     )
     // 반대쪽: 전투 상태는 반드시 되돌아가야 합니다.
+    // 여기서도 상수를 베끼지 않고 레벨 데이터와 맞춥니다.
+    const reloadRoster = await zone.evaluate(() => window.__game.levelRoster())
+    const reloadTotal = Object.values(reloadRoster).reduce((a, b) => a + b, 0)
     check(
       '적은 전부 되살아남 (전투는 처음부터)',
-      afterReload.state.enemiesLeft === 12 && afterReload.state.player.hp === 100,
+      afterReload.state.enemiesLeft === reloadTotal &&
+        reloadTotal > 0 &&
+        afterReload.state.player.hp === 100,
       `적 ${afterReload.state.enemiesLeft}마리 · 체력 ${afterReload.state.player.hp}`,
     )
 
