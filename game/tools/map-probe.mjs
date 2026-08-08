@@ -40,6 +40,8 @@ function check(ok, label, detail = '') {
 // ---------------------------------------------------------------------------
 const level = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
 const VOID = -1
+/** 적으로 치는 배치 종류 — 조합 프로브와 같은 목록입니다. */
+const FOE_KINDS = new Set(['grunt', 'binder', 'dragger', 'charger', 'boss'])
 
 function heightAt(cx, cz) {
   if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) return VOID
@@ -427,6 +429,67 @@ try {
     narrow.length === 0,
     '주 동선이 되돌아올 수 없는 낙차 옆에서 좁지 않다 (실수로 떨어져 갇히지 않게)',
     narrow.length ? `좁은 자리 ${narrow.slice(0, 4).join(' ')}` : `경로 ${routeCells.length}칸 전부`,
+  )
+
+  /**
+   * ---- 9. 주 동선에 **아무것도 없는 구간**이 얼마나 긴가 ----
+   *
+   * ── 왜 이 검사가 생겼는가 ──────────────────────────────────────
+   * 자동 플레이가 여섯 판 연속 같은 것을 말했습니다:
+   *
+   *     빈 시간  교전 사이 평균 7~9초 · **최장 19~25초**
+   *     무엇을 하고 있었나  목표이동 40% · 접근 26%  (= 걷기 66%)
+   *
+   * 여섯 번 찍어 놓고 여섯 번 다 넘겼습니다. "소울류도 걷는다"는 말로요.
+   * 그런데 소울류의 걷기는 **비어 있지 않습니다.** 다크소울1의 언데드 버그는
+   * 모퉁이마다 적이 있고, NRFTW는 오르내릴 것이 있습니다. 우리 존은 방 단위
+   * 어그로(14m) 뒤로 **자는 적 옆을 지나가는 시간**이 되었습니다.
+   *
+   * 매번 봇을 돌려서 재는 것은 느리고, 판마다 경로가 달라 흔들립니다.
+   * 지도만 보고도 알 수 있습니다: **주 동선을 따라 걸으면서, 깨울 수 있는
+   * 적이 하나도 없는 구간이 몇 미터나 이어지는가.**
+   *
+   * ⚠️ 어그로 거리는 게임에서 읽습니다(terrainInfo().levelAggroRange).
+   */
+  const aggro = await page.evaluate(() => window.__game.terrainInfo().levelAggroRange)
+  const foes = level.entities.filter((e) => FOE_KINDS.has(e.kind)).map(cellOf)
+  const quiet = []
+  let runStart = null
+  let runLen = 0
+  for (const c of routeCells) {
+    const near = foes.some(
+      (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+    )
+    if (near) {
+      if (runStart && runLen * CELL >= 16) {
+        quiet.push({ from: runStart, to: c, metres: runLen * CELL })
+      }
+      runStart = null
+      runLen = 0
+    } else {
+      if (!runStart) runStart = c
+      runLen++
+    }
+  }
+  if (runStart && runLen * CELL >= 16) {
+    quiet.push({ from: runStart, to: routeCells[routeCells.length - 1], metres: runLen * CELL })
+  }
+  const worst = quiet.reduce((a, b) => (a && a.metres >= b.metres ? a : b), null)
+  console.log(
+    `  [빈 구간] 주 동선 ${routeCells.length * CELL}m 중 위협 없이 걷는 구간 ${quiet.length}개 — ` +
+      (quiet.length
+        ? quiet
+            .sort((a, b) => b.metres - a.metres)
+            .slice(0, 4)
+            .map((q) => `${q.metres}m (${q.from.cx},${q.from.cz})→(${q.to.cx},${q.to.cz})`)
+            .join(' · ')
+        : '없음') +
+      '\n',
+  )
+  check(
+    !worst || worst.metres <= 30,
+    '주 동선에 위협 없이 30m(약 6초) 넘게 걷는 구간이 없다',
+    worst ? `최장 ${worst.metres}m` : '없음',
   )
 
   console.log('')

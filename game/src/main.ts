@@ -1693,6 +1693,8 @@ class Game {
     cellSize: number
     fallFreeSteps: number
     fallDamagePerStep: number
+    /** 존에서 적이 깨어나는 거리(m) — 프로브가 상수를 베끼지 않게. */
+    levelAggroRange: number
   } {
     return {
       maxClimb: MAX_CLIMB,
@@ -1700,6 +1702,7 @@ class Game {
       cellSize: CELL_SIZE,
       fallFreeSteps: FALL.freeSteps,
       fallDamagePerStep: FALL.damagePerStep,
+      levelAggroRange: LEVEL_AGGRO_RANGE,
     }
   }
 
@@ -2558,6 +2561,7 @@ declare global {
         cellSize: number
         fallFreeSteps: number
         fallDamagePerStep: number
+        levelAggroRange: number
       }
       entityState: (e: number) => {
         hp: number
