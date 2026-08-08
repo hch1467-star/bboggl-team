@@ -35,6 +35,18 @@ export interface Bonfire {
 export interface RestResult {
   /** 이번 프레임에 휴식이 성사되었는가 */
   rested: boolean
+  /**
+   * 이번 프레임에 **처음 닿았는가**(불을 붙였는가).
+   *
+   * 휴식과 분리한 이유가 중요합니다. 자동 플레이 봇을 돌려보니 시작 지점
+   * 3.5m 옆의 화톳불을 **체력이 가득한 채로 지나쳐서** 불이 안 켜졌고,
+   * 24초 뒤 첫 죽음이 그대로 **게임 오버**가 됐습니다.
+   *
+   * 부활 지점은 **보상이 아니라 안전망**입니다. 가만히 서서 쉬는 것(회복 +
+   * 적 부활)은 여전히 판단이지만, "여기서 다시 시작한다"는 지나가기만 해도
+   * 잡혀야 합니다. 안 그러면 처음 하는 사람일수록 안전망 없이 걷게 됩니다.
+   */
+  litNow: boolean
   /** 지금 가장 가까운 화톳불 (없으면 null) */
   near: Bonfire | null
   /** 휴식까지의 진행도 0~1. HUD가 게이지로 그립니다. */
@@ -51,7 +63,7 @@ const enemies = defineQuery(Enemy, Transform, Actor)
  * 그건 레벨 데이터를 아는 게임 루프의 일입니다.
  */
 export function bonfireSystem(p: number, fires: Bonfire[]): RestResult {
-  const idle: RestResult = { rested: false, near: null, progress: 0, blocked: false }
+  const idle: RestResult = { rested: false, litNow: false, near: null, progress: 0, blocked: false }
   if (fires.length === 0) return idle
 
   const px = Transform.x[p]
@@ -74,10 +86,14 @@ export function bonfireSystem(p: number, fires: Bonfire[]): RestResult {
     return idle
   }
 
+  // 닿기만 해도 불이 붙습니다(위 설계 노트 참고). 회복은 별개입니다.
+  const litNow = !near.lit
+  near.lit = true
+
   // 죽었거나 무언가를 하고 있으면 쉬지 않습니다.
   if (Actor.state[p] !== ActorState.Idle) {
     Player.restT[p] = 0
-    return { rested: false, near, progress: 0, blocked: false }
+    return { rested: false, litNow, near, progress: 0, blocked: false }
   }
 
   // 쫓아오는 적이 근처에 있으면 못 쉽니다.
@@ -96,24 +112,24 @@ export function bonfireSystem(p: number, fires: Bonfire[]): RestResult {
   }
   if (blocked) {
     Player.restT[p] = 0
-    return { rested: false, near, progress: 0, blocked: true }
+    return { rested: false, litNow, near, progress: 0, blocked: true }
   }
 
   // 가만히 있는가 — 위치가 아니라 **속도**로 봅니다(위 설계 노트 참고).
   const moving = Math.hypot(Velocity.x[p], Velocity.z[p]) > 0.35
   if (moving) {
     Player.restT[p] = 0
-    return { rested: false, near, progress: 0, blocked: false }
+    return { rested: false, litNow, near, progress: 0, blocked: false }
   }
 
   Player.restT[p] += time.dt
   if (Player.restT[p] >= BONFIRE.restTime) {
     Player.restT[p] = 0
-    near.lit = true
-    return { rested: true, near, progress: 1, blocked: false }
+    return { rested: true, litNow, near, progress: 1, blocked: false }
   }
   return {
     rested: false,
+    litNow,
     near,
     progress: Player.restT[p] / BONFIRE.restTime,
     blocked: false,

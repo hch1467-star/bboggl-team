@@ -512,6 +512,16 @@ class Game {
       const rest = bonfireSystem(p, this.bonfires)
       this.tryUpgrade(p, rest.near !== null && !rest.blocked)
       this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
+      if (rest.litNow && rest.near) {
+        // **닿기만 해도 부활 지점이 됩니다.** 회복·적 부활은 여전히 "쉬어야"
+        // 일어납니다 — 안전망과 보상을 분리한 것입니다(systems/bonfire.ts 설계 노트).
+        Player.respawnX[p] = rest.near.x
+        Player.respawnZ[p] = rest.near.z
+        Player.hasRespawn[p] = 1
+        sfx.pickup()
+        this.hud.showBanner('화톳불에 불이 붙었다', '여기서 다시 시작합니다', 2.0)
+        this.persistProgress()
+      }
       if (rest.rested && rest.near) this.restAt(p, rest.near)
     } else {
       this.hud.setRest(false, 0, false)
@@ -1155,6 +1165,20 @@ class Game {
     return best
   }
 
+  debugCameraAxes(): { forwardX: number; forwardZ: number; rightX: number; rightZ: number } {
+    return {
+      forwardX: this.cam.forward.x,
+      forwardZ: this.cam.forward.z,
+      rightX: this.cam.right.x,
+      rightZ: this.cam.right.z,
+    }
+  }
+
+  debugObjective(): { x: number; z: number; label: string; dist: number } | null {
+    const p = this.playerEntity
+    return this.findObjective(Transform.x[p], Transform.z[p])
+  }
+
   debugBossEncounter(): {
     entity: number
     encounter: number
@@ -1427,11 +1451,17 @@ class Game {
   } | null {
     const p = this.playerEntity
     let best: { x: number; z: number; dist: number; hp: number; playerBehind: boolean } | null = null
-    for (let e = 0; e < 4096; e++) {
+    const ids = enemyQuery.run()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
       if (!isAlive(e) || e === p) continue
       if (Actor.state[e] === ActorState.Dead) continue
-      const kind = Renderable.kind[e]
-      if (kind !== 1 && kind !== 3) continue
+      /**
+       * 예전엔 렌더 종류를 `kind !== 1 && kind !== 3`(잡몹·보스)으로 박아
+       * 뒀는데, 적 종류를 늘리자 **얽는 자·끄는 자가 안 세어졌습니다.**
+       * 오류도 안 나고 화면도 멀쩡해서 눈으로는 못 잡는 종류의 버그입니다.
+       * 이제 "Enemy 컴포넌트를 가졌는가"로만 판단하므로 새 적이 저절로 포함됩니다.
+       */
       const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
       if (!best || d < best.dist) {
         best = {
@@ -1481,6 +1511,7 @@ class Game {
       aim: { x: Number(this.aim.x.toFixed(3)), z: Number(this.aim.z.toFixed(3)) },
       cast: { x: Number(Player.castX[p].toFixed(3)), z: Number(Player.castZ[p].toFixed(3)) },
       enemiesLeft: countLivingEnemies(),
+      treasureFound: this.treasuresFound,
       // 지금 몇 마리가 **동시에** 공격을 걸고 있는가.
       // "여러 명이 겹치면 못 피한다"는 문제는 이 숫자로만 잴 수 있습니다.
       ...this.debugAttackLoad(),
@@ -1608,6 +1639,16 @@ declare global {
         chainNext: string
         cooldownT: number
       } | null
+      /**
+       * 자동 플레이 봇용 훅.
+       *
+       * WASD는 **카메라 기준**이라 월드 방향을 그대로 못 씁니다
+       * (쿼터뷰 45°에서 월드 +X로 가려면 화면상 오른쪽 아래로 가야 합니다).
+       * 봇이 축을 직접 계산하면 카메라 각도를 바꿀 때 봇이 조용히 틀립니다.
+       */
+      cameraAxes: () => { forwardX: number; forwardZ: number; rightX: number; rightZ: number }
+      /** 지금 목표 지점(길안내와 **같은 계산**). 없으면 null. */
+      objective: () => { x: number; z: number; label: string; dist: number } | null
       /** 보스 조우 검증용 */
       bossEncounter: () => {
         entity: number
@@ -1765,6 +1806,8 @@ window.__game = {
       cooldownT: Number(Actor.cooldownT[entity].toFixed(3)),
     }
   },
+  cameraAxes: () => game.debugCameraAxes(),
+  objective: () => game.debugObjective(),
   bossEncounter: () => game.debugBossEncounter(),
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
