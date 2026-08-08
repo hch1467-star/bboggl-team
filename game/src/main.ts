@@ -1800,6 +1800,69 @@ class Game {
     return best
   }
 
+  /**
+   * 주변 적의 **위협 상태**.
+   *
+   * 자동 플레이 봇이 반격을 배우려면 "지금 초록이 뜬 적이 누구고, 내가 그
+   * 정면에 있는가"를 알아야 합니다. 지금까지 봇은 `telegraphing` 개수만 보고
+   * 무조건 굴렀는데, 그러면 초록의 정답(앞으로 나가 스킬)을 **영영 못 배웁니다.**
+   * 사람은 화면에서 색과 자기 위치를 봅니다 — 봇에게도 같은 정보를 줍니다.
+   */
+  debugThreats(range = 14): {
+    entity: number
+    x: number
+    z: number
+    dist: number
+    /** AttackIntent. -1 = 공격 중이 아님 */
+    intent: number
+    winding: boolean
+    /** 내가 이 적의 정면에 있는가 (반격 가능 방향) */
+    inFront: boolean
+    hp: number
+  }[] {
+    const p = this.playerEntity
+    const out: ReturnType<Game['debugThreats']> = []
+    const ids = enemyQuery.run()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (!isAlive(e) || e === p || Actor.state[e] === ActorState.Dead) continue
+      const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
+      if (d > range) continue
+      const attacking = Actor.state[e] === ActorState.Attack
+      out.push({
+        entity: e,
+        x: Number(Transform.x[e].toFixed(2)),
+        z: Number(Transform.z[e].toFixed(2)),
+        dist: Number(d.toFixed(2)),
+        intent: attacking ? attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent : -1,
+        winding: attacking && Actor.phase[e] === AttackPhase.Windup,
+        inFront: !isBehindPoint(
+          Transform.x[p],
+          Transform.z[p],
+          Transform.x[e],
+          Transform.z[e],
+          Transform.rotY[e],
+        ),
+        hp: Number(Health.hp[e].toFixed(1)),
+      })
+    }
+    out.sort((a, b) => a.dist - b.dist)
+    return out
+  }
+
+  /** 슬롯별 남은 쿨다운(초). 봇이 "쓸 수 있는 스킬"을 고르는 데 씁니다. */
+  debugSlotCooldowns(): { slot: number; key: string; cd: number; empty: boolean }[] {
+    const p = this.playerEntity
+    const keys = ['KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyG']
+    const cds = [Loadout.cd0[p], Loadout.cd1[p], Loadout.cd2[p], Loadout.cd3[p], Loadout.cd4[p]]
+    return keys.map((key, slot) => ({
+      slot,
+      key,
+      cd: Number(cds[slot].toFixed(2)),
+      empty: skillForSlot(p, slot) === null,
+    }))
+  }
+
   /** 헤드리스 검증용 스냅샷 */
   debugState() {
     const p = this.playerEntity
@@ -1977,6 +2040,18 @@ declare global {
       /** 🟢 반격 검증용 */
       counterInfo: () => { brokenTime: number; normalBrokenTime: number; damageMultiplier: number }
       counterCount: () => number
+      /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
+      threats: (range?: number) => {
+        entity: number
+        x: number
+        z: number
+        dist: number
+        intent: number
+        winding: boolean
+        inFront: boolean
+        hp: number
+      }[]
+      slotCooldowns: () => { slot: number; key: string; cd: number; empty: boolean }[]
       cameraAxes: () => { forwardX: number; forwardZ: number; rightX: number; rightZ: number }
       /** 지금 목표 지점(길안내와 **같은 계산**). 없으면 null. */
       objective: () => {
@@ -2191,6 +2266,8 @@ window.__game = {
     damageMultiplier: COUNTER.damageMultiplier,
   }),
   counterCount: () => game.debugCounterCount(),
+  threats: (range) => game.debugThreats(range),
+  slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
   objective: () => game.debugObjective(),
   bossEncounter: () => game.debugBossEncounter(),

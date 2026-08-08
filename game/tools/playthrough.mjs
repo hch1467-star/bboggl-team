@@ -108,6 +108,7 @@ try {
     let upgrades = 0
     let bossSeen = false
     let bossKilled = false
+    let clearedAt = 0
     const notes = []
 
     while (now() - t0 < LIMIT) {
@@ -128,6 +129,19 @@ try {
       // 봇이 직접 셌는데, 화톳불 부활이 같은 프레임에 끝나서 그런 프레임이
       // 아예 없었습니다. 그래서 사망 0회로 보고하면서 불티는 280 → 32 로
       // 줄어 있었습니다 — 계측기가 조용히 거짓말을 하고 있었던 것입니다.
+      /**
+       * `gameOver` 는 **전멸에서도 클리어에서도** 켜집니다.
+       * 처음엔 그걸 모르고 전부 "사망"으로 적었습니다. 봇이 처음으로 존을
+       * 끝낸 판에서 체력 67에 적 0마리인데 **사망·게임오버**로 기록됐습니다 —
+       * 계측기가 승리를 패배로 보고한 것입니다.
+       */
+      const cleared = st.gameOver && p.hp > 0 && st.enemiesLeft === 0
+      if (cleared) {
+        notes.push({ at: Number((now() - t0).toFixed(1)), what: '★ 존 클리어', region: curRegion })
+        clearedAt = now() - t0
+        releaseAll()
+        break
+      }
       if (p.hp <= 0 || st.gameOver) {
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '사망', region: curRegion, x: p.x, z: p.z })
         releaseAll()
@@ -185,18 +199,74 @@ try {
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '보스 조우', region: curRegion })
       }
 
-      // ---- 전투 ----
-      if (near && near.dist < 12) {
+      /**
+       * ---- 전투 ----
+       *
+       * ── 봇이 스킬을 쓰게 된 이유 ──────────────────────────────
+       * 이전까지 봇은 좌클릭과 구르기만 썼습니다. **슬롯 다섯 개를 통째로
+       * 놀리고** 있었으니, 봇이 존을 못 끝내는 것을 지도 탓으로 돌릴 수
+       * 없었습니다. 게다가 반격이 스킬 전용이 되면서, 스킬을 안 쓰는 봇은
+       * 초록을 영영 못 배웁니다.
+       *
+       * 여전히 봇은 잘 못합니다 — 백어택을 노리지 않고, 어떤 스킬이 어떤
+       * 상황에 좋은지도 모릅니다. **쿨이 돌면 아무거나 씁니다.**
+       * 그게 이 봇의 역할입니다: 잘하는 플레이가 아니라 **하한선**.
+       */
+      /**
+       * **닿을 수 있는 적만 상대합니다.**
+       *
+       * `nearestEnemy` 는 **수평 거리만** 봅니다. 수직 지도에서는 이게
+       * 치명적입니다 — 함몰지 아래에 있는데 위쪽 가장자리에 선 적이
+       * "5m 근처"로 잡히고, 봇은 오를 수 없는 절벽에 붙어 영원히 밀어댑니다.
+       * 실제로 봇이 420초 중 310초를 함몰지에서 보낸 원인이 이것이었습니다
+       * (체력 100, 성수병 3개 — 죽는 게 아니라 못 나오고 있었습니다).
+       *
+       * 걸어서 가는 거리와 직선 거리를 비교해 **크게 돌아가야 하면 무시**합니다.
+       * 사람은 화면을 보고 "저긴 못 올라가"를 압니다. 봇에게는 길찾기가 그 눈입니다.
+       */
+      let reachable = null
+      if (near) {
+        const step = G.pathStep(near.x, near.z)
+        reachable = step && step.dist <= near.dist * 1.8 + 6 ? step : null
+      }
+      if (near && reachable && near.dist < 12) {
         G.aimAtWorld(near.x, near.z)
+
+        const threats = G.threats(9)
+        const ready = G.slotCooldowns().filter((s) => !s.empty && s.cd <= 0)
+
+        /**
+         * 🟢 반격 — **구르기보다 먼저 봅니다.**
+         *
+         * 순서가 중요합니다. 예고가 뜨면 무조건 구르게 두면 초록도 굴러
+         * 넘기게 되고, 새 동사를 배울 기회가 사라집니다.
+         */
+        const green = threats.find((t) => t.winding && t.intent === 4 && t.inFront && t.dist < 5.5)
+        if (green && ready.length > 0) {
+          G.aimAtWorld(green.x, green.z)
+          tap(ready[0].key)
+          await sleep()
+          continue
+        }
+
+        // 그 밖의 예고는 구릅니다. 4색을 구분하지 못하는 봇이라
+        // **가장 단순한 대응**만 합니다 — 이게 초보자의 하한선입니다.
+        const danger = threats.some((t) => t.winding && t.intent !== 4 && t.dist < 6)
+        if (danger) {
+          tap('Space')
+          await sleep()
+          continue
+        }
+
         if (near.dist > 2.2) {
-          moveToward(near.x - p.x, near.z - p.z)
+          // 다가갈 때도 길을 따라갑니다 — 직선으로 가면 다시 절벽에 붙습니다.
+          moveToward(reachable.x - p.x, reachable.z - p.z)
         } else {
           releaseAll()
-          tap('Mouse0')
+          // 쿨이 돈 스킬이 있으면 씁니다. 없으면 기본 공격.
+          if (ready.length > 0) tap(ready[0].key)
+          else tap('Mouse0')
         }
-        // 예고가 떠 있으면 일단 구릅니다. 4색을 구분하지 못하는 봇이라
-        // **가장 단순한 대응**만 합니다 — 이게 초보자의 하한선입니다.
-        if (st.telegraphing > 0 && near.dist < 6) tap('Space')
         await sleep()
         continue
       }
@@ -332,6 +402,8 @@ try {
       // 쉰 것"으로 추론했는데, 성수병이 이미 가득이면 못 세서 0으로 나왔습니다.
       restCount: G.vialInfo().restCount,
       upgrades,
+      counters: G.counterCount(),
+      clearedAt: Number(clearedAt.toFixed(1)),
       ladderOpen: (G.shortcutInfo() ?? []).filter((l) => l.open).length,
       ladderTotal: (G.shortcutInfo() ?? []).length,
       bossSeen,
@@ -370,13 +442,18 @@ try {
   // 요약은 **맨 마지막**에 찍습니다. 앞에 두면 tail 로 볼 때 잘립니다
   // (실제로 첫 실행에서 요약이 통째로 안 보였습니다).
   console.log('  ── 요약 ──────────────────────────────')
-  console.log(`  진행       ${log.elapsed}초${log.hitLimit ? ' (제한 도달 — 끝내지 못함)' : ''}`)
+  console.log(
+    log.clearedAt > 0
+      ? `  진행       ★ ${log.clearedAt}초에 존 클리어`
+      : `  진행       ${log.elapsed}초${log.hitLimit ? ' (제한 도달 — 끝내지 못함)' : ''}`,
+  )
   console.log(`  사망       ${log.deaths}회`)
   console.log(`  처치       ${log.kills}마리 · 남은 적 ${log.enemiesLeft}마리`)
   console.log(`  보스       조우 ${log.bossSeen ? 'O' : 'X'}`)
   console.log(`  성수병     ${log.vialsUsed}개 사용 · 휴식 ${log.restCount}회 · 최대 ${log.vialsMax}개`)
   console.log(`  불티       ${log.embers} · 강화 ${log.upgrades}회`)
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
+  console.log(`  반격       ${log.counters}회 성공`)
   console.log(`  체력       ${log.hp}`)
   console.log('')
 } finally {

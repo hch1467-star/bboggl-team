@@ -281,6 +281,104 @@ try {
     `가장 가까운 화톳불 ${nearestFire.toFixed(1)}m · 영역 ${arena?.arenaRadius ?? '?'}m`,
   )
 
+  /**
+   * ---- 8. 주 동선이 낭떠러지 옆에서 좁지 않은가 ----
+   *
+   * **자동 플레이가 잡은 버그를 규칙으로 굳힙니다.**
+   * 함몰지 가장자리 통로를 4m로 냈더니 봇이 420초 중 300초를 아래에서
+   * 보냈습니다. 체력 100, 성수병 3개 — 죽은 게 아니라 **실수로 떨어져서**
+   * 못 나오고 있었습니다. 최단 경로는 함몰지를 지나지도 않는데 말입니다.
+   *
+   * 조작이 정밀하지 않은 사람과, 적에게 밀리는 상황에서는 **좁은 길 옆의
+   * 되돌아올 수 없는 낙차가 곧 기본값**이 됩니다. 그래서 규칙으로 둡니다:
+   * 주 동선 위의 칸이 되돌아올 수 없는 낙차와 접해 있으면,
+   * 그 자리의 걸을 수 있는 폭이 최소 6m 는 되어야 합니다.
+   */
+  const routeCells = (() => {
+    // 시작 화톳불 → 보스 최단 경로를 되짚습니다.
+    const key = (x, z) => z * level.w + x
+    const from = startFire
+    const prev = new Map()
+    const dist = new Map([[key(from.cx, from.cz), 0]])
+    let queue = [from]
+    let hit = null
+    while (queue.length && !hit) {
+      const next = []
+      for (const cur of queue) {
+        if (cur.cx === boss.cx && cur.cz === boss.cz) {
+          hit = cur
+          break
+        }
+        const h = heightAt(cur.cx, cur.cz)
+        for (const [nx, nz] of [
+          [cur.cx - 1, cur.cz],
+          [cur.cx + 1, cur.cz],
+          [cur.cx, cur.cz - 1],
+          [cur.cx, cur.cz + 1],
+        ]) {
+          const nh = heightAt(nx, nz)
+          if (nh === VOID || nh - h > maxClimb) continue
+          const k = key(nx, nz)
+          if (dist.has(k)) continue
+          dist.set(k, dist.get(key(cur.cx, cur.cz)) + 1)
+          prev.set(k, cur)
+          next.push({ cx: nx, cz: nz })
+        }
+      }
+      queue = next
+    }
+    const out = []
+    let cur = hit
+    while (cur) {
+      out.push(cur)
+      cur = prev.get(key(cur.cx, cur.cz))
+    }
+    return out.reverse()
+  })()
+
+  /** 이 칸에서 걸어갈 수 있는 이웃(같은 높이 ±오를 수 있는 단차)의 수. */
+  const walkableWidth = (cx, cz) => {
+    const h = heightAt(cx, cz)
+    let n = 1
+    for (const [dx, dz] of [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+    ]) {
+      // 그 방향으로 몇 칸이나 이어지는지 셉니다(양옆 폭의 근사).
+      for (let step = 1; step <= 3; step++) {
+        const v = heightAt(cx + dx * step, cz + dz * step)
+        if (v === VOID || Math.abs(v - h) > maxClimb) break
+        n++
+      }
+    }
+    return n
+  }
+
+  const MIN_WIDTH_CELLS = 3 // 6m
+  const narrow = []
+  for (const c of routeCells) {
+    const h = heightAt(c.cx, c.cz)
+    const nextToDrop = [
+      [c.cx - 1, c.cz],
+      [c.cx + 1, c.cz],
+      [c.cx, c.cz - 1],
+      [c.cx, c.cz + 1],
+    ].some(([nx, nz]) => {
+      const v = heightAt(nx, nz)
+      // 되돌아올 수 없는 낙차 = 내려가면 다시 못 오르는 단차
+      return v !== VOID && h - v > maxClimb
+    })
+    if (!nextToDrop) continue
+    if (walkableWidth(c.cx, c.cz) < MIN_WIDTH_CELLS * 2) narrow.push(`(${c.cx},${c.cz})`)
+  }
+  check(
+    narrow.length === 0,
+    '주 동선이 되돌아올 수 없는 낙차 옆에서 좁지 않다 (실수로 떨어져 갇히지 않게)',
+    narrow.length ? `좁은 자리 ${narrow.slice(0, 4).join(' ')}` : `경로 ${routeCells.length}칸 전부`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {
