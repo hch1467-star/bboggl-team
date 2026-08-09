@@ -197,7 +197,21 @@ class Game {
    */
   private readonly seenIntents = new Set<number>()
   /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지. */
-  private foeSwingLog: Record<string, { swings: number; hits: number }> = {}
+  private foeSwingLog: Record<
+    string,
+    {
+      swings: number
+      hits: number
+      deaths?: number
+      diedWinding?: number
+      /** 아래 넷은 **살아 있던 시간의 분해**입니다(초, 시뮬레이션 시간). */
+      aggroT?: number
+      atkT?: number
+      stagT?: number
+      coolT?: number
+      readyT?: number
+    }
+  > = {}
   private readonly foeLastSwing = new Map<number, string>()
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
@@ -855,6 +869,36 @@ class Game {
           this.swungLastFrame.add(e)
         }
       }
+
+      /**
+       * **적이 살아 있는 동안 무엇을 하고 있었는지**를 나눠 담습니다.
+       *
+       * 왜 이 눈금이 필요한가: 달려드는 자가 마리당 0.33회만 휘두른다는
+       * 것까지는 셌지만, *왜* 인지는 후보가 셋이었습니다. 그런데
+       * enemyAI.ts 의 토큰 코드를 읽어 보니 **셋 다 코드에 실제로 있는
+       * 갈림길**이었습니다:
+       *   · 경직 중이면 대기열에 **아예 들어가지 않습니다**(`Stagger` continue)
+       *   · 쿨다운이 남아 있으면 토큰이 있어도 못 겁니다
+       *   · 토큰은 **가까운 순서**로 둘까지만 나갑니다
+       *
+       * 그래서 살아 있던 시간을 그 세 갈래 그대로 나눠 잽니다. 추측이
+       * 아니라 **코드의 분기와 같은 모양으로** 재야 답이 처방으로 이어집니다
+       * (경직이면 체력·경직시간, 쿨다운이면 수치, 토큰이면 배치·규칙).
+       *
+       * 시뮬레이션 시간(dt)으로 더합니다 — 벽시계로 재면 10fps 환경에서
+       * 프레임 수를 재는 것이 되어 버립니다(이 프로젝트에서 이미 겪은 종류).
+       */
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (Enemy.aggro[e] === 0) continue
+        if (Actor.state[e] === ActorState.Dead) continue
+        const rec = (this.foeSwingLog[enemyDef(Enemy.kind[e]).id] ??= { swings: 0, hits: 0 })
+        rec.aggroT = (rec.aggroT ?? 0) + time.dt
+        if (Actor.state[e] === ActorState.Attack) rec.atkT = (rec.atkT ?? 0) + time.dt
+        else if (Actor.state[e] === ActorState.Stagger) rec.stagT = (rec.stagT ?? 0) + time.dt
+        else if (Actor.cooldownT[e] > 0) rec.coolT = (rec.coolT ?? 0) + time.dt
+        else rec.readyT = (rec.readyT ?? 0) + time.dt
+      }
     }
 
     /** ---- 3.71 처형 안내 ---- */
@@ -1035,6 +1079,29 @@ class Game {
       // **무너진 채로 죽었는가** — 처형까지 못 가고 평타에 정리된 횟수입니다.
       if (!death.isPlayer && hasComponent(Enemy, death.entity) && Enemy.brokenT[death.entity] > 0) {
         this.brokenDeaths++
+      }
+      /**
+       * ── **예고를 띄운 채로 죽었는가** ──────────────────────────────
+       *
+       * 적 종류별 휘두름을 세 보니 마리당 1.0~1.5회로 비슷한데
+       * **달려드는 자만 0.2회** 였습니다(5마리 배치에 판당 1회).
+       * 후보가 셋이었습니다 — 마릿수 / 먼저 죽어서 / 토큰을 뺏겨서.
+       * 마릿수는 나눠 보니 아니었고, 남은 둘을 가르는 것이 이 한 줄입니다.
+       *
+       * 달려드는 자는 예고가 **1.4초**로 가장 길고 체력은 46으로 낮습니다.
+       * 그 둘이 겹치면 *"예고를 띄우자마자 죽는다"* 가 되고, 그러면 🟢 은
+       * 색으로 존재하지 않게 됩니다 — 플레이어가 볼 일이 없으니까요.
+       */
+      if (!death.isPlayer && hasComponent(Enemy, death.entity)) {
+        const id = enemyDef(Enemy.kind[death.entity]).id
+        const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0, deaths: 0, diedWinding: 0 })
+        rec.deaths = (rec.deaths ?? 0) + 1
+        if (
+          Actor.state[death.entity] === ActorState.Attack &&
+          Actor.phase[death.entity] === AttackPhase.Windup
+        ) {
+          rec.diedWinding = (rec.diedWinding ?? 0) + 1
+        }
       }
       if (death.isPlayer) {
         this.deathCount++
@@ -2113,7 +2180,10 @@ class Game {
    * "색마다 한 번만"은 **안 일어나는 것**을 재는 조건이라, 시험을 안 쓰면
    * 두 번 뜨는 것을 아무도 모릅니다(모루 프로브와 같은 종류의 위험입니다).
    */
-  debugFoeSwingLog(): Record<string, { swings: number; hits: number }> {
+  debugFoeSwingLog(): Record<
+    string,
+    { swings: number; hits: number; deaths?: number; diedWinding?: number }
+  > {
     return this.foeSwingLog
   }
 
@@ -2831,7 +2901,20 @@ declare global {
       /** 안내가 나간 예고 색들(AttackIntent 값) */
       seenIntents: () => number[]
       /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지 */
-      foeSwingLog: () => Record<string, { swings: number; hits: number }>
+      foeSwingLog: () => Record<
+        string,
+        {
+          swings: number
+          hits: number
+          deaths?: number
+          diedWinding?: number
+          aggroT?: number
+          atkT?: number
+          stagT?: number
+          coolT?: number
+          readyT?: number
+        }
+      >
       /** 사다리(지름길) 검증용 */
       finisherInfo: () => {
         ready: boolean

@@ -117,9 +117,27 @@ console.log(
   const byFoe = new Map()
   for (const l of logs) {
     for (const f of l.foeSwings ?? []) {
-      if (!byFoe.has(f.id)) byFoe.set(f.id, { sw: [], hit: [] })
+      if (!byFoe.has(f.id))
+        byFoe.set(f.id, {
+          sw: [],
+          hit: [],
+          dead: [],
+          wind: [],
+          live: [],
+          atk: [],
+          stag: [],
+          cool: [],
+          ready: [],
+        })
       byFoe.get(f.id).sw.push(f.swings)
       byFoe.get(f.id).hit.push(f.hits)
+      byFoe.get(f.id).dead.push(f.deaths ?? 0)
+      byFoe.get(f.id).wind.push(f.diedWinding ?? 0)
+      byFoe.get(f.id).live.push(f.aggroT ?? 0)
+      byFoe.get(f.id).atk.push(f.atkT ?? 0)
+      byFoe.get(f.id).stag.push(f.stagT ?? 0)
+      byFoe.get(f.id).cool.push(f.coolT ?? 0)
+      byFoe.get(f.id).ready.push(f.readyT ?? 0)
     }
   }
   if (byFoe.size) {
@@ -127,10 +145,40 @@ console.log(
     for (const [id, v] of [...byFoe.entries()].sort((a, b) => median(b[1].sw) - median(a[1].sw))) {
       const sw = median(v.sw)
       const hit = median(v.hit)
+      /**
+       * **처치 수로 나눠야** 종류끼리 비교가 됩니다. 잡몹은 16마리,
+       * 달려드는 자는 5마리라 총합만 보면 배치 비율을 다시 읽을 뿐입니다.
+       *
+       * `예고 중 사망` 은 *"예고를 띄우자마자 죽는다"* 를 잡는 눈금입니다.
+       * 그 비율이 높으면 그 적의 색은 **화면에 존재하지 않습니다.**
+       */
+      const dead = median(v.dead)
+      const wind = median(v.wind)
       console.log(
         `  ${id.padEnd(10)} 휘두름 ${fmt(v.sw, 0)}회 · 적중 ${fmt(v.hit, 0)}회` +
-          ` (${Math.round((hit / Math.max(1, sw)) * 100)}%)`,
+          ` (${Math.round((hit / Math.max(1, sw)) * 100)}%)` +
+          ` · 처치 ${fmt(v.dead, 0)}마리 → 마리당 ${(sw / Math.max(1, dead)).toFixed(2)}회` +
+          (dead ? ` · 예고 중 사망 ${Math.round((wind / dead) * 100)}%` : ''),
       )
+      /**
+       * **깨어 있던 시간을 넷으로 나눠** 한 줄 더 붙입니다.
+       *
+       * 앞 줄은 *"몇 번 휘둘렀나"* 만 말합니다. 적게 휘둘렀다는 것까지는
+       * 알아도 **왜** 인지는 처방이 셋으로 갈립니다. 그래서 enemyAI.ts 가
+       * 실제로 나누는 갈림길과 **같은 모양으로** 시간을 나눕니다:
+       *   · 경직 — 맞는 동안에는 공격 대기열에 아예 못 들어갑니다
+       *   · 쿨 — 다음 공격까지 쉬는 시간(balance.ts 의 attackCooldown)
+       *   · 대기 — 경직도 쿨도 아닌데 안 겁니다 → **토큰**이거나 사거리 밖
+       * 셋 중 어디가 크냐가 그대로 처방이 됩니다(체력·경직 / 수치 / 배치·규칙).
+       */
+      const live = median(v.live)
+      if (live > 0.5) {
+        const pct = (arr) => Math.round((median(arr) / live) * 100)
+        console.log(
+          `             └ 깨어 ${live.toFixed(1)}초 중` +
+            ` 공격 ${pct(v.atk)}% · 경직 ${pct(v.stag)}% · 쿨 ${pct(v.cool)}% · 대기 ${pct(v.ready)}%`,
+        )
+      }
     }
   }
 }
