@@ -143,6 +143,15 @@ try {
     const detours = []
     let lastTreasureCount = 0
     /**
+     * 보물마다 **가장 가까이 갔던 거리**(걸어야 하는 거리).
+     *
+     * 판마다 보물이 2/5 입니다. 그런데 "못 간 것"과 "안 간 것"은 다릅니다:
+     *   · 한 번도 40m 안에 안 들어왔다 → **예산**이 막은 것(또는 지도가 멀다)
+     *   · 들어왔는데도 안 갔다        → 다른 가지가 먼저 잡아챈 것
+     * 끝나고 안 주운 보물의 최소 거리를 보면 갈립니다.
+     */
+    const treasureBest = {}
+    /**
      * 화톳불에 **닿은 순간의 지갑**을 그대로 남깁니다.
      *
      * 판마다 "무기 강화 0회 [0/0/0]" 이 찍히는데 불티는 316이 남습니다.
@@ -1379,6 +1388,8 @@ try {
           if (t.taken) continue
           const step = G.pathStep(t.x, t.z)
           if (!step) continue
+          const key = `${Math.round(t.x)},${Math.round(t.z)}`
+          if (!(key in treasureBest) || step.dist < treasureBest[key]) treasureBest[key] = step.dist
           // ⚠️ step 은 **다음 한 걸음**이고 t 는 **목적지**입니다. 두 좌표를
           // 한 객체에 펼쳐 담으면 목적지가 조용히 덮어써집니다.
           if (best === null || step.dist < best.dist) best = { goal: t, step, dist: step.dist }
@@ -1606,6 +1617,14 @@ try {
       detours: detours.map((d) => ({ ...d, damage: Math.round(d.damage) })),
       fireVisits,
       fireSkips,
+      /** 끝까지 안 주운 보물과, 그동안 **가장 가까이 갔던 거리** */
+      untakenTreasures: G.treasurePositions()
+        .filter((t) => !t.taken)
+        .map((t) => ({
+          x: Math.round(t.x),
+          z: Math.round(t.z),
+          best: treasureBest[`${Math.round(t.x)},${Math.round(t.z)}`] ?? -1,
+        })),
       affordableAt,
       lastSpendChanceAt,
       embers: em.embers,

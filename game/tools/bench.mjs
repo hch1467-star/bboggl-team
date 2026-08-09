@@ -127,6 +127,30 @@ console.log(`  보물           ${fmt(pick((l) => Number(String(l.treasures).spl
   `${logs[0].treasures?.split('/')[1] ?? '?'}`)
 console.log(`  무기 강화      ${fmt(pick((l) => l.weaponUps ?? 0), 1)}회`)
 /**
+ * 안 주운 보물마다 **가장 가까이 갔던 거리**를 모읍니다.
+ * 예산(40m)보다 크면 "못 간 것", 작으면 "안 간 것" — 처방이 다릅니다.
+ */
+{
+  const bySpot = new Map()
+  for (const l of logs) {
+    for (const t of l.untakenTreasures ?? []) {
+      const k = `(${t.x}, ${t.z})`
+      if (!bySpot.has(k)) bySpot.set(k, [])
+      bySpot.get(k).push(t.best)
+    }
+  }
+  if (bySpot.size) {
+    console.log('  못 주운 보물   (가장 가까이 간 거리 — 예산 40m)')
+    for (const [k, ds] of [...bySpot.entries()].sort((a, b) => b[1].length - a[1].length)) {
+      const seen = ds.filter((d) => d >= 0)
+      console.log(
+        `    ${k.padEnd(12)} ${ds.length}/${logs.length}판에서 못 주움 · ` +
+          (seen.length ? `${fmt(seen, 0)}m` : '경로 자체를 못 찾음'),
+      )
+    }
+  }
+}
+/**
  * **살 수 있게 된 때**와 **소비처에 마지막으로 닿을 수 있었던 때**.
  * 앞이 뒤보다 늦으면 돈이 모자란 게 아니라 **너무 늦게 모인** 것입니다.
  */
