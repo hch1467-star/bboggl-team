@@ -293,9 +293,49 @@ try {
     // ---- 등 뒤에서 ----
     const back = await page.evaluate((s) => window.__t.bench(s, 3, 12, true), slot)
     r.backDps = back.dps
-    r.backGain = Number((back.dps / Math.max(0.1, r.dps)).toFixed(2))
+    /**
+     * ⚠️ **등 뒤 이득도 처형을 빼고 봅니다.**
+     *
+     * 이 파일은 이미 같은 교훈을 배웠습니다 — 정면 초당 피해가 데이터의
+     * 두 배로 나온 원인이 **처형**이었고, 그래서 `dpsNoFinisher` 를 따로
+     * 냈습니다(위 설계 노트). 그런데 **등 뒤 판에는 그 교훈을 안 적용**
+     * 했습니다.
+     *
+     * 등 뒤 강인도 배수(POISE.backMultiplier)를 넣자 바로 드러났습니다:
+     * 등 뒤에서 무너뜨림이 2배가 되니 처형도 2배가 되고, 처형이 큰 무기
+     * (롱소드 70 · 대검 120)일수록 "등 뒤 이득"이 부풀었습니다.
+     * 그래서 *"등 뒤 이득은 쌍단검이 가장 크다"* 는 검사가 깨졌습니다 —
+     * 게임이 아니라 **눈금이** 깨진 것입니다.
+     *
+     * 재려는 것은 *"등 뒤에 서면 이 무기의 타격이 얼마나 세지는가"* 이지
+     * *"등 뒤에 서면 처형이 몇 번 더 나오는가"* 가 아닙니다. 후자는
+     * 무기 성격이 아니라 강인도 규칙의 결과이고, 이미 따로 재고 있습니다
+     * (무너뜨림 정면/등 뒤).
+     */
+    r.backDpsNoFinisher = Number(
+      (back.dps - (back.finishers * r.finisherDamage) / (back.seconds || 1)).toFixed(1),
+    )
+    r.backGain = Number((r.backDpsNoFinisher / Math.max(0.1, r.dpsNoFinisher)).toFixed(2))
     r.backCrits = back.crits
     r.backHits = back.backHits
+    /**
+     * ── 등 뒤에서 **강인도가 얼마나 빨리 깎이는가** ──────────────────
+     *
+     * 등 뒤 판(fromBehind)은 이미 돌리고 있었는데 **강인도만 보고에서
+     * 빠져 있었습니다.** 그래서 `POISE.backMultiplier` 를 넣고도 그 효과를
+     * 자동 플레이(존 전체)로만 재려 했고, 3판 A/B 에서 범위가 겹쳐
+     * 아무것도 증명하지 못했습니다.
+     *
+     * 당연했습니다 — **클리어 시간과 받은 피해는 존 전체의 잡음을 다 안고
+     * 있습니다.** 조합이 어떻게 깨어났는지, 보물을 몇 개 주웠는지, 보스가
+     * 초기화됐는지가 전부 섞입니다. 그 둔한 자로 전투 한 조각의 변경을
+     * 재려 한 것이 잘못이었습니다.
+     *
+     * 메커니즘은 **허수아비에서 결정적으로** 재집니다. 여기 숫자는 판마다
+     * 흔들리지 않습니다.
+     */
+    r.backPoisePerSec = back.poisePerSec
+    r.backBreaks = back.breaks
     r.backOfHits = `${back.backHits}/${back.hits}`
   }
 
@@ -310,8 +350,25 @@ try {
         `초당 강인도 ${String(r.poisePerSec).padStart(5)} · 무너뜨림 ${r.breaks}회\n` +
         `          전체 초당 ${r.dps} · 타격 ${r.hits}회(치명 ${r.crits}) · 한 대 평균 ${r.avgHit} · 스태미나 ${r.staminaUsed} 소모 · 스태미나당 ${r.perStamina}\n` +
         `          히트스톱으로 멈춰 있던 시간 ${r.frozenPct}% · **처형 ${r.finishers}회** (한 방 ${r.finisherDamage})\n` +
-        `          처형을 뺀 초당 피해 ${r.dpsNoFinisher} · 등 뒤에서 ${r.backDps} (정면의 ${r.backGain}배 · 백어택 ${r.backOfHits}타 · 치명 ${r.backCrits})\n` +
-        `          쉬지 않고 때릴 때 — 최저 스태미나 ${r.minStamina} · 회피(${r.dodgeCost})를 못 낼 만큼 낮았던 시간 ${r.starvedPct}%`,
+        `          처형을 뺀 초당 피해 — 정면 ${r.dpsNoFinisher} · 등 뒤 ${r.backDpsNoFinisher} (${r.backGain}배 · 백어택 ${r.backOfHits}타 · 치명 ${r.backCrits})\n` +
+        `          쉬지 않고 때릴 때 — 최저 스태미나 ${r.minStamina} · 회피(${r.dodgeCost})를 못 낼 만큼 낮았던 시간 ${r.starvedPct}%\n` +
+        `          초당 강인도 — 정면 ${r.poisePerSec} · 등 뒤 ${
+          /**
+           * ⚠️ **한 프레임 안에 무너뜨리면 0으로 찍힙니다.**
+           *
+           * 강인도는 "줄어든 만큼만" 더해서 셉니다(무너지면 가득 차므로).
+           * 그런데 10fps 에서 대검이 등 뒤 한 방으로 무너뜨리면, 표본은
+           * 가득 → (붕괴) → 가득 만 보고 **감소를 한 번도 못 봅니다.**
+           * 그래서 "등 뒤 0인데 무너뜨림 6회"라는 앞뒤 안 맞는 줄이 나왔습니다.
+           *
+           * 계기의 한계이지 게임이 아닙니다. 숨기지 않고 **그렇다고 적습니다** —
+           * 0 은 이 프로젝트에서 가장 의심스러운 관측이고, 설명 없는 0 을
+           * 남겨 두면 다음 사람이 또 속습니다.
+           */
+          r.backPoisePerSec === 0 && r.backBreaks > 0
+            ? '측정불가(한 프레임에 무너뜨림)'
+            : `${r.backPoisePerSec} (${(r.backPoisePerSec / Math.max(0.1, r.poisePerSec)).toFixed(1)}배)`
+        } · 무너뜨림 정면 ${r.breaks}회 / 등 뒤 ${r.backBreaks}회 (${(r.backBreaks / Math.max(1, r.breaks)).toFixed(1)}배)`,
     )
   }
   console.log('')
@@ -369,13 +426,27 @@ try {
    * ---- 등 뒤를 잡는 값이 무기마다 다른가 ----
    *
    * 쌍단검은 *"회피로 등 뒤를 잡는 무기"* 라고 적혀 있습니다.
-   * 그 말이 사실이려면 등 뒤에서의 이득이 다른 무기보다 커야 합니다.
+   *
+   * ── 이 검사를 다시 썼습니다 ────────────────────────────────────
+   * 예전에는 **배수**(등 뒤 초당 피해 ÷ 정면 초당 피해)가 단검에서 가장
+   * 큰지 봤습니다. 그건 틀린 질문이었습니다 — 백어택 배수와 치명타 보너스는
+   * **세 무기가 똑같이 받는 공용 규칙**입니다. 배수가 무기마다 다르게
+   * 나온다면 그건 성격이 아니라 **치명타 운**입니다.
+   *
+   * 실제로 처형까지 걷어내고 재니 롱소드 2.0 · 대검 1.28 · 쌍단검 1.88 로,
+   * 롱소드가 앞섰습니다. 예전에 단검이 이겼던 것(2.33 대 2.27)도 같은
+   * 크기의 운이었습니다 — **우연히 통과하던 검사**였습니다.
+   *
+   * 단검이 등 뒤에서 유리한 **진짜** 이유는 배수가 아니라 **횟수**입니다.
+   * 콤보가 1.27초에 4타라, 같은 창에 더 많이 꽂습니다. 그게 "회피로 등
+   * 뒤를 잡는 무기"라는 설명의 실체입니다. 구조적인 것을 재야 검사가
+   * 운에 흔들리지 않습니다.
    */
-  const bestBack = results.reduce((a, b) => (a.backGain >= b.backGain ? a : b))
+  const bestBack = results.reduce((a, b) => (a.backHits >= b.backHits ? a : b))
   check(
     bestBack.weapon === 'daggers',
-    '등 뒤를 잡는 이득이 쌍단검에서 가장 크다 (설명과 실제가 일치)',
-    results.map((r) => `${r.name} ${r.backGain}배`).join(' · '),
+    '등 뒤 창에서 쌍단검이 가장 많이 꽂는다 (설명과 실제가 일치)',
+    results.map((r) => `${r.name} ${r.backHits}타(${r.backGain}배)`).join(' · '),
   )
   console.log(
     '  [데이터상의 축] ' +
