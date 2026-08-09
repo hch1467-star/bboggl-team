@@ -4,6 +4,7 @@ import {
   BOSS_ARENA,
   COMBAT,
   COUNTER,
+  BONFIRE,
   EMBER,
   FALL,
   FINISHER,
@@ -187,6 +188,8 @@ class Game {
   private levelH = 0
   /** 화톳불 좌표들. 엔티티가 아니라 좌표 목록입니다(부딪히지 않으므로). */
   private bonfires: Bonfire[] = []
+  /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
+  private anvils: { x: number; y: number; z: number }[] = []
   private ladderVisuals: { setOpen: (open: boolean) => void }[] = []
   /** 지금까지 쉰 횟수 — 자동 플레이 봇이 **추측하지 않고 읽도록** 노출합니다. */
   private restCount = 0
@@ -362,6 +365,7 @@ class Game {
     encounterEvents.length = 0
     this.defeatedBosses = new Set()
     this.bonfires = []
+    this.anvils = []
     this.levelData = null
 
     if (this.terrain) {
@@ -428,6 +432,8 @@ class Game {
       const spawned = spawnFromLevel(level, this.terrain)
       this.bonfires = spawned.bonfires
       for (const f of this.bonfires) this.visuals.addBonfire(f.x, f.y, f.z)
+      this.anvils = spawned.anvils
+      for (const a of this.anvils) this.visuals.addAnvil(a.x, a.y, a.z)
       this.ladderVisuals = this.terrain.shortcuts.map((s) => this.visuals.addLadder(s))
       this.playerEntity = spawned.player
       this.visuals.attach(this.playerEntity, Renderable.kind[this.playerEntity])
@@ -670,12 +676,38 @@ class Game {
      */
     if (playerAlive) this.collectDrop(p)
 
-    if (playerAlive && this.bonfires.length > 0) {
-      const rest = bonfireSystem(p, this.bonfires)
+    /**
+     * **모루 곁인가** — 화톳불과 같은 반경을 씁니다.
+     *
+     * 반경을 따로 두지 않은 이유: 플레이어가 "얼마나 붙어야 하는가"를
+     * 물건마다 다르게 외울 이유가 없습니다. 다른 것은 **무엇을 해 주는가**
+     * 하나뿐이어야 배울 것이 늘지 않습니다.
+     */
+    let nearAnvil = false
+    if (playerAlive) {
+      for (const a of this.anvils) {
+        if (Math.hypot(a.x - Transform.x[p], a.z - Transform.z[p]) <= BONFIRE.radius) {
+          nearAnvil = true
+          break
+        }
+      }
+    }
+
+    if (playerAlive && (this.bonfires.length > 0 || nearAnvil)) {
+      const rest =
+        this.bonfires.length > 0
+          ? bonfireSystem(p, this.bonfires)
+          : { rested: false, litNow: false, near: null, progress: 0, blocked: false }
       const atFire = rest.near !== null && !rest.blocked
-      this.tryUpgrade(p, atFire)
-      this.tryUpgradeWeapon(p, atFire)
-      this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
+      /**
+       * 강화는 **화톳불 또는 모루** 어느 쪽에서든 됩니다.
+       * 나머지(회복·부활·적 부활)는 아래에서 `rest` 로만 갑니다 — 모루는
+       * 그 어느 것도 건드리지 않습니다.
+       */
+      this.tryUpgrade(p, atFire || nearAnvil)
+      this.tryUpgradeWeapon(p, atFire || nearAnvil)
+      if (nearAnvil && !atFire) this.hud.setRest(true, 0, false, true)
+      else this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
       if (rest.litNow && rest.near) {
         // **닿기만 해도 부활 지점이 됩니다.** 회복·적 부활은 여전히 "쉬어야"
         // 일어납니다 — 안전망과 보상을 분리한 것입니다(systems/bonfire.ts 설계 노트).
@@ -1960,6 +1992,40 @@ class Game {
     }
   }
 
+  /**
+   * 가장 가까운 **소비처**(화톳불 또는 모루).
+   *
+   * 봇과 프로브가 "불티를 쓰러 어디로 가야 하나"를 물을 때 쓰는 값입니다.
+   * 화톳불만 돌려주면 모루를 놓아도 아무도 안 갑니다 — 실제로 그런
+   * 계기 버그를 열두 번 잡았습니다. 물건을 늘렸으면 **묻는 자리도**
+   * 같이 늘려야 합니다.
+   */
+  debugNearestSpend(): { x: number; z: number; anvil: boolean } | null {
+    const p = this.playerEntity
+    let best = null
+    let bestD = Infinity
+    for (const f of this.bonfires) {
+      const d = Math.hypot(f.x - Transform.x[p], f.z - Transform.z[p])
+      if (d < bestD) {
+        bestD = d
+        best = { x: f.x, z: f.z, anvil: false }
+      }
+    }
+    for (const a of this.anvils) {
+      const d = Math.hypot(a.x - Transform.x[p], a.z - Transform.z[p])
+      if (d < bestD) {
+        bestD = d
+        best = { x: a.x, z: a.z, anvil: true }
+      }
+    }
+    return best
+  }
+
+  /** 모루 목록 — 검증용(부활·회복을 **안 한다**는 것을 재려면 위치가 필요합니다). */
+  debugAnvils(): { x: number; z: number }[] {
+    return this.anvils.map((a) => ({ x: a.x, z: a.z }))
+  }
+
   debugNearestBonfire(): { x: number; z: number } | null {
     const p = this.playerEntity
     let best: { x: number; z: number } | null = null
@@ -2659,6 +2725,9 @@ declare global {
       setVials: (n: number) => void
       teleportPlayer: (x: number, z: number) => void
       nearestBonfire: () => { x: number; z: number } | null
+      /** 가장 가까운 소비처(화톳불 또는 모루) */
+      nearestSpend: () => { x: number; z: number; anvil: boolean } | null
+      anvils: () => { x: number; z: number }[]
       /** 사다리(지름길) 검증용 */
       finisherInfo: () => {
         ready: boolean
@@ -2920,6 +2989,8 @@ window.__game = {
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   nearestBonfire: () => game.debugNearestBonfire(),
+  nearestSpend: () => game.debugNearestSpend(),
+  anvils: () => game.debugAnvils(),
   /**
    * 처형 검증용.
    *

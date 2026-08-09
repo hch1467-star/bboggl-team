@@ -48,6 +48,7 @@ const SHORTCUTS: Record<string, Tool> = {
   KeyB: 'binder',
   KeyN: 'dragger',
   KeyH: 'bonfire',
+  KeyJ: 'anvil',
   Digit0: 'delete',
 }
 
@@ -143,6 +144,9 @@ class Editor {
       ladder: new THREE.BoxGeometry(1.1, 0.18, 0.5),
       // 가장 큰 잡몹 실루엣 — 키 2.25m 가 그대로 보이게 길쭉하게.
       charger: new THREE.CapsuleGeometry(0.5, 1.25, 4, 10),
+      // 모루 — 위가 넓은 각기둥. 화톳불(원뿔)과 실루엣이 겹치지 않아야
+      // 배치할 때 "여긴 회복이 아니다"가 지도 위에서 바로 읽힙니다.
+      anvil: new THREE.CylinderGeometry(0.55, 0.3, 0.7, 4),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()

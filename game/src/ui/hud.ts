@@ -244,9 +244,22 @@ export class Hud {
     this.lowHp.style.opacity = t <= 0 ? '0' : String(0.25 + t * (0.5 + 0.25 * pulse))
   }
 
-  setRest(near: boolean, progress: number, blocked: boolean): void {
+  /**
+   * @param anvil 모루 곁인가 — **회복이 아니라는 것을 글자로도 말합니다.**
+   *
+   * 생김새를 다르게 만들어 두었지만, 그것만으로는 부족합니다. "쉰다"는
+   * 말이 안 보이면 플레이어가 성수병이 찰 거라 믿고 보스에 들어갑니다.
+   * 그건 난이도가 아니라 **우리가 놓은 함정**입니다.
+   */
+  setRest(near: boolean, progress: number, blocked: boolean, anvil = false): void {
     this.restHint.style.display = near ? 'block' : 'none'
     if (!near) return
+    if (anvil) {
+      this.restLabel.textContent = '모루 — 강화만 할 수 있다 (회복·부활 없음)'
+      this.restLabel.style.color = '#b9cfe2'
+      this.restFill.style.width = '0%'
+      return
+    }
     this.restLabel.textContent = blocked ? '적이 가까워 쉴 수 없다' : '화톳불 — 가만히 서 있으면 쉰다'
     this.restLabel.style.color = blocked ? '#ff8a7a' : '#ffd9a0'
     this.restFill.style.width = `${Math.round(progress * 100)}%`

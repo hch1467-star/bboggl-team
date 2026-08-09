@@ -256,6 +256,27 @@ export interface SpawnedLevel {
   treasureTotal: number
   /** 레벨에 놓인 화톳불 좌표들 */
   bonfires: Bonfire[]
+  /**
+   * 레벨에 놓인 **모루** 좌표들.
+   *
+   * ── 왜 화톳불과 따로 두는가 ──────────────────────────────────────
+   * 모루는 **불티와 정련석을 쓰는 곳**일 뿐입니다. 부활 지점이 되지 않고,
+   * 성수병을 채우지 않고, 적을 되살리지 않습니다.
+   *
+   * 자동 플레이가 잰 것: 한 판 수입(불티 ~400 · 정련석 4)의 절반 이상이
+   * **쓰이지 않고** 끝났습니다. 화톳불 방문이 판마다 딱 한 번, 40초
+   * 지점이었기 때문입니다. 계단을 오른 뒤로는 가장 가까운 화톳불이 **98m
+   * 뒤**입니다. 수입은 존의 뒤쪽(처치·보물·보스)에서 들어오는데 소비는
+   * 앞쪽에서만 되는 구조였습니다.
+   *
+   * 보스 앞에 화톳불을 하나 더 두는 쉬운 답은 쓸 수 없습니다 — 지름길
+   * 너머에 화톳불을 두면 사다리가 장식이 됩니다(언데드 버그 규칙,
+   * make-zone.mjs 9번 주석). **소비처와 부활 지점을 분리**하면 둘 다 지킵니다.
+   *
+   * 참고: NRFTW 는 필드의 휴식처와 마을의 대장간이 다른 장소이고,
+   * 로스트아크도 강화(도시)와 부활(체크포인트)이 분리되어 있습니다.
+   */
+  anvils: { x: number; y: number; z: number }[]
 }
 
 /**
@@ -300,6 +321,7 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
 
   const entities: number[] = []
   const bonfires: Bonfire[] = []
+  const anvils: { x: number; y: number; z: number }[] = []
   let treasureTotal = 0
   for (const item of level.entities) {
     if (item.kind === 'bonfire') {
@@ -309,6 +331,10 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
         z: item.z,
         lit: false,
       })
+      continue
+    }
+    if (item.kind === 'anvil') {
+      anvils.push({ x: item.x, y: terrain.groundYAt(item.x, item.z), z: item.z })
       continue
     }
     let e = -1
@@ -324,5 +350,5 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     entities.push(e)
   }
-  return { player, entities, treasureTotal, bonfires }
+  return { player, entities, treasureTotal, bonfires, anvils }
 }

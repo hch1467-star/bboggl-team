@@ -992,7 +992,14 @@ try {
        * 그렇게 놀지 않습니다 — 성수병이 떨어지면 **일부러 화톳불로 되돌아갑니다.**
        * 그래서 자원이 바닥나면 목표를 잠시 화톳불로 바꿉니다.
        */
-      const fire = G.nearestBonfire()
+      /**
+       * **가장 가까운 소비처** — 화톳불이든 모루든.
+       *
+       * `nearestBonfire()` 를 그대로 쓰면 모루를 놓아도 봇은 영영 안 갑니다.
+       * 물건을 늘렸으면 **묻는 자리도** 같이 늘려야 합니다 — 이 프로젝트에서
+       * 열두 번 잡은 계기 버그가 전부 이 모양이었습니다.
+       */
+      const fire = G.nearestSpend?.() ?? G.nearestBonfire()
       const em = G.emberInfo()
       // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
       // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
@@ -1003,7 +1010,11 @@ try {
         wu.nextCost > 0 && em.embers >= wu.nextCost && wu.stones >= wu.nextStoneCost
       const canUpgrade = (em.upgradeCost > 0 && em.embers >= em.upgradeCost) || canUpgradeWeapon
       const needsSupply = vi.vials === 0 || p.hp < 45
-      if (fire && needsSupply) {
+      // ⚠️ **보급은 화톳불에서만** 됩니다. 모루로 걸어가서 성수병을 기다리면
+      // 영원히 안 찹니다 — 물건이 나뉘었으니 목적지도 나뉘어야 합니다.
+      const restFire = G.nearestBonfire()
+      if (restFire && needsSupply) {
+        const fire = restFire
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
         if (fd > 2.2) {
           // **길찾기로** 되돌아갑니다. 직선으로 걸어가게 뒀더니 벽에 걸려
@@ -1053,7 +1064,7 @@ try {
          */
         // 98m 는 걷기만 해도 20초, 도중에 싸우면 더 걸립니다. 25초로는
         // 도착 직전에 포기하게 됩니다 — 예산과 제한 시간은 같이 움직여야 합니다.
-        if (fireTripUntil === 0) fireTripUntil = now() + (canUpgradeWeapon ? 45 : 25)
+        if (fireTripUntil === 0) fireTripUntil = now() + 25
         if (now() > fireTripUntil) {
           // 25초 안에 못 닿았으면 포기하고, **지갑도 그때 값으로 적어 둡니다.**
           // 안 그러면 다음 프레임에 "지갑이 늘었다"가 계속 참이라 영원히 재시도합니다.
@@ -1073,11 +1084,19 @@ try {
          * 저울질합니다 — 적은 쉬기 전까지 안 살아나니 길은 안전하고, 대신
          * 시간이 듭니다. 그 시간이 얼마인지가 지금 없는 숫자입니다.
          *
-         * 그래서 무기 강화가 걸린 왕복만 예산을 110m 로 엽니다.
-         * 성수병만 살 수 있는 왕복은 그대로 45m — 보상이 작은데 멀리 가면
-         * 그건 사람이 안 하는 플레이입니다.
+         * 그래서 무기 강화가 걸린 왕복만 예산을 110m 로 열어 **비용을 쟀습니다.**
+         * 결과: 무기 강화 1회를 얻는 대신 한 판의 8%가 되돌아 걷는 시간이
+         * 되었고, 클리어가 157~204초에서 225초로 늘었습니다.
+         *
+         * 그 숫자를 근거로 **지도를 고쳤습니다** — 계단 위에 모루를 놓아
+         * 소비처를 수입이 들어오는 쪽으로 옮겼습니다(make-zone.mjs 참고).
+         * 이제 되돌아 걸을 이유가 없으므로 예산을 45m 하나로 되돌립니다.
+         * 같은 강화를 **75초 싸게** 얻습니다(225 → 150초).
+         *
+         * ⚠️ 이 값을 다시 늘리고 싶어지면, 그건 소비처가 또 엉뚱한 곳에
+         * 있다는 신호입니다. 봇의 예산이 아니라 **지도**를 보십시오.
          */
-        } else if (step && step.dist < (canUpgradeWeapon ? 110 : 45) && straight > 1.6) {
+        } else if (step && step.dist < 45 && straight > 1.6) {
           /**
            * **마지막 몇 미터는 직선으로 갑니다.**
            *
@@ -1110,7 +1129,18 @@ try {
           lastFireWallet = { embers: em.embers, stones: wu.stones }
         }
       }
-      if (fire && (p.hp < 70 || canUpgrade)) {
+      /**
+       * ⚠️ `p.hp < 70` 은 **화톳불에만** 걸립니다.
+       *
+       * 안 나누었더니 봇이 체력 66으로 모루에 붙어 2.5초마다 다시 서기를
+       * 반복하며 존을 못 끝냈습니다(174.9초 · 보스 조우 X). 모루는 회복을
+       * 안 하니 조건이 영원히 참입니다.
+       *
+       * 이건 봇 버그가 아니라 **사람도 똑같이 하는 실수**를 미리 본 것입니다.
+       * 그래서 HUD 문구를 "모루 — 강화만 할 수 있다 (회복·부활 없음)" 로
+       * 두고, 불꽃도 따뜻한 색도 빼 두었습니다. 생김새가 먼저 말해야 합니다.
+       */
+      if (fire && ((p.hp < 70 && fire.anvil !== true) || canUpgrade)) {
         const fd = Math.hypot(fire.x - p.x, fire.z - p.z)
         if (fd < 2.6) {
           releaseAll()
@@ -1130,6 +1160,7 @@ try {
             emberNeed: wu.nextCost,
             vial: false,
             weapon: false,
+            anvil: fire.anvil === true,
           }
           if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
@@ -1453,7 +1484,7 @@ try {
           ? `정련석 ${v.stones}/${v.stoneNeed} 부족`
           : `불티 부족(${v.embers - (v.vial ? v.vialCost : 0)}/${v.emberNeed})`
     console.log(
-      `             ${String(v.at).padStart(6)}초 화톳불 — 불티 ${v.embers} · 정련석 ${v.stones}` +
+      `             ${String(v.at).padStart(6)}초 ${v.anvil ? '모루  ' : '화톳불'} — 불티 ${v.embers} · 정련석 ${v.stones}` +
         ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
     )
   }

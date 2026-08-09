@@ -857,6 +857,42 @@ export class Visuals {
     return g
   }
 
+  /**
+   * 모루 — **불티와 정련석을 쓰는 곳.** 회복도, 부활도 아닙니다.
+   *
+   * ── 생김새가 먼저 말해야 합니다 ────────────────────────────────
+   * 이 물건의 가장 큰 위험은 "화톳불 하나 더"로 읽히는 것입니다. 그러면
+   * 플레이어는 여기서 성수병이 찰 줄 알고 보스에 들어갔다가, 안 찬 걸
+   * 보스 앞에서 알게 됩니다. **그건 우리가 만든 함정**이지 난이도가 아닙니다.
+   *
+   * 그래서 화톳불과 공유하는 신호를 전부 뺐습니다:
+   *   · **불꽃이 없습니다** — 불은 이 게임에서 "쉴 수 있다"는 뜻입니다.
+   *   · **따뜻한 색이 아닙니다** — 차가운 강철색(0x8fa4b8).
+   *   · 실루엣이 다릅니다 — 원뿔이 아니라 **각진 쇳덩이와 받침**.
+   * 대신 은은한 불씨 자국만 남겨, 사람이 쓰던 물건임은 읽히게 둡니다.
+   */
+  addAnvil(x: number, y: number, z: number): THREE.Group {
+    const g = new THREE.Group()
+    g.position.set(x, y, z)
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 0.5, 0.7),
+      new THREE.MeshStandardMaterial({ color: 0x2f2a26, roughness: 0.95 }),
+    )
+    base.position.y = 0.25
+    // 모루 몸통 — 위가 넓고 아래가 좁은 각기둥. 실루엣만으로 구분됩니다.
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.28, 0.42, 4),
+      new THREE.MeshStandardMaterial({ color: 0x8fa4b8, roughness: 0.45, metalness: 0.7 }),
+    )
+    body.position.y = 0.72
+    body.rotation.y = Math.PI * 0.25
+    base.castShadow = true
+    body.castShadow = true
+    g.add(base, body)
+    this.scene.add(g)
+    return g
+  }
+
   /** 불꽃이 흔들립니다 — 정지한 불은 불로 안 보입니다. */
   private syncBonfires(): void {
     for (let i = 0; i < this.bonfireFlames.length; i++) {
