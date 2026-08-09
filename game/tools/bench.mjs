@@ -106,6 +106,35 @@ console.log(
     ` (${fmt(pick((l) => ((l.backHits ?? 0) / Math.max(1, l.hitsDealt ?? 1)) * 100), 0)}%)`,
 )
 
+/**
+ * ── 적 종류가 **존에서 제 일을 하는가** ────────────────────────────
+ *
+ * 배치했다고 일어나는 게 아닙니다. 죽기 전에 한 번도 못 휘두르는 적,
+ * 예고만 띄우고 사라지는 적이 있으면 그 종류는 **있으나 마나**입니다.
+ * 새 적을 넣을 때마다 눈금을 새로 만드는 대신 종류 전체를 한 줄로 봅니다.
+ */
+{
+  const byFoe = new Map()
+  for (const l of logs) {
+    for (const f of l.foeSwings ?? []) {
+      if (!byFoe.has(f.id)) byFoe.set(f.id, { sw: [], hit: [] })
+      byFoe.get(f.id).sw.push(f.swings)
+      byFoe.get(f.id).hit.push(f.hits)
+    }
+  }
+  if (byFoe.size) {
+    console.log('\n  ── 적이 실제로 한 일 (판당) ───────────')
+    for (const [id, v] of [...byFoe.entries()].sort((a, b) => median(b[1].sw) - median(a[1].sw))) {
+      const sw = median(v.sw)
+      const hit = median(v.hit)
+      console.log(
+        `  ${id.padEnd(10)} 휘두름 ${fmt(v.sw, 0)}회 · 적중 ${fmt(v.hit, 0)}회` +
+          ` (${Math.round((hit / Math.max(1, sw)) * 100)}%)`,
+      )
+    }
+  }
+}
+
 console.log('\n  ── 보스 ──────────────────────────────')
 console.log(`  보스전         ${fmt(boss.map((l) => l.boss.engaged))}초`)
 /**

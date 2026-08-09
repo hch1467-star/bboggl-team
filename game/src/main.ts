@@ -196,6 +196,9 @@ class Game {
    * 대개 **다시 배우고 싶은** 사람입니다 — 저장해 두면 그 기회를 막습니다.
    */
   private readonly seenIntents = new Set<number>()
+  /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지. */
+  private foeSwingLog: Record<string, { swings: number; hits: number }> = {}
+  private readonly foeLastSwing = new Map<number, string>()
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
   private anvils: { x: number; y: number; z: number }[] = []
@@ -611,6 +614,15 @@ class Game {
        */
       if (hit.victimIsPlayer && hit.damage > 0) {
         this.enemyHits++
+        // 어느 **종류**가 맞혔는지 — 판정 중인 적을 찾아 귀속시킵니다.
+        for (const [e, id] of this.foeLastSwing) {
+          if (!isAlive(e)) continue
+          if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
+            const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0 })
+            rec.hits++
+            break
+          }
+        }
         // 어느 색이 맞혔는지 — 직전에 그 보스가 휘두른 패턴으로 귀속시킵니다.
         for (const [e, id] of this.bossLastSwing) {
           if (!isAlive(e)) continue
@@ -785,6 +797,24 @@ class Game {
          * 3페이즈짜리 절정인데도요. 원인이 "예고가 길어서 다 피한다"인지
          * "연계가 설계대로 안 나온다"인지 갈라야 고칠 곳이 정해집니다.
          */
+        /**
+         * ── 적 **종류마다** 휘두름/적중을 셉니다 ────────────────────
+         *
+         * 지금까지 이 눈금은 **보스만** 셌습니다. 그래서 잡몹들이 존에서
+         * 실제로 무엇을 하는지는 한 번도 본 적이 없습니다 — 쏘는 자를
+         * 넣고도 *"정말 쏘는가"* 를 물을 방법이 없었습니다.
+         *
+         * 이 프로젝트에서 반복된 모양입니다: **세는 눈금이 없으면 그
+         * 기능은 있어도 없는 것과 같습니다**(보물 0개 · 연계 상수 0 ·
+         * 안 보이던 초록 예고). 새 적을 넣을 때마다 눈금을 새로 만드는 대신,
+         * 종류 전체를 한 번에 셉니다.
+         */
+        {
+          const id = enemyDef(Enemy.kind[e]).id
+          const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0 })
+          rec.swings++
+          this.foeLastSwing.set(e, id)
+        }
         if (Enemy.kind[e] === EnemyKind.Boss) {
           const id = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
           const rec = (this.bossSwingLog[id] ??= {
@@ -2083,6 +2113,10 @@ class Game {
    * "색마다 한 번만"은 **안 일어나는 것**을 재는 조건이라, 시험을 안 쓰면
    * 두 번 뜨는 것을 아무도 모릅니다(모루 프로브와 같은 종류의 위험입니다).
    */
+  debugFoeSwingLog(): Record<string, { swings: number; hits: number }> {
+    return this.foeSwingLog
+  }
+
   debugSeenIntents(): number[] {
     return [...this.seenIntents]
   }
@@ -2796,6 +2830,8 @@ declare global {
       anvils: () => { x: number; z: number }[]
       /** 안내가 나간 예고 색들(AttackIntent 값) */
       seenIntents: () => number[]
+      /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지 */
+      foeSwingLog: () => Record<string, { swings: number; hits: number }>
       /** 사다리(지름길) 검증용 */
       finisherInfo: () => {
         ready: boolean
@@ -3062,6 +3098,7 @@ window.__game = {
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),
   seenIntents: () => game.debugSeenIntents(),
+  foeSwingLog: () => game.debugFoeSwingLog(),
   /**
    * 처형 검증용.
    *
