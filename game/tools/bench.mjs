@@ -167,5 +167,56 @@ console.log(`  남은 불티      ${fmt(pick((l) => l.embers ?? 0), 0)}`)
 
 console.log('\n  ── 흐름 ──────────────────────────────')
 console.log(`  교전 사이 빈 시간 평균 ${fmt(pick((l) => l.gapAvg))}초 · 최장 ${fmt(pick((l) => l.gapMax))}초`)
-console.log(`  8초 이상 빈 구간       ${fmt(pick((l) => l.gapLong), 1)}회`)
+/**
+ * 8초 이상 빈 구간을 **길 걷기**와 **심부름**으로 갈라 셉니다.
+ * 앞은 지도가 준 시간(길면 설계 문제), 뒤는 플레이어가 고른 시간
+ * (길어도 문제 아님 — 오히려 곁길이 살아 있다는 뜻).
+ */
+{
+  const walk = []
+  const errand = []
+  for (const l of logs) {
+    const gs = l.longGaps ?? []
+    walk.push(gs.filter((g) => !g.errand).length)
+    errand.push(gs.filter((g) => g.errand).length)
+  }
+  console.log(`  8초 이상 — 길 걷기 ${fmt(walk, 1)}회 · 심부름 ${fmt(errand, 1)}회`)
+}
+/**
+ * ── 긴 빈 시간이 **어디서** 생기는가 ────────────────────────────────
+ *
+ * 곁길 보물을 주 동선 쪽으로 옮긴 뒤 최장 빈 시간이 10.4 → 15.6초로
+ * 늘었습니다. "탐험을 늘렸으니 당연하다"로 넘길 수도 있지만, 그러면
+ * **흐름이 어디서 끊기는지** 영영 모릅니다.
+ *
+ * 구간(어디→어디)과 그때 무엇을 하고 있었는지를 판마다 모읍니다.
+ * 같은 구간이 판마다 반복되면 그건 운이 아니라 **지도**입니다.
+ */
+{
+  const byWhere = new Map()
+  for (const l of logs) {
+    for (const g of l.longGaps ?? []) {
+      if (!byWhere.has(g.where)) byWhere.set(g.where, { secs: [], did: new Map(), errand: 0 })
+      const e = byWhere.get(g.where)
+      e.secs.push(g.secs)
+      if (g.errand) e.errand++
+      for (const part of String(g.did).split(' ')) {
+        // "지름길이동 73%" 같은 조각 — 이름만 세어 무엇을 하며 걸었는지 봅니다.
+        const name = part.replace(/\d+%$/, '')
+        if (name) e.did.set(name, (e.did.get(name) ?? 0) + 1)
+      }
+    }
+  }
+  if (byWhere.size) {
+    console.log('  긴 빈 구간 (8초 이상)')
+    for (const [where, e] of [...byWhere.entries()].sort((a, b) => b[1].secs.length - a[1].secs.length)) {
+      const top = [...e.did.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => k)
+      console.log(
+        `    ${where.padEnd(26)} ${e.secs.length}회 · ${fmt(e.secs)}초` +
+          (top.length ? ` · 주로 ${top.join('·')}` : '') +
+          (e.errand > e.secs.length / 2 ? '  [심부름]' : '  [길 걷기]'),
+      )
+    }
+  }
+}
 console.log('')
