@@ -35,7 +35,8 @@
     "sweep": "node tools/sweep-probe.mjs",
     "finish": "node tools/finish-probe.mjs",
     "chain": "node tools/chain-probe.mjs",
-    "anvil": "node tools/anvil-probe.mjs"
+    "anvil": "node tools/anvil-probe.mjs",
+    "bench": "node tools/bench.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

@@ -20,7 +20,7 @@
  * ⚠️ 모든 대기는 **시뮬레이션 시간**입니다. SwiftShader에서는 실시간의
  *    1/3~1/20로 흐르기 때문에 벽시계로 재면 전부 거짓이 됩니다.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
 
@@ -1571,6 +1571,23 @@ try {
       lastHp,
     }
   }, TIME_LIMIT)
+
+  /**
+   * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
+   *
+   * `PLAY_JSON=<경로>` 가 있으면 이 판의 log 를 그대로 씁니다.
+   * `npm run bench` 가 여러 판을 돌려 **중앙값과 범위**를 내는 데 씁니다.
+   *
+   * 왜 필요한가: 지금까지 손잡이를 한두 판 보고 돌렸습니다. 그런데 같은
+   * 설정에서도 보스전이 **17초와 50초**로 나옵니다(무기 강화·집중·운).
+   * 한 판으로 값을 정하면 그건 측정이 아니라 도박입니다.
+   *
+   * 화면 출력을 파싱하지 않고 JSON 을 쓰는 이유: 사람이 읽는 글은 바뀝니다.
+   * 문구 하나 고칠 때마다 집계기가 조용히 망가지면, 또 계기 버그입니다.
+   */
+  if (process.env.PLAY_JSON) {
+    writeFileSync(process.env.PLAY_JSON, JSON.stringify(log))
+  }
 
   if (log.regionTotal.length) {
     console.log('  [구역별 누적]')
