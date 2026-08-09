@@ -654,7 +654,14 @@ export function enemyAiSystem(
     // 토큰이 없는 적은 그냥 다음 판정으로 흘러가 노려보며 기다립니다.
     if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       const list = attacksFor(kind)
-      let picked = pickAttack(list, dist, combatRng.next(), ph.weights)
+      /**
+       * 기다리다 지친 적은 **거리를 좁히는 패턴**을 고릅니다.
+       * (enemyAttacks.ts pickAttack 의 preferReach 설계 노트 참고)
+       * 근접 사거리 안에 이미 들어와 있으면 평소대로 굴립니다 — 코앞에서까지
+       * 긴 패턴만 나오면 그게 또 하나의 단조로움이 됩니다.
+       */
+      const wantReach = impatient && dist > cfg.attackRange
+      let picked = pickAttack(list, dist, combatRng.next(), ph.weights, wantReach)
       // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
       // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
       if (picked && picked.arcDeg >= WIDE_ARC_DEG && wideSlotsLeft <= 0) {

@@ -167,6 +167,7 @@ try {
     let bossRangeSamples = 0
     let bossInRangeSamples = 0
     let bossWindingSamples = 0
+    const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
     const bossAttackRange = G.enemyRoster().find((r) => r.id === 'boss')?.attackRange ?? 3.4
     let bossKilled = false
     let clearedAt = 0
@@ -591,6 +592,21 @@ try {
         const bt = G.threats(40).find((t) => t.entity === be.entity)
         if (bt && bt.dist <= bossAttackRange) bossInRangeSamples++
         if (bt && bt.winding) bossWindingSamples++
+        /**
+         * **보스와의 거리 분포** — 어떤 색이 나올 수 있었는지를 결정합니다.
+         *
+         * 보스의 패턴은 거리로 걸러집니다: 직격 0~4m · 광역 0~6.5m ·
+         * **속박 2.5~9m** · 갈고리 5~11m · 돌진 3~10m.
+         * 그리고 2·3페이즈의 연계는 전부 **속박과 갈고리**에 걸려 있습니다.
+         * 즉 플레이어가 계속 코앞에 붙어 있으면 연계는 **구조적으로**
+         * 한 번도 나올 수 없습니다. 그게 사실인지 거리로 확인합니다.
+         */
+        if (bt) {
+          if (bt.dist < 2.5) bossDist.near++
+          else if (bt.dist < 5) bossDist.mid++
+          else if (bt.dist < 9) bossDist.far++
+          else bossDist.away++
+        }
       } else if (bossSeen && !be && bossKilledAt === 0) {
         // 보스가 사라졌습니다 = 처치. 시간은 **그 순간**으로 고정합니다.
         bossKilledAt = now()
@@ -1007,6 +1023,7 @@ try {
           ? Math.round((bossWindingSamples / bossRangeSamples) * 100)
           : 0,
         attackRange: bossAttackRange,
+        dist: bossDist,
       },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
@@ -1138,11 +1155,17 @@ try {
   console.log(
     `  스태미나    최저 ${log.minStamina} · 교전 중 회피(${log.dodgeCost})를 못 낼 만큼 낮았던 시간 ${log.lowStaminaRatio}%`,
   )
+  const distTotal =
+    log.boss.fought && log.boss.dist
+      ? log.boss.dist.near + log.boss.dist.mid + log.boss.dist.far + log.boss.dist.away
+      : 0
+  const pct = (n) => Math.round((n / Math.max(1, distTotal)) * 100)
   if (log.boss.fought) {
     console.log(
       `  보스전      ${log.boss.seconds}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
         `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}\n` +
-        `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%`,
+        `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%\n` +
+        `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%`,
     )
     for (const a of log.bossSwings) {
       console.log(

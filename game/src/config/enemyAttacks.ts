@@ -351,8 +351,40 @@ export function pickAttack(
    * 전부 두 번 관리해야 하고, 한쪽만 고쳐서 어긋나기 시작합니다.
    */
   weights?: Record<string, number>,
+  /**
+   * **거리를 좁히는 패턴을 우선 고릅니다** (기다리다 지친 적에게만).
+   *
+   * ── 왜 필요해졌는가 ────────────────────────────────────────────
+   * 보스전을 거리로 뜯어 보니 이랬습니다:
+   *
+   *     2.5m 미만 39% · 2.5~5m 16% · 5~9m 26% · 9m 이상 20%
+   *     34.6초에 휘두른 것은 **5회**, 그중 🔵🟣🟢는 **0회**, 연계도 0회
+   *
+   * 절반 가까운 시간을 **걸어오는 데** 씁니다. 플레이어(5.4m/s)가 치고
+   * 빠지면 보스(2.4m/s)는 영원히 따라붙기만 합니다. 그리고 2·3페이즈의
+   * 연계는 전부 🔵 속박(2.5m~)과 🟣 갈고리(5m~)에 걸려 있는데, 그 색들이
+   * 나오려면 **보스가 그 거리에서 공격을 시작해야** 합니다.
+   *
+   * 소울류 보스가 거리를 좁히는 방법은 걷기가 아니라 **공격**입니다 —
+   * 돌진하고, 도약하고, 끌어당깁니다. 우리도 그 수단이 이미 있습니다
+   * (🟣 갈고리 11m, 🟢 돌진 10m). 쓰이지 않았을 뿐입니다.
+   *
+   * 그래서 기다리다 지친 적은 **닿는 것 중 가장 먼 사거리의 패턴**을
+   * 고릅니다. 그게 곧 거리를 좁히는 패턴입니다(멀리서 쓰라고 만든 것이니까).
+   * 예고 시간은 그대로라 읽고 피할 여지는 줄지 않습니다.
+   */
+  preferReach = false,
 ): EnemyAttackDef | null {
   const weightOf = (a: EnemyAttackDef): number => weights?.[a.id] ?? a.weight
+  if (preferReach) {
+    let best: EnemyAttackDef | null = null
+    for (const a of attacks) {
+      if (dist < a.minRange || dist > a.maxRange) continue
+      if (weightOf(a) <= 0) continue
+      if (!best || a.maxRange > best.maxRange) best = a
+    }
+    if (best) return best
+  }
   let total = 0
   for (const a of attacks) {
     if (dist >= a.minRange && dist <= a.maxRange) total += weightOf(a)
