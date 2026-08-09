@@ -13,7 +13,7 @@
  *
  * (Unity 이식 노트: 이 표의 한 항목이 EnemyDefinition.asset 하나가 됩니다.)
  */
-import { BINDER, BOSS, CHARGER, DRAGGER, GRUNT } from './balance'
+import { ARCHER, BINDER, BOSS, CHARGER, DRAGGER, GRUNT } from './balance'
 import { EnemyKind } from '../core/components'
 
 /**
@@ -132,6 +132,26 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
     trauma: 0.3,
     heavy: false,
   },
+  [EnemyKind.Archer]: {
+    id: 'archer',
+    name: '쏘는 자',
+    ...ARCHER,
+    /**
+     * 강인도 14 — 가장 낮습니다. **붙기만 하면 금방 무너집니다.**
+     *
+     * 이 적의 정답은 "붙어라"인데, 붙고 나서도 오래 버티면 정답을 지킨
+     * 대가가 없습니다. 낮은 강인도가 그 보상입니다 — 붙으면 무너지고,
+     * 무너지면 처형이 나갑니다.
+     */
+    poiseMax: 14,
+    ember: 12,
+    // 다른 적보다 밝고 차갑게 — 멀리 있는 실루엣이 배경에 묻히면
+    // "저기서 쏘고 있다"를 못 읽습니다.
+    color: 0x8fb3c9,
+    hitstop: 0.05,
+    trauma: 0.28,
+    heavy: false,
+  },
   [EnemyKind.Charger]: {
     id: 'charger',
     name: '달려드는 자',
@@ -152,14 +172,16 @@ export function enemyDef(kind: number): EnemyDef {
 }
 
 /** 레벨 파일에 적힌 문자열 → EnemyKind. 없으면 null(적이 아님). */
+/**
+ * 레벨 파일의 문자열 id → EnemyKind.
+ *
+ * ⚠️ **표를 돌립니다.** 예전에는 종류를 손으로 나열했는데, 그런 목록은
+ * 새 적을 넣을 때 조용히 빠집니다 — 실제로 렌더 쪽에서 같은 일이
+ * 일어났습니다(visuals.ts renderKindForEnemy 설계 노트). 여기서 빠지면
+ * **레벨에 배치했는데 안 나오는** 적이 됩니다.
+ */
 export function kindFromId(id: string): EnemyKind | null {
-  for (const k of [
-    EnemyKind.Grunt,
-    EnemyKind.Boss,
-    EnemyKind.Binder,
-    EnemyKind.Dragger,
-    EnemyKind.Charger,
-  ]) {
+  for (const k of Object.keys(ENEMY_DEFS).map(Number) as EnemyKind[]) {
     if (ENEMY_DEFS[k].id === id) return k
   }
   return null

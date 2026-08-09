@@ -41,7 +41,7 @@ function check(ok, label, detail = '') {
 const level = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
 const VOID = -1
 /** 적으로 치는 배치 종류 — 조합 프로브와 같은 목록입니다. */
-const FOE_KINDS = new Set(['grunt', 'binder', 'dragger', 'charger', 'boss'])
+const FOE_KINDS = new Set(['grunt', 'binder', 'dragger', 'charger', 'archer', 'boss'])
 
 function heightAt(cx, cz) {
   if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) return VOID
@@ -318,6 +318,52 @@ try {
     '시작 지점에서 모든 배치물에 사다리 없이도 닿는다',
     unreachable.length ? unreachable.join(' · ') : `${level.entities.length - 2}개 전부`,
   )
+
+  /**
+   * ---- 6.5 **쏘는 적에게 걸어서 닿을 수 있는가** ----
+   *
+   * DESIGN.md 의 *"아직 안 한 것"* 에 이렇게 적어 뒀습니다: *"우리 적 AI가
+   * 절벽을 낀 추격을 어떻게 처리하는지 확인하지 않은 채 넣으면 **영영 못
+   * 다가오면서 계속 쏘는 적**이 생깁니다. 먼저 재고 넣습니다."*
+   *
+   * 그 "재는 것"이 이 검사입니다. 시작 지점에서 닿는지(6번)만으로는
+   * 부족합니다 — **맞으면서 걸어가야 하는 거리**가 진짜 문제이기 때문입니다.
+   * 12m 밖에서 쏘는데 그 자리까지 90m를 돌아가야 한다면, 그건 난이도가
+   * 아니라 벌입니다.
+   *
+   * 그래서 *사거리 안에 들어오는 칸들* 각각에서 그 적까지 **걸어야 하는
+   * 거리**를 재고, 사거리의 3배를 넘는 칸이 없어야 한다고 요구합니다.
+   * 3배로 잡은 근거: 지형을 한 번 우회하면 대략 2배, 두 번이면 3배가
+   * 됩니다. 그 이상은 "돌아가는 길"이 아니라 **다른 길**입니다.
+   */
+  const RANGED = level.entities.filter((e) => e.kind === 'archer')
+  for (const a of RANGED) {
+    const ac = cellOf(a)
+    const reachM = 12 // 사거리(m) — 아래에서 게임 값과 대조합니다
+    const cells = Math.ceil(reachM / 2)
+    let worst = 0
+    let worstAt = ''
+    for (let dz = -cells; dz <= cells; dz++) {
+      for (let dx = -cells; dx <= cells; dx++) {
+        const cx = ac.cx + dx
+        const cz = ac.cz + dz
+        if (heightAt(cx, cz) === VOID) continue
+        // 사거리 안(직선)인 칸만 봅니다 — 여기서 화살이 날아옵니다.
+        if (Math.hypot(dx, dz) * 2 > reachM) continue
+        const walk = bfs({ cx, cz }, ac, maxClimb, false)
+        if (!Number.isFinite(walk)) continue // 아예 못 가는 칸은 아래에서 따로 봅니다
+        if (walk * 2 > worst) {
+          worst = walk * 2
+          worstAt = `(${cx},${cz})`
+        }
+      }
+    }
+    check(
+      worst <= reachM * 3,
+      `쏘는 자(${ac.cx},${ac.cz})는 맞는 자리에서 걸어서 닿는다 (맞으면서 존을 돌지 않게)`,
+      `가장 먼 자리 ${worstAt} 에서 ${worst.toFixed(0)}m · 사거리 ${reachM}m · 한도 ${reachM * 3}m`,
+    )
+  }
 
   // ---- 7. 보스 전 화톳불이 영역 밖인가 ----
   const arena = await page.evaluate(() => window.__game.bossEncounter())

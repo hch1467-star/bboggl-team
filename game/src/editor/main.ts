@@ -49,6 +49,7 @@ const SHORTCUTS: Record<string, Tool> = {
   KeyN: 'dragger',
   KeyH: 'bonfire',
   KeyJ: 'anvil',
+  KeyU: 'archer',
   Digit0: 'delete',
 }
 
@@ -147,6 +148,8 @@ class Editor {
       // 모루 — 위가 넓은 각기둥. 화톳불(원뿔)과 실루엣이 겹치지 않아야
       // 배치할 때 "여긴 회복이 아니다"가 지도 위에서 바로 읽힙니다.
       anvil: new THREE.CylinderGeometry(0.55, 0.3, 0.7, 4),
+      // 쏘는 자 — 가늘고 길쭉하게. 멀리서 쏘는 적이라 실루엣이 가장 얇습니다.
+      archer: new THREE.CapsuleGeometry(0.3, 1.2, 4, 8),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()

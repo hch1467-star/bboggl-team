@@ -3,7 +3,7 @@ import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
 import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
-import { enemyDef } from '../config/enemies'
+import { ENEMY_DEFS, enemyDef } from '../config/enemies'
 import {
   Actor,
   ActorState,
@@ -33,34 +33,25 @@ import { time } from '../core/time'
  */
 
 export const KIND_PLAYER = 0
-export const KIND_GRUNT = 1
 export const KIND_TREASURE = 2
-export const KIND_BOSS = 3
-export const KIND_BINDER = 4
-export const KIND_DRAGGER = 5
-export const KIND_CHARGER = 6
 
 /**
- * EnemyKind → 렌더 종류.
+ * 적의 렌더 종류는 **EnemyKind 에 상수를 더한 값**입니다.
  *
- * 두 개의 열거형이 나란히 있는 게 마음에 걸리지만, 렌더 종류는 적이 아닌 것
- * (플레이어·보물)까지 담아야 해서 하나로 합칠 수 없습니다. 대신 **변환은
- * 오직 이 함수 하나**로 몰아 두었습니다. 새 적을 추가할 때 여기 한 줄만
- * 빠뜨리지 않으면 됩니다.
+ * ── 왜 switch 를 지웠는가 ──────────────────────────────────────────
+ * 예전에는 종류마다 `case` 를 적고 *"새 적을 추가할 때 여기 한 줄만
+ * 빠뜨리지 않으면 됩니다"* 라고 주석까지 달아 두었습니다.
+ * 그리고 **빠뜨렸습니다** — 🟢 달려드는 자가 `default` 로 떨어져 잡몹
+ * 캡슐을 쓰고 있었고, 몸·예고·등 뒤 표시 도형은 아예 안 만들어졌습니다.
+ * `new THREE.Mesh(undefined, mat)` 는 오류 없이 **빈 도형**이 되므로
+ * 아무도 몰랐습니다.
+ *
+ * 주석은 사람에게 부탁하는 것이고, 부탁은 언젠가 잊힙니다.
+ * **빠뜨릴 자리를 없애는 편이 낫습니다.**
  */
+const ENEMY_RENDER_BASE = 100
 export function renderKindForEnemy(kind: EnemyKind): number {
-  switch (kind) {
-    case EnemyKind.Boss:
-      return KIND_BOSS
-    case EnemyKind.Binder:
-      return KIND_BINDER
-    case EnemyKind.Dragger:
-      return KIND_DRAGGER
-    case EnemyKind.Charger:
-      return KIND_CHARGER
-    default:
-      return KIND_GRUNT
-  }
+  return ENEMY_RENDER_BASE + kind
 }
 
 interface Visual {
@@ -209,12 +200,6 @@ function capsuleFor(kind: EnemyKind): THREE.CapsuleGeometry {
   return new THREE.CapsuleGeometry(cfg.radius, cfg.height - cfg.radius * 2, 6, 12)
 }
 
-/** 등 뒤(백어택) 구역 표시. 몸 크기에 맞춰 자동으로 커집니다. */
-function backZoneFor(kind: EnemyKind): THREE.BufferGeometry {
-  const cfg = enemyDef(kind)
-  return makeSectorGeometry(cfg.radius + 0.1, cfg.radius + 1.15, COMBAT.backArcDeg)
-}
-
 /** 무기를 든 팔이 쉬는 자세(라디안). 몸 오른쪽에 비스듬히 내려둔 상태. */
 const REST_SWING = 0.75
 const REST_TILT = 0.25
@@ -241,24 +226,40 @@ export class Visuals {
   ) {
     this.geos = {
       [KIND_PLAYER]: new THREE.CapsuleGeometry(PLAYER.radius, PLAYER.height - PLAYER.radius * 2, 6, 14),
-      [KIND_GRUNT]: new THREE.CapsuleGeometry(GRUNT.radius, GRUNT.height - GRUNT.radius * 2, 6, 12),
-      [KIND_BOSS]: new THREE.CapsuleGeometry(BOSS.radius, BOSS.height - BOSS.radius * 2, 8, 16),
-      [KIND_BINDER]: capsuleFor(EnemyKind.Binder),
-      [KIND_DRAGGER]: capsuleFor(EnemyKind.Dragger),
       [KIND_TREASURE]: new THREE.OctahedronGeometry(0.42),
     }
-    // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
-    // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.
-    for (const kind of [EnemyKind.Grunt, EnemyKind.Boss, EnemyKind.Binder, EnemyKind.Dragger]) {
+    this.backZoneGeos = {}
+    /**
+     * ── 손으로 적던 목록을 **적 표에서 유도**하도록 바꿨습니다 ──────────
+     *
+     * 예전에는 몸·예고·등 뒤 표시를 종류마다 손으로 적어 두었습니다.
+     * 그리고 정확히 예상된 일이 일어났습니다 — **🟢 달려드는 자를 넣을 때
+     * 세 곳 다 빠뜨렸습니다.**
+     *
+     * 결과가 조용했습니다. `new THREE.Mesh(undefined, mat)` 는 오류를 내지
+     * 않고 **빈 도형**을 만듭니다. 그래서 달려드는 자는 몸도, 예고도, 등 뒤
+     * 표시도 안 보이는 채로 존에 서 있었습니다. 하필 🟢 은 *"예고를 읽고
+     * 앞으로 나가라"* 는 색이라, **읽을 것이 안 보이는데 읽으라고** 하고
+     * 있었던 셈입니다. 반격이 판마다 1~4회뿐이던 데는 이 몫도 있습니다.
+     *
+     * 이런 종류의 빠뜨림은 주석으로 못 막습니다("여기 한 줄만 빠뜨리지
+     * 않으면 됩니다"라고 적혀 있었는데도 빠뜨렸습니다). **적 표를 돌면
+     * 빠뜨릴 자리가 없어집니다.**
+     */
+    for (const kind of Object.keys(ENEMY_DEFS).map(Number) as EnemyKind[]) {
+      const rk = renderKindForEnemy(kind)
+      if (!this.geos[rk]) this.geos[rk] = capsuleFor(kind)
+      // 보스는 몸이 커서 등 뒤 구역도 조금 더 넓게 잡습니다(원래 값 유지).
+      if (!this.backZoneGeos[rk]) {
+        const cfg = enemyDef(kind)
+        const pad = kind === EnemyKind.Boss ? 1.5 : 1.15
+        this.backZoneGeos[rk] = makeSectorGeometry(cfg.radius + 0.1, cfg.radius + pad, COMBAT.backArcDeg)
+      }
+      // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
+      // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.
       for (const def of attacksFor(kind)) {
         this.telegraphGeos.set(def.id, makeSectorGeometry(0.35, def.reach, def.arcDeg))
       }
-    }
-    this.backZoneGeos = {
-      [KIND_GRUNT]: makeSectorGeometry(GRUNT.radius + 0.1, GRUNT.radius + 1.15, COMBAT.backArcDeg),
-      [KIND_BOSS]: makeSectorGeometry(BOSS.radius + 0.1, BOSS.radius + 1.5, COMBAT.backArcDeg),
-      [KIND_BINDER]: backZoneFor(EnemyKind.Binder),
-      [KIND_DRAGGER]: backZoneFor(EnemyKind.Dragger),
     }
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
     this.pillarGeo = makePillarGeometry()
@@ -299,9 +300,9 @@ export class Visuals {
     }
 
     const isPlayer = kind === KIND_PLAYER
-    const isBoss = kind === KIND_BOSS
     // 이 엔티티가 어떤 적인지. 색·크기·예고 도형이 전부 여기서 나옵니다.
     const enemyKind: EnemyKind = hasComponent(Enemy, entity) ? Enemy.kind[entity] : EnemyKind.Grunt
+    const isBoss = !isPlayer && hasComponent(Enemy, entity) && enemyKind === EnemyKind.Boss
     const cfg = isPlayer ? PLAYER : enemyDef(enemyKind)
     // 색 배정 규칙은 config/enemies.ts 의 ENEMY_DEFS 주석에 정리돼 있습니다.
     // 요약: 적은 전부 붉은 계열, 종류는 명도·채도와 **실루엣**으로 가릅니다.

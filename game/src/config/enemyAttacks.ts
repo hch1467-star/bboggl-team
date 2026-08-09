@@ -464,6 +464,36 @@ export const BINDER_ATTACKS: EnemyAttackDef[] = [
  * 잡몹판은 보스판보다 예고가 길고(1.4초) 피해가 작습니다(16). 실패해도
  * 죽지 않는 자리에서 손에 익히게 하려는 것입니다.
  */
+/**
+ * 🔴 쏘는 자 — 화살 하나뿐입니다.
+ *
+ * **새 색을 만들지 않았습니다.** 화살의 정답은 여전히 구르기(🔴)입니다.
+ * 색을 늘리면 외울 것만 늘어나고, 이 적이 만드는 새로움은 색이 아니라
+ * **위치**입니다 — 붙어 있는 잡몹을 상대하는 동안 계속 날아오니까요.
+ *
+ * 부채꼴 22°는 게임에서 가장 좁습니다. 12m 짜리 **선**처럼 보여야
+ * "저 선 위에 서 있지 마라"가 한눈에 읽힙니다. 반대로 옆으로 한 걸음만
+ * 비켜도 빗나가야, 먼 거리에서 오는 공격이 불공정하지 않습니다.
+ */
+export const ARCHER_ATTACKS: EnemyAttackDef[] = [
+  {
+    id: 'archer_shot',
+    intent: AttackIntent.Strike,
+    windup: 1.25,
+    active: 0.14,
+    recovery: 0.9,
+    reach: 12,
+    arcDeg: 22,
+    damage: 13,
+    knockback: 2.2,
+    // 최소 사거리 3 — 코앞에서는 못 쏩니다. 붙는 것이 답이 되려면
+    // 붙었을 때 실제로 안전해져야 합니다.
+    minRange: 3,
+    maxRange: 12,
+    weight: 1,
+  },
+]
+
 export const CHARGER_ATTACKS: EnemyAttackDef[] = [
   {
     id: 'charger_rush',
@@ -520,6 +550,7 @@ const ATTACKS_BY_KIND: Record<number, EnemyAttackDef[]> = {
   2: BINDER_ATTACKS,
   3: DRAGGER_ATTACKS,
   4: CHARGER_ATTACKS,
+  5: ARCHER_ATTACKS,
 }
 
 /** 이 적이 쓰는 패턴 목록. EnemyKind 값으로 찾습니다. */
