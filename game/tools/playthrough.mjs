@@ -162,6 +162,8 @@ try {
     let detour = null
     /** 끝난 곁길 왕복들 — 곁길이 **값어치가 있었는지**를 재는 유일한 자료입니다. */
     const detours = []
+    /** 등 뒤로 돌기를 포기할 시각(0이면 안 돌고 있음). */
+    let circleUntil = 0
     let lastTreasureCount = 0
     /**
      * 보물마다 **가장 가까이 갔던 거리**(걸어야 하는 거리).
@@ -1072,6 +1074,50 @@ try {
           await sleep()
           continue
         }
+
+        /**
+         * ---- 등 뒤로 돌기 (기둥 3) ----
+         *
+         * ── 왜 이 가지가 생겼는가 ──────────────────────────────────
+         * 존에서 백어택 비율이 **6~7%** 였습니다. 무기와 무관하게요.
+         * 그래서 기둥 3(포지셔닝이 보상받는다)이 실제로는 거의 안
+         * 돌아갑니다. 보상을 키워도(등 뒤 강인도 ×1.6) 숫자가 안
+         * 움직였는데, 당연합니다 — **봇에 돌아가는 가지가 없었습니다.**
+         * 보물이 0개였을 때와 정확히 같은 모양입니다: 없는 행동은
+         * 아무리 보상을 붙여도 안 일어나고, 그러면 그 기둥은 영영
+         * 측정되지 않습니다.
+         *
+         * ── 사람처럼 굴게 하는 조건 ────────────────────────────────
+         *   1. **예고가 떠 있으면 안 돕니다** — 그건 피하거나 반격할 때입니다.
+         *   2. **이미 등 뒤면 안 돕니다** — 때릴 때입니다.
+         *   3. **오래 못 돕니다**(1.2초). 못 잡으면 그냥 정면에서 칩니다.
+         *      산수로는 0.78초면 들어가야 하고(창은 1.23초), 못 들어가면
+         *      그건 이 적한테는 안 되는 것입니다. 영원히 돌면 봇이
+         *      "춤추다 끝나는" 판이 됩니다 — 이 프로젝트에서 이미 두 번
+         *      데인 무한 왕복 버그와 같은 함정입니다.
+         */
+        const es = G.entityState(near.entity)
+        const behindMe =
+          es &&
+          (() => {
+            const dx = p.x - es.x
+            const dz = p.z - es.z
+            const d = Math.hypot(dx, dz) || 1
+            // 적이 보는 방향과 반대쪽에 있는가 (게임의 backArcDeg 와 같은 뜻)
+            return (dx * Math.sin(es.rotY) + dz * Math.cos(es.rotY)) / d < -0.34
+          })()
+        if (circleUntil === 0 && es && !behindMe && near.dist < 4) circleUntil = now() + 1.2
+        if (es && !behindMe && now() < circleUntil && near.dist < 4) {
+          markAct('돌기')
+          // 적의 **등 뒤 지점**으로 걸어갑니다. 접선으로 도는 것보다
+          // 단순하고, 적이 돌면 목표점도 같이 돌아서 저절로 추적이 됩니다.
+          const bx = es.x - Math.sin(es.rotY) * 1.6
+          const bz = es.z - Math.cos(es.rotY) * 1.6
+          moveToward(bx - p.x, bz - p.z)
+          await sleep()
+          continue
+        }
+        if (behindMe || now() >= circleUntil) circleUntil = 0
 
         if (near.dist > 2.2) {
           markAct('접근')

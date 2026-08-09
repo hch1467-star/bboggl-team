@@ -286,7 +286,7 @@ function enemySpec(e: number): AttackSpec {
  * 강인도 피해를 `trauma` 에서 뽑는 이유는 balance.ts POISE 주석 참고
  * (같은 뜻의 숫자를 두 벌 두지 않기 위해서입니다).
  */
-function applyPoise(t: number, spec: AttackSpec): void {
+function applyPoise(t: number, spec: AttackSpec, behind = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
 
   /**
@@ -316,7 +316,9 @@ function applyPoise(t: number, spec: AttackSpec): void {
     ? FOCUS.poiseMult
     : winding
       ? POISE.windupMultiplier
-      : POISE.basicMultiplier
+      : behind
+        ? POISE.backMultiplier
+        : POISE.basicMultiplier
   // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
   let dmg = spec.trauma * POISE.fromTrauma * multiplier * (spec.poiseScale ?? 1)
   /**
@@ -713,7 +715,9 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Enemy.poiseIdleT[t] = 0
         if (Actor.state[t] === ActorState.Stagger) Actor.timer[t] = 0
       } else if (hasComponent(Enemy, t)) {
-        applyPoise(t, spec)
+        // `back` 은 위에서 이미 계산했습니다(근접 부채꼴 + 등 뒤).
+        // 강인도에도 같은 판정을 그대로 씁니다 — 두 번 계산하면 언젠가 어긋납니다.
+        applyPoise(t, spec, back)
       }
     }
 
