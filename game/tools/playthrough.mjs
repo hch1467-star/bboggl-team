@@ -274,6 +274,25 @@ try {
     const weaponCost = Object.fromEntries(
       G.weaponTable().map((w) => [w.id, w.comboStamina]),
     )
+    /**
+     * ── 🟢 초록이 뜬 순간, 답할 수단이 있었는가 ──────────────────────
+     *
+     * 반격은 **스킬로만** 성립합니다(combat.ts 설계 노트 — 로스트아크가
+     * 카운터를 카운터 스킬로 제한한 이유와 같습니다). 그런데 지난 라운드에
+     * 쿨다운을 1.5배로 늘렸습니다. 그러면 초록이 떴는데 **누를 게 없는**
+     * 경우가 늘어납니다.
+     *
+     * 그건 기둥 2의 공정함에 걸립니다. "내가 못 봤네"가 나오면 안 된다고
+     * 적어 두었는데, **"봤는데 답할 수단이 없었다"** 도 같은 종류입니다.
+     * 색을 보여 주고 답을 못 내게 하면 예고는 정보가 아니라 약 올리기가 됩니다.
+     *
+     * 다만 설계는 "놓쳐도 구르기라는 답이 남는다"고도 적어 두었습니다.
+     * 그러니 **얼마나 자주인가**가 전부입니다. 드물면 판단이고, 대부분이면
+     * 막다른 길입니다. 세면 갈립니다.
+     */
+    const greenSeen = new Set()
+    let greenEvents = 0
+    let greenAnswerable = 0
     let rhythmSamples = 0
     /** 쓸 수 있는 스킬이 하나도 없던 표본 = **쿨다운 리듬이 압박이 된 시간** */
     let noSkillSamples = 0
@@ -528,6 +547,20 @@ try {
         rhythmSamples++
         const slots = G.slotCooldowns().filter((sl) => !sl.empty)
         const readyNow = slots.filter((sl) => sl.cd <= 0).length
+        /**
+         * 🟢 예고는 **올라가는 순간에만** 셉니다. 프레임마다 세면 예고가
+         * 긴 패턴일수록 커져서, 횟수가 아니라 시간을 재게 됩니다.
+         */
+        for (const t of G.threats(12)) {
+          if (!t.winding || t.intent !== 4) {
+            greenSeen.delete(t.entity)
+            continue
+          }
+          if (greenSeen.has(t.entity)) continue
+          greenSeen.add(t.entity)
+          greenEvents++
+          if (readyNow > 0) greenAnswerable++
+        }
         if (readyNow === 0) noSkillSamples++
         if (readyNow >= 3) manySkillSamples++
         /**
@@ -1408,6 +1441,8 @@ try {
       noSkillPct: rhythmSamples ? Math.round((noSkillSamples / rhythmSamples) * 100) : 0,
       manySkillPct: rhythmSamples ? Math.round((manySkillSamples / rhythmSamples) * 100) : 0,
       noStaminaPct: rhythmSamples ? Math.round((noStaminaSamples / rhythmSamples) * 100) : 0,
+      greenEvents,
+      greenAnswerable,
       finishers: G.runStats().finishers,
       brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
@@ -1583,7 +1618,9 @@ try {
 ` +
       `             교전 중 — 쓸 스킬이 하나도 없던 시간 ${log.noSkillPct}%` +
       ` · 셋 이상 준비된 시간 ${log.manySkillPct}%` +
-      ` · 스태미나가 콤보의 1/3 미만이던 시간 ${log.noStaminaPct}%`,
+      ` · 스태미나가 콤보의 1/3 미만이던 시간 ${log.noStaminaPct}%\n` +
+      `             🟢 초록 예고 ${log.greenEvents}회 — 그중 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
+      ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist
