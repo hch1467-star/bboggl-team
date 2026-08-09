@@ -179,6 +179,24 @@ try {
     )
   }
 
+  /**
+   * ---- 4. 처음 보는 색이면 **정답을 한 번** 알려줬는가 ----
+   *
+   * 위 시험들은 🔴 과 🟡 예고를 실제로 띄웠습니다. 그러니 그 두 색의
+   * 안내가 **나갔어야** 하고, 같은 색이 여러 번 나왔어도 **한 번씩만**
+   * 기록되어야 합니다.
+   *
+   * "한 번만"은 **안 일어나는 것**을 재는 조건입니다 — 시험을 안 쓰면
+   * 두 번 뜨는 것을 아무도 모릅니다(모루 프로브와 같은 종류의 위험).
+   */
+  const seen = await page.evaluate(() => window.__game.seenIntents())
+  check(seen.length >= 2, '예고를 띄운 색마다 안내가 나갔다', `${seen.length}색`)
+  check(
+    new Set(seen).size === seen.length,
+    '같은 색을 두 번 알려주지 않는다 (안내가 잔소리가 되지 않게)',
+    `[${seen.join(',')}]`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {

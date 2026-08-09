@@ -47,6 +47,8 @@ export class Hud {
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
   private readonly finisherHint = el<HTMLElement>('finisherHint')
+  private readonly colorHint = el<HTMLElement>('colorHint')
+  private colorHintT = 0
   private readonly focusPips = el<HTMLElement>('focusPips')
   private readonly weaponUpgradeHint = el<HTMLElement>('weaponUpgradeHint')
   private readonly stoneText = el<HTMLElement>('stoneText')
@@ -323,6 +325,27 @@ export class Hud {
       this.bannerTimer -= realDt
       if (this.bannerTimer <= 0) this.banner.classList.remove('show')
     }
+    /**
+     * ⚠️ **실제 시간**으로 셉니다(realDt). 히트스톱이나 느린 화면에서
+     * 안내가 같이 멈추면, 정작 급한 순간에 글자가 화면에 붙어 있습니다.
+     */
+    if (this.colorHintT > 0) {
+      this.colorHintT -= realDt
+      if (this.colorHintT <= 0) this.colorHint.style.display = 'none'
+    }
+  }
+
+  /**
+   * 처음 보는 예고 색의 **정답**을 잠깐 띄웁니다.
+   *
+   * 문구는 게임 데이터(`INTENT_LABEL`)를 그대로 받습니다 — 여기 베껴 적으면
+   * 색의 정답을 바꿨을 때 안내만 옛말을 하게 됩니다.
+   */
+  showColorHint(text: string, color: number, seconds = 3.5): void {
+    this.colorHint.textContent = text
+    this.colorHint.style.borderColor = `#${color.toString(16).padStart(6, '0')}`
+    this.colorHint.style.display = 'block'
+    this.colorHintT = seconds
   }
 
   showBanner(title: string, sub: string, seconds: number): void {

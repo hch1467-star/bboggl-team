@@ -19,7 +19,7 @@ import {
   WEAPON_UPGRADE,
   WORLD,
 } from './config/balance'
-import { attackAt, attacksFor } from './config/enemyAttacks'
+import { INTENT_COLOR, INTENT_LABEL, attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { enemyDef, kindFromId } from './config/enemies'
 import {
@@ -188,6 +188,14 @@ class Game {
   private levelW = 0
   private levelH = 0
   /** 화톳불 좌표들. 엔티티가 아니라 좌표 목록입니다(부딪히지 않으므로). */
+  /**
+   * 이번 판에 **이미 알려준** 예고 색들. 색마다 한 번만 알려줍니다.
+   *
+   * 세이브에 남기지 않는 이유: 처음 여는 사람에게 필요한 것이지, 이어하는
+   * 사람에게는 이미 아는 내용입니다. 그리고 판을 새로 시작하는 사람은
+   * 대개 **다시 배우고 싶은** 사람입니다 — 저장해 두면 그 기회를 막습니다.
+   */
+  private readonly seenIntents = new Set<number>()
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
   private anvils: { x: number; y: number; z: number }[] = []
@@ -722,6 +730,39 @@ class Game {
       if (rest.rested && rest.near) this.restAt(p, rest.near)
     } else {
       this.hud.setRest(false, 0, false)
+    }
+
+    /**
+     * ---- 처음 보는 색이면 **정답을 한 번** 알려줍니다 ----
+     *
+     * ── 왜 필요한가 ──────────────────────────────────────────────
+     * 이 게임의 중심은 4색 예고입니다(기둥 2). 그런데 게임 **안에서**
+     * 그 규칙을 설명하는 곳이 한 군데도 없었습니다 — 화면 아래 키 목록은
+     * 조작표이지 규칙이 아닙니다. 처음 여는 사람은 색만 보고 다섯 가지
+     * 다른 정답을 **추론**해야 합니다.
+     *
+     * 존은 이미 색을 순서대로 가르치도록 배치되어 있습니다(잡몹이 먼저,
+     * 보스가 나중). 배치가 *언제* 가르칠지를 정했으니, 여기서는 *무엇을*
+     * 가르칠지만 한 줄 얹습니다.
+     *
+     * ── 규칙 셋 ──────────────────────────────────────────────────
+     *   1. **색마다 한 번만.** 반복되면 안내가 아니라 잔소리가 됩니다.
+     *   2. **예고가 시작될 때.** 맞고 나서 알려주면 늦습니다.
+     *   3. 문구는 `INTENT_LABEL` 에서 그대로 가져옵니다 — 색의 정답을
+     *      바꿨을 때 안내만 옛말을 하는 일이 없어야 합니다.
+     */
+    if (playerAlive) {
+      const ids = enemyQuery.run()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (Actor.state[e] !== ActorState.Attack) continue
+        if (Actor.phase[e] !== AttackPhase.Windup) continue
+        const intent = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent
+        if (this.seenIntents.has(intent)) continue
+        this.seenIntents.add(intent)
+        this.hud.showColorHint(INTENT_LABEL[intent], INTENT_COLOR[intent])
+        break
+      }
     }
 
     /**
@@ -2037,6 +2078,15 @@ class Game {
     ]
   }
 
+  /**
+   * 지금까지 안내한 예고 색들 — 검증용.
+   * "색마다 한 번만"은 **안 일어나는 것**을 재는 조건이라, 시험을 안 쓰면
+   * 두 번 뜨는 것을 아무도 모릅니다(모루 프로브와 같은 종류의 위험입니다).
+   */
+  debugSeenIntents(): number[] {
+    return [...this.seenIntents]
+  }
+
   /** 모루 목록 — 검증용(부활·회복을 **안 한다**는 것을 재려면 위치가 필요합니다). */
   debugAnvils(): { x: number; z: number }[] {
     return this.anvils.map((a) => ({ x: a.x, z: a.z }))
@@ -2744,6 +2794,8 @@ declare global {
       /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
       spendPoints: () => { x: number; z: number; anvil: boolean }[]
       anvils: () => { x: number; z: number }[]
+      /** 안내가 나간 예고 색들(AttackIntent 값) */
+      seenIntents: () => number[]
       /** 사다리(지름길) 검증용 */
       finisherInfo: () => {
         ready: boolean
@@ -3009,6 +3061,7 @@ window.__game = {
   nearestBonfire: () => game.debugNearestBonfire(),
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),
+  seenIntents: () => game.debugSeenIntents(),
   /**
    * 처형 검증용.
    *
