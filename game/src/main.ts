@@ -203,12 +203,14 @@ class Game {
       swings: number
       hits: number
       deaths?: number
-      diedWinding?: number
-      /** 아래 넷은 **살아 있던 시간의 분해**입니다(초, 시뮬레이션 시간). */
+      /** 예고를 건 횟수. `swings`(판정 도달)와의 차이가 **끊긴 공격**입니다. */
+      commits?: number
+      /** 아래 다섯은 **살아 있던 시간의 분해**입니다(초, 시뮬레이션 시간). */
       aggroT?: number
       atkT?: number
       stagT?: number
       coolT?: number
+      chaseT?: number
       readyT?: number
     }
   > = {}
@@ -276,6 +278,21 @@ class Game {
   private brokenDeaths = 0
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
+  /**
+   * 지난 프레임에 **예고 중**이던 적.
+   *
+   * 판정(위)과 따로 세는 이유가 이번 라운드의 핵심입니다. `휘두름` 은
+   * 판정 단계에 들어간 횟수만 셉니다 — *"예고만 띄우고 끊긴 것은 세지
+   * 않는다"* 고 아래에 적어 뒀습니다. 그런데 **반격은 예고 중에 강인도를
+   * 무너뜨리는 것**이므로, 반격이 성공하면 그 공격은 판정에 영영 못 갑니다.
+   *
+   * 그래서 `휘두름 0회` 가 정반대 두 가지를 같은 숫자로 보여 줍니다:
+   *   · 한 번도 공격을 못 걸었다  (문제)
+   *   · 걸 때마다 플레이어가 끊었다  (설계대로)
+   * 하필 🟢 달려드는 자가 **반격을 가르치려고 만든 적**이라, 가장 중요한
+   * 구분이 가장 안 보이는 자리에 있었습니다.
+   */
+  private readonly windingLastFrame = new Set<number>()
   /** 적을 되살리려면 원본 배치가 필요합니다. */
   private levelData: LevelData | null = null
   /**
@@ -862,12 +879,26 @@ class Game {
           this.bossLastSwing.set(e, id)
         }
       }
-      this.swungLastFrame.clear()
+      /**
+       * **예고를 시작한 횟수** — 판정까지 갔는지와 무관하게 셉니다.
+       * 둘의 차이가 곧 *"끊긴 공격"* 이고, 그게 반격이 실제로 먹힌 횟수입니다.
+       */
       for (let i = 0; i < enemyQuery.count; i++) {
         const e = ids[i]
-        if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
-          this.swungLastFrame.add(e)
-        }
+        if (Actor.state[e] !== ActorState.Attack) continue
+        if (Actor.phase[e] !== AttackPhase.Windup) continue
+        if (this.windingLastFrame.has(e)) continue
+        const rec = (this.foeSwingLog[enemyDef(Enemy.kind[e]).id] ??= { swings: 0, hits: 0 })
+        rec.commits = (rec.commits ?? 0) + 1
+      }
+
+      this.swungLastFrame.clear()
+      this.windingLastFrame.clear()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (Actor.state[e] !== ActorState.Attack) continue
+        if (Actor.phase[e] === AttackPhase.Active) this.swungLastFrame.add(e)
+        if (Actor.phase[e] === AttackPhase.Windup) this.windingLastFrame.add(e)
       }
 
       /**
@@ -897,7 +928,25 @@ class Game {
         if (Actor.state[e] === ActorState.Attack) rec.atkT = (rec.atkT ?? 0) + time.dt
         else if (Actor.state[e] === ActorState.Stagger) rec.stagT = (rec.stagT ?? 0) + time.dt
         else if (Actor.cooldownT[e] > 0) rec.coolT = (rec.coolT ?? 0) + time.dt
-        else rec.readyT = (rec.readyT ?? 0) + time.dt
+        else {
+          /**
+           * 남은 시간을 **거리로 한 번 더 가릅니다.**
+           *
+           * 첫 판에서 '대기' 하나로 뭉쳐 놨더니 읽을 수가 없었습니다.
+           * aggroRange 가 55m 라 깨어 있는 시간의 대부분이 **아직 달려오는
+           * 중**일 수 있는데, 그러면 *"사거리 안인데 토큰이 없어 못 건다"*
+           * 라는 진짜 신호가 추격 시간에 묻힙니다.
+           *
+           * 이 프로젝트에서 이미 한 번 겪은 실수입니다 — 길 걷기와
+           * 심부름을 '빈 시간' 하나로 재던 것과 같은 모양입니다.
+           * 처방도 정반대라서(추격이면 배치·이동속도, 대기면 토큰 규칙)
+           * 반드시 갈라야 합니다.
+           */
+          const reach = attacksFor(Enemy.kind[e]).reduce((m, a) => Math.max(m, a.reach), 0)
+          const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
+          if (d > reach) rec.chaseT = (rec.chaseT ?? 0) + time.dt
+          else rec.readyT = (rec.readyT ?? 0) + time.dt
+        }
       }
     }
 
@@ -1081,27 +1130,31 @@ class Game {
         this.brokenDeaths++
       }
       /**
-       * ── **예고를 띄운 채로 죽었는가** ──────────────────────────────
+       * ── **종류별 처치 수** ────────────────────────────────────────
        *
-       * 적 종류별 휘두름을 세 보니 마리당 1.0~1.5회로 비슷한데
-       * **달려드는 자만 0.2회** 였습니다(5마리 배치에 판당 1회).
-       * 후보가 셋이었습니다 — 마릿수 / 먼저 죽어서 / 토큰을 뺏겨서.
-       * 마릿수는 나눠 보니 아니었고, 남은 둘을 가르는 것이 이 한 줄입니다.
+       * 여기에 `예고 중 사망`(예고를 띄운 채로 죽었는가) 도 같이 셌었는데,
+       * **재던 방법이 틀려서 걷어냈습니다.** 열다섯 번째 계기 버그입니다.
        *
-       * 달려드는 자는 예고가 **1.4초**로 가장 길고 체력은 46으로 낮습니다.
-       * 그 둘이 겹치면 *"예고를 띄우자마자 죽는다"* 가 되고, 그러면 🟢 은
-       * 색으로 존재하지 않게 됩니다 — 플레이어가 볼 일이 없으니까요.
+       * 죽는 순간의 `Actor.state` 를 봤습니다. 그런데 강인도가 무너지면
+       * combat.ts 가 상태를 **`Stagger` 로 덮어씁니다.** 예고 중에 무너뜨린
+       * 뒤 죽이는 것 — 즉 **반격이 성공한 바로 그 경로** — 는 죽을 때
+       * 이미 `Attack/Windup` 이 아닙니다. 그래서 모든 종류가 한결같이
+       * **0%** 로 나왔고, 저는 그걸 *"먼저 죽는 건 아니다"* 라는 근거로
+       * 썼습니다. 실제로는 **셀 수 없는 것을 세고 0을 얻은 것**입니다.
+       *
+       * 이 프로젝트에서 몇 번이나 나온 모양 그대로입니다:
+       * **"0"은 가장 의심스러운 관측입니다** — *안 일어났다* 와
+       * *안 세어지고 있다* 가 똑같이 생겼습니다.
+       *
+       * 대신 `예고 → 판정` 을 따로 세고 그 차이를 `끊김` 으로 봅니다.
+       * 사건이 일어난 자리(상태가 덮이기 전)에서 세므로 덮어쓰기에
+       * 영향받지 않고, *"공격을 걸었는데 판정까지 못 갔다"* 를 이유와
+       * 무관하게 전부 잡습니다.
        */
       if (!death.isPlayer && hasComponent(Enemy, death.entity)) {
         const id = enemyDef(Enemy.kind[death.entity]).id
-        const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0, deaths: 0, diedWinding: 0 })
+        const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0, deaths: 0 })
         rec.deaths = (rec.deaths ?? 0) + 1
-        if (
-          Actor.state[death.entity] === ActorState.Attack &&
-          Actor.phase[death.entity] === AttackPhase.Windup
-        ) {
-          rec.diedWinding = (rec.diedWinding ?? 0) + 1
-        }
       }
       if (death.isPlayer) {
         this.deathCount++
@@ -2182,7 +2235,7 @@ class Game {
    */
   debugFoeSwingLog(): Record<
     string,
-    { swings: number; hits: number; deaths?: number; diedWinding?: number }
+    { swings: number; hits: number; deaths?: number }
   > {
     return this.foeSwingLog
   }
@@ -2907,11 +2960,12 @@ declare global {
           swings: number
           hits: number
           deaths?: number
-          diedWinding?: number
+              commits?: number
           aggroT?: number
           atkT?: number
           stagT?: number
           coolT?: number
+          chaseT?: number
           readyT?: number
         }
       >
