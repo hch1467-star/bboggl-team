@@ -44,6 +44,14 @@ function check(ok, label, detail = '') {
   console.log(`  ${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
 }
 
+/**
+ * 콤보 마무리 타의 피해 — `weaponTable()` 이 주는 합계에서 되짚습니다.
+ * (제원에 마무리 타 하나만 따로 노출하기보다, 이미 있는 값으로 유도합니다.)
+ */
+function lastStepDamage(w) {
+  return w.lastStepDamage
+}
+
 const server = await createServer({ root: ROOT, server: { port: PORT }, logLevel: 'error' })
 await server.listen()
 const browser = await chromium.launch({
@@ -76,7 +84,7 @@ try {
        * **AI를 재게 됩니다.** 강인도도 계속 회복되면 무너지므로,
        * 회복분까지 합쳐 "실제로 깎은 총량"을 누적해서 셉니다.
        */
-      bench: async (slot, burstSeconds, totalSeconds) => {
+      bench: async (slot, burstSeconds, totalSeconds, fromBehind) => {
         const G = window.__game
         G.reset()
         await window.__t.runFor(0.4)
@@ -95,7 +103,10 @@ try {
         G.aimAtWorld(es0.x, es0.z)
         const startHp = G.entityState(e).hp
         const startHits = G.state().hitsDealt
-        const t0 = G.state().elapsed
+        // ⚠️ **시뮬레이션 시계**로 잽니다. `elapsed` 는 히트스톱 동안에도
+        // 흘러서, 히트스톱이 큰 무기(대검 0.15초/타)일수록 손해를 봅니다.
+        const t0 = G.state().simElapsed
+        const wall0 = G.state().elapsed
         /**
          * **어느 타가 몇 번 나갔는지**도 셉니다.
          *
@@ -111,13 +122,15 @@ try {
         // 한 번에 크게 쓰는 무기일수록 효율이 실제보다 좋아 보였습니다.
         const stamStart = G.runStats().staminaSpent
         const critStart = G.state().critHits
+        const finStart = G.runStats().finishers
+        const backStart = G.state().backHits
         let breaks = 0
         let wasBroken = false
 
-        while (G.state().elapsed - t0 < totalSeconds) {
+        while (G.state().simElapsed - t0 < totalSeconds) {
           // 스태미나가 가득인 동안의 **폭발력**과, 바닥난 뒤의 **지속력**은
           // 완전히 다른 능력입니다. 하나로 뭉치면 둘 다 안 보입니다.
-          if (burstDealt === 0 && G.state().elapsed - t0 >= burstSeconds) {
+          if (burstDealt === 0 && G.state().simElapsed - t0 >= burstSeconds) {
             burstDealt = startHp - G.entityState(e).hp
           }
           const info = G.enemyInfo(e)
@@ -130,16 +143,30 @@ try {
           // 위치가 밀릴 수 있으므로 매번 붙여 세웁니다 — 사거리 차이가 아니라
           // **때렸을 때의 성능**을 재는 자리입니다.
           const es = G.entityState(e)
-          G.teleportPlayer(es.x - 1.2, es.z)
+          /**
+           * `fromBehind` 면 **적의 등 뒤**에 섭니다.
+           *
+           * 쌍단검의 설명은 *"회피로 등 뒤를 잡는 무기"* 입니다. 그런데
+           * 지금까지 이 프로브는 정면에 얼어붙은 허수아비만 때렸습니다 —
+           * **단검의 정체성이 통째로 안 보이는 자리에서** 세 무기를 비교하고
+           * 있었던 것입니다. 대검을 너프하기 전에 이 축을 먼저 재야 합니다.
+           */
+          const fx = Math.sin(es.rotY)
+          const fz = Math.cos(es.rotY)
+          const side = fromBehind ? -1.2 : 1.2
+          G.teleportPlayer(es.x + fx * side, es.z + fz * side)
           G.aimAtWorld(es.x, es.z)
           G.press('Mouse0')
           G.release('Mouse0')
           await new Promise((r) => setTimeout(r, 8))
         }
-        const elapsed = G.state().elapsed - t0
+        const elapsed = G.state().simElapsed - t0
+        const wall = G.state().elapsed - wall0
         const dealt = startHp - G.entityState(e).hp
         const staminaUsed = G.runStats().staminaSpent - stamStart
         const crits = G.state().critHits - critStart
+        const finishers = G.runStats().finishers - finStart
+        const backHits = G.state().backHits - backStart
         G.freezeEnemies(false)
         const hits = G.state().hitsDealt - startHits
         return {
@@ -159,7 +186,11 @@ try {
           // 지속력 = 스태미나 1당 피해. 소모가 적고 세면 오래 붙어 있습니다.
           perStamina: Number((dealt / Math.max(1, staminaUsed)).toFixed(2)),
           staminaUsed: Math.round(staminaUsed),
+          /** 히트스톱으로 멈춰 있던 비율 — 계측이 얼마나 왜곡됐었는지 */
+          frozenPct: Math.round(((wall - elapsed) / Math.max(0.01, wall)) * 100),
           crits,
+          backHits,
+          finishers,
           breaks,
         }
       },
@@ -186,11 +217,16 @@ try {
    * **동전 던지기**로 만들면 안 됩니다. (구르기 프로브에서 같은 이유로
    * 이미 한 번 겪었습니다.)
    */
+  /**
+   * 처형 한 방의 피해는 **게임에서 읽습니다**(마무리 타 × 배율).
+   * 이 값을 빼야 "무기 자체의 초당 피해"가 보입니다 — 아래 설계 노트 참고.
+   */
+  const finSpec = await page.evaluate(() => window.__game.finisherInfo())
   const results = []
   for (let slot = 1; slot <= table.length; slot++) {
     const runs = []
     for (let i = 0; i < 2; i++) {
-      runs.push(await page.evaluate((s) => window.__t.bench(s, 3, 16), slot))
+      runs.push(await page.evaluate((s) => window.__t.bench(s, 3, 16, false), slot))
     }
     const mean = (key) => Number((runs.reduce((a, r) => a + r[key], 0) / runs.length).toFixed(2))
     results.push({
@@ -202,9 +238,36 @@ try {
       perStamina: mean('perStamina'),
       hits: Math.round(mean('hits')),
       crits: Math.round(mean('crits')),
+      finishers: mean('finishers'),
       staminaUsed: Math.round(mean('staminaUsed')),
       breaks: Math.round(mean('breaks')),
     })
+    const r = results[results.length - 1]
+    const w = table[slot - 1]
+    /**
+     * ── 실측 초당 피해가 데이터의 두 배였던 이유 ────────────────────
+     *
+     * 히트스톱(12%)으로는 설명이 안 됐습니다. 타격당 평균 피해를 보고 알았습니다:
+     * 대검은 한 대 평균 **49**인데 콤보 평균은 36입니다. 남는 13은 **처형**
+     * 이었습니다 — 대검은 강인도 ×1.7 이라 16초에 세 번 무너뜨리고,
+     * 무너뜨릴 때마다 선입력이 처형(마무리 타 × 2.6)으로 나갑니다.
+     *
+     * 즉 계측기 탓이 아니라 **게임의 실제 연쇄**였습니다:
+     * *무너뜨리는 무기가 곧 가장 세게 때리는 무기가 됩니다.*
+     * 이건 밸런스 질문이지 계측 오류가 아닙니다. 그래서 지우지 않고
+     * **갈라서 둘 다 보여줍니다** — 무기 자체의 힘과, 처형이 얹는 힘.
+     */
+    r.finisherDamage = Math.round(finSpec.damageMultiplier * lastStepDamage(w))
+    r.dpsNoFinisher = Number(
+      (r.dps - (r.finishers * r.finisherDamage) / (r.seconds || 1)).toFixed(1),
+    )
+    // ---- 등 뒤에서 ----
+    const back = await page.evaluate((s) => window.__t.bench(s, 3, 12, true), slot)
+    r.backDps = back.dps
+    r.backGain = Number((back.dps / Math.max(0.1, r.dps)).toFixed(2))
+    r.backCrits = back.crits
+    r.backHits = back.backHits
+    r.backOfHits = `${back.backHits}/${back.hits}`
   }
 
   console.log(
@@ -216,7 +279,9 @@ try {
     console.log(
       `    ${r.name.padEnd(5)} 폭발력 ${String(r.burstDps).padStart(5)} · 지속력 ${String(r.sustainDps).padStart(5)} · ` +
         `초당 강인도 ${String(r.poisePerSec).padStart(5)} · 무너뜨림 ${r.breaks}회\n` +
-        `          전체 초당 ${r.dps} · 타격 ${r.hits}회(치명 ${r.crits}) · 한 대 평균 ${r.avgHit} · 스태미나 ${r.staminaUsed} 소모 · 스태미나당 ${r.perStamina}`,
+        `          전체 초당 ${r.dps} · 타격 ${r.hits}회(치명 ${r.crits}) · 한 대 평균 ${r.avgHit} · 스태미나 ${r.staminaUsed} 소모 · 스태미나당 ${r.perStamina}\n` +
+        `          히트스톱으로 멈춰 있던 시간 ${r.frozenPct}% · **처형 ${r.finishers}회** (한 방 ${r.finisherDamage})\n` +
+        `          처형을 뺀 초당 피해 ${r.dpsNoFinisher} · 등 뒤에서 ${r.backDps} (정면의 ${r.backGain}배 · 백어택 ${r.backOfHits}타 · 치명 ${r.backCrits})`,
     )
   }
   console.log('')
@@ -256,6 +321,32 @@ try {
   }))
   const bestOf = (key) => axes.reduce((a, b) => (a[key] >= b[key] ? a : b)).name
   const winners = new Set([bestOf('burst'), bestOf('thrift'), bestOf('poise')])
+  /**
+   * ---- 순수한 힘은 같은가 ----
+   *
+   * 처형을 빼고 나면 세 무기의 초당 피해가 얼마나 벌어지는지를 봅니다.
+   * 여기서 크게 벌어지면 "무기 자체가 세다/약하다"는 뜻이고,
+   * 좁으면 **차이는 전부 동사(처형·백어택)에서 나온다**는 뜻입니다.
+   */
+  const pureMax = Math.max(...results.map((r) => r.dpsNoFinisher))
+  const pureMin = Math.min(...results.map((r) => r.dpsNoFinisher))
+  check(
+    pureMax / pureMin <= 1.4,
+    '처형을 빼면 무기 자체의 초당 피해는 비슷하다 (차이는 동사에서 나온다)',
+    results.map((r) => `${r.name} ${r.dpsNoFinisher}`).join(' · '),
+  )
+  /**
+   * ---- 등 뒤를 잡는 값이 무기마다 다른가 ----
+   *
+   * 쌍단검은 *"회피로 등 뒤를 잡는 무기"* 라고 적혀 있습니다.
+   * 그 말이 사실이려면 등 뒤에서의 이득이 다른 무기보다 커야 합니다.
+   */
+  const bestBack = results.reduce((a, b) => (a.backGain >= b.backGain ? a : b))
+  check(
+    bestBack.weapon === 'daggers',
+    '등 뒤를 잡는 이득이 쌍단검에서 가장 크다 (설명과 실제가 일치)',
+    results.map((r) => `${r.name} ${r.backGain}배`).join(' · '),
+  )
   console.log(
     '  [데이터상의 축] ' +
       axes

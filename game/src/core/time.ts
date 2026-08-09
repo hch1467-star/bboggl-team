@@ -16,8 +16,25 @@ export const time = {
   dt: 0,
   /** 실제 델타(초). 절대 멈추지 않음. */
   realDt: 0,
-  /** 시작 후 실제 경과 시간(초). */
+  /** 시작 후 실제 경과 시간(초). **히트스톱 동안에도 흐릅니다.** */
   elapsed: 0,
+  /**
+   * 시작 후 **시뮬레이션**이 실제로 진행한 시간(초) — `dt` 의 누적.
+   *
+   * ── 왜 따로 필요한가 (계측이 두 배로 틀린 것을 쫓다 발견) ────────────
+   * 프로브와 자동 플레이는 전부 `elapsed` 를 "시뮬레이션 시간"이라고 부르며
+   * 기다렸습니다. 파일 맨 위에 *"모든 대기는 시뮬레이션 시간입니다"* 라고
+   * 적어 두기까지 했습니다. **사실이 아니었습니다.**
+   *
+   * `elapsed` 는 히트스톱 중에도 흐릅니다(위 tick 참고). 히트스톱은 타격이
+   * 꽂힐 때마다 시뮬레이션만 멈추는 장치이므로, **많이 때릴수록 `elapsed` 와
+   * 실제 진행 사이가 벌어집니다.** 즉 "3초 동안 얼마나 때렸나" 같은 측정이
+   * 무기마다 다른 크기로 틀립니다 — 히트스톱이 큰 무기일수록 손해를 봅니다.
+   *
+   * 이름을 나누는 것이 유일한 해법입니다. `elapsed` 는 연출·UI 용,
+   * `simElapsed` 는 **"게임 안에서 얼마나 흘렀나"** 를 묻는 모든 계측 용.
+   */
+  simElapsed: 0,
   /** 남은 히트스톱 시간(초). */
   hitstop: 0,
   /** 슬로우모션 등 전역 배속 (1 = 정상). */
@@ -62,12 +79,14 @@ export function tick(rawDeltaSeconds: number): void {
   } else {
     time.dt = realDt * time.scale
   }
+  time.simElapsed += time.dt
 }
 
 export function resetTime(): void {
   time.dt = 0
   time.realDt = 0
   time.elapsed = 0
+  time.simElapsed = 0
   time.hitstop = 0
   time.scale = 1
   time.frame = 0

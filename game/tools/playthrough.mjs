@@ -50,7 +50,17 @@ try {
 
   const log = await page.evaluate(async (LIMIT) => {
     const G = window.__game
-    const now = () => G.state().elapsed
+    /**
+     * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
+     *
+     * 이 파일 맨 위에 *"모든 대기는 시뮬레이션 시간입니다"* 라고 적어 두고,
+     * 정작 `elapsed` 를 쓰고 있었습니다 — 그건 **실제 시간**이라 히트스톱
+     * 동안에도 흐릅니다. 무기 프로브에서 재 보니 전투 중 **11~13%** 가
+     * 히트스톱이었습니다. 즉 "420 시뮬레이션초"는 실제로는 370초쯤이었고,
+     * 교전 사이 빈 시간도 그만큼 부풀려져 있었습니다.
+     * (많이 때릴수록 더 부풀려지므로, 밸런스를 바꾸면 오차도 같이 변합니다.)
+     */
+    const now = () => G.state().simElapsed
     const sleep = () => new Promise((r) => setTimeout(r, 8))
 
     const held = new Set()

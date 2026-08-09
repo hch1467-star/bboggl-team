@@ -1750,9 +1750,19 @@ class Game {
     brokenT: number
     x: number
     z: number
+    /**
+     * 바라보는 방향 — **등 뒤를 재려면 반드시 필요합니다.**
+     *
+     * 이게 없어서 무기 프로브의 "등 뒤에서" 측정이 `undefined` 를 읽고
+     * NaN 좌표로 순간이동했습니다. 55타 중 백어택 **0타**가 나왔는데도
+     * 피해는 정상적으로 들어와서, 하마터면 *"쌍단검의 백어택은 이득이
+     * 14%뿐"* 이라는 결론을 낼 뻔했습니다.
+     */
+    rotY: number
   } | null {
     if (!isAlive(e)) return null
     return {
+      rotY: Number(Transform.rotY[e].toFixed(3)),
       hp: Number(Health.hp[e].toFixed(2)),
       maxHp: Health.max[e],
       level: this.terrain?.levelAtWorld(Transform.x[e], Transform.z[e]) ?? 0,
@@ -2297,6 +2307,8 @@ class Game {
         : null,
       frame: time.frame,
       elapsed: Number(time.elapsed.toFixed(3)),
+      /** 시뮬레이션이 실제로 진행한 시간 — 히트스톱을 뺀 값(core/time.ts 설계 노트). */
+      simElapsed: Number(time.simElapsed.toFixed(3)),
       hitstop: Number(time.hitstop.toFixed(4)),
       trauma: Number(this.cam.currentTrauma.toFixed(4)),
       player: {
@@ -2575,6 +2587,7 @@ declare global {
         comboSeconds: number
         comboTrauma: number
         poiseScale: number
+        lastStepDamage: number
         maxRange: number
       }[]
       shortcutInfo: () => {
@@ -2606,6 +2619,7 @@ declare global {
         brokenT: number
         x: number
         z: number
+        rotY: number
       } | null
       teleportEntity: (e: number, x: number, z: number) => void
       pushEntity: (e: number, vx: number, vz: number) => void
@@ -2840,6 +2854,8 @@ window.__game = {
       ),
       comboTrauma: Number(w.combo.reduce((a, c) => a + c.trauma, 0).toFixed(3)),
       poiseScale: w.poiseScale,
+      /** 마무리 타의 피해 — 처형(마무리 타 × 배율)을 계산하려면 필요합니다. */
+      lastStepDamage: w.combo[w.combo.length - 1].damage,
       maxRange: Math.max(...w.combo.map((c) => c.range)),
     })),
   shortcutInfo: () => game.debugShortcutInfo(),
