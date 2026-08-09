@@ -1,0 +1,231 @@
+/**
+ * 보스 연계 검증 — `npm run chain`
+ *
+ * ── 왜 이 프로브가 생겼는가 ──────────────────────────────────────
+ * 보스 2·3페이즈의 **연계**(🔵 속박 → 🔴 직격 / 🟣 갈고리 → 🔴 직격 /
+ * 🔵 속박 → 🟡 광역)는 이 존 전투 설계의 마지막 층입니다. *"이미 아는 색
+ * 둘을 붙여, 새 규칙을 외우게 하지 않으면서 난이도만 올린다"* 는 것이
+ * 설계 의도였습니다(bossPhases.ts).
+ *
+ * 그런데 자동 플레이를 **여덟 판** 돌리는 동안 연계는 **한 번도** 관측되지
+ * 않았습니다. 원인을 두 라운드에 걸쳐 좁혔습니다:
+ *   · 보스가 조준을 못 맞춰 공격 자체를 거의 못 함  → 고침(인내심 조준)
+ *   · 거리가 안 맞아 🔵🟣가 안 나옴                → 고침(접근 패턴 우선)
+ *   · 3페이즈가 **1.9초**라 창이 없음               → 고침(체력·경계 재배분)
+ *
+ * 셋을 다 고쳐도 여전히 0회입니다. 여기서부터는 **플레이로는 확인할 수
+ * 없습니다** — 확률이 낮은 사건을 기다리는 것과, 기능이 고장 난 것을
+ * 구분할 방법이 없기 때문입니다.
+ *
+ * 그래서 연계만 따로 세워 놓고 잽니다. 이 프로브가 통과하면 "연계는
+ * 작동하는데 드물게 나온다"가 되고, 실패하면 "연계는 애초에 안 나간다"가
+ * 됩니다. **둘은 완전히 다른 문제**이고, 지금까지 그걸 못 갈랐습니다.
+ *
+ * ── 여기서 재는 것 ──────────────────────────────────────────────
+ *   1) 페이즈마다 **연계가 실제로 걸리는가** (예고 중에 다음 패턴이 예약되나)
+ *   2) 예약된 연계가 **실제로 이어서 나가는가** (쿨다운을 건너뛰고)
+ *   3) 연계로 나온 공격도 **예고를 그대로 다 보여주는가**
+ *      — bossPhases.ts 의 "예고는 줄이지 않는다" 원칙이 지켜지는지
+ *   4) 1페이즈에는 연계가 **없는가** (난이도가 실제로 올라가는지)
+ *
+ * ⚠️ 연계 표를 여기 베껴 적지 않습니다. `bossTuning().chains` 로 읽습니다.
+ */
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { chromium } from 'playwright'
+import { createServer } from 'vite'
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const PORT = 5211
+const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
+
+let pass = 0
+let fail = 0
+function check(ok, label, detail = '') {
+  if (ok) pass++
+  else fail++
+  console.log(`  ${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
+}
+
+const server = await createServer({ root: ROOT, server: { port: PORT }, logLevel: 'error' })
+await server.listen()
+const browser = await chromium.launch({
+  executablePath: execPath,
+  args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+})
+
+try {
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
+  await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 30000 })
+
+  await page.evaluate(() => {
+    window.__t = {
+      runFor: async (seconds) => {
+        const target = window.__game.state().simElapsed + seconds
+        const deadline = Date.now() + 120000
+        while (window.__game.state().simElapsed < target && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 8))
+        }
+      },
+      until: async (fn, limit) => {
+        const target = window.__game.state().simElapsed + limit
+        const deadline = Date.now() + 120000
+        while (Date.now() < deadline && window.__game.state().simElapsed < target) {
+          if (fn()) return true
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        return fn()
+      },
+      /**
+       * 보스를 **원하는 페이즈**에 세우고, 방아쇠가 되는 색을 강제로 겁니다.
+       * 그리고 그 공격이 끝난 뒤 무엇이 이어 나오는지 봅니다.
+       *
+       * 보스를 얼리지 않는 이유: 연계는 AI가 후딜 끝에서 거는 것이라,
+       * 얼려 두면 **연계 자체가 안 돌아갑니다.** 대신 플레이어를 멀리 세워
+       * 두어 다른 판단이 끼어들지 않게 합니다.
+       */
+      chainTrial: async (phaseIdx, triggerId) => {
+        const G = window.__game
+        G.reset()
+        await window.__t.runFor(0.4)
+        G.clearEnemies()
+        await window.__t.runFor(0.3)
+        const b = G.spawnBoss(6, 0)
+        await window.__t.runFor(0.3)
+        const tuning = G.bossTuning()
+        const roster = G.enemyRoster().find((r) => r.id === 'boss')
+        const maxHp = roster.maxHp
+        // 그 페이즈에 **확실히** 들어가는 체력으로 맞춥니다.
+        // (경계 바로 아래가 아니라 구간 한가운데 — 한 대 맞고 넘어가지 않게)
+        const upper = tuning[phaseIdx].enterBelow
+        const lower = phaseIdx + 1 < tuning.length ? tuning[phaseIdx + 1].enterBelow : 0
+        G.setHp(b, maxHp * ((upper + lower) / 2))
+        await window.__t.runFor(0.4)
+        const idx = roster.attacks.findIndex((a) => a.id === triggerId)
+        G.forceAttack(b, idx)
+        await window.__t.runFor(0.05)
+        const armed = G.enemyInfo(b)
+        // 방아쇠 공격이 끝나고 다음 공격이 시작될 때까지 기다립니다.
+        await window.__t.until(() => G.enemyInfo(b)?.attackId !== triggerId, 4)
+        const after = G.enemyInfo(b)
+        // 이어진 공격의 **예고 시간**을 잽니다(줄이지 않았는지 확인).
+        const windup = after?.winding ? after.timer : 0
+        /**
+         * 예고가 **끝까지 가서 실제로 휘두를 때까지** 기다립니다.
+         *
+         * 원래는 여기서 바로 다음 시험으로 넘어갔습니다. 그런데 보고서용
+         * 눈금(`bossSwingLog`)은 **판정 단계(Active)에 들어간 순간**에만
+         * 올라갑니다. 예고 중에 `reset()` 해 버리면 연계가 분명히 걸렸는데도
+         * 로그에는 아무것도 안 남습니다 — 프로브가 자기 손으로 증거를
+         * 지우고 있었던 셈입니다.
+         */
+        await window.__t.until(() => G.enemyInfo(b)?.attackPhase !== 0, 3)
+        return {
+          phase: armed?.phase ?? -1,
+          armedChain: armed?.chainNext ?? '',
+          nextId: after?.attackId ?? '',
+          nextWinding: after?.winding ?? false,
+          windupLeft: windup,
+          expectedWindup:
+            tuning[phaseIdx].windups.find((w) => w.id === (after?.attackId ?? ''))?.seconds ?? 0,
+        }
+      },
+    }
+  })
+
+  console.log('\n⛓️ 보스 연계 검증\n')
+
+  const tuning = await page.evaluate(() => window.__game.bossTuning())
+  for (let i = 0; i < tuning.length; i++) {
+    const list = Object.entries(tuning[i].chains)
+    console.log(
+      `  [${tuning[i].name}] 연계 ${list.length}개 — ` +
+        (list.length ? list.map(([a, b]) => `${a}→${b}`).join(' · ') : '없음'),
+    )
+  }
+  console.log('')
+
+  // ---- 1. 1페이즈에는 연계가 없다 ----
+  //
+  // 난이도가 **올라간다**는 말이 성립하려면 시작점이 낮아야 합니다.
+  check(
+    Object.keys(tuning[0].chains).length === 0,
+    '1페이즈에는 연계가 없다 (배우는 구간)',
+    `${Object.keys(tuning[0].chains).length}개`,
+  )
+
+  // ---- 2. 2·3페이즈의 연계가 실제로 이어진다 ----
+  let tested = 0
+  for (let phaseIdx = 1; phaseIdx < tuning.length; phaseIdx++) {
+    for (const [trigger, expected] of Object.entries(tuning[phaseIdx].chains)) {
+      const r = await page.evaluate(
+        ([p, t]) => window.__t.chainTrial(p, t),
+        [phaseIdx, trigger],
+      )
+      tested++
+      check(
+        r.phase === phaseIdx,
+        `${tuning[phaseIdx].name}: 보스가 그 페이즈에 서 있다`,
+        `페이즈 ${r.phase}`,
+      )
+      check(
+        r.armedChain === expected,
+        `${tuning[phaseIdx].name}: ${trigger} 예고 중에 ${expected} 가 예약된다`,
+        `예약 "${r.armedChain}"`,
+      )
+      check(
+        r.nextId === expected,
+        `${tuning[phaseIdx].name}: ${trigger} 뒤에 실제로 ${expected} 가 이어진다`,
+        `이어진 것 "${r.nextId}"`,
+      )
+      /**
+       * **예고는 줄이지 않습니다.**
+       *
+       * 연계가 없애는 것은 "쉬는 시간"이지 "읽을 시간"이 아닙니다
+       * (bossPhases.ts 설계 원칙). 이게 깨지면 연계는 난이도가 아니라
+       * **불공정**이 됩니다 — DESIGN.md 의 판단 기준 그대로,
+       * "내가 못 봤네"가 나오면 안 됩니다.
+       */
+      if (r.nextId === expected) {
+        check(
+          r.nextWinding && r.windupLeft > r.expectedWindup * 0.5,
+          `${tuning[phaseIdx].name}: 이어진 ${expected} 도 예고를 다 보여준다`,
+          `남은 예고 ${r.windupLeft.toFixed(2)}초 / 정상 ${r.expectedWindup.toFixed(2)}초`,
+        )
+      }
+    }
+  }
+  check(tested >= 3, '연계를 최소 3개 시험했다', `${tested}개`)
+
+  /**
+   * ── 계기가 실제로 세는가 ────────────────────────────────────────
+   *
+   * 위의 검사는 전부 `enemyInfo()` 로 봅니다. 그런데 **자동 플레이 보고서**는
+   * 다른 눈금(`bossSwingLog().chained`)을 씁니다. 그 눈금은 만들어만 놓고
+   * **한 번도 올리지 않아서**, 판마다 "연계 0회"를 찍고 있었습니다.
+   * 그 상수 0을 관측으로 믿고 세 라운드를 썼습니다.
+   *
+   * 그래서 여기서 **보고서가 보는 그 눈금을** 직접 확인합니다.
+   * 위가 다 통과해도 이게 0이면, 게임이 아니라 계기가 고장 난 것입니다.
+   */
+  const swingLog = await page.evaluate(() => window.__game.bossSwingLog())
+  const chainedTotal = Object.values(swingLog).reduce((a, v) => a + (v.chained ?? 0), 0)
+  check(
+    chainedTotal >= tested,
+    '보고서가 쓰는 눈금(bossSwingLog.chained)도 연계를 센다',
+    `${chainedTotal}회 / 시험 ${tested}회`,
+  )
+
+  console.log('')
+  check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
+} finally {
+  await browser.close()
+  await server.close()
+}
+
+console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
+process.exit(fail === 0 ? 0 : 1)

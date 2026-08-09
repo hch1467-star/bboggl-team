@@ -73,6 +73,8 @@ import {
   chainIndexFor,
   encounterEvents,
   enemyAiSystem,
+  readChainsArmed,
+  readChainsLost,
   setAggroRangeOverride,
   setReachDistance,
   phaseEvents,
@@ -718,6 +720,23 @@ class Game {
             byPhase: [0, 0, 0],
           })
           rec.swings++
+          /**
+           * **이 휘두름이 연계로 나온 것인가.**
+           *
+           * ⚠️ 이 한 줄이 원래 **없었습니다.** `chained: 0` 으로 만들어만 놓고
+           * 아무 데서도 올리지 않았습니다. 그래서 판마다 찍히던 "연계 0회"는
+           * 관측이 아니라 **상수 0** 이었습니다.
+           *
+           * 이걸 모르고 세 라운드를 썼습니다 — 보스 조준을 고치고, 거리
+           * 조건을 열고, 페이즈 경계를 옮기고, 전용 프로브(`npm run chain`)까지
+           * 만들었습니다. 프로브는 15/15 통과했는데 플레이는 0이라, "드물게
+           * 나온다"와 "고장 났다" 사이에서 계속 헤맸습니다. 둘 다 아니었고,
+           * **세는 눈금이 아예 없었습니다.**
+           *
+           * 이 프로젝트에서 열두 번째로 잡은 계기 버그입니다. 규칙은 그대로:
+           * 숫자가 이상하면 게임보다 **계기를 먼저 의심한다.**
+           */
+          if (Enemy.chained[e] === 1) rec.chained++
           // **어느 페이즈에서 나왔는지**도 남깁니다. 연계는 2·3페이즈에만
           // 걸려 있으므로, 그 페이즈에 공격이 몇 번이나 나왔는지가
           // "연계가 안 나온다"의 답입니다.
@@ -1909,6 +1928,10 @@ class Game {
     brokenDeaths: number
     finishers: number
     bossFinishers: number
+    /** 연계가 예약된 횟수 — 실제 발동 수와 비교해 "안 나온다"의 원인을 가릅니다. */
+    chainsArmed: number
+    /** 예약된 연계가 무너짐으로 끊긴 횟수 — `[예고, 휘두름, 후딜]` 박자별 */
+    chainsLost: [number, number, number]
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
     /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
@@ -1921,6 +1944,8 @@ class Game {
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
+      chainsArmed: readChainsArmed(),
+      chainsLost: readChainsLost(),
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
       deaths: this.deathCount,
@@ -2484,6 +2509,7 @@ declare global {
         enterBelow: number
         cooldownScale: number
         windups: { id: string; seconds: number }[]
+        chains: Record<string, string>
       }[]
       /** 적 종류 검증용 — 표를 그대로 내보냅니다(스크립트가 수치를 베끼지 않도록). */
       enemyRoster: () => {
@@ -2710,6 +2736,8 @@ declare global {
         brokenDeaths: number
         finishers: number
         bossFinishers: number
+        chainsArmed: number
+        chainsLost: [number, number, number]
         dodgeStamina: number
         staminaSpent: number
       }
@@ -2801,6 +2829,11 @@ window.__game = {
       enterBelow: ph.enterBelow,
       cooldownScale: ph.cooldownScale,
       windups: attacksFor(EnemyKind.Boss).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
+      /**
+       * 이 페이즈의 **연계 표** — 프로브가 기대값을 베껴 적지 않도록 그대로 내보냅니다.
+       * (연계를 바꿨는데 검증만 옛 표로 통과하는 일을 막습니다.)
+       */
+      chains: ph.chains ?? {},
     })),
   damageEntity: (entity, amount) => {
     if (!isAlive(entity)) return

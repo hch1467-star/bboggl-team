@@ -169,6 +169,34 @@ try {
     let bossWindingSamples = 0
     const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
     const bossPhaseTime = [0, 0, 0]
+    /** 보스전 동안 보스가 각 상태에 머문 **초**. 합계 ≒ 보스전 시간. */
+    const bossBudget = {
+      windup: 0,
+      active: 0,
+      recovery: 0,
+      cooldown: 0,
+      broken: 0,
+      transition: 0,
+      idle: 0,
+    }
+    let bossBreaks = 0
+    let bossWasStaggered = false
+    /**
+     * 보스가 **귀환(리셋)** 한 횟수와, 그 동안 흘러간 시간.
+     *
+     * ── 왜 이게 없으면 안 되는가 ──────────────────────────────────
+     * 쿨다운·추격을 손보고 잰 판이 "보스전 106.5초"로 찍혔습니다. 그런데
+     * 시간 예산을 다 더하면 44.4초밖에 안 됐고, 준 피해는 **689/620** 이었습니다.
+     * 최대 체력보다 많이 넣었다는 건 **중간에 보스가 체력을 되찾았다**는 뜻입니다.
+     *
+     * 즉 그 106.5초는 "긴 보스전"이 아니라 "죽고 다시 걸어온 시간"이었습니다.
+     * 이걸 안 세면 나는 방금 한 변경이 성공했다고 **오독할 뻔했습니다.**
+     * 계기가 틀리면 없는 문제를 만들거나 있는 문제를 가립니다 — 또 한 번.
+     */
+    let bossResets = 0
+    let bossDisengaged = 0
+    let bossEngaged = 0
+    let bossWasEngaged = false
     let lastBossSample = 0
     const bossAttackRange = G.enemyRoster().find((r) => r.id === 'boss')?.attackRange ?? 3.4
     let bossKilled = false
@@ -589,8 +617,61 @@ try {
         // ⚠️ **조우 중일 때만** 셉니다. 처음엔 보스가 레벨에 존재하기만 하면
         // 세어서, 1단계가 103초로 찍혔습니다 — 그 대부분은 플레이어가 존
         // 반대편을 걷던 시간이었습니다.
-        if (be.encounter > 0) {
-          bossPhaseTime[Math.min(2, be.phase)] += Math.max(0, now() - lastBossSample)
+        const dtB = Math.max(0, now() - lastBossSample)
+        // ⚠️ encounter 3 = **귀환 중**입니다. 이것도 "> 0" 이라, 예전 코드는
+        // 보스가 자리로 걸어 돌아가는 시간까지 페이즈 시간에 더하고 있었습니다.
+        const engaged = be.encounter > 0 && be.encounter < 3
+        if (engaged) {
+          bossPhaseTime[Math.min(2, be.phase)] += dtB
+          bossEngaged += dtB
+        } else if (bossSeen) bossDisengaged += dtB
+        if (!engaged && bossWasEngaged) {
+          bossResets++
+          /**
+           * 초기화되면 **누적을 버리고 다시 셉니다.**
+           * 안 그러면 "준 피해 689/620" 처럼 최대 체력보다 큰 값이 나와서,
+           * 숫자를 보는 사람이 무엇을 믿어야 할지 알 수 없게 됩니다.
+           * 보고하는 것은 언제나 **마지막(성공한) 시도** 기준입니다.
+           */
+          bossDamageDealt = 0
+          bossDamageTaken = 0
+          bossPhaseTime[0] = 0
+          bossPhaseTime[1] = 0
+          bossPhaseTime[2] = 0
+          bossEngaged = 0
+          bossBreaks = 0
+          for (const k of Object.keys(bossBudget)) bossBudget[k] = 0
+        }
+        bossWasEngaged = engaged
+        /**
+         * ── 보스의 **시간 예산** ─────────────────────────────────────
+         *
+         * 왜 이걸 재는가: 보스전 32초에 보스가 **6번** 휘둘렀습니다.
+         * 5.4초에 한 번입니다. 참고한 게임들(엘든 링·세키로·오공)의 보스는
+         * 1.5~2.5초에 한 번 움직입니다. 3페이즈·5패턴·연계까지 얹은 설계는
+         * **2분짜리 싸움의 분량**인데, 실제로는 32초 만에 끝납니다.
+         *
+         * "왜 안 휘두르나"의 답은 하나가 아닙니다 — 무너져 있었을 수도,
+         * 페이즈 전환 중이었을 수도, 쿨다운이었을 수도, 사거리 밖이었을
+         * 수도 있습니다. **네 개는 각각 다른 처방**을 부릅니다:
+         *   · 무너짐이 크다   → 강인도가 너무 쉽게 깨진다
+         *   · 전환이 크다     → 전환 시간이 길거나 페이즈가 잦다
+         *   · 쿨다운이 크다   → attackCooldown / cooldownScale
+         *   · 대기·이동이 크다 → 보스가 못 따라온다(이동속도·길찾기)
+         *
+         * 그래서 나눠 담습니다. 합계는 보스전 시간과 같아야 합니다.
+         */
+        const bi = G.enemyInfo(be.entity)
+        if (engaged && bi) {
+          if (bi.transitionT > 0) bossBudget.transition += dtB
+          else if (bi.staggered) bossBudget.broken += dtB
+          else if (bi.attacking) {
+            bossBudget[bi.attackPhase === 0 ? 'windup' : bi.attackPhase === 1 ? 'active' : 'recovery'] += dtB
+          } else if (bi.cooldownT > 0) bossBudget.cooldown += dtB
+          else bossBudget.idle += dtB
+          // 무너진 **횟수**는 올라가는 순간에만 셉니다(프레임마다 세면 시간이 됩니다).
+          if (bi.staggered && !bossWasStaggered) bossBreaks++
+          bossWasStaggered = bi.staggered
         }
         bossSamples++
         const dmg = Math.max(0, lastBossHp - be.hp)
@@ -1045,7 +1126,16 @@ try {
         attackRange: bossAttackRange,
         dist: bossDist,
         phaseTime: bossPhaseTime.map((v) => Number(v.toFixed(1))),
+        budget: Object.fromEntries(
+          Object.entries(bossBudget).map(([k, v]) => [k, Number(v.toFixed(1))]),
+        ),
+        breaks: bossBreaks,
+        engaged: Number(bossEngaged.toFixed(1)),
+        disengaged: Number(bossDisengaged.toFixed(1)),
+        resets: bossResets,
         finishers: G.runStats().bossFinishers,
+        chainsArmed: G.runStats().chainsArmed,
+        chainsLost: G.runStats().chainsLost,
       },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
@@ -1182,14 +1272,30 @@ try {
       ? log.boss.dist.near + log.boss.dist.mid + log.boss.dist.far + log.boss.dist.away
       : 0
   const pct = (n) => Math.round((n / Math.max(1, distTotal)) * 100)
+  const bud = log.boss.budget ?? {}
+  /** 보스가 **실제로 공격 동작에 쓴** 시간의 비율 — 나머지는 전부 "못 하고 있던" 시간입니다. */
+  const actPct = Math.round(
+    (((bud.windup ?? 0) + (bud.active ?? 0) + (bud.recovery ?? 0)) /
+      Math.max(0.1, log.boss.engaged ?? log.boss.seconds)) *
+      100,
+  )
+  const totalSwings = (log.bossSwings ?? []).reduce((a, b) => a + b.swings, 0)
+  const swingRate = ((log.boss.engaged ?? log.boss.seconds) / Math.max(1, totalSwings)).toFixed(1)
   if (log.boss.fought) {
     console.log(
-      `  보스전      ${log.boss.seconds}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
+      `  보스전      실제 교전 ${log.boss.engaged}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
+        (log.boss.resets > 0
+          ? `              ⚠️ 보스가 ${log.boss.resets}번 초기화됨 — 그 사이 ${log.boss.disengaged}초는 교전이 아닙니다(체력도 되돌아갑니다)\n`
+          : '') +
         `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}\n` +
         `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%\n` +
         `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%\n` +
         `              페이즈별 시간 — 1단계 ${log.boss.phaseTime[0]}초 · 2단계 ${log.boss.phaseTime[1]}초 · 3단계 ${log.boss.phaseTime[2]}초\n` +
-        `              보스에게 들어간 처형 ${log.boss.finishers}회`,
+        `              보스의 시간 — 예고 ${bud.windup}초 · 휘두름 ${bud.active}초 · 후딜 ${bud.recovery}초 · 쿨다운 ${bud.cooldown}초\n` +
+        `                          · 무너짐 ${bud.broken}초(${log.boss.breaks}회) · 페이즈전환 ${bud.transition}초 · 대기·이동 ${bud.idle}초\n` +
+        `                          → 실제로 공격에 쓴 시간 ${actPct}% · ${swingRate}초에 한 번 휘두름\n` +
+        `              보스에게 들어간 처형 ${log.boss.finishers}회 · 연계 예약 ${log.boss.chainsArmed}회` +
+          ` · 무너져서 끊긴 연계 ${(log.boss.chainsLost ?? []).reduce((a, b) => a + b, 0)}회`          + ` [예고 ${log.boss.chainsLost?.[0] ?? 0} · 휘두름 ${log.boss.chainsLost?.[1] ?? 0} · 후딜 ${log.boss.chainsLost?.[2] ?? 0}]`,
     )
     for (const a of log.bossSwings) {
       console.log(

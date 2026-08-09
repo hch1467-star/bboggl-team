@@ -113,8 +113,38 @@ function wrapAngle(a: number): number {
  */
 let commitGapT = 0
 
+/** 연계가 예약된 횟수 — 실제로 발동한 횟수와 비교합니다(commitAttack 설계 노트). */
+let chainsArmed = 0
+export function readChainsArmed(): number {
+  return chainsArmed
+}
+
+/**
+ * 예약된 연계가 **무너짐으로 끊긴** 횟수 — 끊긴 시점의 박자별로 셉니다.
+ * `[예고 중, 휘두르는 중, 후딜 중]`
+ *
+ * ── 왜 박자를 나눠 세는가 ──────────────────────────────────────────
+ * "예약 3회 · 발동 0회"까지는 쟀는데, 그 숫자만으로는 **고쳐야 할지**
+ * 판단할 수 없습니다. 끊긴 자리가 어디냐에 따라 답이 정반대이기 때문입니다:
+ *
+ *   · **후딜에서 끊겼다** → 고칠 게 없습니다. 연계는 "후딜을 욕심내지 마라"는
+ *     장치이고, 그걸 무너뜨려 끊는 것은 플레이어가 **이긴** 것입니다.
+ *   · **예고에서 끊겼다** → 연계는 시작도 못 해 봤습니다. 두 박자를 배우게
+ *     하려던 설계가 통째로 도달 불가입니다.
+ *
+ * 추측으로 고르지 않으려고 세는 한 줄입니다.
+ */
+const chainsLost: [number, number, number] = [0, 0, 0]
+export function readChainsLost(): [number, number, number] {
+  return [chainsLost[0], chainsLost[1], chainsLost[2]]
+}
+
 export function resetAttackTokens(): void {
   commitGapT = 0
+  chainsArmed = 0
+  chainsLost[0] = 0
+  chainsLost[1] = 0
+  chainsLost[2] = 0
 }
 
 /**
@@ -234,6 +264,16 @@ function commitAttack(
 
   // 이 패턴 뒤에 따라붙을 연계를 지금 정해 둡니다.
   Enemy.chainNext[e] = chainIndexFor(kind, Enemy.phase[e], index)
+  /**
+   * **예약된 연계의 수**를 셉니다.
+   *
+   * 연계 프로브는 15/15 통과인데 실제 플레이에서는 0회입니다. 남은 가설이
+   * 둘인데 지금까지 **가르지 못했습니다**:
+   *   · 방아쇠가 되는 색이 안 나온다        → 예약 자체가 0
+   *   · 예약은 되는데 중간에 끊긴다(무너짐)  → 예약 > 0, 발동 0
+   * 세면 갈립니다. 추측으로 고치지 않기 위한 한 줄입니다.
+   */
+  if (Enemy.chainNext[e] !== NO_CHAIN) chainsArmed++
 
   /**
    * **예고음 — 4색이 곧 4개의 음입니다.**
@@ -368,6 +408,22 @@ export function enemyAiSystem(
 
     // 경직 중에는 아무것도 못 합니다 — 플레이어가 흐름을 끊을 수 있는 근거
     if (Actor.state[e] === ActorState.Stagger) {
+      /**
+       * 무너지면 **예약해 둔 연계는 사라집니다.**
+       *
+       * 원래는 `Enemy.chainNext` 가 그대로 남아 있었습니다. 다음 공격을
+       * 걸 때 덮어써지니 눈에 띄는 버그는 아니었지만, "예약이 살아 있는데
+       * 영원히 안 나간다"는 상태가 존재하는 것 자체가 셈을 흐립니다.
+       * 여기서 명시적으로 지우고, **어느 박자에서 끊겼는지**를 기록합니다.
+       *
+       * `Actor.phase` 는 breakPoise 가 건드리지 않아서 끊긴 순간의 값이
+       * 그대로 남아 있습니다(combat.ts breakPoise 참고).
+       */
+      if (Enemy.chainNext[e] !== NO_CHAIN) {
+        const at = Actor.phase[e]
+        chainsLost[at === 0 ? 0 : at === 1 ? 1 : 2]++
+        Enemy.chainNext[e] = NO_CHAIN
+      }
       Actor.timer[e] -= dt
       if (Actor.timer[e] <= 0) Actor.state[e] = ActorState.Idle
       decayVelocity(e, dt, 9)
@@ -710,8 +766,17 @@ export function enemyAiSystem(
       const nx = dist > 0.0001 ? dx / dist : 0
       const nz = dist > 0.0001 ? dz / dist : 0
       const accel = 26 * dt
-      Velocity.x[e] += clampMag(nx * cfg.moveSpeed * snareScale - Velocity.x[e], accel)
-      Velocity.z[e] += clampMag(nz * cfg.moveSpeed * snareScale - Velocity.z[e], accel)
+      /**
+       * **보스만** 멀어지면 뛰어옵니다 (BOSS_ARENA.chaseRange 설계 노트).
+       *
+       * 잡몹에는 일부러 주지 않았습니다. 잡몹이 빨라지면 "먼저 뭘 죽일까"가
+       * 사라지고 모두가 동시에 얼굴 앞에 도착합니다 — 다대일 설계(공격
+       * 토큰)가 풀려는 문제를 오히려 키웁니다. 보스는 1:1이라 안전합니다.
+       */
+      const chase =
+        kind === EnemyKind.Boss && dist > BOSS_ARENA.chaseRange ? BOSS_ARENA.chaseSpeedScale : 1
+      Velocity.x[e] += clampMag(nx * cfg.moveSpeed * chase * snareScale - Velocity.x[e], accel)
+      Velocity.z[e] += clampMag(nz * cfg.moveSpeed * chase * snareScale - Velocity.z[e], accel)
     }
   }
 }
