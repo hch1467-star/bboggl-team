@@ -150,6 +150,22 @@ try {
      * 애초에 화톳불에 안 갔나 — 지금은 **알 방법이 없습니다.**
      * 셋은 각각 다른 처방을 부릅니다(경제 / 재료 배치 / 봇의 판단).
      */
+    /**
+     * ── 재료는 언제 도착하고, 소비처는 언제까지 닿는가 ────────────────
+     *
+     * 3판 벤치에서 **무기 강화 중앙값 0회**, 남은 불티 360 이 나왔습니다.
+     * 불티는 남는데 못 삽니다 — 막는 것은 **정련석**입니다.
+     *
+     * 그런데 "정련석이 부족하다"와 "정련석이 **늦게** 온다"는 다른 문제이고
+     * 처방도 다릅니다(드롭을 늘린다 / 배치를 앞으로 당긴다). 두 시각을
+     * 재면 갈립니다:
+     *   · 처음으로 **살 수 있게 된** 순간
+     *   · 소비처(화톳불·모루)에 **마지막으로 닿을 수 있었던** 순간
+     * 앞의 것이 뒤의 것보다 늦으면, 돈이 모자란 게 아니라 **너무 늦게**
+     * 모인 것입니다.
+     */
+    let affordableAt = -1
+    let lastSpendChanceAt = -1
     const fireVisits = []
     /** 화톳불에 가려다 **접은** 기록 — 접은 이유(걸어야 하는 거리)와 함께. */
     const fireSkips = []
@@ -1112,13 +1128,30 @@ try {
        * 그래서 자원이 바닥나면 목표를 잠시 화톳불로 바꿉니다.
        */
       /**
-       * **가장 가까운 소비처** — 화톳불이든 모루든.
+       * **소비처는 걸어야 하는 거리로 고릅니다.**
        *
-       * `nearestBonfire()` 를 그대로 쓰면 모루를 놓아도 봇은 영영 안 갑니다.
-       * 물건을 늘렸으면 **묻는 자리도** 같이 늘려야 합니다 — 이 프로젝트에서
-       * 열두 번 잡은 계기 버그가 전부 이 모양이었습니다.
+       * 직선으로 고르면 계단 위에서 폐허의 화톳불(직선 20m · 실제 98m)을
+       * 골라 놓고 "너무 멀다"며 접습니다. 바로 옆(30m)의 모루를 두고요.
+       * 실제로 그래서 **재료가 40초 일찍 모였는데도 무기 강화가 0/3판**
+       * 이었습니다.
+       *
+       * 직선거리로 고른 실수는 이 프로젝트에서 세 번째입니다(적 어그로 ·
+       * 화톳불 막힘 판정 · 여기). 그래서 게임 쪽은 **목록만** 주고,
+       * 고르는 코드는 길찾기를 가진 이 한 곳에만 둡니다.
        */
-      const fire = G.nearestSpend?.() ?? G.nearestBonfire()
+      let fire = null
+      {
+        let bestD = Infinity
+        for (const sp of G.spendPoints?.() ?? []) {
+          const step = G.pathStep(sp.x, sp.z)
+          const d = step ? step.dist : Math.hypot(sp.x - p.x, sp.z - p.z)
+          if (d < bestD) {
+            bestD = d
+            fire = sp
+          }
+        }
+        if (!fire) fire = G.nearestBonfire()
+      }
       const em = G.emberInfo()
       // 강화할 수 있으면 체력과 무관하게 멈춥니다. **불티는 쓰라고 있는 것**이고,
       // 안 쓰면 불티 경제가 도는지 아닌지를 이 봇이 영영 못 잽니다.
@@ -1167,6 +1200,15 @@ try {
        * 없었습니다.** 사람이라면 400을 들고 있으면 쓰러 갑니다.
        * 다만 너무 멀면 안 갑니다 — 강화하러 존을 되돌아가는 것은 사람도 안 합니다.
        */
+      /**
+       * 소비처까지 **걸어야 하는 거리**로 봅니다. 직선으로 재면 벽 너머
+       * 화톳불이 "가깝다"로 잡혀서, 갈 수 없는 기회를 있었다고 세게 됩니다.
+       */
+      if (fire) {
+        const sp = G.pathStep(fire.x, fire.z)
+        if (sp && sp.dist <= 45) lastSpendChanceAt = Number(now().toFixed(1))
+      }
+      if (affordableAt < 0 && canUpgradeWeapon) affordableAt = Number(now().toFixed(1))
       const walletGrew =
         em.embers > lastFireWallet.embers || wu.stones > lastFireWallet.stones
       if (fire && canUpgrade && walletGrew && now() >= fireCooldownUntil) {
@@ -1564,6 +1606,8 @@ try {
       detours: detours.map((d) => ({ ...d, damage: Math.round(d.damage) })),
       fireVisits,
       fireSkips,
+      affordableAt,
+      lastSpendChanceAt,
       embers: em.embers,
       vialsMax: em.vialsMax,
       hp: st.player.hp,

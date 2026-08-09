@@ -2007,25 +2007,34 @@ class Game {
    * 계기 버그를 열두 번 잡았습니다. 물건을 늘렸으면 **묻는 자리도**
    * 같이 늘려야 합니다.
    */
-  debugNearestSpend(): { x: number; z: number; anvil: boolean } | null {
-    const p = this.playerEntity
-    let best = null
-    let bestD = Infinity
-    for (const f of this.bonfires) {
-      const d = Math.hypot(f.x - Transform.x[p], f.z - Transform.z[p])
-      if (d < bestD) {
-        bestD = d
-        best = { x: f.x, z: f.z, anvil: false }
-      }
-    }
-    for (const a of this.anvils) {
-      const d = Math.hypot(a.x - Transform.x[p], a.z - Transform.z[p])
-      if (d < bestD) {
-        bestD = d
-        best = { x: a.x, z: a.z, anvil: true }
-      }
-    }
-    return best
+  /**
+   * **소비처 전부**를 좌표로 내보냅니다. 고르는 것은 부르는 쪽입니다.
+   *
+   * ── 왜 "가장 가까운 하나"를 돌려주지 않는가 ────────────────────────
+   * 처음엔 `debugNearestSpend()` 가 **직선거리**로 하나를 골라 줬습니다.
+   * 그게 조용히 봇을 망가뜨렸습니다:
+   *
+   *   재료가 모이는 시각 98.9초 · 소비처에 닿을 수 있던 마지막 시각 139.6초
+   *   → 40초의 창이 있는데도 **무기 강화 0/3판**
+   *
+   * 봇이 계단 위에 있을 때, 폐허의 화톳불은 **직선 20m**지만 성벽마루를
+   * 돌아가야 해서 **걸어야 하는 거리는 98m** 입니다. 바로 옆(약 30m)의
+   * 모루를 두고 그 화톳불을 고른 뒤, "너무 멀다"며 왕복을 접었습니다.
+   *
+   * 이 프로젝트에서 **직선거리로 고른 것**이 문제가 된 것은 이번이 세 번째
+   * 입니다 — 적 어그로(성벽 건너 12.4m), 화톳불 막힘 판정, 그리고 여기.
+   * 앞의 둘은 고쳐 놓고 주석까지 적었는데, **세 라운드 전에 제가 새로 쓴
+   * 코드에서 같은 실수가 되살아났습니다.**
+   *
+   * 그래서 이번엔 고르는 일을 아예 안 합니다. 목록만 주고, **길찾기를
+   * 가진 쪽**이 고르게 둡니다. 고르는 코드가 하나면 다시 어긋날 자리도
+   * 하나입니다.
+   */
+  debugSpendPoints(): { x: number; z: number; anvil: boolean }[] {
+    return [
+      ...this.bonfires.map((f) => ({ x: f.x, z: f.z, anvil: false })),
+      ...this.anvils.map((a) => ({ x: a.x, z: a.z, anvil: true })),
+    ]
   }
 
   /** 모루 목록 — 검증용(부활·회복을 **안 한다**는 것을 재려면 위치가 필요합니다). */
@@ -2732,8 +2741,8 @@ declare global {
       setVials: (n: number) => void
       teleportPlayer: (x: number, z: number) => void
       nearestBonfire: () => { x: number; z: number } | null
-      /** 가장 가까운 소비처(화톳불 또는 모루) */
-      nearestSpend: () => { x: number; z: number; anvil: boolean } | null
+      /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
+      spendPoints: () => { x: number; z: number; anvil: boolean }[]
       anvils: () => { x: number; z: number }[]
       /** 사다리(지름길) 검증용 */
       finisherInfo: () => {
@@ -2998,7 +3007,7 @@ window.__game = {
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   nearestBonfire: () => game.debugNearestBonfire(),
-  nearestSpend: () => game.debugNearestSpend(),
+  spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),
   /**
    * 처형 검증용.

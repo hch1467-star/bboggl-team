@@ -126,6 +126,19 @@ console.log(`  🟢 초록 예고   ${fmt(pick((l) => l.greenEvents ?? 0), 0)}�
 console.log(`  보물           ${fmt(pick((l) => Number(String(l.treasures).split('/')[0])), 0)} / ` +
   `${logs[0].treasures?.split('/')[1] ?? '?'}`)
 console.log(`  무기 강화      ${fmt(pick((l) => l.weaponUps ?? 0), 1)}회`)
+/**
+ * **살 수 있게 된 때**와 **소비처에 마지막으로 닿을 수 있었던 때**.
+ * 앞이 뒤보다 늦으면 돈이 모자란 게 아니라 **너무 늦게 모인** 것입니다.
+ */
+const afford = pick((l) => l.affordableAt).filter((n) => n >= 0)
+console.log(
+  `  살 수 있게 된 때  ${afford.length ? fmt(afford) : '한 번도 없음'}초` +
+    ` · 소비처에 닿을 수 있던 마지막 때 ${fmt(pick((l) => l.lastSpendChanceAt))}초`,
+)
+const tooLate = logs.filter(
+  (l) => l.affordableAt >= 0 && l.lastSpendChanceAt >= 0 && l.affordableAt > l.lastSpendChanceAt,
+).length
+console.log(`  → 늦게 모인 판    ${tooLate}/${logs.length}판`)
 console.log(`  남은 불티      ${fmt(pick((l) => l.embers ?? 0), 0)}`)
 
 console.log('\n  ── 흐름 ──────────────────────────────')
