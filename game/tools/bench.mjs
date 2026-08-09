@@ -54,7 +54,12 @@ function fmt(xs, digits = 1) {
   return lo === hi ? d(m) : `${d(m)}  (${d(lo)}~${d(hi)})`
 }
 
-console.log(`\n📊 ${RUNS}판 벤치 — 중앙값 (최소~최대)\n`)
+const WEAPON = process.env.PLAY_WEAPON
+console.log(
+  `\n📊 ${RUNS}판 벤치 — 중앙값 (최소~최대)` +
+    (WEAPON ? ` · 무기 고정 ${WEAPON}번` : '') +
+    '\n',
+)
 
 const logs = []
 for (let i = 0; i < RUNS; i++) {
@@ -95,6 +100,11 @@ console.log(`  클리어 시간    ${fmt(cleared.map((l) => l.clearedAt))}초`)
 console.log(`  사망           ${fmt(pick((l) => l.deaths), 1)}회`)
 console.log(`  처치           ${fmt(pick((l) => l.kills), 0)}마리`)
 console.log(`  받은 피해      ${fmt(pick((l) => l.damageTaken), 0)}`)
+console.log(`  쓴 무기        ${[...new Set(pick((l) => l.weaponId))].join(', ')}`)
+console.log(
+  `  백어택         ${fmt(pick((l) => l.backHits ?? 0), 0)}회 / 총 타격 ${fmt(pick((l) => l.hitsDealt ?? 0), 0)}회` +
+    ` (${fmt(pick((l) => ((l.backHits ?? 0) / Math.max(1, l.hitsDealt ?? 1)) * 100), 0)}%)`,
+)
 
 console.log('\n  ── 보스 ──────────────────────────────')
 console.log(`  보스전         ${fmt(boss.map((l) => l.boss.engaged))}초`)

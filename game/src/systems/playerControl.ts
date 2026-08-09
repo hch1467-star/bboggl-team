@@ -396,7 +396,8 @@ function beginDodge(p: number, dirX: number, dirZ: number): void {
   Player.dodgeDirX[p] = dirX
   Player.dodgeDirZ[p] = dirZ
   Player.dodgeElapsed[p] = 0
-  spendStamina(p, PLAYER.dodge.staminaCost)
+  // 무기마다 회피 값이 다릅니다 — arsenal.ts dodgeCostScale 설계 노트 참고.
+  spendStamina(p, PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1))
   Transform.rotY[p] = Math.atan2(dirX, dirZ)
   sfx.dodge()
 }
@@ -520,7 +521,9 @@ export function playerControlSystem(ctx: ControlContext): void {
     const aimDz = ctx.aimZ - Transform.z[p]
     const aimRot = Math.hypot(aimDx, aimDz) > 0.05 ? Math.atan2(aimDx, aimDz) : Transform.rotY[p]
 
-    const canDodge = Stamina.value[p] >= PLAYER.dodge.staminaCost && Player.dodgeCooldownT[p] <= 0
+    const canDodge =
+      Stamina.value[p] >= PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) &&
+      Player.dodgeCooldownT[p] <= 0
     const weapon = weaponOf(p)
 
     /** 슬롯을 지금 쓸 수 있는지 — 룬이 비었거나 쿨다운이면 불가. */

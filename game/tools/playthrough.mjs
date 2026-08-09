@@ -48,7 +48,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async (LIMIT) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -125,6 +125,27 @@ try {
     // 반영 전이라 0으로 나옵니다 — 실제로 불티 424를 쓰고도 "강화 0회"로
     // 보고했습니다. 또 계측기가 거짓말을 한 경우입니다.
     const startVialMax = G.vialInfo().max
+    /**
+     * ── 시작 무기를 고정할 수 있게 합니다 (`PLAY_WEAPON=1|2|3`) ─────────
+     *
+     * 봇은 지금까지 **한 무기만** 썼습니다. 그래서 판마다 강화가
+     * `[1/0/0]` 으로 찍혔고, 나머지 둘은 존을 한 번도 안 지나갔습니다.
+     *
+     * 그런데 이 게임이 **직업제 대신 무기제를 택한 이유**가 DESIGN.md
+     * 맨 앞에 적혀 있습니다 — *"보물 = 새로운 걸 할 수 있게 되는 것"* 이
+     * 무기제에서만 성립하기 때문입니다. 무기가 셋인데 존이 하나의 무기로만
+     * 검증되었다면, 그 주장은 **벤치(허수아비)에서만** 참입니다.
+     *
+     * 허수아비는 "무엇이 가능한가"를 재고, 존은 "무엇이 실제로 일어나는가"를
+     * 잽니다. 세 무기로 존을 각각 돌려 봐야 *"무기를 바꾸면 플레이가
+     * 달라지는가"* 에 답할 수 있습니다.
+     */
+    const forced = Number(WEAPON_SLOT)
+    if (forced >= 1 && forced <= 3) {
+      G.press(`Digit${forced}`)
+      G.release(`Digit${forced}`)
+      await new Promise((r) => setTimeout(r, 60))
+    }
     const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
     /**
@@ -1616,6 +1637,23 @@ try {
       restCount: G.vialInfo().restCount,
       upgrades: G.vialInfo().max - startVialMax,
       weaponUps: G.weaponUpgradeInfo().levels.reduce((a, v, i) => a + (v - startWeaponLevels[i]), 0),
+      weaponId: G.state().loadout.weapon,
+      /**
+       * ── 존에서 **등 뒤를 실제로 잡는가** ────────────────────────────
+       *
+       * 무기 벤치(허수아비)는 쌍단검이 **등 뒤에서 2.33배**라고 말합니다.
+       * 그런데 존을 세 무기로 돌려 보니 단검이 가장 나쁩니다 — 클리어
+       * 263초(롱소드 167초), 받은 피해 404(롱소드 183).
+       *
+       * 두 가지가 가능합니다:
+       *   · 숫자가 약하다            → 밸런스 문제
+       *   · 정체성(백어택)을 못 쓴다 → 기회/조작 문제
+       * **완전히 다른 처방**입니다. 존에서의 백어택 비율을 세면 갈립니다.
+       * 벤치가 "무엇이 가능한가"를 재는 동안, 이 숫자는 "실제로 쓰이는가"를
+       * 잽니다 — 이 프로젝트에서 그 둘을 안 나눠 여러 번 헤맸습니다.
+       */
+      backHits: G.state().backHits,
+      hitsDealt: G.state().hitsDealt,
       weaponLevels: G.weaponUpgradeInfo().levels,
       stones: G.weaponUpgradeInfo().stones,
       stonesEarned: G.weaponUpgradeInfo().earnedStones,
@@ -1656,7 +1694,7 @@ try {
       notes,
       lastHp,
     }
-  }, TIME_LIMIT)
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? ''])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
