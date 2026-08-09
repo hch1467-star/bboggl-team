@@ -154,6 +154,12 @@ try {
     const notes = []
     /** 교전과 교전 사이의 빈 시간(초) 목록 */
     const gaps = []
+    /** 그중 8초 이상인 것들의 **정황** — 어디서, 무엇을 하다, 죽었는지 */
+    const longGaps = []
+    const gapActs = new Map()
+    let gapFrames = 0
+    let gapDeaths = 0
+    let gapStartRegion = ''
     let wasInCombat = false
     let lastCombatEnd = 0
     /** 스태미나 압박 */
@@ -311,11 +317,47 @@ try {
          */
         const inCombat = chasing > 0
         if (inCombat && !wasInCombat) {
-          if (lastCombatEnd > 0) gaps.push(now() - lastCombatEnd)
+          if (lastCombatEnd > 0) {
+            const secs = now() - lastCombatEnd
+            gaps.push(secs)
+            /**
+             * **긴 빈 시간이 "어디서, 무엇을 하다" 생겼는지**도 남깁니다.
+             *
+             * 지난 라운드에 지도의 빈 구간 58m를 조합 둘로 잘라 평균을
+             * 9.2초 → 6.0초로 줄였는데, **최장은 19초 그대로**였습니다.
+             * 그때 "죽은 뒤 되돌아가는 길이거나 곁길일 것"이라고 적고
+             * **추측이라고 표시**해 뒀습니다. 이번엔 셉니다.
+             *
+             * 정적 계측(map 프로브)은 주 동선만 봅니다. 봇은 화톳불로
+             * 되돌아가고, 지름길을 열러 가고, 죽으면 부활 지점에서 다시
+             * 걷습니다 — 그 시간은 지도에 안 보입니다.
+             */
+            if (secs >= 8) {
+              const top = [...gapActs.entries()].sort((a, b) => b[1] - a[1])
+              longGaps.push({
+                at: Number((now() - t0).toFixed(0)),
+                secs: Number(secs.toFixed(1)),
+                where: `${gapStartRegion} → ${curRegion}`,
+                did: top
+                  .slice(0, 3)
+                  .map(([k, v]) => `${k} ${Math.round((v / Math.max(1, gapFrames)) * 100)}%`)
+                  .join(' '),
+                died: gapDeaths,
+              })
+            }
+          }
           wasInCombat = true
         } else if (!inCombat && wasInCombat) {
           wasInCombat = false
           lastCombatEnd = now()
+          gapActs.clear()
+          gapFrames = 0
+          gapDeaths = 0
+          gapStartRegion = curRegion
+        }
+        if (!inCombat && lastCombatEnd > 0) {
+          gapFrames++
+          gapActs.set(act, (gapActs.get(act) ?? 0) + 1)
         }
 
         /**
@@ -381,7 +423,16 @@ try {
        * 끝낸 판에서 체력 67에 적 0마리인데 **사망·게임오버**로 기록됐습니다 —
        * 계측기가 승리를 패배로 보고한 것입니다.
        */
-      const cleared = st.gameOver && p.hp > 0 && st.enemiesLeft === 0
+      /**
+       * ⚠️ **클리어 판정은 게임에게 맡깁니다.**
+       *
+       * 예전엔 `enemiesLeft === 0` 을 같이 봤습니다. 그런데 존의 끝이
+       * "보스 처치"로 바뀌면서 그 조건은 **영원히 참이 되지 않습니다**
+       * (보스를 잡아도 잡몹은 남아 있으니까요). 봇이 클리어를 놓치고
+       * 제한 시간까지 헤매게 됩니다 — 게임의 규칙을 봇이 따로 적어 두면
+       * 규칙을 바꿀 때마다 이런 일이 생깁니다.
+       */
+      const cleared = st.gameOver && p.hp > 0
       if (cleared) {
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '★ 존 클리어', region: curRegion })
         clearedAt = now() - t0
@@ -389,6 +440,7 @@ try {
         break
       }
       if (p.hp <= 0 || st.gameOver) {
+        gapDeaths++
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '사망', region: curRegion, x: p.x, z: p.z })
         releaseAll()
         // 화톳불 부활은 자동입니다. 게임 오버(부활 지점 없음)면 여기서 끝.
@@ -865,6 +917,7 @@ try {
       gapMax: gaps.length ? Number(Math.max(...gaps).toFixed(1)) : 0,
       gapLong: gaps.filter((g) => g >= 8).length,
       gapCount: gaps.length,
+      longGaps: longGaps.sort((a, b) => b.secs - a.secs).slice(0, 4),
       /** 스태미나가 실제로 제약이 되는가 */
       minStamina: Number(minStamina.toFixed(0)),
       dodgeCost,
@@ -973,6 +1026,11 @@ try {
   console.log(
     `  빈 시간     교전 사이 평균 ${log.gapAvg}초 · 최장 ${log.gapMax}초 · 8초 이상 ${log.gapLong}회 / ${log.gapCount}구간`,
   )
+  for (const g of log.longGaps) {
+    console.log(
+      `              ${String(g.at).padStart(4)}초 · ${String(g.secs).padStart(5)}초 · ${g.where} · ${g.did}${g.died ? ` · 사망 ${g.died}회` : ''}`,
+    )
+  }
   console.log(
     `  스태미나    최저 ${log.minStamina} · 교전 중 회피(${log.dodgeCost})를 못 낼 만큼 낮았던 시간 ${log.lowStaminaRatio}%`,
   )

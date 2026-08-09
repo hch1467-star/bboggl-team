@@ -160,6 +160,8 @@ class Game {
   private kills = 0
   private waveTimer = 0
   private gameOver = false
+  /** 이 존의 보스를 잡았는가 — 존의 끝은 보스입니다(아래 6번 설계 노트). */
+  private bossDefeated = false
   private lastFrameMs = 0
   private paused = false
   private readonly aim = { x: 0, z: 0 }
@@ -362,6 +364,7 @@ class Game {
     this.kills = 0
     this.waveTimer = 0
     this.gameOver = false
+    this.bossDefeated = false
     this.treasuresFound = 0
     this.treasureTotal = 0
     this.hitsDealt = 0
@@ -897,6 +900,7 @@ class Game {
         if (Enemy.kind[death.entity] === EnemyKind.Boss) {
           Player.stones[p] += WEAPON_UPGRADE.stonePerBoss
           this.stonesEarned += WEAPON_UPGRADE.stonePerBoss
+          this.bossDefeated = true
         }
         /**
          * 되살아난 적일수록 덜 줍니다. 보스는 예외 — 부활하지 않으므로
@@ -935,9 +939,40 @@ class Game {
     // ---- 6. 진행 ----
     const enemiesLeft = countLivingEnemies()
     if (this.levelMode) {
-      if (!this.gameOver && enemiesLeft === 0 && this.treasuresFound >= this.treasureTotal) {
+      /**
+       * ── 존의 끝은 **보스**입니다 ────────────────────────────────
+       *
+       * 예전 조건은 *"모든 적 처치 + 모든 보물 획득"* 이었습니다.
+       * 자동 플레이가 그 대가를 그대로 찍어 줬습니다:
+       *
+       *     376초 클리어 중 보스 처치는 140초 — **236초(63%)가 그 뒤의 청소**
+       *     가장 긴 빈 구간 넷 중 셋이 "북쪽 단상 → 무너진 성문",
+       *     즉 지도를 **거꾸로 가로질러 되돌아가는** 길이었습니다.
+       *
+       * 목표 화살표가 보스를 잡은 뒤 남은 보물을 가리키면서, 존의 마지막
+       * 3분의 2가 **수집 심부름**이 되어 있었습니다. 절정 뒤에 잡일이 붙으면
+       * 절정이 절정이 아니게 됩니다.
+       *
+       * 소울류는 이렇게 하지 않습니다. 보스를 잡으면 그 구역은 끝이고,
+       * 못 주운 아이템은 **아쉬움으로 남습니다.** 그래서 안개문 앞에서
+       * *"더 둘러볼까, 지금 들어갈까"* 가 진짜 결정이 됩니다.
+       *
+       * 그 결정을 만들려면 클리어 조건이 보스여야 합니다. 보물 수는 **가두는
+       * 조건이 아니라 기록**으로 남깁니다 — 배너에 3/5 라고 적히는 것이
+       * "두 개는 두고 왔구나"를 말해 줍니다.
+       */
+      const hasBoss = (this.levelData?.entities ?? []).some((e) => e.kind === 'boss')
+      const done = hasBoss
+        ? this.bossDefeated
+        : enemiesLeft === 0 && this.treasuresFound >= this.treasureTotal
+      if (!this.gameOver && done) {
         this.gameOver = true
-        this.hud.showBanner('클리어!', `${this.levelName} · 보물 ${this.treasuresFound}/${this.treasureTotal}`, 6)
+        this.hud.showBanner(
+          '클리어!',
+          `${this.levelName} · 보물 ${this.treasuresFound}/${this.treasureTotal}` +
+            (this.treasuresFound < this.treasureTotal ? ' — 두고 온 것이 있다' : ''),
+          6,
+        )
       }
     } else if (!this.gameOver && enemiesLeft === 0) {
       this.waveTimer -= time.realDt

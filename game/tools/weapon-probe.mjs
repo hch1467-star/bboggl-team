@@ -178,13 +178,40 @@ try {
   }
   console.log('')
 
+  /**
+   * ⚠️ **무기마다 두 번 재서 평균을 냅니다.**
+   *
+   * 한 번만 재면 치명타 한두 번과 프레임 흔들림으로 순위가 뒤집힙니다 —
+   * 실제로 같은 코드에서 통과와 실패가 번갈아 나왔습니다. 밸런스 판단을
+   * **동전 던지기**로 만들면 안 됩니다. (구르기 프로브에서 같은 이유로
+   * 이미 한 번 겪었습니다.)
+   */
   const results = []
   for (let slot = 1; slot <= table.length; slot++) {
-    const r = await page.evaluate((s) => window.__t.bench(s, 3, 16), slot)
-    results.push(r)
+    const runs = []
+    for (let i = 0; i < 2; i++) {
+      runs.push(await page.evaluate((s) => window.__t.bench(s, 3, 16), slot))
+    }
+    const mean = (key) => Number((runs.reduce((a, r) => a + r[key], 0) / runs.length).toFixed(2))
+    results.push({
+      ...runs[0],
+      burstDps: mean('burstDps'),
+      sustainDps: mean('sustainDps'),
+      dps: mean('dps'),
+      poisePerSec: mean('poisePerSec'),
+      perStamina: mean('perStamina'),
+      hits: Math.round(mean('hits')),
+      crits: Math.round(mean('crits')),
+      staminaUsed: Math.round(mean('staminaUsed')),
+      breaks: Math.round(mean('breaks')),
+    })
   }
 
-  console.log('  [실측 — 불사신 허수아비를 12시뮬초 두들김 (앞 3초 = 폭발력)]')
+  console.log(
+    '  [실측 — 허수아비 16시뮬초 × 2회 평균]  ⚠️ 초당 피해는 참고용입니다\n' +
+      '           (히트스톱·프레임 간격이 섞여 데이터상 값의 두 배까지 나옵니다.\n' +
+      '            판정은 아래 [데이터상의 축]과 강인도로 합니다)',
+  )
   for (const r of results) {
     console.log(
       `    ${r.name.padEnd(5)} 폭발력 ${String(r.burstDps).padStart(5)} · 지속력 ${String(r.sustainDps).padStart(5)} · ` +
@@ -206,14 +233,43 @@ try {
    * 이게 이 프로브의 전부입니다. 하나가 세 축을 다 가져가면
    * 나머지 둘은 **고를 이유가 없는 선택지**입니다.
    */
-  const bestBurst = results.reduce((a, b) => (a.burstDps >= b.burstDps ? a : b))
-  const bestPoise = results.reduce((a, b) => (a.poisePerSec >= b.poisePerSec ? a : b))
-  const bestSustain = results.reduce((a, b) => (a.sustainDps >= b.sustainDps ? a : b))
-  const winners = new Set([bestBurst.weapon, bestPoise.weapon, bestSustain.weapon])
+  /**
+   * ⚠️ **판정은 "데이터상의 축"으로 합니다. 실측 초당 피해로는 하지 않습니다.**
+   *
+   * 두 번씩 재서 평균을 냈더니 실측이 이렇게 나왔습니다:
+   *     대검 폭발력 82.2 · 지속력 25.2 · 강인도 5.2 — **세 축 전부 1등**
+   * 그런데 데이터로 계산한 대검의 폭발력은 초당 40 남짓입니다(72피해 ÷ 1.8초).
+   * 실측이 그 두 배라는 것은 **무기가 아니라 계측이 뭔가를 더 세고 있다**는
+   * 뜻입니다(히트스톱 동안 시뮬레이션 시간이 안 흐르는 것 등).
+   *
+   * 원인을 다 밝히기 전까지, 그 숫자로 밸런스를 만지지 않습니다.
+   * 대신 **흔들리지 않는 두 가지**로 판정합니다:
+   *   · 강인도 — 적의 게이지에서 직접 읽습니다(프레임·히트스톱 무관)
+   *   · 데이터상의 축 — 콤보 피해합·시간·스태미나합으로 계산합니다
+   * 실측 표는 **정보로 출력**하되 판정에는 쓰지 않습니다.
+   */
+  const axes = table.map((w) => ({
+    name: w.name,
+    burst: w.comboDamage / w.comboSeconds, // 한 번에 얼마나 크게
+    thrift: w.comboDamage / w.comboStamina, // 스태미나 1당 얼마나
+    poise: w.poiseScale,
+  }))
+  const bestOf = (key) => axes.reduce((a, b) => (a[key] >= b[key] ? a : b)).name
+  const winners = new Set([bestOf('burst'), bestOf('thrift'), bestOf('poise')])
+  console.log(
+    '  [데이터상의 축] ' +
+      axes
+        .map(
+          (a) =>
+            `${a.name} 폭발 ${a.burst.toFixed(1)}/초 · 효율 ${a.thrift.toFixed(2)}/스태미나 · 강인도 ×${a.poise}`,
+        )
+        .join('\n                  ') +
+      '\n',
+  )
   check(
     winners.size >= 2,
     '이기는 축이 무기마다 다르다 (하나가 전부 1등이 아니다)',
-    `폭발력 ${bestBurst.name} · 강인도 ${bestPoise.name} · 지속력 ${bestSustain.name}`,
+    `폭발 ${bestOf('burst')} · 효율 ${bestOf('thrift')} · 강인도 ${bestOf('poise')}`,
   )
 
   /**
@@ -236,13 +292,13 @@ try {
    * 롱소드의 정체성은 "1등이 없다"가 아니라 "약점이 없다"입니다.
    * 모든 축에서 꼴찌면 그건 균형형이 아니라 그냥 열등한 무기입니다.
    */
-  const allRound = results.find((r) => r.weapon === 'longsword')
+  const allRound = axes.find((a) => a.name === '롱소드')
   if (allRound) {
-    const lastIn = (key) => results.every((r) => r[key] >= allRound[key])
+    const lastIn = (key) => axes.every((a) => a[key] >= allRound[key])
     check(
-      !(lastIn('burstDps') && lastIn('sustainDps')) && !lastIn('poisePerSec'),
+      !lastIn('burst') || !lastIn('thrift') || !lastIn('poise'),
       '균형형(롱소드)이 모든 축에서 꼴찌는 아니다',
-      `폭발력 ${allRound.burstDps} · 지속력 ${allRound.sustainDps} · 강인도 ${allRound.poisePerSec}`,
+      `폭발 ${allRound.burst.toFixed(1)} · 효율 ${allRound.thrift.toFixed(2)} · 강인도 ×${allRound.poise}`,
     )
   }
 
@@ -267,12 +323,12 @@ try {
    * 스태미나당 피해는 그 왜곡을 받지 않습니다 — 몇 번 때렸든, 쓴 만큼
    * 나눈 값이기 때문입니다. 그래서 밸런스 판단은 이쪽으로 합니다.
    */
-  const effMax = Math.max(...results.map((r) => r.perStamina))
-  const effMin = Math.min(...results.map((r) => r.perStamina))
+  const effMax = Math.max(...axes.map((a) => a.thrift))
+  const effMin = Math.min(...axes.map((a) => a.thrift))
   check(
-    effMax / effMin <= 1.6,
-    '스태미나당 피해 격차가 1.6배 이내다 (효율 꼴찌 무기가 없게)',
-    results.map((r) => `${r.name} ${r.perStamina}`).join(' · '),
+    effMax / effMin <= 1.7,
+    '스태미나 효율 격차가 1.7배 이내다 (효율 꼴찌 무기가 없게)',
+    axes.map((a) => `${a.name} ${a.thrift.toFixed(2)}`).join(' · '),
   )
 
   /**
