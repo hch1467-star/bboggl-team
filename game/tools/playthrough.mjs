@@ -112,6 +112,11 @@ try {
     let lastPos = G.state().player
     let lastKills = 0
     const regionLog = []
+    /** 구역별 받은 피해와 머문 시간 — 난이도 곡선을 보기 위해 */
+    const regionDanger = {}
+    let lastRegionSample = t0
+    let lastSwings = 0
+    let lastRegionKills = 0
     let curRegion = ''
     let regionStart = t0
     let vialsUsed = 0
@@ -159,6 +164,10 @@ try {
     let lastBossHp = 0
     let bossMaxHp = 0
     let bossKilledAt = 0
+    let bossRangeSamples = 0
+    let bossInRangeSamples = 0
+    let bossWindingSamples = 0
+    const bossAttackRange = G.enemyRoster().find((r) => r.id === 'boss')?.attackRange ?? 3.4
     let bossKilled = false
     let clearedAt = 0
     const notes = []
@@ -414,6 +423,50 @@ try {
         }
       }
 
+      /**
+       * ── 구역별 **위험도** ────────────────────────────────────────
+       *
+       * 지금까지 구역별로 잰 것은 "얼마나 오래 있었나"뿐이었습니다.
+       * 그건 지도가 넓은지를 말할 뿐, **난이도 곡선**은 말하지 않습니다.
+       *
+       * 소울류 레벨은 올라갑니다 — 첫 구간은 조작을 익히는 곳이고, 보스
+       * 직전이 가장 위험합니다. 우리 존도 그렇게 적어 뒀지만(생성기 주석의
+       * "전투 동사를 순서대로 가르친다"), **한 번도 확인한 적이 없습니다.**
+       * 곡선이 평평하거나 거꾸로면 조합을 옮겨야 합니다.
+       *
+       * 시간으로 나눕니다 — 넓어서 오래 걸린 구역과 위험해서 오래 걸린
+       * 구역을 가르지 못하면 "넓은 곳이 위험한 곳"이 되어 버립니다.
+       */
+      if (curRegion) {
+        const r = (regionDanger[curRegion] ??= {
+          damage: 0,
+          seconds: 0,
+          combat: 0,
+          swings: 0,
+          kills: 0,
+        })
+        const dt = Math.max(0, now() - lastRegionSample)
+        r.damage += frameDamage
+        r.seconds += dt
+        /**
+         * ⚠️ **"피해 0"이 "위협 없음"을 뜻하지는 않습니다.**
+         *
+         * 첫 측정에서 함몰지 가장자리가 분당 0으로 나왔습니다. 그런데 거기엔
+         * 지난 라운드에 넣은 조합 7이 있고, 봇은 12.7초를 머물렀습니다.
+         * 싸움이 아예 없었던 것인지, 싸웠는데 잘 막아낸 것인지 —
+         * 피해 하나로는 갈리지 않습니다. 그래서 **교전 시간과 적의 휘두름**을
+         * 같이 셉니다. 셋을 함께 봐야 "안전한 구간"과 "쉬운 구간"이 갈립니다.
+         */
+        if (G.threats(12).some((t) => t.aggro)) r.combat += dt
+        const sw = G.runStats().enemySwings
+        if (sw > lastSwings) r.swings += sw - lastSwings
+        lastSwings = sw
+        const kl = G.runStats().kills
+        if (kl > lastRegionKills) r.kills += kl - lastRegionKills
+        lastRegionKills = kl
+      }
+      lastRegionSample = now()
+
       // ---- 구역 기록 ----
       if (st.region && st.region !== curRegion) {
         if (curRegion) regionLog.push({ name: curRegion, seconds: now() - regionStart })
@@ -526,6 +579,18 @@ try {
         bossMaxHp = be.maxHp
         bossDamageTaken += frameDamage
         if (p.hp < bossMinHp) bossMinHp = p.hp
+        /**
+         * **보스가 때릴 수 있는 자리에 있던 시간**을 셉니다.
+         *
+         * 보스가 41초에 4번밖에 안 휘둘렀습니다. 원인이 "예고가 길어 다 피한다"가
+         * 아니라 **애초에 공격을 못 한다**일 수 있습니다 — 보스는 2.4m/s 인데
+         * 플레이어는 5.4m/s 이고, 회전도 100°/s 로 느립니다. 사거리 안에 있던
+         * 시간이 짧으면 그건 AI 문제이지 밸런스 문제가 아닙니다.
+         */
+        bossRangeSamples++
+        const bt = G.threats(40).find((t) => t.entity === be.entity)
+        if (bt && bt.dist <= bossAttackRange) bossInRangeSamples++
+        if (bt && bt.winding) bossWindingSamples++
       } else if (bossSeen && !be && bossKilledAt === 0) {
         // 보스가 사라졌습니다 = 처치. 시간은 **그 순간**으로 고정합니다.
         bossKilledAt = now()
@@ -906,10 +971,24 @@ try {
       elapsed: Number((now() - t0).toFixed(1)),
       deaths: G.runStats().deaths,
       regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
+      regionDanger: Object.entries(regionDanger)
+        .filter(([, v]) => v.seconds >= 3)
+        .map(([name, v]) => ({
+          name,
+          seconds: Number(v.seconds.toFixed(1)),
+          damage: Math.round(v.damage),
+          combat: Number(v.combat.toFixed(1)),
+          swings: v.swings,
+          kills: v.kills,
+          /** 위험도는 **교전 시간**으로 나눕니다 — 넓어서 오래 걸린 구역과 구분하려고. */
+          perMin: Number(((v.damage / Math.max(1, v.combat)) * 60).toFixed(1)),
+        }))
+        .sort((a, b) => b.perMin - a.perMin),
       regionTotal: Object.entries(total)
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
+      bossSwings: Object.entries(G.bossSwingLog()).map(([id, v]) => ({ id, ...v })),
       boss: {
         fought: bossSeen,
         // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
@@ -921,6 +1000,13 @@ try {
         minHp: Math.round(bossMinHp),
         killed: bossKilled,
         samples: bossSamples,
+        inRangePct: bossRangeSamples
+          ? Math.round((bossInRangeSamples / bossRangeSamples) * 100)
+          : 0,
+        windingPct: bossRangeSamples
+          ? Math.round((bossWindingSamples / bossRangeSamples) * 100)
+          : 0,
+        attackRange: bossAttackRange,
       },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
@@ -988,6 +1074,14 @@ try {
     console.log('  [구역별 누적]')
     for (const r of log.regionTotal) console.log(`    ${r.name.padEnd(12)} ${r.seconds}초`)
     console.log('')
+    console.log('  [구역별 위험도 — 교전 1분당 받은 피해]')
+    for (const r of log.regionDanger) {
+      console.log(
+        `    ${r.name.padEnd(12)} ${String(r.perMin).padStart(6)} /교전분   ` +
+          `(머문 ${r.seconds}초 중 교전 ${r.combat}초 · 피해 ${r.damage} · 적의 휘두름 ${r.swings} · 처치 ${r.kills})`,
+      )
+    }
+    console.log('')
     console.log('  [무엇을 하고 있었나]')
     console.log(`    ${log.actTotal.map((a) => `${a.name} ${a.pct}%`).join(' · ')}`)
     console.log('')
@@ -1047,8 +1141,14 @@ try {
   if (log.boss.fought) {
     console.log(
       `  보스전      ${log.boss.seconds}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
-        `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}`,
+        `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}\n` +
+        `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%`,
     )
+    for (const a of log.bossSwings) {
+      console.log(
+        `              ${a.id.padEnd(12)} ${a.swings}회 휘두름 · ${a.hits}회 적중 (${Math.round((a.hits / Math.max(1, a.swings)) * 100)}%) · 연계로 나온 것 ${a.chained}회`,
+      )
+    }
   } else {
     console.log('  보스전      조우하지 못함')
   }

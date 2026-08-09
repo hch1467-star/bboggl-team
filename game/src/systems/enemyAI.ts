@@ -94,6 +94,13 @@ const DEG = Math.PI / 180
 /** 이 각도 안에 플레이어가 들어와야 공격을 시작합니다(뒤통수에 대고 휘두르지 않도록). */
 const ATTACK_FACING_TOLERANCE = 45 * DEG
 
+/**
+ * 준비가 된 채로 이만큼(초) 조준을 못 맞추면 **홱 돌아봅니다.**
+ * 0.6초인 이유: 사람이 "보스가 나를 노려봤다"를 알아챌 만큼은 길고,
+ * 전투가 멈춘 것처럼 느껴질 만큼은 짧습니다.
+ */
+const ATTACK_PATIENCE = 0.6
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2
   while (a < -Math.PI) a += Math.PI * 2
@@ -324,7 +331,13 @@ export function enemyAiSystem(
       }
     }
 
-    if (Actor.cooldownT[e] > 0) Actor.cooldownT[e] = Math.max(0, Actor.cooldownT[e] - dt)
+    /**
+     * 쿨다운은 **0 아래로도 내려갑니다** — 그 음수가 "준비된 채로 얼마나
+     * 오래 못 때리고 있는가"(인내심)입니다. 새 필드를 만들지 않고 이미 있는
+     * 값의 부호를 쓰는 이유는 ECS 컴포넌트가 타입 배열이라, 필드 하나를
+     * 늘리면 모든 적에게 메모리가 붙기 때문입니다.
+     */
+    if (Actor.cooldownT[e] > -ATTACK_PATIENCE * 2) Actor.cooldownT[e] -= dt
 
     /**
      * ── 강인도 회복 ────────────────────────────────────────────────
@@ -602,7 +615,31 @@ export function enemyAiSystem(
       Enemy.reactT[e] = cfg.backReactionDelay
     }
 
-    turnToward(e, toPlayer, cfg.turnSpeedDeg * snareScale, dt)
+    /**
+     * ── 오래 못 때리고 있으면 **홱 돌아봅니다** ──────────────────────
+     *
+     * 자동 플레이가 보스전을 뜯어 보여 줬습니다:
+     *
+     *     보스전 70.5초 · 보스가 사거리(3.4m) 안에 있던 시간 **16%**
+     *     예고를 띄우고 있던 시간 **6%** · 휘두름 **4회** · 연계 **0회**
+     *
+     * 3페이즈짜리 절정인데 70초에 네 번 휘두릅니다. 설계해 둔 연계
+     * (🔵→🔴, 🟣→🔴, 🔵→🟡)는 **한 번도 나오지 않았습니다.**
+     *
+     * 원인은 밸런스가 아니라 조준이었습니다. 공격을 커밋하려면 정면 45°
+     * 안에 들어와야 하는데, 보스는 100°/s 로 돕니다. 플레이어는 5.4m/s 로
+     * 4m 반경을 도니까 각속도가 비슷합니다 — **영원히 조준이 안 맞습니다.**
+     * 그동안 보스는 돌기만 하고, 그래서 존의 절정이 존에서 가장 안전한
+     * 전투가 되어 있었습니다.
+     *
+     * 소울류 보스가 이걸 푸는 방법은 "더 빨리 걷기"가 아닙니다 —
+     * **크게 한 번 노려보고 커밋합니다.** 준비가 된 채로 일정 시간 조준을
+     * 못 맞추면 회전을 확 올려 겨눕니다. 예고 시간은 그대로이므로 플레이어가
+     * 읽고 피할 여지는 하나도 줄지 않습니다. 줄어드는 것은 **아무 일도
+     * 일어나지 않는 시간**뿐입니다.
+     */
+    const impatient = Actor.cooldownT[e] <= -ATTACK_PATIENCE
+    turnToward(e, toPlayer, cfg.turnSpeedDeg * snareScale * (impatient ? 4 : 1), dt)
 
     const facingError = Math.abs(wrapAngle(toPlayer - Transform.rotY[e]))
     const inRange = dist <= cfg.attackRange

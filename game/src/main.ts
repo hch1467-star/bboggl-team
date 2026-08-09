@@ -231,6 +231,9 @@ class Game {
   private finishers = 0
   /** 그중 **예고 중에** 끊긴 것 — 🟢 반격만이 초록을 끊는지 재는 값입니다. */
   private windupBreaks = 0
+  /** 보스가 색깔별로 몇 번 휘두르고 몇 번 맞혔는가 */
+  private bossSwingLog: Record<string, { swings: number; hits: number; chained: number }> = {}
+  private readonly bossLastSwing = new Map<number, string>()
   /** 무너진 순간의 체력 비율 합 — 평균을 내면 "붕괴가 언제 터지는가"가 나옵니다. */
   private breakHpSum = 0
   /** 무방비 상태 그대로 죽은 적의 수 — 처형까지 못 가고 정리된 횟수. */
@@ -584,7 +587,18 @@ class Game {
        * 시스템 안쪽에서 따로 울리면 히트스톱만큼(최대 0.11초) 어긋나는데,
        * 그 정도면 사람은 "소리가 늦다"로 느낍니다.
        */
-      if (hit.victimIsPlayer && hit.damage > 0) this.enemyHits++
+      if (hit.victimIsPlayer && hit.damage > 0) {
+        this.enemyHits++
+        // 어느 색이 맞혔는지 — 직전에 그 보스가 휘두른 패턴으로 귀속시킵니다.
+        for (const [e, id] of this.bossLastSwing) {
+          if (!isAlive(e)) continue
+          if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
+            const rec = (this.bossSwingLog[id] ??= { swings: 0, hits: 0, chained: 0 })
+            rec.hits++
+            break
+          }
+        }
+      }
       if (hit.victimIsPlayer) {
         sfx.hurt()
       } else if (hit.damage > 0) {
@@ -677,6 +691,21 @@ class Game {
         if (Actor.phase[e] !== AttackPhase.Active) continue
         if (this.swungLastFrame.has(e)) continue
         this.enemySwings++
+        /**
+         * **보스가 어떤 색을 몇 번 휘두르고 몇 번 맞혔는지**를 따로 셉니다.
+         *
+         * 자동 플레이 아홉 판을 모아 보니 보스전에서 받은 피해가 4~77,
+         * 교전 1분당 45.7 — **존에서 가장 안전한 지속 전투**였습니다.
+         * 3페이즈짜리 절정인데도요. 원인이 "예고가 길어서 다 피한다"인지
+         * "연계가 설계대로 안 나온다"인지 갈라야 고칠 곳이 정해집니다.
+         */
+        if (Enemy.kind[e] === EnemyKind.Boss) {
+          const id = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
+          const rec = (this.bossSwingLog[id] ??= { swings: 0, hits: 0, chained: 0 })
+          rec.swings++
+          if (Enemy.chained[e] === 1) rec.chained++
+          this.bossLastSwing.set(e, id)
+        }
       }
       this.swungLastFrame.clear()
       for (let i = 0; i < enemyQuery.count; i++) {
@@ -1661,6 +1690,10 @@ class Game {
   }
 
   /** 사다리 상태 — 프로브가 상수를 베끼지 않고 게임에서 읽도록. */
+  debugBossSwingLog(): Record<string, { swings: number; hits: number; chained: number }> {
+    return this.bossSwingLog
+  }
+
   debugShortcutInfo(): {
     key: string
     open: boolean
@@ -2590,6 +2623,7 @@ declare global {
         lastStepDamage: number
         maxRange: number
       }[]
+      bossSwingLog: () => Record<string, { swings: number; hits: number; chained: number }>
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -2858,6 +2892,8 @@ window.__game = {
       lastStepDamage: w.combo[w.combo.length - 1].damage,
       maxRange: Math.max(...w.combo.map((c) => c.range)),
     })),
+  /** 보스가 어떤 색을 몇 번 휘두르고 몇 번 맞혔는가 — 절정이 위험한지 재는 값. */
+  bossSwingLog: () => game.debugBossSwingLog(),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
