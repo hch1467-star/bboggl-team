@@ -127,6 +127,47 @@ try {
     const startVialMax = G.vialInfo().max
     const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
+    /**
+     * 곁길 예산 — **걸어야 하는 거리**로 자릅니다(직선 아님).
+     *
+     * 40m 로 잡은 근거: 이 존의 곁길 셋(북쪽 단상 · 숨은 벽감 · 남쪽 함몰지)은
+     * 전부 주 동선에서 **보이는** 거리에 있습니다(기둥 4 설계). 40m 면
+     * "보이니까 들른다"는 되고, "존을 되돌아간다"는 안 됩니다.
+     */
+    const TREASURE_DETOUR = 40
+    let treasureCooldownUntil = 0
+    let treasureTripUntil = 0
+    /** 지금 나가 있는 곁길 왕복(있으면). 주우면 닫고 detours 에 넣습니다. */
+    let detour = null
+    /** 끝난 곁길 왕복들 — 곁길이 **값어치가 있었는지**를 재는 유일한 자료입니다. */
+    const detours = []
+    let lastTreasureCount = 0
+    /**
+     * 화톳불에 **닿은 순간의 지갑**을 그대로 남깁니다.
+     *
+     * 판마다 "무기 강화 0회 [0/0/0]" 이 찍히는데 불티는 316이 남습니다.
+     * 못 산 이유가 셋 중 무엇인지 — 불티가 모자랐나, 정련석이 없었나,
+     * 애초에 화톳불에 안 갔나 — 지금은 **알 방법이 없습니다.**
+     * 셋은 각각 다른 처방을 부릅니다(경제 / 재료 배치 / 봇의 판단).
+     */
+    const fireVisits = []
+    /** 화톳불에 가려다 **접은** 기록 — 접은 이유(걸어야 하는 거리)와 함께. */
+    const fireSkips = []
+    /**
+     * 마지막으로 화톳불에 닿았을 때의 지갑. **늘어났을 때만** 다시 갑니다.
+     *
+     * 예전에는 한 번 들르면 60초 동안 안 갔습니다. 그래서 판마다 화톳불
+     * 방문이 **딱 한 번**이었고, 그 한 번이 40.8초 — 불티 70을 들고 있을
+     * 때였습니다. 성수병(60)을 사면 10이 남고, 무기(80)는 못 삽니다.
+     * 그리고 존이 끝날 때까지 다시 안 갑니다: **불티 342 · 정련석 4를
+     * 그대로 들고** 끝냈습니다. 한 판 수입의 절반 이상이 안 쓰였습니다.
+     *
+     * 시간으로 막으면 "살 수 있게 됐는데 못 간다"와 "살 것도 없는데
+     * 오간다"를 못 가릅니다. **지갑으로 막으면** 둘 다 해결됩니다 —
+     * 불티나 정련석이 늘지 않았으면 갈 이유가 없고, 늘었으면 갈 이유가
+     * 생긴 것입니다. 사고 나면 다음 단계는 더 비싸니 저절로 멈춥니다.
+     */
+    let lastFireWallet = { embers: -1, stones: -1 }
     let fireCooldownUntil = 0
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
     let fireTripUntil = 0
@@ -222,7 +263,7 @@ try {
     let brokenUsedSamples = 0
     /** 처형 안내가 떠 있던 표본 / 그중 곧바로 누를 수 있던(대기 상태) 표본 */
     let finisherReadySamples = 0
-    let finisherReadyIdleSamples = 0
+    let finisherNoStaminaSamples = 0
 
     /**
      * ── 봇이 "무엇을 하고 있었는지" 를 남깁니다 ────────────────────────
@@ -318,6 +359,29 @@ try {
       const frameDamage = Math.max(0, lastHpSample - p.hp)
       damageTaken += frameDamage
       lastHpSample = p.hp
+      /**
+       * **보물을 실제로 주운 순간** 곁길 왕복을 닫습니다.
+       *
+       * 줍기는 키 입력이 아니라 **밟으면 됩니다**(TREASURE.pickupRadius).
+       * 그래서 "도착했다"를 좌표로 판정하면 어긋납니다 — 게임이 세는
+       * 숫자가 오르는 것을 그대로 신호로 씁니다.
+       */
+      {
+        const found = G.state().treasureFound ?? 0
+        if (detour) detour.damage += frameDamage
+        if (found > lastTreasureCount) {
+          if (detour) {
+            detours.push({
+              ...detour,
+              took: Number((now() - detour.at).toFixed(1)),
+              got: true,
+            })
+            detour = null
+            treasureTripUntil = 0
+          }
+          lastTreasureCount = found
+        }
+      }
       if (p.hp < minHp) minHp = p.hp
       /**
        * **교전 중일 때만** 셉니다.
@@ -443,7 +507,16 @@ try {
         const fi = G.finisherInfo()
         if (fi.ready) {
           finisherReadySamples++
-          if (st.player.state === 0) finisherReadyIdleSamples++
+          /**
+           * ⚠️ 예전엔 여기서 `state === 0`(가만히 서 있음)을 세고 "곧바로
+           * 누를 수 있던 프레임"이라고 불렀습니다. 판마다 **0** 이 찍혔는데,
+           * 같은 판에 처형은 7회 들어갔습니다 — 앞뒤가 안 맞습니다.
+           * 게임은 콤보 끝과 스킬 후딜에서도 처형을 **버퍼로 받아** 줍니다.
+           * 그러니 "서 있어야 누를 수 있다"는 전제 자체가 틀렸습니다.
+           *
+           * 대신 **진짜 막는 것**을 셉니다: 스태미나입니다.
+           */
+          if (st.player.stamina < fi.staminaCost) finisherNoStaminaSamples++
         }
         const brokenNear = G.threats(6).find((t) => t.entity !== undefined && G.enemyInfo(t.entity)?.broken)
         if (brokenNear) {
@@ -964,7 +1037,9 @@ try {
        * 없었습니다.** 사람이라면 400을 들고 있으면 쓰러 갑니다.
        * 다만 너무 멀면 안 갑니다 — 강화하러 존을 되돌아가는 것은 사람도 안 합니다.
        */
-      if (fire && canUpgrade && now() >= fireCooldownUntil) {
+      const walletGrew =
+        em.embers > lastFireWallet.embers || wu.stones > lastFireWallet.stones
+      if (fire && canUpgrade && walletGrew && now() >= fireCooldownUntil) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
         /**
@@ -976,11 +1051,33 @@ try {
          * 실제로 계단에서 336초를 맴돌았습니다.
          * 결과와 무관하게 **한 번 시도했으면 한동안 안 갑니다.**
          */
-        if (fireTripUntil === 0) fireTripUntil = now() + 25
+        // 98m 는 걷기만 해도 20초, 도중에 싸우면 더 걸립니다. 25초로는
+        // 도착 직전에 포기하게 됩니다 — 예산과 제한 시간은 같이 움직여야 합니다.
+        if (fireTripUntil === 0) fireTripUntil = now() + (canUpgradeWeapon ? 45 : 25)
         if (now() > fireTripUntil) {
-          fireCooldownUntil = now() + 60
+          // 25초 안에 못 닿았으면 포기하고, **지갑도 그때 값으로 적어 둡니다.**
+          // 안 그러면 다음 프레임에 "지갑이 늘었다"가 계속 참이라 영원히 재시도합니다.
+          fireCooldownUntil = now() + 30
           fireTripUntil = 0
-        } else if (step && step.dist < 45 && straight > 1.6) {
+          lastFireWallet = { embers: em.embers, stones: wu.stones }
+        /**
+         * 왕복 예산 — 무기 강화는 **멀어도 갑니다.**
+         *
+         * 45m 로 잘랐더니 판마다 화톳불 방문이 1회(40초 지점)뿐이었고,
+         * 그 뒤로는 걸어야 하는 거리가 **98m** 로 찍혔습니다. 즉 이 존의
+         * 후반부에는 불티를 **쓸 곳이 없습니다.** 수입의 대부분(처치·보물·
+         * 보스)이 후반에 들어오는데 말입니다.
+         *
+         * 그게 문제인지 아닌지는 **왕복 비용을 실제로 치러 봐야** 압니다.
+         * 사람이라면 "정련석 4개와 불티 400을 들고 있는데 98m 되돌아갈까"를
+         * 저울질합니다 — 적은 쉬기 전까지 안 살아나니 길은 안전하고, 대신
+         * 시간이 듭니다. 그 시간이 얼마인지가 지금 없는 숫자입니다.
+         *
+         * 그래서 무기 강화가 걸린 왕복만 예산을 110m 로 엽니다.
+         * 성수병만 살 수 있는 왕복은 그대로 45m — 보상이 작은데 멀리 가면
+         * 그건 사람이 안 하는 플레이입니다.
+         */
+        } else if (step && step.dist < (canUpgradeWeapon ? 110 : 45) && straight > 1.6) {
           /**
            * **마지막 몇 미터는 직선으로 갑니다.**
            *
@@ -999,8 +1096,18 @@ try {
         }
         else {
           // 붙었는데도 못 쓰는 상황이면(적이 가까워 막힘 등) 한동안 포기합니다.
-          fireCooldownUntil = now() + 60
+          //
+          // **왜 포기했는지 남깁니다.** 지갑 조건을 고친 뒤에도 화톳불 방문이
+          // 판마다 1회로 그대로였습니다. "안 가는 것"과 "못 가는 것"은 다르고,
+          // 후자면 그건 봇이 아니라 **지도** 문제입니다.
+          fireSkips.push({
+            at: Number(now().toFixed(1)),
+            dist: step ? Number(step.dist.toFixed(0)) : -1,
+            straight: Number(straight.toFixed(0)),
+          })
+          fireCooldownUntil = now() + 30
           fireTripUntil = 0
+          lastFireWallet = { embers: em.embers, stones: wu.stones }
         }
       }
       if (fire && (p.hp < 70 || canUpgrade)) {
@@ -1014,24 +1121,102 @@ try {
            * 싶은가"를 저울질하지만 봇은 그런 판단을 못 합니다. 가장 단순한
            * 우선순위 하나만 씁니다 — 그리고 그게 초보자의 기본값이기도 합니다.
            */
+          const visit = {
+            at: Number(now().toFixed(1)),
+            embers: G.emberInfo().embers,
+            vialCost: em.upgradeCost,
+            stones: wu.stones,
+            stoneNeed: wu.nextStoneCost,
+            emberNeed: wu.nextCost,
+            vial: false,
+            weapon: false,
+          }
           if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
+            visit.vial = true
             await sleep()
           }
           const w2 = G.weaponUpgradeInfo()
           if (w2.nextCost > 0 && G.emberInfo().embers >= w2.nextCost && w2.stones >= w2.nextStoneCost) {
             tap('KeyB')
+            visit.weapon = true
             await sleep()
           }
+          fireVisits.push(visit)
+          lastFireWallet = { embers: G.emberInfo().embers, stones: G.weaponUpgradeInfo().stones }
           // 한 번 들렀으면 한동안 다시 오지 않습니다. 안 그러면 아직 살 수 있는
           // 강화가 남아 있는 한 화톳불과 목표 사이를 영원히 오갑니다
           // (실제로 그렇게 막혀서 139초에 실행이 끝났습니다).
-          fireCooldownUntil = now() + 60
+          fireCooldownUntil = now() + 15
           fireTripUntil = 0
           const until = now() + 2.5
           while (now() < until) await sleep()
           lastVials = G.vialInfo().vials
           continue
+        }
+      }
+
+      /**
+       * ---- 곁길: 보물을 주우러 간다 ----
+       *
+       * ── 왜 이 가지가 생겼는가 ────────────────────────────────────
+       * 마흔 판을 돌리는 동안 봇은 보물을 **한 개도** 줍지 않았습니다.
+       * 그런 가지가 아예 없었기 때문입니다. 결과가 조용히 이상했습니다:
+       * "정련석 누적 2" — 정확히 **보스가 주는 2개**입니다. 즉 존이 끝날
+       * 때까지 정련석이 하나도 없어서, 무기 강화는 판마다 0회로 찍혔습니다.
+       * 불티는 318이 남아 있었는데도요. 강화가 안 도는 게 아니라
+       * **재료가 도착한 적이 없었습니다.**
+       *
+       * 더 큰 문제는 이겁니다: 기둥 4(탐험)의 핵심 질문이
+       * *"곁길에 갈지 말지의 선택이 좋은 선택인가"* 인데, 곁길에 **가 본
+       * 적이 없으니** 그 질문에 답할 데이터가 0이었습니다.
+       * 존의 절반(남은 적 10마리)도 그래서 안 밟혔습니다.
+       *
+       * ── 사람처럼 굴게 하는 세 가지 조건 ───────────────────────────
+       *   1. **싸우는 중에는 안 갑니다.** 사람은 전투가 끝나고 줍습니다.
+       *   2. **너무 멀면 안 갑니다.** 존을 되돌아가서 상자 하나를 여는
+       *      플레이는 없습니다. 걸어야 하는 거리(직선 아님)로 자릅니다.
+       *   3. **한 번 나선 왕복에는 제한 시간이 있습니다.** 화톳불 왕복에서
+       *      두 번 데인 그 버그입니다 — 도착 판정이 어긋나면 목표와 곁길
+       *      사이를 영원히 오갑니다.
+       */
+      const fighting = near && reachable && near.dist < 12
+      if (!fighting && now() >= treasureCooldownUntil) {
+        let best = null
+        for (const t of G.treasurePositions()) {
+          if (t.taken) continue
+          const step = G.pathStep(t.x, t.z)
+          if (!step) continue
+          // ⚠️ step 은 **다음 한 걸음**이고 t 는 **목적지**입니다. 두 좌표를
+          // 한 객체에 펼쳐 담으면 목적지가 조용히 덮어써집니다.
+          if (best === null || step.dist < best.dist) best = { goal: t, step, dist: step.dist }
+        }
+        if (best && best.dist <= TREASURE_DETOUR) {
+          if (treasureTripUntil === 0) {
+            treasureTripUntil = now() + 30
+            detour = { at: now(), hp: p.hp, dist: Number(best.dist.toFixed(1)), damage: 0 }
+          }
+          if (now() > treasureTripUntil) {
+            // 30초를 썼는데 못 주웠으면 포기합니다. 기록에는 남깁니다 —
+            // "못 가는 보물"은 지도 문제이지 봇 문제일 수도 있습니다.
+            treasureCooldownUntil = now() + 45
+            treasureTripUntil = 0
+            if (detour) detours.push({ ...detour, took: Number((now() - detour.at).toFixed(1)), got: false })
+            detour = null
+          } else {
+            markAct('보물이동')
+            // 마지막 몇 미터는 직선 — 격자 길찾기는 목적지에 붙으면 진동합니다
+            // (화톳불에서 이미 한 번 데인 자리입니다).
+            const straight = Math.hypot(best.goal.x - p.x, best.goal.z - p.z)
+            const tx = straight < 5 ? best.goal.x : best.step.x
+            const tz = straight < 5 ? best.goal.z : best.step.z
+            moveToward(tx - p.x, tz - p.z)
+            await sleep()
+            continue
+          }
+        } else if (treasureTripUntil > 0) {
+          treasureTripUntil = 0
+          detour = null
         }
       }
 
@@ -1152,7 +1337,7 @@ try {
       breakHpAvg: G.runStats().breakHpAvg,
       brokenDeaths: G.runStats().brokenDeaths,
       finisherReady: finisherReadySamples,
-      finisherReadyIdle: finisherReadyIdleSamples,
+      finisherNoStamina: finisherNoStaminaSamples,
       finishers: G.runStats().finishers,
       brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
@@ -1191,6 +1376,9 @@ try {
       kills: st.kills,
       enemiesLeft: st.enemiesLeft,
       treasures: `${st.treasureFound ?? '?'}/${st.treasureTotal}`,
+      detours: detours.map((d) => ({ ...d, damage: Math.round(d.damage) })),
+      fireVisits,
+      fireSkips,
       embers: em.embers,
       vialsMax: em.vialsMax,
       hp: st.player.hp,
@@ -1247,6 +1435,43 @@ try {
     `  불티       ${log.embers} · 정련석 ${log.stones}(누적 ${log.stonesEarned}) · 성수병 강화 ${log.upgrades}회 · 무기 강화 ${log.weaponUps}회 [${log.weaponLevels.join('/')}]`,
   )
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
+  /**
+   * ── 곁길이 값어치가 있었는가 ────────────────────────────────────
+   *
+   * 기둥 4의 질문은 "숨겼는가"가 아니라 **"갈지 말지가 좋은 선택인가"**
+   * 입니다. 그러려면 **든 비용**(시간·피해)과 **얻은 것**(정련석·룬)을
+   * 같은 자리에 놓고 봐야 합니다. 지금까지는 비용도 보상도 안 재고 있었고,
+   * 실은 봇이 곁길에 **가 본 적조차 없었습니다.**
+   */
+  for (const v of log.fireVisits ?? []) {
+    /** 화톳불에 **닿았는데 못 산** 이유를 그 자리의 숫자로 적습니다. */
+    const why = v.weapon
+      ? '무기 강화함'
+      : v.emberNeed <= 0
+        ? '최대 단계'
+        : v.stones < v.stoneNeed
+          ? `정련석 ${v.stones}/${v.stoneNeed} 부족`
+          : `불티 부족(${v.embers - (v.vial ? v.vialCost : 0)}/${v.emberNeed})`
+    console.log(
+      `             ${String(v.at).padStart(6)}초 화톳불 — 불티 ${v.embers} · 정련석 ${v.stones}` +
+        ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
+    )
+  }
+  if ((log.fireSkips ?? []).length) {
+    const ds = log.fireSkips.map((f) => f.dist)
+    console.log(
+      `             화톳불에 가려다 ${log.fireSkips.length}번 접음 — 걸어야 하는 거리 ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)`,
+    )
+  }
+  const got = (log.detours ?? []).filter((d) => d.got)
+  const gave = (log.detours ?? []).filter((d) => !d.got)
+  console.log(
+    `  보물       ${log.treasures} · 곁길 왕복 ${got.length}회 성공` +
+      (gave.length ? ` · ${gave.length}회 포기` : '') +
+      (got.length
+        ? `\n             왕복 1회 평균 — 걸린 시간 ${(got.reduce((a, d) => a + d.took, 0) / got.length).toFixed(1)}초 · 받은 피해 ${Math.round(got.reduce((a, d) => a + d.damage, 0) / got.length)} · 나선 지점에서 ${(got.reduce((a, d) => a + d.dist, 0) / got.length).toFixed(0)}m`
+        : ''),
+  )
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
   console.log(
@@ -1308,7 +1533,7 @@ try {
   console.log(
     `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
       `              무너진 순간의 평균 체력 ${Math.round(log.breakHpAvg * 100)}% · 무방비인 채로 죽은 적 ${log.brokenDeaths}마리\n` +
-      `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 곧바로 누를 수 있던 프레임 ${log.finisherReadyIdle})`,
+      `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 스태미나가 모자랐던 프레임 ${log.finisherNoStamina})`,
   )
   console.log('')
 } finally {
