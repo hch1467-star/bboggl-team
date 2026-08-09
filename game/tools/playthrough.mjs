@@ -210,6 +210,23 @@ try {
     let bossWindingSamples = 0
     const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
     const bossPhaseTime = [0, 0, 0]
+    /**
+     * ── 페이즈별 **실효 화력** ───────────────────────────────────────
+     *
+     * 지난 라운드에 3단계가 4.4~13초로 끝나는 것을 확인하고, 원인을
+     * *"플레이어 화력이 전투 중에 올라가기 때문"* 이라고 적었습니다.
+     * 그건 **가설이었지 관측이 아니었습니다.** 체력을 두 번 올리고
+     * 경계를 한 번 옮기고도 안 고쳐졌으니, 이번엔 재고 나서 만집니다.
+     *
+     * 같은 체력 구간이라도 뒤로 갈수록 빨리 녹는다면 페이즈별 **초당
+     * 피해**가 올라갑니다. 그리고 그 상승분이 어디서 오는지도 갈라야
+     * 처방이 정해집니다 — 처형인가, 무방비 창인가, 그냥 익숙해진 것인가.
+     */
+    const bossPhaseDamage = [0, 0, 0]
+    const bossPhaseFinishers = [0, 0, 0]
+    const bossPhaseBreaks = [0, 0, 0]
+    let lastBossFin = 0
+    let lastBossPhase = -1
     /** 보스전 동안 보스가 각 상태에 머문 **초**. 합계 ≒ 보스전 시간. */
     const bossBudget = {
       windup: 0,
@@ -780,6 +797,16 @@ try {
           bossPhaseTime[2] = 0
           bossEngaged = 0
           bossBreaks = 0
+          bossPhaseDamage[0] = 0
+          bossPhaseDamage[1] = 0
+          bossPhaseDamage[2] = 0
+          bossPhaseFinishers[0] = 0
+          bossPhaseFinishers[1] = 0
+          bossPhaseFinishers[2] = 0
+          bossPhaseBreaks[0] = 0
+          bossPhaseBreaks[1] = 0
+          bossPhaseBreaks[2] = 0
+          lastBossPhase = -1
           for (const k of Object.keys(bossBudget)) bossBudget[k] = 0
         }
         bossWasEngaged = engaged
@@ -810,12 +837,37 @@ try {
           } else if (bi.cooldownT > 0) bossBudget.cooldown += dtB
           else bossBudget.idle += dtB
           // 무너진 **횟수**는 올라가는 순간에만 셉니다(프레임마다 세면 시간이 됩니다).
-          if (bi.staggered && !bossWasStaggered) bossBreaks++
+          if (bi.staggered && !bossWasStaggered) {
+            bossBreaks++
+            bossPhaseBreaks[Math.min(2, be.phase)]++
+          }
           bossWasStaggered = bi.staggered
         }
         bossSamples++
         const dmg = Math.max(0, lastBossHp - be.hp)
         if (lastBossHp > 0) bossDamageDealt += dmg
+        /**
+         * ⚠️ **직전 프레임의 페이즈**에 얹습니다.
+         *
+         * `dmg` 는 (지난 프레임 체력 − 지금 체력)이므로 **지난 프레임에**
+         * 일어난 일입니다. 지금 페이즈에 얹으면 전환을 일으킨 그 타격이
+         * 새 페이즈의 화력으로 잡힙니다.
+         *
+         * ⚠️ 그리고 여기서 열세 번째 계기 버그를 잡았습니다. 처음엔
+         * `be.transitionT <= 0` 으로 전환 중을 걸렀는데, `bossEncounter()`
+         * 는 **transitionT 를 주지 않습니다.** `undefined <= 0` 이 늘 거짓이라
+         * 조건이 통째로 막혀서 **세 페이즈 전부 피해 0** 이 찍혔습니다.
+         * 총 피해는 613인데 합이 0 — 숫자끼리 안 맞아서 바로 걸렸습니다.
+         * (전환 중에는 보스가 무적이라 애초에 걸러 낼 피해가 없습니다.)
+         */
+        const ph = Math.min(2, lastBossPhase < 0 ? be.phase : lastBossPhase)
+        if (engaged && lastBossHp > 0) bossPhaseDamage[ph] += dmg
+        lastBossPhase = be.phase
+        const finNow = G.runStats().bossFinishers
+        if (finNow > lastBossFin) {
+          bossPhaseFinishers[ph] += finNow - lastBossFin
+          lastBossFin = finNow
+        }
         lastBossHp = be.hp
         bossMaxHp = be.maxHp
         bossDamageTaken += frameDamage
@@ -1413,6 +1465,34 @@ try {
           Object.entries(bossBudget).map(([k, v]) => [k, Number(v.toFixed(1))]),
         ),
         breaks: bossBreaks,
+        phaseDamage: bossPhaseDamage.map((v) => Math.round(v)),
+        /**
+         * ── 페이즈 **구간 체력** — 프레임 표본을 안 씁니다 ────────────
+         *
+         * 프레임마다 (지난 체력 − 지금 체력)을 더해 페이즈에 얹어 봤더니
+         * 166 / 394 / 58 이 나왔습니다. 그런데 실제 구간은 155 / 217 / 248
+         * 입니다 — 3단계 몫의 대부분이 2단계에 얹혔습니다.
+         *
+         * 원인은 **10fps**입니다. 한 프레임에 콤보와 처형이 같이 들어가면
+         * 100 넘는 피해가 한 덩어리로 잡히고, 그 프레임에 경계를 넘으면
+         * 전부 앞 페이즈로 갑니다.
+         *
+         * 그런데 구간 체력은 **애초에 알고 있는 값**입니다(경계 × 최대 체력).
+         * 표본이 필요 없습니다. 시간만 재고 나누면 정확합니다 —
+         * 계기를 고치는 가장 좋은 방법은 **안 재도 되는 것을 안 재는** 것입니다.
+         * (⚠️ 경계는 bossTuning() 에서 읽습니다. 여기 베껴 적지 않습니다.)
+         */
+        phaseBands: (() => {
+          const t = G.bossTuning()
+          const maxHp = G.enemyRoster().find((r) => r.id === 'boss')?.maxHp ?? 0
+          return t.map((ph, i) => {
+            const upper = ph.enterBelow
+            const lower = i + 1 < t.length ? t[i + 1].enterBelow : 0
+            return maxHp * (upper - lower)
+          })
+        })(),
+        phaseFinishers: bossPhaseFinishers,
+        phaseBreaks: bossPhaseBreaks,
         engaged: Number(bossEngaged.toFixed(1)),
         disengaged: Number(bossDisengaged.toFixed(1)),
         resets: bossResets,
@@ -1646,6 +1726,13 @@ try {
         `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%\n` +
         `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%\n` +
         `              페이즈별 시간 — 1단계 ${log.boss.phaseTime[0]}초 · 2단계 ${log.boss.phaseTime[1]}초 · 3단계 ${log.boss.phaseTime[2]}초\n` +
+        `              페이즈별 실효 화력 — ${(log.boss.phaseBands ?? [])
+          .map(
+            (b, i) =>
+              `${i + 1}단계 ${(b / Math.max(0.1, log.boss.phaseTime[i])).toFixed(1)}/초` +
+              ` (구간 체력 ${Math.round(b)} ÷ ${log.boss.phaseTime[i]}초 · 처형 ${log.boss.phaseFinishers?.[i] ?? 0} · 붕괴 ${log.boss.phaseBreaks?.[i] ?? 0})`,
+          )
+          .join('\n                             ')}\n` +
         `              보스의 시간 — 예고 ${bud.windup}초 · 휘두름 ${bud.active}초 · 후딜 ${bud.recovery}초 · 쿨다운 ${bud.cooldown}초\n` +
         `                          · 무너짐 ${bud.broken}초(${log.boss.breaks}회) · 페이즈전환 ${bud.transition}초 · 대기·이동 ${bud.idle}초\n` +
         `                          → 실제로 공격에 쓴 시간 ${actPct}% · ${swingRate}초에 한 번 휘두름\n` +

@@ -13,6 +13,7 @@ import {
   Transform,
   Velocity,
 } from '../core/components'
+import { BOSS_PHASES } from '../config/bossPhases'
 import { enemyDef } from '../config/enemies'
 import { AttackIntent, attackAt } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
@@ -317,7 +318,15 @@ function applyPoise(t: number, spec: AttackSpec): void {
       ? POISE.windupMultiplier
       : POISE.basicMultiplier
   // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
-  const dmg = spec.trauma * POISE.fromTrauma * multiplier * (spec.poiseScale ?? 1)
+  let dmg = spec.trauma * POISE.fromTrauma * multiplier * (spec.poiseScale ?? 1)
+  /**
+   * 보스는 **페이즈가 오를수록 덜 무너집니다**(bossPhases.ts poiseResist 설계 노트).
+   * 후반 화력의 상당 부분이 붕괴→처형에서 나오기 때문에, 여기가 페이즈
+   * 길이를 되찾는 가장 원인에 가까운 자리입니다.
+   */
+  if (Enemy.kind[t] === EnemyKind.Boss) {
+    dmg /= BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, Enemy.phase[t])].poiseResist ?? 1
+  }
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
