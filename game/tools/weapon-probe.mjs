@@ -126,6 +126,26 @@ try {
         const backStart = G.state().backHits
         let breaks = 0
         let wasBroken = false
+        /**
+         * ── 기둥 1 을 이 자리에서 잽니다 ────────────────────────────
+         *
+         * 설계는 *"쿨다운 도는 중에는 기본공격·회피로 버티며 **스태미나
+         * 관리**"* 라고 적어 두었습니다. 그런데 자동 플레이에서 스태미나가
+         * 콤보의 1/3 아래로 떨어진 시간이 **1%** 였습니다 — 관리할 것이
+         * 없었다는 뜻입니다.
+         *
+         * 다만 봇은 기본 공격을 별로 안 씁니다(스킬 비중 65%). 그래서
+         * 봇으로는 "자원이 헐렁하다"와 "봇이 그 리듬에 안 머문다"를
+         * 가를 수 없습니다. **여기서는 쉬지 않고 기본 공격만** 하므로
+         * 자원 자체의 여유가 그대로 드러납니다.
+         *
+         * 재는 것: 쉬지 않고 때릴 때 **회피(25)를 못 낼 만큼** 스태미나가
+         * 낮았던 시간의 비율. 0% 면 스태미나는 장식입니다.
+         */
+        let stamSamples = 0
+        let stamStarved = 0
+        let minStam = 999
+        const dodgeCost = G.runStats().dodgeStamina
 
         while (G.state().simElapsed - t0 < totalSeconds) {
           // 스태미나가 가득인 동안의 **폭발력**과, 바닥난 뒤의 **지속력**은
@@ -156,6 +176,10 @@ try {
           const side = fromBehind ? -1.2 : 1.2
           G.teleportPlayer(es.x + fx * side, es.z + fz * side)
           G.aimAtWorld(es.x, es.z)
+          const stam = G.state().player.stamina
+          stamSamples++
+          if (stam < dodgeCost) stamStarved++
+          if (stam < minStam) minStam = stam
           G.press('Mouse0')
           G.release('Mouse0')
           await new Promise((r) => setTimeout(r, 8))
@@ -170,6 +194,9 @@ try {
         G.freezeEnemies(false)
         const hits = G.state().hitsDealt - startHits
         return {
+          minStamina: Number(minStam.toFixed(0)),
+          starvedPct: stamSamples ? Math.round((stamStarved / stamSamples) * 100) : 0,
+          dodgeCost,
           hits,
           avgHit: Number((dealt / Math.max(1, hits)).toFixed(1)),
           weapon: G.state().loadout.weapon,
@@ -241,6 +268,8 @@ try {
       finishers: mean('finishers'),
       staminaUsed: Math.round(mean('staminaUsed')),
       breaks: Math.round(mean('breaks')),
+      minStamina: Math.round(mean('minStamina')),
+      starvedPct: Math.round(mean('starvedPct')),
     })
     const r = results[results.length - 1]
     const w = table[slot - 1]
@@ -281,7 +310,8 @@ try {
         `초당 강인도 ${String(r.poisePerSec).padStart(5)} · 무너뜨림 ${r.breaks}회\n` +
         `          전체 초당 ${r.dps} · 타격 ${r.hits}회(치명 ${r.crits}) · 한 대 평균 ${r.avgHit} · 스태미나 ${r.staminaUsed} 소모 · 스태미나당 ${r.perStamina}\n` +
         `          히트스톱으로 멈춰 있던 시간 ${r.frozenPct}% · **처형 ${r.finishers}회** (한 방 ${r.finisherDamage})\n` +
-        `          처형을 뺀 초당 피해 ${r.dpsNoFinisher} · 등 뒤에서 ${r.backDps} (정면의 ${r.backGain}배 · 백어택 ${r.backOfHits}타 · 치명 ${r.backCrits})`,
+        `          처형을 뺀 초당 피해 ${r.dpsNoFinisher} · 등 뒤에서 ${r.backDps} (정면의 ${r.backGain}배 · 백어택 ${r.backOfHits}타 · 치명 ${r.backCrits})\n` +
+        `          쉬지 않고 때릴 때 — 최저 스태미나 ${r.minStamina} · 회피(${r.dodgeCost})를 못 낼 만큼 낮았던 시간 ${r.starvedPct}%`,
     )
   }
   console.log('')

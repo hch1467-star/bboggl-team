@@ -107,6 +107,7 @@ import {
   finisherTarget,
   healEvents,
   playerControlSystem,
+  readRhythm,
   readStaminaSpent,
   resetStaminaSpent,
   type ControlContext,
@@ -1968,6 +1969,10 @@ class Game {
     dodgeStamina: number
     /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
     staminaSpent: number
+    /** 기둥 1 — 슬롯별 **실제 시전 횟수**(누른 횟수가 아님) */
+    skillCasts: number[]
+    /** 기둥 1 — 스태미나로 낸 기본 공격 횟수 */
+    lightSwings: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -1980,6 +1985,8 @@ class Game {
       chainsLost: readChainsLost(),
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
+      skillCasts: readRhythm().skillCasts,
+      lightSwings: readRhythm().lightSwings,
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -2809,6 +2816,8 @@ declare global {
         chainsLost: [number, number, number]
         dodgeStamina: number
         staminaSpent: number
+        skillCasts: number[]
+        lightSwings: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }

@@ -264,6 +264,23 @@ try {
     /** 처형 안내가 떠 있던 표본 / 그중 곧바로 누를 수 있던(대기 상태) 표본 */
     let finisherReadySamples = 0
     let finisherNoStaminaSamples = 0
+    /**
+     * ── 기둥 1 을 재는 표본 ──────────────────────────────────────────
+     * *"두 자원, 두 리듬"* 이 실제로 번갈아 오는지 봅니다. **교전 중에만**
+     * 셉니다 — 걸어 다니는 동안은 쿨이 다 도니 당연히 "다 준비됨"이 되어
+     * 숫자가 거짓말을 합니다.
+     */
+    /** 무기 id → 콤보 한 벌의 스태미나. 판 시작에 한 번만 읽습니다. */
+    const weaponCost = Object.fromEntries(
+      G.weaponTable().map((w) => [w.id, w.comboStamina]),
+    )
+    let rhythmSamples = 0
+    /** 쓸 수 있는 스킬이 하나도 없던 표본 = **쿨다운 리듬이 압박이 된 시간** */
+    let noSkillSamples = 0
+    /** 스킬이 셋 이상 준비된 표본 = 쿨다운이 **제약이 아니었던** 시간 */
+    let manySkillSamples = 0
+    /** 스태미나가 기본 공격도 못 낼 만큼 낮던 표본 = **스태미나 리듬의 압박** */
+    let noStaminaSamples = 0
 
     /**
      * ── 봇이 "무엇을 하고 있었는지" 를 남깁니다 ────────────────────────
@@ -504,6 +521,23 @@ try {
          * 안내가 안 뜨는 것인가(창이 사거리 밖에서 소모됨), 떠 있는데 봇이
          * 못 누르는 것인가(후딜·경직). 세어 보면 바로 갈립니다.
          */
+        /**
+         * 두 리듬의 압박을 **같은 자리에서** 셉니다. 따로 재면 "둘 다
+         * 압박이었던 순간"과 "둘 다 여유였던 순간"이 안 보입니다.
+         */
+        rhythmSamples++
+        const slots = G.slotCooldowns().filter((sl) => !sl.empty)
+        const readyNow = slots.filter((sl) => sl.cd <= 0).length
+        if (readyNow === 0) noSkillSamples++
+        if (readyNow >= 3) manySkillSamples++
+        /**
+         * ⚠️ `state().weapon` 은 **문자열 id** 입니다(숫자 인덱스가 아님).
+         * 표를 그걸로 색인하면 undefined → NaN → 비교가 늘 거짓이 되어
+         * 이 눈금이 조용히 **항상 0** 이 됩니다. 열세 번째 계기 버그가 될
+         * 뻔한 자리라, id 로 찾습니다. 표는 판 시작에 한 번만 읽습니다.
+         */
+        const wcost = weaponCost[st.loadout?.weapon] ?? 0
+        if (wcost > 0 && st.player.stamina < wcost / 3) noStaminaSamples++
         const fi = G.finisherInfo()
         if (fi.ready) {
           finisherReadySamples++
@@ -1369,6 +1403,11 @@ try {
       brokenDeaths: G.runStats().brokenDeaths,
       finisherReady: finisherReadySamples,
       finisherNoStamina: finisherNoStaminaSamples,
+      skillCasts: G.runStats().skillCasts,
+      lightSwings: G.runStats().lightSwings,
+      noSkillPct: rhythmSamples ? Math.round((noSkillSamples / rhythmSamples) * 100) : 0,
+      manySkillPct: rhythmSamples ? Math.round((manySkillSamples / rhythmSamples) * 100) : 0,
+      noStaminaPct: rhythmSamples ? Math.round((noStaminaSamples / rhythmSamples) * 100) : 0,
       finishers: G.runStats().finishers,
       brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
@@ -1522,6 +1561,29 @@ try {
   }
   console.log(
     `  스태미나    최저 ${log.minStamina} · 교전 중 회피(${log.dodgeCost})를 못 낼 만큼 낮았던 시간 ${log.lowStaminaRatio}%`,
+  )
+  /**
+   * ── 기둥 1 — 두 자원, 두 리듬 ──────────────────────────────────
+   *
+   * 이 게임의 **핵심 차별점**이라고 적어 둔 것을 처음으로 잽니다.
+   * 주장: 기본 공격은 스태미나로, 스킬 다섯은 쿨다운으로 굴러가고
+   * **둘이 번갈아 오면서** 리듬이 생긴다.
+   *
+   * 읽는 법:
+   *   · `쿨다운뿐인 시간` 이 0에 가까우면 → 쿨다운은 **장식**입니다.
+   *     늘 쓸 스킬이 있으니 기본 공격으로 내려올 이유가 없습니다.
+   *   · `셋 이상 준비` 가 대부분이면 → 슬롯을 늘린 값어치가 없습니다.
+   *   · 슬롯별 시전이 한쪽에만 몰리면 → 나머지는 **안 쓰이는 버튼**입니다.
+   */
+  const casts = log.skillCasts ?? []
+  const castTotal = casts.reduce((a, b) => a + b, 0)
+  console.log(
+    `  두 리듬     스킬 ${castTotal}회 [${casts.join('/')}] · 기본 공격 ${log.lightSwings}회` +
+      ` (스킬 비중 ${Math.round((castTotal / Math.max(1, castTotal + log.lightSwings)) * 100)}%)
+` +
+      `             교전 중 — 쓸 스킬이 하나도 없던 시간 ${log.noSkillPct}%` +
+      ` · 셋 이상 준비된 시간 ${log.manySkillPct}%` +
+      ` · 스태미나가 콤보의 1/3 미만이던 시간 ${log.noStaminaPct}%`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist

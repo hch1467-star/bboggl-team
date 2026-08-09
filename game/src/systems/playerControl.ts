@@ -6,7 +6,7 @@ import {
   heavyStep,
   type SkillDef,
 } from '../config/arsenal'
-import { FINISHER, FOCUS, PLAYER, VIAL } from '../config/balance'
+import { FINISHER, FOCUS, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
@@ -96,6 +96,31 @@ export function readStaminaSpent(): number {
 }
 export function resetStaminaSpent(): void {
   staminaSpent = 0
+  skillCasts.fill(0)
+  lightSwings = 0
+}
+
+/**
+ * ── 기둥 1 을 재는 눈금 ─────────────────────────────────────────────
+ *
+ * *"두 자원, 두 리듬"* 은 이 게임의 **핵심 차별점**이라고 적어 둔
+ * 것입니다(DESIGN.md 기둥 1): 기본 공격은 **스태미나**로, 스킬 다섯은
+ * **쿨다운**으로 굴러가고, 둘이 번갈아 오면서 리듬이 생긴다는 주장입니다.
+ *
+ * 그런데 **한 번도 재 본 적이 없습니다.** 재지 않은 주장은 설계가 아니라
+ * 희망입니다. 실제로는 세 가지 중 하나일 수 있습니다:
+ *   · 스킬이 늘 하나는 준비되어 있다 → 쿨다운 리듬이 **장식**
+ *   · 스킬이 거의 안 나온다        → 슬롯 다섯이 **장식**
+ *   · 번갈아 온다                  → 주장이 사실
+ *
+ * 봇이 키를 눌렀는지가 아니라 **실제로 나갔는지**를 게임 쪽에서 셉니다.
+ * 누른 것과 나간 것은 다릅니다(스태미나·쿨다운·상태가 막습니다). 이
+ * 프로젝트에서 잡은 계기 버그 열둘이 전부 그 틈에서 나왔습니다.
+ */
+const skillCasts = new Array<number>(8).fill(0)
+let lightSwings = 0
+export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
+  return { skillCasts: skillCasts.slice(0, 5), lightSwings }
 }
 function spendStamina(p: number, cost: number): void {
   const used = Math.min(Stamina.value[p], cost)
@@ -249,6 +274,8 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.nextHitT[p] = 0
   Actor.bufferedAttack[p] = 0
   spendStamina(p, c.staminaCost)
+  // 기둥 1 — **스태미나로 낸 공격**. 쿨다운으로 낸 것과 나눠 셉니다.
+  lightSwings++
   // 스냅하지 않고 **목표만 정해 둡니다.** 선행동작 동안 수렴합니다(turnArrive).
   Player.faceRot[p] = rot
 
@@ -278,6 +305,7 @@ function beginSkill(
     aimRot = assistAim(Transform.x[p], Transform.z[p], aimRot, def.range + def.dash).rot
   }
 
+  if (slot >= 0 && slot < skillCasts.length) skillCasts[slot]++
   Actor.state[p] = ActorState.Skill
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = def.windup
@@ -290,7 +318,8 @@ function beginSkill(
   Player.dodgeElapsed[p] = 0
   // 기본 공격과 같은 규칙 — 스냅하지 않고 선행동작 동안 수렴합니다.
   Player.faceRot[p] = aimRot
-  setCooldown(p, slot, def.cooldown)
+  // 기둥 1 의 리듬 손잡이 — balance.ts SKILL_COOLDOWN_SCALE 설계 노트 참고.
+  setCooldown(p, slot, def.cooldown * SKILL_COOLDOWN_SCALE)
 
   // 대시 거리는 **조준한 지점 바로 뒤**에 착지하도록 그때그때 계산합니다.
   //
