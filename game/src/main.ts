@@ -229,10 +229,15 @@ class Game {
   private poiseBreaks = 0
   /** 처형이 실제로 몇 번 나갔는가 — 무방비 창을 쓰게 됐는지 재는 값입니다. */
   private finishers = 0
+  /** 그중 보스에게 들어간 것 */
+  private bossFinishers = 0
   /** 그중 **예고 중에** 끊긴 것 — 🟢 반격만이 초록을 끊는지 재는 값입니다. */
   private windupBreaks = 0
   /** 보스가 색깔별로 몇 번 휘두르고 몇 번 맞혔는가 */
-  private bossSwingLog: Record<string, { swings: number; hits: number; chained: number }> = {}
+  private bossSwingLog: Record<
+    string,
+    { swings: number; hits: number; chained: number; byPhase: number[] }
+  > = {}
   private readonly bossLastSwing = new Map<number, string>()
   /** 무너진 순간의 체력 비율 합 — 평균을 내면 "붕괴가 언제 터지는가"가 나옵니다. */
   private breakHpSum = 0
@@ -593,7 +598,12 @@ class Game {
         for (const [e, id] of this.bossLastSwing) {
           if (!isAlive(e)) continue
           if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
-            const rec = (this.bossSwingLog[id] ??= { swings: 0, hits: 0, chained: 0 })
+            const rec = (this.bossSwingLog[id] ??= {
+              swings: 0,
+              hits: 0,
+              chained: 0,
+              byPhase: [0, 0, 0],
+            })
             rec.hits++
             break
           }
@@ -701,9 +711,17 @@ class Game {
          */
         if (Enemy.kind[e] === EnemyKind.Boss) {
           const id = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
-          const rec = (this.bossSwingLog[id] ??= { swings: 0, hits: 0, chained: 0 })
+          const rec = (this.bossSwingLog[id] ??= {
+            swings: 0,
+            hits: 0,
+            chained: 0,
+            byPhase: [0, 0, 0],
+          })
           rec.swings++
-          if (Enemy.chained[e] === 1) rec.chained++
+          // **어느 페이즈에서 나왔는지**도 남깁니다. 연계는 2·3페이즈에만
+          // 걸려 있으므로, 그 페이즈에 공격이 몇 번이나 나왔는지가
+          // "연계가 안 나온다"의 답입니다.
+          rec.byPhase[Math.min(2, Enemy.phase[e])]++
           this.bossLastSwing.set(e, id)
         }
       }
@@ -839,6 +857,18 @@ class Game {
      */
     for (const f of finisherEvents) {
       this.finishers++
+      /**
+       * **보스에게 들어간 처형**을 따로 셉니다.
+       *
+       * 보스 페이즈 경계를 옮겼는데도 3단계가 3.5초뿐이었습니다.
+       * 남은 용의자는 처형입니다 — 한 방이 마무리 타의 2.6배라, 두 번이면
+       * 마지막 페이즈가 통째로 지워집니다. 세키로의 인살은 그게 곧 끝이라
+       * 자연스럽지만, 우리는 그 뒤에 **아직 보여주지 못한 연계**가 남아
+       * 있습니다. 얼마나 지우고 있는지부터 알아야 합니다.
+       */
+      if (hasComponent(Enemy, f.entity) && Enemy.kind[f.entity] === EnemyKind.Boss) {
+        this.bossFinishers++
+      }
       this.cam.addTrauma(0.7)
       requestHitstop(0.2)
       sfx.impact(true, true, f.x, f.z)
@@ -1690,7 +1720,10 @@ class Game {
   }
 
   /** 사다리 상태 — 프로브가 상수를 베끼지 않고 게임에서 읽도록. */
-  debugBossSwingLog(): Record<string, { swings: number; hits: number; chained: number }> {
+  debugBossSwingLog(): Record<
+    string,
+    { swings: number; hits: number; chained: number; byPhase: number[] }
+  > {
     return this.bossSwingLog
   }
 
@@ -1875,6 +1908,7 @@ class Game {
     /** 무방비인 채로 죽은 적의 수 */
     brokenDeaths: number
     finishers: number
+    bossFinishers: number
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
     /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
@@ -1886,6 +1920,7 @@ class Game {
       breakHpAvg: this.poiseBreaks > 0 ? Number((this.breakHpSum / this.poiseBreaks).toFixed(3)) : 0,
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
+      bossFinishers: this.bossFinishers,
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
       deaths: this.deathCount,
@@ -2623,7 +2658,10 @@ declare global {
         lastStepDamage: number
         maxRange: number
       }[]
-      bossSwingLog: () => Record<string, { swings: number; hits: number; chained: number }>
+      bossSwingLog: () => Record<
+        string,
+        { swings: number; hits: number; chained: number; byPhase: number[] }
+      >
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -2671,6 +2709,7 @@ declare global {
         breakHpAvg: number
         brokenDeaths: number
         finishers: number
+        bossFinishers: number
         dodgeStamina: number
         staminaSpent: number
       }

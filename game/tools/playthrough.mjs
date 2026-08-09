@@ -168,6 +168,8 @@ try {
     let bossInRangeSamples = 0
     let bossWindingSamples = 0
     const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
+    const bossPhaseTime = [0, 0, 0]
+    let lastBossSample = 0
     const bossAttackRange = G.enemyRoster().find((r) => r.id === 'boss')?.attackRange ?? 3.4
     let bossKilled = false
     let clearedAt = 0
@@ -561,6 +563,10 @@ try {
       if (be && be.encounter > 0 && !bossSeen) {
         bossSeen = true
         bossStart = now()
+        // ⚠️ 여기서 **처음 맞춰 둡니다.** 0으로 두면 첫 프레임에
+        // "지금까지 흐른 시간 전부"가 1단계에 더해집니다 —
+        // 실제로 1단계가 113초로 찍혔습니다(보스전은 25초인데).
+        lastBossSample = now()
         notes.push({ at: Number((now() - t0).toFixed(1)), what: '보스 조우', region: curRegion })
       }
       /**
@@ -573,6 +579,19 @@ try {
       if (bossSeen && be && be.hp > 0) {
         bossFightTime = now() - bossStart
         if (be.phase + 1 > bossPhaseSeen) bossPhaseSeen = be.phase + 1
+        /**
+         * **페이즈마다 몇 초를 보냈는가.**
+         *
+         * 연계(🔵→🔴, 🟣→🔴, 🔵→🟡)는 2·3페이즈에만 걸려 있습니다.
+         * 그 페이즈가 몇 초 안 되면 연계는 나올 수가 없습니다 —
+         * "연계가 0회"의 답이 밸런스인지 시간인지가 여기서 갈립니다.
+         */
+        // ⚠️ **조우 중일 때만** 셉니다. 처음엔 보스가 레벨에 존재하기만 하면
+        // 세어서, 1단계가 103초로 찍혔습니다 — 그 대부분은 플레이어가 존
+        // 반대편을 걷던 시간이었습니다.
+        if (be.encounter > 0) {
+          bossPhaseTime[Math.min(2, be.phase)] += Math.max(0, now() - lastBossSample)
+        }
         bossSamples++
         const dmg = Math.max(0, lastBossHp - be.hp)
         if (lastBossHp > 0) bossDamageDealt += dmg
@@ -588,6 +607,7 @@ try {
          * 플레이어는 5.4m/s 이고, 회전도 100°/s 로 느립니다. 사거리 안에 있던
          * 시간이 짧으면 그건 AI 문제이지 밸런스 문제가 아닙니다.
          */
+        lastBossSample = now()
         bossRangeSamples++
         const bt = G.threats(40).find((t) => t.entity === be.entity)
         if (bt && bt.dist <= bossAttackRange) bossInRangeSamples++
@@ -1024,6 +1044,8 @@ try {
           : 0,
         attackRange: bossAttackRange,
         dist: bossDist,
+        phaseTime: bossPhaseTime.map((v) => Number(v.toFixed(1))),
+        finishers: G.runStats().bossFinishers,
       },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,
@@ -1165,11 +1187,13 @@ try {
       `  보스전      ${log.boss.seconds}초 · 본 페이즈 ${log.boss.phasesSeen}/3 · ${log.boss.killed ? '처치' : '미처치'}\n` +
         `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}\n` +
         `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%\n` +
-        `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%`,
+        `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%\n` +
+        `              페이즈별 시간 — 1단계 ${log.boss.phaseTime[0]}초 · 2단계 ${log.boss.phaseTime[1]}초 · 3단계 ${log.boss.phaseTime[2]}초\n` +
+        `              보스에게 들어간 처형 ${log.boss.finishers}회`,
     )
     for (const a of log.bossSwings) {
       console.log(
-        `              ${a.id.padEnd(12)} ${a.swings}회 휘두름 · ${a.hits}회 적중 (${Math.round((a.hits / Math.max(1, a.swings)) * 100)}%) · 연계로 나온 것 ${a.chained}회`,
+        `              ${a.id.padEnd(12)} ${a.swings}회 휘두름 · ${a.hits}회 적중 (${Math.round((a.hits / Math.max(1, a.swings)) * 100)}%) · 연계 ${a.chained}회 · 페이즈별 [${(a.byPhase ?? []).join('/')}]`,
       )
     }
   } else {
