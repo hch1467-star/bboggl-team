@@ -1479,16 +1479,36 @@ try {
           const settleBy = now() + 1.5
           while (now() < settleBy && !G.weaponUpgradeInfo().atStation) await sleep()
           visit.atStation = G.weaponUpgradeInfo().atStation === true
+          /**
+           * ⚠️ **한 번 누르면 게임이 처리할 때까지 기다립니다.**
+           *
+           * 게임이 갈림길마다 세게 했더니 답이 나왔습니다:
+           *   `B 눌림 1 · 자리아님 0 · 소비됨 1 · 정련석X 0 · **불티X 1** · 성공 0`
+           * 게임 자신의 `embers < cost` 에서 걸렸는데, 봇은 누르기 직전에
+           * 불티를 다시 읽고 "충분하다"고 판단했습니다.
+           *
+           * `await sleep()` 은 8ms 이고 한 프레임은 **100ms** 입니다.
+           * 성수병 결제(60)가 아직 반영되지 않은 지갑을 보고 무기(80)를
+           * 또 사려 한 것입니다 — **같은 돈을 두 번 셌습니다.**
+           * (`성수병 못함` 이라고 적혔는데 게임은 `성수병 강화 1회` 였던
+           *  앞 판의 모순도 같은 원인입니다.)
+           *
+           * 이번 라운드 내내 나온 그 규칙입니다 — **일어나기 전에 재지
+           * 않습니다.** 눌렀으면 반영될 때까지 기다린 뒤 다음을 정합니다.
+           */
+          const applied = async (read, before, limit = 2.0) => {
+            const until = now() + limit
+            while (now() < until && read() === before) await sleep()
+            return read() !== before
+          }
           if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
-            await sleep()
-            visit.vial = G.vialInfo().max > beforeVial
+            visit.vial = await applied(() => G.vialInfo().max, beforeVial)
           }
           const w2 = G.weaponUpgradeInfo()
           if (w2.nextCost > 0 && G.emberInfo().embers >= w2.nextCost && w2.stones >= w2.nextStoneCost) {
             tap('KeyB')
-            await sleep()
-            visit.weapon = G.weaponUpgradeInfo().level > beforeLevel
+            visit.weapon = await applied(() => G.weaponUpgradeInfo().level, beforeLevel)
             /**
              * **누른 직후의 자리 상태**도 남깁니다.
              *
