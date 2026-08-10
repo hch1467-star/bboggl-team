@@ -207,6 +207,52 @@ console.log(
 }
 
 /**
+ * ── 구역별 위험도 — **난이도가 보스를 향해 올라가는가** ────────────
+ *
+ * 한 판짜리 출력에만 있던 눈금입니다. 그래서 제가 한 판을 보고
+ * *"절정이 존 한가운데이고 보스로 가는 길이 가장 안전하다"* 고 읽었습니다.
+ * 네 판을 나란히 놓으니 **정확히 뒤집혀** 있었습니다:
+ *
+ *     구역        판6    판7    판8    판9
+ *     성벽 위(보스) 132    130    127    118
+ *     무너진 성문   103    104    105    104
+ *     중앙 폐허     85     94     92   **135**   ← 판9만 튐
+ *
+ * 실제 곡선은 `성문 103 → 폐허 90 → 보스 130` 으로 **올라갑니다.**
+ * 판9 하나가 이상값이었고, 저는 그 한 판으로 존을 다시 짤 뻔했습니다.
+ *
+ * 이번 라운드에만 두 번째입니다(`답할 스킬 0%` 도 91초에 막힌 실패 판의
+ * 값이었습니다). 그래서 고칠 것은 게임이 아니라 **읽는 자리**입니다 —
+ * 여러 판을 보는 도구에 없으면, 한 판을 보고 판단하게 됩니다.
+ * `fireVisits` 를 벤치에 올린 것과 같은 이유입니다.
+ */
+{
+  const byRegion = new Map()
+  for (const l of logs) {
+    for (const r of l.regionDanger ?? []) {
+      if (!byRegion.has(r.name)) byRegion.set(r.name, { risk: [], secs: [], kills: [] })
+      const g = byRegion.get(r.name)
+      // 위험도는 **판마다 먼저** 냅니다(부분의 중앙값은 전체의 중앙값과 안 맞습니다).
+      if (r.combat > 0) g.risk.push((r.damage / r.combat) * 60)
+      g.secs.push(r.seconds)
+      g.kills.push(r.kills)
+    }
+  }
+  if (byRegion.size) {
+    console.log('\n  ── 구역별 위험도 (교전 1분당 받은 피해) ────')
+    for (const [name, g] of [...byRegion.entries()].sort(
+      (a, b) => median(b[1].risk) - median(a[1].risk),
+    )) {
+      console.log(
+        `  ${name.padEnd(12)} ${fmt(g.risk, 0)} /교전분` +
+          ` · 머문 ${fmt(g.secs, 0)}초 · 처치 ${fmt(g.kills, 0)}마리` +
+          ` (${g.risk.length}/${logs.length}판)`,
+      )
+    }
+  }
+}
+
+/**
  * ── 소비처 — **강화가 왜 안 일어나는가** ──────────────────────────
  *
  * 벤치가 판마다 `무기 강화 0.0회` 를 찍는데, 그 옆에는 `남은 불티 285` 와
