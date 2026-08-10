@@ -1420,18 +1420,41 @@ try {
             emberNeed: wu.nextCost,
             vial: false,
             weapon: false,
+            atStation: false,
             anvil: fire.anvil === true,
           }
+          /**
+           * ⚠️ **누른 것이 아니라 바뀐 것을 적습니다.**
+           *
+           * 예전엔 `tap('KeyB')` 바로 뒤에 `visit.weapon = true` 였습니다.
+           * 그래서 벤치가 *"닿았을 때 무기 강화함 4회"* 라고 찍는 동안
+           * 진짜 강화 횟수(게임 상태의 차이)는 **0** 이었습니다 —
+           * 두 눈금이 같은 것을 두고 정반대를 말했습니다.
+           *
+           * 원인은 **봇이 자기 기준으로 "닿았다"를 판단한 것**이었습니다.
+           * 직선 2.6m 면 눌렀는데 게임의 반경은 2.4m 이고, 화톳불은
+           * 적이 14m 안에 있으면 아예 막힙니다. 못 쓰는 자리에서 누르고
+           * "썼다"고 적고 있었던 것입니다.
+           *
+           * 이 프로젝트에서 계속 나온 규칙 그대로입니다 — **의도가 아니라
+           * 결과를 세고, 판단은 게임에서 읽습니다.**
+           */
+          const beforeVial = G.vialInfo().max
+          const beforeLevel = G.weaponUpgradeInfo().level
+          // 게임이 "여기서 된다"고 할 때까지 잠깐 기다립니다(반경 차이 흡수).
+          const settleBy = now() + 1.5
+          while (now() < settleBy && !G.weaponUpgradeInfo().atStation) await sleep()
+          visit.atStation = G.weaponUpgradeInfo().atStation === true
           if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
             tap('KeyV')
-            visit.vial = true
             await sleep()
+            visit.vial = G.vialInfo().max > beforeVial
           }
           const w2 = G.weaponUpgradeInfo()
           if (w2.nextCost > 0 && G.emberInfo().embers >= w2.nextCost && w2.stones >= w2.nextStoneCost) {
             tap('KeyB')
-            visit.weapon = true
             await sleep()
+            visit.weapon = G.weaponUpgradeInfo().level > beforeLevel
           }
           fireVisits.push(visit)
           lastFireWallet = { embers: G.emberInfo().embers, stones: G.weaponUpgradeInfo().stones }

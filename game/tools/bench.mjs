@@ -241,13 +241,22 @@ console.log(
     if (visits.length) {
       const why = {}
       for (const v of visits) {
-        const k = v.weapon
-          ? '무기 강화함'
-          : v.emberNeed <= 0
-            ? '최대 단계'
-            : v.stones < v.stoneNeed
-              ? '정련석 부족'
-              : '불티 부족'
+        /**
+         * `자리 아님` 이 맨 앞입니다 — **이게 진짜 원인이었습니다.**
+         * 봇이 소비처에 닿았다고 믿고 B 를 눌렀는데 게임 기준으로는
+         * 강화가 되는 자리가 아니었고(반경 2.4m · 화톳불은 적 14m 이내면
+         * 막힘), 그걸 "강화함"으로 적고 있었습니다. 자원 부족과 자리 문제는
+         * 처방이 정반대라(수입·배치 vs 지도·반경) 반드시 갈라야 합니다.
+         */
+        const k = !v.atStation
+          ? '자리 아님'
+          : v.weapon
+            ? '무기 강화함'
+            : v.emberNeed <= 0
+              ? '최대 단계'
+              : v.stones < v.stoneNeed
+                ? '정련석 부족'
+                : '불티 부족'
         why[k] = (why[k] ?? 0) + 1
       }
       console.log(

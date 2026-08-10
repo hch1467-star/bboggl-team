@@ -298,6 +298,8 @@ class Game {
    */
   private fallLog: { player: number; foe: number; foeSteps: number; byKind: Record<string, number> } =
     { player: 0, foe: 0, foeSteps: 0, byKind: {} }
+  /** 지금 서 있는 자리에서 강화가 되는가 — 게임의 판단(봇이 다시 계산하지 않게). */
+  private canSpendHere = false
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
   /**
@@ -778,8 +780,21 @@ class Game {
        * 나머지(회복·부활·적 부활)는 아래에서 `rest` 로만 갑니다 — 모루는
        * 그 어느 것도 건드리지 않습니다.
        */
-      this.tryUpgrade(p, atFire || nearAnvil)
-      this.tryUpgradeWeapon(p, atFire || nearAnvil)
+      /**
+       * **게임이 판단한 "지금 여기서 강화할 수 있는가"** 를 남깁니다.
+       *
+       * 자동 플레이가 소비처에 닿아 B 를 네 번 눌렀는데 강화 횟수는
+       * **0** 이었습니다. 봇이 자기 기준(직선 2.6m)으로 "닿았다"를 판단하고
+       * 있었기 때문입니다. 게임의 반경은 `BONFIRE.radius` 2.4m 이고,
+       * 화톳불 쪽은 **적이 14m 안에 있으면 막힙니다**(`rest.blocked`).
+       * 즉 봇은 못 쓰는 자리에서 누르고 "썼다"고 적고 있었습니다.
+       *
+       * 규칙을 두 곳에 적으면 한쪽만 낡습니다. 처형(`finisherInfo().ready`)
+       * 에서 이미 정한 방식대로, **판단은 게임이 하고 봇은 읽기만** 합니다.
+       */
+      this.canSpendHere = atFire || nearAnvil
+      this.tryUpgrade(p, this.canSpendHere)
+      this.tryUpgradeWeapon(p, this.canSpendHere)
       if (nearAnvil && !atFire) this.hud.setRest(true, 0, false, true)
       else this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
       if (rest.litNow && rest.near) {
@@ -2157,6 +2172,8 @@ class Game {
     earnedStones: number
     damagePerLevel: number
     levels: number[]
+    /** **지금 이 자리에서** 강화가 되는가. 봇이 거리를 다시 재지 않게. */
+    atStation: boolean
   } {
     const p = this.playerEntity
     const w = Loadout.weapon[p]
@@ -2172,6 +2189,7 @@ class Game {
       stones: Player.stones[p],
       damagePerLevel: WEAPON_UPGRADE.damagePerLevel,
       levels: [Loadout.wLv0[p], Loadout.wLv1[p], Loadout.wLv2[p]],
+      atStation: this.canSpendHere,
     }
   }
 
@@ -2970,6 +2988,7 @@ declare global {
         earnedStones: number
         damagePerLevel: number
         levels: number[]
+        atStation: boolean
       }
       setStones: (n: number) => void
       treasurePositions: () => { x: number; z: number; taken: boolean }[]
