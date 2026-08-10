@@ -4,6 +4,7 @@ import {
   BOSS_ARENA,
   COMBAT,
   COUNTER,
+  CAMERA,
   BONFIRE,
   EMBER,
   FALL,
@@ -1340,6 +1341,13 @@ class Game {
     // ---- 7. 카메라 & 렌더 ----
     const px = Transform.x[p]
     const pz = Transform.z[p]
+    /**
+     * 달리는 만큼 시야를 넓힙니다 — 연출이 아니라 **반응 시간** 때문입니다
+     * (render/camera.ts setSprint 주석). 게임이 이미 센 값을 그대로 넘깁니다.
+     */
+    this.cam.setSprint(
+      PLAYER_CFG.sprint.rampUp > 0 ? Player.sprintT[p] / PLAYER_CFG.sprint.rampUp : 0,
+    )
     this.cam.update(px, playerY, pz, this.aim.x, this.aim.z)
     this.sunTarget.position.set(px, playerY, pz)
 
@@ -2134,6 +2142,10 @@ class Game {
     levelAggroRange: number
     /** 달리기 배율 · 공격 템포 배율 — 프로브가 상수를 베끼지 않게. */
     sprintScale: number
+    /** 달릴 때 시야가 넓어지는 배율 · 기본 시야(m) · 지금 카메라 줌. */
+    sprintViewScale: number
+    cameraViewSize: number
+    cameraZoom: number
     attackTempo: number
     /** 원거리 적이 자기 사거리 위에 더 받는 여유(m). */
     levelAggroLead: number
@@ -2150,6 +2162,9 @@ class Game {
       fallDamagePerStep: FALL.damagePerStep,
       levelAggroRange: LEVEL_AGGRO_RANGE,
       sprintScale: PLAYER_CFG.sprint.speedScale,
+      sprintViewScale: CAMERA.sprintViewScale,
+      cameraViewSize: CAMERA.viewSize,
+      cameraZoom: this.cam.currentZoom(),
       attackTempo: PLAYER_CFG.tempo.attackScale,
       levelAggroLead: LEVEL_AGGRO_LEAD,
       levelAggroMax: LEVEL_AGGRO_MAX,
@@ -3160,6 +3175,9 @@ declare global {
         fallDamagePerStep: number
         levelAggroRange: number
         sprintScale: number
+        sprintViewScale: number
+        cameraViewSize: number
+        cameraZoom: number
         attackTempo: number
         levelAggroLead: number
         levelAggroMax: number

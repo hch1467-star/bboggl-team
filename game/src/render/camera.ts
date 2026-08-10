@@ -30,6 +30,9 @@ export class QuarterViewCamera {
 
   /** 화면 흔들림 — trauma 방식(제곱 감쇠)이 선형보다 훨씬 자연스럽습니다. */
   private trauma = 0
+  /** 달리기 시야 확대 — 0이면 걷기, 1이면 최대. */
+  private sprintTarget = 0
+  private sprintMix = 0
   private readonly shakeBias = new THREE.Vector2()
 
   private readonly raycaster = new THREE.Raycaster()
@@ -82,6 +85,31 @@ export class QuarterViewCamera {
    * @param dirX,dirZ 월드 기준 충격 방향. 주면 그 방향으로 카메라가 밀립니다.
    *        (연구 결과: 방향성 있는 흔들림이 무작위 흔들림보다 타격감이 크게 좋습니다)
    */
+  /**
+   * ── 달리는 동안 시야를 조금 넓힙니다 ──────────────────────────────
+   *
+   * 연출이 아니라 **반응 시간** 때문입니다. 화면이 세로로 22m 를 담으므로
+   * 화면 끝에 나타난 적까지 걷기(5.4m/s)로 2.0초, 달리기(8.4m/s)로는
+   * **1.3초** 입니다. 속도를 올린 만큼 읽을 시간이 줄어듭니다.
+   *
+   * ⚠️ 속도만큼(1.55배) 넓히지는 **않습니다.** 그러면 캐릭터가 작아져서
+   * 쿼터뷰에서 4색 예고와 등 뒤 표시를 읽을 수가 없습니다 — 이 게임이
+   * 읽히는 이유를 시야를 넓히려다 깨는 셈입니다. 1.18배(22m → 26m)면
+   * 잃은 시간의 40%쯤을 되돌리면서 화면의 밀도는 유지됩니다.
+   *
+   * 되돌아오는 것은 **빠르게**(0.18초), 넓어지는 것은 천천히(0.45초).
+   * 멈추는 순간 시야가 늦게 좁혀지면 전투가 시작됐는데 화면이 아직
+   * "이동 중"인 상태가 됩니다.
+   */
+  /** 지금 줌 — 프로브가 "시야가 실제로 넓어졌는가"를 재려면 필요합니다. */
+  currentZoom(): number {
+    return this.camera.zoom
+  }
+
+  setSprint(mix: number): void {
+    this.sprintTarget = Math.max(0, Math.min(1, mix))
+  }
+
   addTrauma(amount: number, dirX = 0, dirZ = 0): void {
     this.trauma = Math.min(1, this.trauma + amount)
     if (dirX !== 0 || dirZ !== 0) {
@@ -130,6 +158,22 @@ export class QuarterViewCamera {
     this.camera.lookAt(this.smoothed)
 
     // 흔들림은 realDt로 감쇠 — 히트스톱 중에도 카메라는 계속 흔들려야 합니다.
+    /**
+     * 시야는 **실시간(realDt)** 으로 움직입니다. 히트스톱 중에 시야가 같이
+     * 멈추면 타격 순간 화면이 굳어 보입니다 — 흔들림·연출과 같은 축입니다.
+     */
+    {
+      const up = this.sprintTarget > this.sprintMix
+      const rate = up ? 1 / 0.45 : 1 / 0.18
+      const step = rate * time.realDt
+      this.sprintMix += Math.max(-step, Math.min(step, this.sprintTarget - this.sprintMix))
+      const zoom = 1 / (1 + (CAMERA.sprintViewScale - 1) * this.sprintMix)
+      if (Math.abs(this.camera.zoom - zoom) > 0.0005) {
+        this.camera.zoom = zoom
+        this.camera.updateProjectionMatrix()
+      }
+    }
+
     if (this.trauma > 0) {
       this.trauma = Math.max(0, this.trauma - CAMERA.shake.decay * time.realDt)
       const shake = this.trauma * this.trauma // 제곱: 약할 땐 거의 안 보이고 강할 때 확 튐

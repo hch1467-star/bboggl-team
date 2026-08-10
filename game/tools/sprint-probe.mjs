@@ -211,6 +211,44 @@ try {
   })
   check(still < 0.2, '제자리에서 Shift 만 눌러도 움직이지 않는다', `${still.toFixed(2)}m`)
 
+  // ---- 7. 달리면 **시야가 넓어지는가** ----
+  //
+  // 연출이 아니라 반응 시간 때문입니다. 속도가 1.55배가 되면 화면 끝의 적까지
+  // 걷기 2.0초 → 달리기 1.3초로 줄어듭니다. 신호가 없으면 플레이어는 달리는
+  // 중인지도 모르고(모루에서 정한 원칙 — "생김새가 먼저 말해야 합니다"),
+  // 줄어든 시간만 그대로 떠안습니다.
+  const view = await page.evaluate(async () => {
+    const G = window.__game
+    await window.__idle()
+    const walkZoom = G.terrainInfo().cameraZoom
+    G.press('KeyW')
+    G.press('ShiftLeft')
+    const t0 = G.state().simElapsed
+    while (G.state().simElapsed - t0 < 1.4) await new Promise((r) => setTimeout(r, 4))
+    const runZoom = G.terrainInfo().cameraZoom
+    await window.__idle()
+    const t1 = G.state().simElapsed
+    while (G.state().simElapsed - t1 < 0.8) await new Promise((r) => setTimeout(r, 4))
+    return { walkZoom, runZoom, backZoom: G.terrainInfo().cameraZoom }
+  })
+  const wantZoom = 1 / info.sprintViewScale
+  check(
+    view.runZoom < view.walkZoom * 0.995,
+    '달리면 시야가 넓어진다 (줄어든 반응 시간을 일부 돌려줍니다)',
+    `줌 ${view.walkZoom.toFixed(3)} → ${view.runZoom.toFixed(3)}` +
+      ` (${info.cameraViewSize.toFixed(1)}m → ${(info.cameraViewSize * info.sprintViewScale).toFixed(1)}m)`,
+  )
+  check(
+    Math.abs(view.runZoom - wantZoom) / wantZoom < 0.08,
+    '넓어지는 폭이 설정값과 맞는다',
+    `${view.runZoom.toFixed(3)} vs 기대 ${wantZoom.toFixed(3)}`,
+  )
+  check(
+    view.backZoom > view.runZoom * 1.02,
+    '멈추면 시야가 되돌아온다 (전투가 시작됐는데 화면이 "이동 중"이면 안 됩니다)',
+    `${view.runZoom.toFixed(3)} → ${view.backZoom.toFixed(3)}`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {
