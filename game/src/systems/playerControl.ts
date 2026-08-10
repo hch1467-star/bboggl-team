@@ -770,22 +770,39 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 짧은 저음 하나로 "입력은 됐고, 지금은 자원이 없다"가 됩니다.
          * — 스태미나가 자원으로 작동하려면 **바닥났다는 사실이 들려야** 합니다.
          */
-        if (dodgeQueued || attackQueued) {
+        /**
+         * ── 못 낸 입력에 어떻게 답할 것인가 ──────────────────────────
+         *
+         * ⚠️ 여기서 **버퍼를 버렸다가 되돌렸습니다.** 처음엔 "낼 수 없는
+         * 입력은 버린다"고 적고 지웠는데, 그러면 제가 만든 연속 구르기가
+         * 그대로 막힙니다:
+         *
+         *   구르기가 끝나는 순간 쿨다운(0.12초)이 걸립니다 → 다음 프레임의
+         *   `canDodge` 가 거짓 → 눌러 둔 구르기가 **거절음과 함께 버려짐**
+         *
+         * 창 0.55초를 `구르기 0.42 + 쿨다운 0.12 = 0.54` 를 덮으라고 잡아
+         * 놓고, 정작 그 0.12초를 못 넘기고 지우고 있었습니다. 바로 위
+         * `takeBufferedSkill` 주석이 같은 함정을 이미 적어 뒀습니다 —
+         * *"쿨다운이라 못 쓴 것을 지워버리면, 쿨이 0.1초 뒤에 도는 흔한
+         * 경우에 또 입력이 사라집니다."* 스킬에는 지킨 규칙을 구르기·공격에는
+         * 안 지켰습니다.
+         *
+         * 그래서 **버리지 않고 거절음만 한 번** 냅니다. "한 번 누른 것에
+         * 한 번 답한다"는 원래 의도는 그대로이고, 창이 남아 있는 동안
+         * 자원이나 쿨다운이 회복되면 그때 나갑니다.
+         *
+         * 누른 그 프레임인지는 **남은 창**으로 압니다 — 누른 순간에만
+         * 남은 시간이 창 전체와 같습니다. 새 필드를 만들지 않습니다.
+         */
+        const justPressed =
+          (dodgeQueued && Actor.bufferedDodgeT[p] >= BUFFER_TIME - 0.0001) ||
+          (attackQueued && Actor.bufferedAttackT[p] >= BUFFER_TIME - 0.0001)
+        if (justPressed) {
           sfx.deny()
-          /**
-           * 낼 수 없는 입력은 **버립니다.**
-           *
-           * 버퍼가 살아 있으면 자원이 찰 때까지 거절음이 **프레임마다**
-           * 울립니다. 한 번 누른 것에 한 번 답해야 정보가 됩니다 —
-           * 계속 울리면 그건 정보가 아니라 소음입니다.
-           */
-          // ⚠️ `take*` 를 쓰면 "이어졌다(used)"로 세어집니다. 이건 이어진 게
-          //    아니라 **못 내서 버린 것**이므로 따로 셉니다.
-          if (Actor.bufferedDodge[p] === 1 || Actor.bufferedAttack[p] === 1) inputFlow.dropped++
-          Actor.bufferedDodge[p] = 0
-          Actor.bufferedDodgeT[p] = 0
-          Actor.bufferedAttack[p] = 0
-          Actor.bufferedAttackT[p] = 0
+          // 누른 순간에 못 낸 것 — 버린 게 아니라 **그때 못 낸 것**입니다.
+          // 창이 남아 있으므로 뒤에 나갈 수도 있고, 그러면 `used` 로도 세어집니다.
+          // 두 칸이 겹치므로 합계가 누른 횟수와 같지 않습니다(보고에 적어 둡니다).
+          inputFlow.dropped++
         }
         turnToward(p, aimRot, PLAYER.turnSpeedDeg, dt)
         break

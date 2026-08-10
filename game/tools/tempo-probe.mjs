@@ -182,6 +182,33 @@ try {
   `)
   check(!expiry.moved, '창이 지난 선입력은 버려진다 (뒤늦게 튀어나오지 않는다)')
 
+  // ---- 3.5 연속 구르기 — 창 0.55초를 그렇게 잡은 **이유** ----
+  //
+  // 창 길이를 `구르기 0.42 + 쿨다운 0.12 = 0.54` 에서 뽑아 놓고, 정작 그
+  // 0.12초를 넘기는지는 검사하지 않았습니다. 그래서 실제로는 막혀 있었는데도
+  // 6개 검사가 전부 통과했습니다 — **근거로 삼은 수치에 해당하는 검사가
+  // 없으면, 그 수치는 지켜지지 않습니다.**
+  const chainRoll = await lab(`
+    tap('Space')
+    const first = await until(() => st() === St.dodge, 1.0)
+    if (first < 0) return { ok: false, why: '첫 구르기가 안 나감' }
+    // 구르는 **도중에** 다음 구르기를 눌러 둡니다 — 사람이 실제로 하는 입력.
+    await wait(0.05)
+    const pressedAt = now()
+    tap('Space')
+    // 첫 구르기가 끝나기를 기다린 뒤, 두 번째가 나오는지 봅니다.
+    await until(() => st() !== St.dodge, 1.5)
+    const second = await until(() => st() === St.dodge, 1.5)
+    return { ok: second > 0, delay: second > 0 ? second - pressedAt : -1 }
+  `)
+  check(
+    chainRoll.ok,
+    '구르는 중에 눌러 둔 **다음 구르기**가 쿨다운을 넘겨 나간다',
+    chainRoll.ok
+      ? `누르고 ${chainRoll.delay.toFixed(2)}초 뒤 (구르기 ${t.dodgeDuration} + 쿨다운 ${t.dodgeCooldown} = ${(t.dodgeDuration + t.dodgeCooldown).toFixed(2)})`
+      : chainRoll.why || '끝내 안 나감 — 쿨다운 중에 버려졌습니다',
+  )
+
   // ---- 4. 콤보가 바닥나도 이어지는가 ----
   //
   // `endAttack` 이 콤보 끝에서 선입력을 지우고 있었습니다. 그 자리에서만
