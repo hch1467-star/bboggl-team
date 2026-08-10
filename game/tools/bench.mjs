@@ -207,6 +207,61 @@ console.log(
 }
 
 /**
+ * ── 소비처 — **강화가 왜 안 일어나는가** ──────────────────────────
+ *
+ * 벤치가 판마다 `무기 강화 0.0회` 를 찍는데, 그 옆에는 `남은 불티 285` 와
+ * `살 수 있게 된 때 37초 / 닿을 수 있던 마지막 때 138초` 가 같이 있습니다.
+ * **살 수 있고 닿을 수 있는데 100초 동안 안 삽니다.**
+ *
+ * 이유를 가르는 데이터는 봇이 **이미 모으고 있었습니다** — 소비처에 닿은
+ * 순간의 지갑과, 닿고도 못 산 이유(`fireVisits`), 가려다 접은 횟수와
+ * 그때의 거리(`fireSkips`). 그런데 그 둘을 **한 판짜리 출력에만** 찍고
+ * 있어서, 제가 내내 읽던 벤치에는 한 번도 안 나왔습니다.
+ *
+ * 이번 라운드에 세 번째로 만나는 같은 모양입니다 — 기능도 데이터도 있는데
+ * **보는 자리에 없어서** 없는 것과 같았습니다.
+ */
+{
+  const visits = logs.flatMap((l) => l.fireVisits ?? [])
+  const skips = logs.flatMap((l) => l.fireSkips ?? [])
+  if (visits.length || skips.length) {
+    console.log('\n  ── 소비처 (판당) ─────────────────────')
+    console.log(
+      `  닿음          ${fmt(logs.map((l) => (l.fireVisits ?? []).length), 1)}회` +
+        ` · 가려다 접음 ${fmt(logs.map((l) => (l.fireSkips ?? []).length), 1)}회`,
+    )
+    if (skips.length) {
+      const ds = skips.map((f) => f.dist).filter((d) => d >= 0)
+      if (ds.length) console.log(`  접은 거리     ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)`)
+    }
+    /**
+     * 닿고도 못 산 이유를 **묶어서** 셉니다. 이유마다 처방이 다릅니다:
+     * 정련석이면 **보물 배치**, 불티면 **수입**, 최대 단계면 **손댈 것 없음**.
+     */
+    if (visits.length) {
+      const why = {}
+      for (const v of visits) {
+        const k = v.weapon
+          ? '무기 강화함'
+          : v.emberNeed <= 0
+            ? '최대 단계'
+            : v.stones < v.stoneNeed
+              ? '정련석 부족'
+              : '불티 부족'
+        why[k] = (why[k] ?? 0) + 1
+      }
+      console.log(
+        '  닿았을 때     ' +
+          Object.entries(why)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, n]) => `${k} ${n}회`)
+            .join(' · '),
+      )
+    }
+  }
+}
+
+/**
  * ── 절벽 — **밀어서 떨어뜨리기가 일어나는가** ──────────────────────
  *
  * 이 동사는 새로 만든 게 아니라 **이미 있던 것**입니다(넉백 + 낙하 판정).
