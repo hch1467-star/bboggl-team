@@ -314,15 +314,21 @@ function commitAttack(
  *    언젠가 두 숫자가 어긋나고, 그때 어느 쪽을 믿을지 알 수 없게 됩니다.
  *    여기서는 **예고가 끝난 방식**만 셉니다.
  */
-const greenOutcome = { swung: 0, died: 0, broken: 0 }
+const greenOutcome = { swung: 0, died: 0, countered: 0, broken: 0 }
 /** 지금 초록 예고 중인 적들 — 프레임마다 갱신하고, 빠진 것을 결산합니다. */
 const greenWinding = new Set<number>()
-export function readGreenOutcome(): { swung: number; died: number; broken: number } {
+export function readGreenOutcome(): {
+  swung: number
+  died: number
+  countered: number
+  broken: number
+} {
   return { ...greenOutcome }
 }
 export function resetGreenOutcome(): void {
   greenOutcome.swung = 0
   greenOutcome.died = 0
+  greenOutcome.countered = 0
   greenOutcome.broken = 0
   greenWinding.clear()
 }
@@ -343,7 +349,23 @@ function settleGreenWindups(): void {
     }
     greenWinding.delete(e)
     // 죽었는가, 아니면 무너져서(경직) 끊겼는가.
-    if (!isAlive(e) || Actor.state[e] === ActorState.Dead) greenOutcome.died++
+    if (!isAlive(e) || Actor.state[e] === ActorState.Dead) {
+      greenOutcome.died++
+      continue
+    }
+    /**
+     * 끊긴 것이 **반격 때문인가**, 아니면 다른 무엇인가.
+     *
+     * 지난번 출력은 `무너져 끊김 2회` 였고 반격도 2회였습니다. 같은 숫자라
+     * "그러면 반격이겠지" 하고 넘어갈 뻔했는데, 두 숫자가 **우연히 같은 것**과
+     * **같은 사건인 것**은 다릅니다. 이 프로젝트에서 계기를 여덟 번 틀린
+     * 이유가 매번 그 자리였습니다. 그래서 잇습니다 — combat.ts 가 찍어 둔
+     * 시각을 보고 방금 반격당한 것인지 확인합니다.
+     *
+     * 0.5초를 창으로 두는 이유: 반격이 들어간 프레임과 예고가 끝났다고
+     * 결산되는 프레임이 다를 수 있습니다(이 환경은 한 프레임이 0.1초).
+     */
+    if (time.simElapsed - Enemy.counteredAt[e] < 0.5) greenOutcome.countered++
     else greenOutcome.broken++
   }
 }

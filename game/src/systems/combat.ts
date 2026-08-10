@@ -642,7 +642,11 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     let damage = spec.damage
     if (back && !spec.noCrit) damage *= COMBAT.backDamageMult
     if (crit) damage *= COMBAT.critMult
-    if (countered) damage *= COUNTER.damageMultiplier
+    if (countered) {
+      damage *= COUNTER.damageMultiplier
+      // 예고가 어떻게 끝났는지 결산하는 쪽(enemyAI)이 읽습니다.
+      Enemy.counteredAt[t] = time.simElapsed
+    }
 
     Health.hp[t] -= damage
     /**

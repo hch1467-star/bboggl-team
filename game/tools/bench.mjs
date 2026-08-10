@@ -435,7 +435,8 @@ console.log(`  🟢 초록 예고   ${fmt(pick((l) => l.greenEvents ?? 0), 0)}�
 console.log(
   `                 끝난 방식 — 휘두름까지 ${fmt(pick((l) => l.greenSwung ?? 0), 0)}회 · ` +
     `적이 죽음 ${fmt(pick((l) => l.greenDied ?? 0), 0)}회 · ` +
-    `무너져 끊김 ${fmt(pick((l) => l.greenBroken ?? 0), 0)}회`,
+    `반격으로 끊김 ${fmt(pick((l) => l.greenCountered ?? 0), 0)}회 · ` +
+    `그 밖의 끊김 ${fmt(pick((l) => l.greenBroken ?? 0), 0)}회`,
 )
 console.log(`  보물           ${fmt(pick((l) => Number(String(l.treasures).split('/')[0])), 0)} / ` +
   `${logs[0].treasures?.split('/')[1] ?? '?'}`)

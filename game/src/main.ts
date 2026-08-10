@@ -2299,6 +2299,7 @@ class Game {
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
     greenDied: number
+    greenCountered: number
     greenBroken: number
     /** 무너진 순간의 평균 체력 비율(0~1) */
     breakHpAvg: number
@@ -2329,6 +2330,7 @@ class Game {
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
+      greenCountered: readGreenOutcome().countered,
       greenBroken: readGreenOutcome().broken,
       breakHpAvg: this.poiseBreaks > 0 ? Number((this.breakHpSum / this.poiseBreaks).toFixed(3)) : 0,
       brokenDeaths: this.brokenDeaths,
@@ -3268,6 +3270,7 @@ declare global {
         windupBreaks: number
         greenSwung: number
         greenDied: number
+        greenCountered: number
         greenBroken: number
         breakHpAvg: number
         brokenDeaths: number
