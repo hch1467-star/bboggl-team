@@ -424,7 +424,24 @@ export function playerControlSystem(ctx: ControlContext): void {
   // 🥋 강타 — 우클릭. 지금까지 비어 있던 유일한 주요 입력이라, 새 키를
   // 외우게 하지 않고도 "왼쪽은 쌓기, 오른쪽은 태우기"가 손에 붙습니다.
   const heavyPressed = consumePress('Mouse2')
-  const dodgePressed = consumePress('Space') || consumePress('ShiftLeft')
+  /**
+   * 구르기는 **Space 하나**입니다.
+   *
+   * 예전엔 `Space || ShiftLeft` 였습니다 — 편의로 둔 보조 키였는데,
+   * 달리기를 Shift 에 넣으면서 **같은 키가 두 동사를 갖게** 됐습니다.
+   * 달리려고 Shift 를 누르면 대신 굴러 버립니다.
+   *
+   * 눈으로는 못 잡았습니다. 봇은 Shift 를 안 누르고, 벤치도 안 씁니다.
+   * `npm run sprint` 의 *"제자리에서 Shift 만 눌러도 움직이지 않는다"* 가
+   * 3.91m 를 찍어서 드러났습니다 — 구르기 거리(4.2m)와 같은 값이었습니다.
+   *
+   * 소울류는 **탭=구르기, 홀드=달리기**로 한 키에 둘을 겁니다. 그 방식도
+   * 좋지만 지금 넣지 않았습니다: 탭/홀드 판정에는 문턱 시간이 필요하고,
+   * 그 시간만큼 **구르기가 늦게 나갑니다.** 회피가 늦는 것은 이 게임에서
+   * 가장 비싼 지연입니다(무적 프레임이 0.06~0.3초 구간입니다).
+   * 키가 남아 있으니 굳이 한 키에 겹칠 이유가 없습니다.
+   */
+  const dodgePressed = consumePress('Space')
   const drinkPressed = consumePress('KeyX')
   let skillPressed = -1
   for (let i = 0; i < SKILL_KEY_CODES.length; i++) {
