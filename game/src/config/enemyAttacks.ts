@@ -80,6 +80,22 @@ export const INTENT_COLOR: Record<AttackIntent, number> = {
   [AttackIntent.Counter]: 0x4dffa1,
 }
 
+/**
+ * 색 이모지 — 프로브·로그가 사람 눈으로 읽으라고 쓰는 표시입니다.
+ *
+ * `Record<AttackIntent, …>` 로 둔 이유: 배열로 `['🔴','🟡','🔵','🟣']`
+ * 라고 적어 뒀더니 🟢 을 추가한 뒤 **`undefined🟢` 이 찍히고 있었습니다.**
+ * (`npm run enemies` 출력에 `패턴 undefinedcharger_rush` 로 나왔습니다.)
+ * Record 로 두면 색을 하나 더 만드는 순간 **타입이 먼저 막습니다.**
+ */
+export const INTENT_EMOJI: Record<AttackIntent, string> = {
+  [AttackIntent.Strike]: '🔴',
+  [AttackIntent.Sweep]: '🟡',
+  [AttackIntent.Snare]: '🔵',
+  [AttackIntent.Pull]: '🟣',
+  [AttackIntent.Counter]: '🟢',
+}
+
 export const INTENT_LABEL: Record<AttackIntent, string> = {
   [AttackIntent.Strike]: '직격 — 구르기',
   [AttackIntent.Sweep]: '광역 — 걸어서 이탈',

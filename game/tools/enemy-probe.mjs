@@ -75,7 +75,27 @@ try {
     )
   }
   const byId = Object.fromEntries(roster.map((r) => [r.id, r]))
-  check(roster.length === 4, '적 종류 4가지', roster.map((r) => r.name).join(' · '))
+  /**
+   * **존에 배치된 종류가 전부 종류표에 있는가.**
+   *
+   * 예전엔 `roster.length === 4` 였습니다. 그런데 그 4는 게임이 아니라
+   * `enemyRoster()` 안에 **손으로 적힌 목록**의 길이였고, 나중에 들어온
+   * 달려드는 자·쏘는 자가 통째로 빠져 있었습니다. 그래서 아래 실루엣
+   * 검사도 그 둘을 한 번도 못 봤고, 규칙(키 0.30m 간격)을 어긴 값이
+   * 두 번 들어왔습니다.
+   *
+   * 숫자를 4에서 6으로 고치면 **같은 버그를 한 번 더 심는 것**입니다.
+   * 세는 대신 두 목록을 맞춰 봅니다 — 존에 세운 종류는 반드시 표에
+   * 있어야 합니다. 새 적을 넣으면 이 검사가 저절로 따라옵니다.
+   */
+  const inLevel = await page.evaluate(() => window.__game.levelRoster())
+  const missing = Object.keys(inLevel).filter((id) => !byId[id])
+  check(
+    missing.length === 0,
+    '존에 배치된 적 종류가 전부 종류표에 있다 (새 적이 검사에서 새지 않게)',
+    `배치 ${Object.keys(inLevel).length}종 · 표 ${roster.length}종` +
+      (missing.length ? ` · 빠진 것 ${missing.join(', ')}` : ` — ${roster.map((r) => r.name).join(' · ')}`),
+  )
   // 불리언 잔재가 남아 있으면 이 검사가 무너집니다 — 새 적이 잡몹 수치를 씁니다.
   check(
     byId.binder && byId.binder.maxHp !== byId.grunt.maxHp,

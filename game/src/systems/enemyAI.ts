@@ -28,7 +28,7 @@ import {
   bossPhase,
   phaseForHp,
 } from '../config/bossPhases'
-import { BOSS_ARENA, POISE } from '../config/balance'
+import { BOSS_ARENA, LEVEL_AGGRO_LEAD, LEVEL_AGGRO_MAX, POISE } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -556,7 +556,18 @@ export function enemyAiSystem(
      * 레벨 모드에서는 **방 단위**로 좁힙니다(balance.ts LEVEL_AGGRO_RANGE 설계 노트).
      * 종류별 값을 그대로 쓰면 존 전체가 한 번에 깨어나 한 줄로 걸어옵니다.
      */
-    const range = aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, aggroRangeOverride) : cfg.aggroRange
+    /**
+     * 원거리 적은 **자기 사거리 + 여유**만큼은 확보해 줍니다.
+     * 사거리 12m 인 적을 14m 에서 깨우면 여유가 2m 뿐이라, 한 발 쏘고
+     * 끝납니다(balance.ts LEVEL_AGGRO_LEAD 설계 노트). 근접 적은
+     * 사거리가 작아 이 식이 14m 를 넘지 않으므로 **아무것도 안 바뀝니다.**
+     */
+    const hurtReach = attacksFor(kind).reduce((m, a) => Math.max(m, a.reach), 0)
+    const wakeCap = Math.min(
+      LEVEL_AGGRO_MAX,
+      Math.max(aggroRangeOverride, hurtReach + LEVEL_AGGRO_LEAD),
+    )
+    const range = aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, wakeCap) : cfg.aggroRange
     /**
      * ⚠️ **직선거리가 아니라 걸어야 하는 거리로 깨웁니다.**
      *

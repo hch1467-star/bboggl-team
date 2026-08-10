@@ -11,6 +11,8 @@ import {
   FOCUS,
   KILL_FEEDBACK,
   LADDER_REACH,
+  LEVEL_AGGRO_LEAD,
+  LEVEL_AGGRO_MAX,
   LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
   POISE,
@@ -19,9 +21,9 @@ import {
   WEAPON_UPGRADE,
   WORLD,
 } from './config/balance'
-import { INTENT_COLOR, INTENT_LABEL, attackAt, attacksFor } from './config/enemyAttacks'
+import { INTENT_COLOR, INTENT_EMOJI, INTENT_LABEL, attackAt, attacksFor } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
-import { enemyDef, kindFromId } from './config/enemies'
+import { ENEMY_DEFS, enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
   ActorState,
@@ -2039,6 +2041,12 @@ class Game {
     fallDamagePerStep: number
     /** 존에서 적이 깨어나는 거리(m) — 프로브가 상수를 베끼지 않게. */
     levelAggroRange: number
+    /** 원거리 적이 자기 사거리 위에 더 받는 여유(m). */
+    levelAggroLead: number
+    /** 어그로 천장(m) — 카메라가 세로로 담는 높이. */
+    levelAggroMax: number
+    /** 플레이어 이동 속도(m/s) — "지나가는 데 몇 초"를 프로브가 직접 계산하도록. */
+    playerMoveSpeed: number
   } {
     return {
       maxClimb: MAX_CLIMB,
@@ -2047,6 +2055,9 @@ class Game {
       fallFreeSteps: FALL.freeSteps,
       fallDamagePerStep: FALL.damagePerStep,
       levelAggroRange: LEVEL_AGGRO_RANGE,
+      levelAggroLead: LEVEL_AGGRO_LEAD,
+      levelAggroMax: LEVEL_AGGRO_MAX,
+      playerMoveSpeed: PLAYER_CFG.moveSpeed,
     }
   }
 
@@ -2809,7 +2820,8 @@ declare global {
         moveSpeed: number
         attackRange: number
         keepDistance?: number
-        attacks: { id: string; intent: number; color: string }[]
+        attackCycle: number
+        attacks: { id: string; intent: number; color: string; reach: number }[]
       }[]
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
@@ -3018,6 +3030,9 @@ declare global {
         fallFreeSteps: number
         fallDamagePerStep: number
         levelAggroRange: number
+        levelAggroLead: number
+        levelAggroMax: number
+        playerMoveSpeed: number
       }
       entityState: (e: number) => {
         hp: number
@@ -3115,8 +3130,20 @@ window.__game = {
   effectiveSkill: (slot) => game.debugEffectiveSkill(slot),
   tripodInfo: () => game.debugTripodInfo(),
   toggleTripodPanel: () => game.debugToggleTripodPanel(),
+  /**
+   * 적 종류표 — **ENEMY_DEFS 를 그대로 돌립니다.**
+   *
+   * 예전엔 `[Grunt, Binder, Dragger, Boss]` 라고 손으로 적어 뒀는데,
+   * 그 뒤에 들어온 **달려드는 자와 쏘는 자가 통째로 빠져 있었습니다.**
+   * 새 적을 넣을 때 이 줄을 고쳐야 한다는 걸 아무것도 알려주지 않습니다 —
+   * 렌더링에서 달려드는 자가 **투명하게 보이던** 버그와 같은 모양입니다
+   * (visuals.ts 도 같은 이유로 손으로 적은 switch 를 걷어냈습니다).
+   *
+   * 목록을 손으로 적으면 언젠가 반드시 빠집니다. 데이터에서 돌립니다.
+   */
   enemyRoster: () =>
-    [EnemyKind.Grunt, EnemyKind.Binder, EnemyKind.Dragger, EnemyKind.Boss].map((k) => {
+    Object.keys(ENEMY_DEFS).map((key) => {
+      const k = Number(key) as EnemyKind
       const d = enemyDef(k)
       return {
         id: d.id,
@@ -3126,10 +3153,17 @@ window.__game = {
         moveSpeed: d.moveSpeed,
         attackRange: d.attackRange,
         keepDistance: d.keepDistance,
+        /**
+         * **한 번 공격하는 데 걸리는 전체 시간**(초). 프로브가 네 값을
+         * 따로 받아 더하다가 하나를 빠뜨리는 일이 없도록 여기서 냅니다.
+         */
+        attackCycle: d.attackCooldown + d.windup + d.active + d.recovery,
         attacks: attacksFor(k).map((a) => ({
           id: a.id,
           intent: a.intent as number,
-          color: ['🔴', '🟡', '🔵', '🟣'][a.intent as number],
+          color: INTENT_EMOJI[a.intent],
+          /** 실제로 때리는 거리. 어그로 여유를 이 값으로 잽니다(attackRange 아님). */
+          reach: a.reach,
         })),
       }
     }),

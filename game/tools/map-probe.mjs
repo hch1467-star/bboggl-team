@@ -533,6 +533,152 @@ try {
    * ⚠️ 어그로 거리는 게임에서 읽습니다(terrainInfo().levelAggroRange).
    */
   const aggro = await page.evaluate(() => window.__game.terrainInfo().levelAggroRange)
+
+  /**
+   * ---- 8.5 **색을 가르치는 적이 주 동선에서 깨어나는가** ----
+   *
+   * ── 왜 이 검사가 생겼는가 ──────────────────────────────────────
+   * 🟢 달려드는 자를 5마리 배치했는데 자동 플레이 3판에서 **판당 3회**만
+   * 초록 예고가 떴습니다(실제로 만나는 건 5마리 중 2~3마리). 존이 212초니
+   * **70초에 한 번**입니다.
+   *
+   * 기준은 제가 make-zone.mjs 에 이미 적어 뒀습니다:
+   *   *"로스트아크의 카운터 창은 20~30초마다 옵니다.
+   *     3분짜리 존에서 2회는 배우는 게 아니라 구경하는 것입니다."*
+   * 제 기준의 1/2~1/3 입니다.
+   *
+   * 원인은 쿨다운도 체력도 아니고 **깨지 않는다**였습니다. 레벨 모드의
+   * 어그로는 종류값이 아니라 LEVEL_AGGRO_RANGE 로 잘립니다. 그 거리 밖에
+   * 세운 적은 존재하지 않는 것과 같습니다 — 34m 밖에 세워 두고 한 발도
+   * 못 쏘던 궁수와 **똑같은 실수**입니다. 그때는 원거리만 검사를 만들었고,
+   * 근접 특수 적에는 같은 검사가 없었습니다.
+   *
+   * ⚠️ **직선거리가 아니라 걸어야 하는 거리로 잽니다.** 게임도 그렇게
+   * 깨웁니다(enemyAI.ts 의 reachDistance). 이 프로젝트에서 직선/경로를
+   * 혼동해 생긴 버그가 이미 셋입니다. 주 동선 칸 **전체에서 한 번에**
+   * BFS 를 돌려(다중 출발점), 각 칸이 동선에서 몇 m 인지 구합니다.
+   *
+   * ── 규칙: 색마다 주 동선에서 깨울 수 있는 개체 2마리 이상 ──────
+   * 곁길에 둔 것까지 실패로 치지는 않습니다 — *"곁길에서 한 번 더"* 는
+   * 의도된 배치입니다. 다만 **주 동선에서 못 만나는 색은 배운 적이
+   * 없는 색**이므로, 색마다 최소 두 번(처음 + 복습)은 동선 위에 있어야
+   * 합니다. 한 번은 배우는 게 아니라 구경입니다.
+   */
+  {
+    const key = (x, z) => z * level.w + x
+    const distToRoute = new Map()
+    let frontier = []
+    for (const c of routeCells) {
+      distToRoute.set(key(c.cx, c.cz), 0)
+      frontier.push(c)
+    }
+    while (frontier.length) {
+      const next = []
+      for (const cur of frontier) {
+        const h = heightAt(cur.cx, cur.cz)
+        const d = distToRoute.get(key(cur.cx, cur.cz))
+        for (const [nx, nz] of [
+          [cur.cx - 1, cur.cz],
+          [cur.cx + 1, cur.cz],
+          [cur.cx, cur.cz - 1],
+          [cur.cx, cur.cz + 1],
+        ]) {
+          const nh = heightAt(nx, nz)
+          if (nh === VOID || nh - h > maxClimb) continue
+          const k = key(nx, nz)
+          if (distToRoute.has(k)) continue
+          distToRoute.set(k, d + CELL)
+          next.push({ cx: nx, cz: nz })
+        }
+      }
+      frontier = next
+    }
+
+    /**
+     * 색을 가르치는 **근접** 적만 마릿수로 봅니다.
+     * 잡몹은 채우는 역할, 보스는 시험입니다.
+     *
+     * ⚠️ 🔴 쏘는 자는 **일부러 뺐습니다.** 규칙을 빠져나가려는 게 아니라
+     * 재는 단위가 다르기 때문입니다. 근접 적은 "만난다/못 만난다"가
+     * 한 번의 사건이지만, 원거리 적은 **동선의 어느 구간을 사거리로
+     * 덮고 있느냐**가 곧 기회입니다. 한 마리가 22m 를 덮으면 그 22m 를
+     * 걷는 내내 압박입니다 — 마릿수로는 그게 안 잡힙니다.
+     * 대신 바로 아래에서 **"지나가는 동안 몇 발 쏠 수 있는가"** 를 잽니다.
+     */
+    const TEACHERS = { charger: '🟢 달려드는 자', binder: '🔵 얽는 자', dragger: '🟣 끄는 자' }
+    for (const [kind, label] of Object.entries(TEACHERS)) {
+      const placed = level.entities.filter((e) => e.kind === kind)
+      const dists = placed.map((e) => {
+        const c = cellOf(e)
+        return { c, d: distToRoute.get(key(c.cx, c.cz)) ?? Infinity }
+      })
+      const onRoute = dists.filter((x) => x.d <= aggro)
+      check(
+        onRoute.length >= 2,
+        `${label} — 주 동선에서 깨울 수 있는 개체가 2마리 이상 (배치만 하고 안 만나지 않게)`,
+        `${placed.length}마리 중 ${onRoute.length}마리 · 동선까지 ` +
+          dists
+            .sort((a, b) => a.d - b.d)
+            .map((x) => `(${x.c.cx},${x.c.cz}) ${Number.isFinite(x.d) ? `${x.d}m` : '길없음'}`)
+            .join(' · ') +
+          ` · 어그로 ${aggro}m`,
+      )
+    }
+
+    /**
+     * ── 🔴 원거리: **지나가는 동안 몇 발 쏘는가** ──────────────────
+     *
+     * 자동 플레이 3판에서 쏘는 자는 판당 **예고 1회**였습니다. 배치도
+     * 사거리도 검사를 통과했는데도요. 마릿수로는 안 잡히는 종류의
+     * 부족이라 여기서 따로 잽니다.
+     *
+     * 계산은 전부 **게임에서 읽은 값**으로 합니다 — 상수를 베껴 오면
+     * 밸런스를 바꿨을 때 검사만 옛말을 하게 됩니다(이 프로젝트의 규칙).
+     *   · 사거리·공격 한 바퀴 시간 → enemyRoster()
+     *   · 어그로 → terrainInfo().levelAggroRange (+ 원거리 여유)
+     *   · 플레이어 이동 속도 → playerTuning()
+     *
+     * 지나가는 시간 = (어그로 안에 드는 동선 길이) ÷ 이동 속도
+     * 쏠 수 있는 횟수 = 그 시간 ÷ 공격 한 바퀴
+     *
+     * **2발**을 최소로 둡니다. 한 발은 사고이고, 두 발이어야
+     * *"피하고 붙는다"* 라는 대응이 성립합니다.
+     */
+    const roster = await page.evaluate(() => window.__game.enemyRoster())
+    const t = await page.evaluate(() => window.__game.terrainInfo())
+    const walkSpeed = t.playerMoveSpeed
+    const archerDef = roster.find((r) => r.id === 'archer')
+    if (archerDef) {
+      // 게임(enemyAI.ts)과 **같은 식**으로 이 종류의 실제 어그로를 냅니다.
+      /**
+       * 게임(enemyAI.ts)과 **같은 식**으로 깨는 거리를 냅니다.
+       * ⚠️ 기준은 `attackRange`(달려들기 시작하는 거리)가 아니라 패턴의
+       * **reach**(실제로 때리는 거리)입니다 — 끄는 자가 attackRange 12 ·
+       * reach 6.5 라, 이 둘을 헷갈리면 근접 적 어그로까지 조용히 넓어집니다.
+       */
+      const hurtReach = Math.max(...archerDef.attacks.map((a) => a.reach))
+      const wakeRange = Math.min(
+        Math.max(t.levelAggroRange, hurtReach + t.levelAggroLead),
+        t.levelAggroMax,
+      )
+      for (const a of level.entities.filter((e) => e.kind === 'archer')) {
+        const ac = cellOf(a)
+        const inside = routeCells.filter(
+          (c) => Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * CELL <= wakeRange,
+        ).length
+        const metres = inside * CELL
+        const seconds = metres / walkSpeed
+        const shots = seconds / archerDef.attackCycle
+        check(
+          shots >= 2,
+          `🔴 쏘는 자(${ac.cx},${ac.cz}) — 지나가는 동안 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
+          `깨는 거리 ${wakeRange}m 안의 동선 ${metres}m ÷ 이동 ${walkSpeed}m/s = ${seconds.toFixed(1)}초` +
+            ` ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초 = ${shots.toFixed(1)}발`,
+        )
+      }
+    }
+  }
+
   const foes = level.entities.filter((e) => FOE_KINDS.has(e.kind)).map(cellOf)
   const quiet = []
   let runStart = null
