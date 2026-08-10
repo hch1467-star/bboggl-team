@@ -1395,10 +1395,27 @@ try {
           // **왜 포기했는지 남깁니다.** 지갑 조건을 고친 뒤에도 화톳불 방문이
           // 판마다 1회로 그대로였습니다. "안 가는 것"과 "못 가는 것"은 다르고,
           // 후자면 그건 봇이 아니라 **지도** 문제입니다.
+          /**
+           * **어느 소비처를 접었는지, 그때 다른 곳은 얼마였는지** 같이 남깁니다.
+           *
+           * 봇은 `fire` 를 **가장 가까운** 소비처로 고릅니다. 그런데 이 존은
+           * 한 방향(+X)이라, 70% 지점에서 가장 가까운 것이 **뒤에 있는**
+           * 모루일 수 있습니다 — 앞의 것을 두고요. 그러면 "예산 밖"이라
+           * 접고, 쿨다운이 끝날 즈음엔 이미 보스 앞입니다.
+           *
+           * 이게 사실인지는 **고르기 전의 목록**을 봐야 압니다. 두 번
+           * 가설을 세우고 두 번 틀렸으니(모루 추가 · 성수병 사다리),
+           * 이번에는 고치기 전에 적습니다.
+           */
           fireSkips.push({
             at: Number(now().toFixed(1)),
             dist: step ? Number(step.dist.toFixed(0)) : -1,
             straight: Number(straight.toFixed(0)),
+            target: `${fire.anvil ? '모루' : '화톳불'}(${fire.x.toFixed(0)},${fire.z.toFixed(0)})`,
+            all: (G.spendPoints?.() ?? []).map((sp) => {
+              const st = G.pathStep(sp.x, sp.z)
+              return `${sp.anvil ? '모루' : '불'}${st ? Math.round(st.dist) : -1}m`
+            }),
           })
           fireCooldownUntil = now() + 30
           fireTripUntil = 0
@@ -1875,7 +1892,10 @@ try {
   if ((log.fireSkips ?? []).length) {
     const ds = log.fireSkips.map((f) => f.dist)
     console.log(
-      `             화톳불에 가려다 ${log.fireSkips.length}번 접음 — 걸어야 하는 거리 ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)`,
+      `             소비처에 가려다 ${log.fireSkips.length}번 접음 — 걸어야 하는 거리 ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)\n` +
+        log.fireSkips
+          .map((f) => `                ${String(f.at).padStart(6)}초 ${f.target} ${f.dist}m · 그때 전부: ${(f.all ?? []).join(' ')}`)
+          .join('\n'),
     )
   }
   const got = (log.detours ?? []).filter((d) => d.got)
