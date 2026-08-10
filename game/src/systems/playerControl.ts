@@ -122,6 +122,18 @@ let lightSwings = 0
 export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
   return { skillCasts: skillCasts.slice(0, 5), lightSwings }
 }
+/**
+ * 플레이어 공격의 **앞뒤(예고·후딜) 배율.** 판정(active)은 안 건드립니다 —
+ * 그건 손맛이 아니라 규칙이고, 적 예고 길이와 맞물려 있습니다.
+ * (근거는 balance.ts PLAYER.tempo 주석)
+ *
+ * ⚠️ 시간을 **넣는 곳과 재는 곳이 같은 배율**을 써야 합니다. 후딜만 줄이고
+ * 취소 판정(`recovery * 0.5`)을 안 줄이면, 줄어든 후딜 안에서 그 지점이
+ * 상대적으로 뒤로 밀려 **취소가 더 늦게** 열립니다 — 빠르게 만들려던 것이
+ * 반대로 굼떠집니다. 그래서 아래 모든 자리에 함께 곱합니다.
+ */
+const TEMPO = PLAYER.tempo.attackScale
+
 function spendStamina(p: number, cost: number): void {
   const used = Math.min(Stamina.value[p], cost)
   staminaSpent += used
@@ -268,7 +280,7 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   const rot = aim.rot
   Actor.state[p] = ActorState.Attack
   Actor.phase[p] = AttackPhase.Windup
-  Actor.timer[p] = c.windup
+  Actor.timer[p] = c.windup * TEMPO
   Actor.comboIndex[p] = index
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
@@ -308,7 +320,7 @@ function beginSkill(
   if (slot >= 0 && slot < skillCasts.length) skillCasts[slot]++
   Actor.state[p] = ActorState.Skill
   Actor.phase[p] = AttackPhase.Windup
-  Actor.timer[p] = def.windup
+  Actor.timer[p] = def.windup * TEMPO
   Actor.skillSlot[p] = slot
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
@@ -333,7 +345,7 @@ function beginSkill(
     const adz = ctx.aimZ - Transform.z[p]
     const aimDist = Math.hypot(adx, adz)
     const distance = Math.min(def.dash, aimDist + DASH_OVERSHOOT)
-    Player.dashSpeed[p] = distance / Math.max(def.windup + def.active, 0.001)
+    Player.dashSpeed[p] = distance / Math.max(def.windup * TEMPO + def.active, 0.001)
   } else {
     Player.dashSpeed[p] = 0
   }
@@ -365,7 +377,7 @@ function beginSkill(
     arcDeg: def.arcDeg,
     color: def.color,
     phase: 'telegraph',
-    duration: def.windup,
+    duration: def.windup * TEMPO,
   })
 }
 
@@ -692,7 +704,7 @@ export function playerControlSystem(ctx: ControlContext): void {
             )
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery
-            Actor.timer[p] = combo.recovery
+            Actor.timer[p] = combo.recovery * TEMPO
             Actor.comboWindowT[p] = weapon.comboWindow
           } else {
             endAttack(p, aimRot)
@@ -700,7 +712,8 @@ export function playerControlSystem(ctx: ControlContext): void {
         } else if (phase === AttackPhase.Recovery && Actor.bufferedAttack[p] === 1) {
           // 후딜의 55%가 지났으면 즉시 다음 타로 이어집니다.
           // 후딜을 끝까지 기다리게 하면 콤보가 "무겁게 끌리는" 느낌이 납니다.
-          if (Actor.timer[p] <= combo.recovery * 0.45) endAttack(p, aimRot)
+          if (Actor.timer[p] <= combo.recovery * TEMPO * PLAYER.tempo.comboCancel)
+            endAttack(p, aimRot)
         }
         break
       }
@@ -732,7 +745,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (
           phase === AttackPhase.Recovery &&
           Actor.bufferedAttack[p] === 1 &&
-          Actor.timer[p] <= def.recovery * 0.5
+          Actor.timer[p] <= def.recovery * TEMPO * 0.5
         ) {
           /**
            * 스킬 후딜에서도 **처형**이 나갑니다 — 콤보 후딜과 같은 규칙입니다.
@@ -757,7 +770,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 후딜 후반에는 **다음 스킬로 바로 이어갈 수 있습니다.**
         // 스킬 3개를 엮는 것이 이 게임의 리듬이므로, 이어치기가 안 되면
         // 슬롯을 늘린 의미가 없습니다. 전반부는 못 빠지므로 커밋은 유지됩니다.
-        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * 0.5) {
+        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * TEMPO * 0.5) {
           const queued = takeBufferedSkill()
           if (queued) {
             beginSkill(p, queued.slot, queued.def, aimRot, ctx)
@@ -775,7 +788,7 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 회피·스킬 이어가기와 **같은 규칙**(후딜 절반 이후)을 씁니다 —
          * 규칙이 하나면 외울 것도 하나입니다.
          */
-        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * 0.5) {
+        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * TEMPO * 0.5) {
           if (Player.vials[p] > 0) {
             beginDrink(p)
             break
@@ -788,7 +801,7 @@ export function playerControlSystem(ctx: ControlContext): void {
           phase === AttackPhase.Recovery &&
           dodgePressed &&
           canDodge &&
-          Actor.timer[p] <= def.recovery * 0.5
+          Actor.timer[p] <= def.recovery * TEMPO * 0.5
         ) {
           const dx = hasMoveInput ? mx : -Math.sin(Transform.rotY[p])
           const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
@@ -822,7 +835,7 @@ export function playerControlSystem(ctx: ControlContext): void {
             })
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery
-            Actor.timer[p] = def.recovery
+            Actor.timer[p] = def.recovery * TEMPO
             // 대시가 끝나면 남은 속도를 반드시 죽여야 합니다.
             //
             // 자동 검증으로 잡은 버그: 대시는 초당 29m로 달리는데, 대시가 끝난 뒤
@@ -920,7 +933,28 @@ export function playerControlSystem(ctx: ControlContext): void {
       Velocity.x[p] = Math.sin(Player.faceRot[p]) * forwardOverride
       Velocity.z[p] = Math.cos(Player.faceRot[p]) * forwardOverride
     } else if (Actor.state[p] !== ActorState.Dodge) {
-      const speedCap = PLAYER.moveSpeed * weapon.moveSpeedScale
+      /**
+       * ---- 🏃 달리기 ----
+       *
+       * Shift 를 누르고 **움직이는 동안** 붙습니다. 조건이 둘뿐입니다:
+       *   · 지금 공격/스킬 중이 아닐 것 — 휘두르면 그 순간 걷기로 돌아옵니다
+       *   · 실제로 이동 입력이 있을 것 — 제자리 달리기는 없습니다
+       *
+       * 스태미나를 안 쓰는 이유와 배율의 근거는 balance.ts PLAYER.sprint.
+       * 여기서는 **붙는 데 시간이 걸리고 끊길 때는 즉시**만 지킵니다 —
+       * 공격하려는 순간 미끄러지면 조준이 어긋납니다.
+       */
+      const wantSprint =
+        isDown('ShiftLeft') || isDown('ShiftRight')
+      const canSprint = wantSprint && hasMoveInput && Actor.state[p] === ActorState.Idle
+      if (canSprint) {
+        Player.sprintT[p] = Math.min(PLAYER.sprint.rampUp, Player.sprintT[p] + dt)
+      } else {
+        Player.sprintT[p] = 0
+      }
+      const sprintMix = PLAYER.sprint.rampUp > 0 ? Player.sprintT[p] / PLAYER.sprint.rampUp : 0
+      const sprintScale = 1 + (PLAYER.sprint.speedScale - 1) * sprintMix
+      const speedCap = PLAYER.moveSpeed * weapon.moveSpeedScale * sprintScale
       const targetVx = mx * speedCap * moveScale
       const targetVz = mz * speedCap * moveScale
       const accel = PLAYER.acceleration * dt

@@ -2132,6 +2132,9 @@ class Game {
     fallDamagePerStep: number
     /** 존에서 적이 깨어나는 거리(m) — 프로브가 상수를 베끼지 않게. */
     levelAggroRange: number
+    /** 달리기 배율 · 공격 템포 배율 — 프로브가 상수를 베끼지 않게. */
+    sprintScale: number
+    attackTempo: number
     /** 원거리 적이 자기 사거리 위에 더 받는 여유(m). */
     levelAggroLead: number
     /** 어그로 천장(m) — 카메라가 세로로 담는 높이. */
@@ -2146,6 +2149,8 @@ class Game {
       fallFreeSteps: FALL.freeSteps,
       fallDamagePerStep: FALL.damagePerStep,
       levelAggroRange: LEVEL_AGGRO_RANGE,
+      sprintScale: PLAYER_CFG.sprint.speedScale,
+      attackTempo: PLAYER_CFG.tempo.attackScale,
       levelAggroLead: LEVEL_AGGRO_LEAD,
       levelAggroMax: LEVEL_AGGRO_MAX,
       playerMoveSpeed: PLAYER_CFG.moveSpeed,
@@ -3154,6 +3159,8 @@ declare global {
         fallFreeSteps: number
         fallDamagePerStep: number
         levelAggroRange: number
+        sprintScale: number
+        attackTempo: number
         levelAggroLead: number
         levelAggroMax: number
         playerMoveSpeed: number

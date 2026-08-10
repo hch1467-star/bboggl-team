@@ -157,6 +157,8 @@ export const Player = defineComponent({
   focus: 'f32',
   /** 지금 쓰는 강타가 **몇 점을 태웠는가**. 위력이 여기에 비례합니다. */
   focusSpent: 'f32',
+  /** 달리기에 붙은 시간(초) — 0이면 걷기. 끊기면 즉시 0으로 돌아갑니다. */
+  sprintT: 'f32',
 })
 
 /** 적 종류 (Enemy.kind) */
