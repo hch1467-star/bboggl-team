@@ -2520,6 +2520,14 @@ class Game {
   debugVialInfo(): {
     vials: number
     max: number
+    /**
+     * 한 병이 되돌리는 체력.
+     *
+     * 프로브가 "이만큼 잃었다"를 판단하려면 **되돌릴 수 있는 단위**가
+     * 있어야 합니다. 이 값을 프로브에 베껴 적으면 밸런스를 바꾼 날
+     * 검사가 조용히 거짓이 됩니다 — 그래서 게임이 내보냅니다.
+     */
+    heal: number
     hp: number
     state: number
     drinking: boolean
@@ -2532,6 +2540,7 @@ class Game {
     return {
       vials: Player.vials[p],
       max: Player.vialsMax[p],
+      heal: VIAL.heal,
       hp: Number(Health.hp[p].toFixed(1)),
       state: Actor.state[p],
       drinking: Actor.state[p] === ActorState.Drink,
@@ -2942,6 +2951,8 @@ declare global {
         maxHp: number
         height: number
         moveSpeed: number
+        /** 사거리 밖에서 내는 속도 — 추격을 잴 때 봐야 하는 값 */
+        approachSpeed: number
         attackRange: number
         keepDistance?: number
         attackCycle: number
@@ -3071,6 +3082,8 @@ declare global {
       vialInfo: () => {
         vials: number
         max: number
+        /** 한 병 회복량 — 프로브가 "되돌릴 수 있는 단위"로 쓰는 기준선 */
+        heal: number
         hp: number
         state: number
         drinking: boolean
@@ -3300,6 +3313,12 @@ window.__game = {
         maxHp: d.maxHp,
         height: d.height,
         moveSpeed: d.moveSpeed,
+        /**
+         * **사거리 밖에서 실제로 내는 속도.** 프로브가 `moveSpeed`만 보고
+         * "가장 빠른 적"을 고르면 추격전에서는 틀린 답이 나옵니다 —
+         * 이 게임에서 도망을 따라잡는 건 전투 속도가 아니라 접근 속도입니다.
+         */
+        approachSpeed: d.moveSpeed * (d.approachSpeedScale ?? 1),
         attackRange: d.attackRange,
         keepDistance: d.keepDistance,
         /**

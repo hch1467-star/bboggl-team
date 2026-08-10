@@ -37,7 +37,8 @@
     "chain": "node tools/chain-probe.mjs",
     "anvil": "node tools/anvil-probe.mjs",
     "bench": "node tools/bench.mjs",
-    "sprint": "node tools/sprint-probe.mjs"
+    "sprint": "node tools/sprint-probe.mjs",
+    "bypass": "node tools/bypass-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
