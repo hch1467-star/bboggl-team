@@ -645,6 +645,41 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     if (countered) damage *= COUNTER.damageMultiplier
 
     Health.hp[t] -= damage
+    /**
+     * ── 🟢 예고 중에는 **죽지 않습니다** (체력 1에서 멈춥니다) ──────────
+     *
+     * 이 색의 정의는 바로 위(강인도 면제)에 이미 적어 뒀습니다:
+     * *"초록 예고를 끊는 길은 반격 하나만 남깁니다."*
+     * 그런데 실제로 막아 둔 것은 **강인도로 끊는 길** 하나뿐이었고,
+     * **때려죽여서 끊는 길**은 열려 있었습니다. 선언과 구현이 달랐습니다.
+     *
+     * 재 보니 그 구멍이 주된 통로였습니다:
+     *   · 자동 플레이 — 🟢 예고 7회 중 **적이 죽어서 끝난 것 3회**
+     *   · 실험대     — 예고 시작 체력 **46/46**, 예고 1.4초 동안 깎인 양 **46**
+     *     (즉 이 적은 늘 만피에서 예고를 시작하고, 그 예고가 통째로
+     *      공짜 딜 타임이 됩니다. 체력이 모자란 게 아니라 창이 무방비였습니다.)
+     *
+     * 체력을 올리는 선택은 하지 않았습니다. 그러면 "몇으로 올릴 것인가"가
+     * 무기 화력·판수마다 달라지는 추측이 되고, 잡몹 하나가 스펀지가 됩니다.
+     * 대신 **규칙을 선언한 대로** 만듭니다 — 예고 중에는 강인도로도, 피해로도
+     * 못 끊습니다. 답은 반격 하나뿐입니다.
+     *
+     * 불공정하지 않은 이유: 피해는 정상적으로 다 들어가고(체력 1까지),
+     * 휘두름이 끝나는 순간 다음 한 대에 죽습니다. 그리고 무엇보다
+     * **막을 방법이 항상 있습니다** — 정면에서 스킬을 꽂으면 됩니다.
+     * 막다른 길이 아니라 "다른 답을 요구하는 창"입니다.
+     * (세키로의 위험 공격, 로스트아크의 카운터 구간이 같은 계약입니다.)
+     */
+    if (
+      !targetIsPlayer &&
+      hasComponent(Enemy, t) &&
+      Actor.state[t] === ActorState.Attack &&
+      Actor.phase[t] === AttackPhase.Windup &&
+      attackAt(Enemy.kind[t], Enemy.attackIndex[t]).intent === AttackIntent.Counter &&
+      Health.hp[t] < 1
+    ) {
+      Health.hp[t] = 1
+    }
     Health.flashT[t] = 0.12
     // 다단히트 스킬은 무적 시간을 아주 짧게 줘야 두 번째 타격이 씹히지 않습니다.
     Health.invulnT[t] = targetIsPlayer ? PLAYER.invulnAfterHit : 0.02

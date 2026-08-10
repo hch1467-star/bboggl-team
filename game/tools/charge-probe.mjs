@@ -222,6 +222,9 @@ try {
       let reachedActive = false
       let broken = false
       let windupEndDist = -1
+      let hpAtWindup = -1
+      let maxHp = 0
+      let hpAtEnd = -1
       const t0 = now()
       const dl = Date.now() + 60000
       while (now() - t0 < 10 && Date.now() < dl) {
@@ -234,6 +237,13 @@ try {
         G.press('Mouse0')
         G.release('Mouse0')
         if (info.winding) {
+          if (!sawWindup) {
+            // ⚠️ **예고가 시작되는 순간의 체력.** "예고 도중에 죽는다"를
+            //    고치려면 얼마나 올려야 하는지가 이 값에서 나옵니다 —
+            //    추측한 체력을 넣고 벤치를 돌리는 것보다 한 단계 빠릅니다.
+            hpAtWindup = info.hp
+            maxHp = info.max
+          }
           sawWindup = true
           windupEndDist = dist
         } else if (sawWindup) {
@@ -245,7 +255,21 @@ try {
         }
         await sleep()
       }
-      out.push({ sawWindup, reachedActive, broken, windupEndDist: Number(windupEndDist.toFixed(2)) })
+      {
+        const fin = G.enemyInfo(e)
+        hpAtEnd = fin ? fin.hp : 0 // null = 죽어서 사라짐
+      }
+      out.push({
+        sawWindup,
+        reachedActive,
+        broken,
+        windupEndDist: Number(windupEndDist.toFixed(2)),
+        hpAtWindup,
+        maxHp,
+        hpAtEnd,
+        // 예고 한 번을 버티는 데 실제로 필요한 체력 = 그 사이에 깎인 양
+        drainDuringWindup: hpAtWindup >= 0 ? Number((hpAtWindup - hpAtEnd).toFixed(1)) : -1,
+      })
       G.clearEnemies()
     }
     return out
@@ -257,6 +281,21 @@ try {
       `끊김 ${fighting.filter((r) => r.broken).length}/3 · ` +
       `예고 끝 거리 ${fighting.map((r) => r.windupEndDist).join(' / ')}m`,
   )
+  /**
+   * **예고를 한 번 버티는 데 드는 체력.**
+   *
+   * 벤치가 "🟢 예고 7회 중 3회는 적이 죽어서 끝났다"고 했습니다. 고칠 값은
+   * 체력인데, 얼마로 올릴지를 추측하면 오늘 두 번 되돌린 것과 같은 일이
+   * 반복됩니다. 그래서 **예고가 시작된 순간의 체력**과 **그 사이에 깎인 양**을
+   * 직접 잽니다 — 필요한 체력이 숫자에서 나오게.
+   */
+  const withHp = fighting.filter((r) => r.hpAtWindup >= 0)
+  if (withHp.length) {
+    console.log(
+      `  [예고 한 번의 값] 예고 시작 체력 ${withHp.map((r) => r.hpAtWindup).join(' / ')}` +
+        ` (최대 ${withHp[0].maxHp}) · 예고 중 깎인 양 ${withHp.map((r) => r.drainDuringWindup).join(' / ')}`,
+    )
+  }
   /**
    * ⚠️ **여기에는 합격/불합격을 두지 않습니다.**
    *
