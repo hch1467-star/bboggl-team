@@ -201,6 +201,30 @@ try {
     const fireVisits = []
     /** 화톳불에 가려다 **접은** 기록 — 접은 이유(걸어야 하는 거리)와 함께. */
     const fireSkips = []
+    /**
+     * 슬롯별로 봇이 **몇 번 눌렀는지** — 아래 회전 선택에 씁니다.
+     *
+     * 왜 회전인가: 예전엔 준비된 것 중 **맨 앞**(`ready[0]`)을 눌렀습니다.
+     * 그래서 보고서의 슬롯 분포가 `[17/13/10/9/5]` 처럼 **단조 감소**로
+     * 나왔는데, 그건 설계 신호가 아니라 **봇의 자리 편향**이었습니다.
+     * 슬롯 5가 적게 쓰인 것이 "쓸모없어서"인지 "봇이 안 골라서"인지
+     * 그 숫자로는 갈리지 않습니다 — 그럴듯해 보이는데 답을 못 하는 눈금.
+     *
+     * 가장 적게 쓴 것부터 고르면 편향이 사라집니다. **무작위가 아니라
+     * 결정적**이라 판마다 재현됩니다(이 프로젝트는 같은 조건에서 같은
+     * 결과가 나와야 밸런스를 비교할 수 있습니다).
+     * 이제 남는 차이는 진짜 원인만 반영합니다 — 쿨다운이 길어 **덜 준비되는**
+     * 슬롯인가, 아니면 사거리·상황이 안 맞아 **못 쓰는** 슬롯인가.
+     */
+    const slotUses = [0, 0, 0, 0, 0]
+    const pickSkill = (ready) => {
+      let best = ready[0]
+      for (const r of ready) {
+        if ((slotUses[r.slot] ?? 0) < (slotUses[best.slot] ?? 0)) best = r
+      }
+      slotUses[best.slot] = (slotUses[best.slot] ?? 0) + 1
+      return best
+    }
     /** 소비처로 가는 여행이 **어느 조건에서** 막혔는가(프레임 단위). */
     const tripBlock = { noFire: 0, cantBuy: 0, noGrowth: 0, cooling: 0, open: 0 }
     /**
@@ -1110,7 +1134,7 @@ try {
         if (green && ready.length > 0) {
           markAct('반격')
           G.aimAtWorld(green.x, green.z)
-          tap(ready[0].key)
+          tap(pickSkill(ready).key)
           await sleep()
           continue
         }
@@ -1207,7 +1231,7 @@ try {
            * 그래서 이 봇이 재는 것도 "가장 서투르게 써도 이 정도는 된다"입니다.
            */
           if (G.focusInfo().focus >= G.focusInfo().max) tap('Mouse2')
-          else if (ready.length > 0) tap(ready[0].key)
+          else if (ready.length > 0) tap(pickSkill(ready).key)
           else tap('Mouse0')
         }
         await sleep()
