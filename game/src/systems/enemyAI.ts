@@ -618,6 +618,20 @@ export function enemyAiSystem(
         const accel = 30 * dt
         Velocity.x[e] += clampMag(nx * cfg.moveSpeed * 1.35 - Velocity.x[e], accel)
         Velocity.z[e] += clampMag(nz * cfg.moveSpeed * 1.35 - Velocity.z[e], accel)
+      } else if (phase === AttackPhase.Windup && atk.lungeSpeed && dist > atk.reach * 0.7) {
+        /**
+         * 🟢 돌진 — **자기 정면으로만** 나갑니다 (설계 근거는 enemyAttacks.ts
+         * `lungeSpeed` 주석). 여기서 `dx/dz`(플레이어 방향)를 쓰면 추적 공격이
+         * 되어 옆으로 꺾어 피할 방법이 사라집니다. 그래서 `rotY` 를 씁니다 —
+         * 예고 중 회전은 바로 위에서 이미 평소의 30%로 묶여 있습니다.
+         */
+        const fx = Math.sin(Transform.rotY[e])
+        const fz = Math.cos(Transform.rotY[e])
+        // 가속을 크게 잡습니다. 돌진은 "점점 빨라지는 것"이 아니라 **터지는 것**이고,
+        // 천천히 붙으면 위에서 계산한 1.4초 예산이 그대로 사라집니다.
+        const accel = 60 * dt
+        Velocity.x[e] += clampMag(fx * atk.lungeSpeed - Velocity.x[e], accel)
+        Velocity.z[e] += clampMag(fz * atk.lungeSpeed - Velocity.z[e], accel)
       } else {
         decayVelocity(e, dt, 12)
       }
@@ -784,8 +798,16 @@ export function enemyAiSystem(
        * 사라지고 모두가 동시에 얼굴 앞에 도착합니다 — 다대일 설계(공격
        * 토큰)가 풀려는 문제를 오히려 키웁니다. 보스는 1:1이라 안전합니다.
        */
+      /**
+       * 여기가 **사거리 밖**입니다 — 위 두 가지(물러남/사거리 안 대기)가 아닌 경우.
+       * `approachSpeedScale` 은 정확히 이 자리에서만 걸립니다. 전투 중
+       * 붙었다 떨어지는 속도는 그대로 두고 **추격만** 빨라집니다.
+       * (설계 근거는 enemies.ts 의 `approachSpeedScale` 주석에 적어 두었습니다.)
+       */
       const chase =
-        kind === EnemyKind.Boss && dist > BOSS_ARENA.chaseRange ? BOSS_ARENA.chaseSpeedScale : 1
+        kind === EnemyKind.Boss && dist > BOSS_ARENA.chaseRange
+          ? BOSS_ARENA.chaseSpeedScale
+          : (cfg.approachSpeedScale ?? 1)
       Velocity.x[e] += clampMag(nx * cfg.moveSpeed * chase * snareScale - Velocity.x[e], accel)
       Velocity.z[e] += clampMag(nz * cfg.moveSpeed * chase * snareScale - Velocity.z[e], accel)
     }
