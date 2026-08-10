@@ -206,6 +206,43 @@ console.log(
   }
 }
 
+/**
+ * ── 절벽 — **밀어서 떨어뜨리기가 일어나는가** ──────────────────────
+ *
+ * 이 동사는 새로 만든 게 아니라 **이미 있던 것**입니다(넉백 + 낙하 판정).
+ * balance.ts FALL 주석이 *"밀어 떨어뜨린 적이 무방비로 착지하는 것이 진짜
+ * 보상"* 이라고 설계까지 적어 뒀는데, **한 번이라도 일어나는지는 아무도
+ * 세지 않았습니다.** 이 프로젝트에서 기능이 조용히 죽어 있던 자리는 늘
+ * 여기였습니다 — 세는 눈금이 없는 곳.
+ *
+ * 지형은 미리 쟀습니다: 넉백 5m 면 3단 이상 낙차 옆에 선 적이 7마리이고
+ * 전부 주 동선입니다. **기회는 있습니다.** 결과를 봅니다.
+ */
+{
+  const fall = logs.map((l) => l.falls).filter(Boolean)
+  if (fall.length) {
+    console.log('\n  ── 절벽 (판당) ───────────────────────')
+    const foe = fall.map((f) => f.foe)
+    const me = fall.map((f) => f.player)
+    console.log(
+      `  적을 떨어뜨림  ${fmt(foe, 0)}회` +
+        (median(foe) > 0 ? ` · 평균 낙차 ${(median(fall.map((f) => f.foeSteps / Math.max(1, f.foe)))).toFixed(1)}단` : ''),
+    )
+    console.log(`  내가 떨어짐    ${fmt(me, 0)}회`)
+    const kinds = new Map()
+    for (const f of fall) for (const [id, n] of Object.entries(f.byKind ?? {})) {
+      if (!kinds.has(id)) kinds.set(id, [])
+      kinds.get(id).push(n)
+    }
+    if (kinds.size) {
+      console.log(
+        '  종류별        ' +
+          [...kinds.entries()].map(([id, ns]) => `${id} ${fmt(ns, 0)}`).join(' · '),
+      )
+    }
+  }
+}
+
 console.log('\n  ── 보스 ──────────────────────────────')
 console.log(`  보스전         ${fmt(boss.map((l) => l.boss.engaged))}초`)
 /**

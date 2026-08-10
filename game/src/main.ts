@@ -278,6 +278,26 @@ class Game {
   private breakHpSum = 0
   /** 무방비 상태 그대로 죽은 적의 수 — 처형까지 못 가고 정리된 횟수. */
   private brokenDeaths = 0
+  /**
+   * **절벽에서 떨어진 횟수** — 나와 적을 따로 셉니다.
+   *
+   * ── 왜 이제야 세는가 ──────────────────────────────────────────
+   * 「밀어서 떨어뜨리기」를 **만들려다** 코드를 읽어 보니 **이미 있었습니다.**
+   * 낙하 판정은 플레이어와 적을 가리지 않고, 적이 떨어지면 피해 +
+   * `breakPoise()` 까지 들어갑니다. balance.ts FALL 주석에 설계 의도도
+   * 그대로 적혀 있습니다 — *"밀어 떨어뜨린 적이 무방비로 착지하는 것이
+   * 진짜 보상"*.
+   *
+   * 그런데 **한 번이라도 일어나는지는 아무도 모릅니다.** 이 프로젝트에서
+   * 몇 번이나 나온 모양입니다: 연계 0회 · 안 보이던 초록 예고 · 한 발도
+   * 안 쏘던 궁수 — 전부 기능은 멀쩡한데 **세는 눈금이 없어서** 없는 것과
+   * 같았습니다. 새 기능을 얹기 전에 있는 기능부터 셉니다.
+   *
+   * 지형은 미리 재 뒀습니다: 넉백 5m 면 낙차(3단 이상) 옆에 서 있는 적이
+   * 일곱이고 전부 주 동선입니다. 조건은 있는데 결과를 모르는 상태입니다.
+   */
+  private fallLog: { player: number; foe: number; foeSteps: number; byKind: Record<string, number> } =
+    { player: 0, foe: 0, foeSteps: 0, byKind: {} }
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
   /**
@@ -1019,6 +1039,14 @@ class Game {
         requestHitstop(FALL.hitstop)
       } else if (FALL.breaksPoise && hasComponent(Enemy, f.entity)) {
         breakPoise(f.entity)
+      }
+      // 사건이 일어난 자리에서 셉니다 — 상태가 덮이기 전에.
+      if (f.entity === p) this.fallLog.player++
+      else if (hasComponent(Enemy, f.entity)) {
+        this.fallLog.foe++
+        this.fallLog.foeSteps += f.steps
+        const id = enemyDef(Enemy.kind[f.entity]).id
+        this.fallLog.byKind[id] = (this.fallLog.byKind[id] ?? 0) + 1
       }
     }
     fallEvents.length = 0
@@ -2255,6 +2283,11 @@ class Game {
     return [...this.seenIntents]
   }
 
+  /** 절벽 낙하 — 나 / 적 / 적의 총 낙차(단) / 종류별. */
+  debugFallLog(): { player: number; foe: number; foeSteps: number; byKind: Record<string, number> } {
+    return this.fallLog
+  }
+
   /** 모루 목록 — 검증용(부활·회복을 **안 한다**는 것을 재려면 위치가 필요합니다). */
   debugAnvils(): { x: number; z: number }[] {
     return this.anvils.map((a) => ({ x: a.x, z: a.z }))
@@ -2966,6 +2999,12 @@ declare global {
       /** 안내가 나간 예고 색들(AttackIntent 값) */
       seenIntents: () => number[]
       /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지 */
+      fallLog: () => {
+        player: number
+        foe: number
+        foeSteps: number
+        byKind: Record<string, number>
+      }
       foeSwingLog: () => Record<
         string,
         {
@@ -3270,6 +3309,7 @@ window.__game = {
   anvils: () => game.debugAnvils(),
   seenIntents: () => game.debugSeenIntents(),
   foeSwingLog: () => game.debugFoeSwingLog(),
+  fallLog: () => game.debugFallLog(),
   /**
    * 처형 검증용.
    *

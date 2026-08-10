@@ -1586,6 +1586,8 @@ try {
       bossSwings: Object.entries(G.bossSwingLog()).map(([id, v]) => ({ id, ...v })),
       /** 적 종류별 휘두름/적중 — "이 적이 존에서 제 일을 하는가" */
       foeSwings: Object.entries(G.foeSwingLog?.() ?? {}).map(([id, v]) => ({ id, ...v })),
+      // 절벽 낙하 — 「밀어서 떨어뜨리기」가 실제로 일어나는지.
+      falls: G.fallLog?.() ?? null,
       boss: {
         fought: bossSeen,
         // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
