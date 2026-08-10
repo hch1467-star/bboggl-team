@@ -42,7 +42,7 @@ import {
 import { AttackPhase } from './core/components'
 import { defineQuery, destroyEntity, hasComponent, isAlive, resetWorld } from './core/ecs'
 import { sfx } from './core/audio'
-import { consumePress, debugInput, endFrame, initInput, mouse } from './core/input'
+import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
 import { requestHitstop, resetTime, tick, time } from './core/time'
 import {
   CELL_SIZE,
@@ -300,6 +300,8 @@ class Game {
     { player: 0, foe: 0, foeSteps: 0, byKind: {} }
   /** 지금 서 있는 자리에서 강화가 되는가 — 게임의 판단(봇이 다시 계산하지 않게). */
   private canSpendHere = false
+  /** 무기 강화 시도의 **갈림길별** 횟수 — 밖에서 추측하지 않도록 게임이 셉니다. */
+  private upgradeTries = { seen: 0, notStation: 0, consumed: 0, noStone: 0, noEmber: 0, done: 0 }
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
   private readonly swungLastFrame = new Set<number>()
   /**
@@ -1900,8 +1902,25 @@ class Game {
       stoneCost,
       Player.stones[p],
     )
-    if (!atFire || maxed) return
+    /**
+     * **왜 강화가 안 됐는지를 게임이 직접 적습니다.**
+     *
+     * 밖에서 세 번 추측하고 세 번 틀렸습니다 — 소비처가 중간에 없어서 /
+     * 성수병이 불티를 먹어서 / 적이 14m 안이라 막혀서. 마지막 것은
+     * 누른 직후의 자리 상태가 `O→O` 로 찍혀 refute 되었습니다.
+     *
+     * 밖에서 보이는 것은 **결과(레벨이 안 올랐다)** 뿐이고, 그 앞의
+     * 갈림길은 전부 이 함수 안에 있습니다. 그래서 갈림길마다 이름을
+     * 남깁니다. 이 프로젝트에서 계속 확인한 규칙 그대로입니다 —
+     * **사건은 사건이 일어난 자리에서 기록합니다.**
+     */
+    if (wasPressed('KeyB')) this.upgradeTries.seen++
+    if (!atFire || maxed) {
+      if (wasPressed('KeyB')) this.upgradeTries.notStation++
+      return
+    }
     if (!consumePress('KeyB')) return
+    this.upgradeTries.consumed++
     /**
      * **정련석을 먼저 봅니다.**
      *
@@ -1910,6 +1929,7 @@ class Game {
      * 메시지도 달라야 합니다. 한 줄로 뭉뚱그리면 무엇을 하라는 건지 모릅니다.
      */
     if (Player.stones[p] < stoneCost) {
+      this.upgradeTries.noStone++
       sfx.deny()
       this.hud.showBanner(
         '정련석이 모자라다',
@@ -1919,10 +1939,12 @@ class Game {
       return
     }
     if (Player.embers[p] < cost) {
+      this.upgradeTries.noEmber++
       sfx.deny()
       this.hud.showBanner('불티가 모자라다', `${Player.embers[p]} / ${cost}`, 1.2)
       return
     }
+    this.upgradeTries.done++
     Player.stones[p] -= stoneCost
     Player.embers[p] -= cost
     setWeaponLevel(p, weaponIndex, level + 1)
@@ -2299,6 +2321,11 @@ class Game {
 
   debugSeenIntents(): number[] {
     return [...this.seenIntents]
+  }
+
+  /** 무기 강화 시도가 어느 갈림길에서 멈췄는가. */
+  debugUpgradeTries(): { seen: number; notStation: number; consumed: number; noStone: number; noEmber: number; done: number } {
+    return this.upgradeTries
   }
 
   /** 절벽 낙하 — 나 / 적 / 적의 총 낙차(단) / 종류별. */
@@ -3018,6 +3045,14 @@ declare global {
       /** 안내가 나간 예고 색들(AttackIntent 값) */
       seenIntents: () => number[]
       /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지 */
+      upgradeTries: () => {
+        seen: number
+        notStation: number
+        consumed: number
+        noStone: number
+        noEmber: number
+        done: number
+      }
       fallLog: () => {
         player: number
         foe: number
@@ -3329,6 +3364,7 @@ window.__game = {
   seenIntents: () => game.debugSeenIntents(),
   foeSwingLog: () => game.debugFoeSwingLog(),
   fallLog: () => game.debugFallLog(),
+  upgradeTries: () => game.debugUpgradeTries(),
   /**
    * 처형 검증용.
    *

@@ -1660,6 +1660,8 @@ try {
       foeSwings: Object.entries(G.foeSwingLog?.() ?? {}).map(([id, v]) => ({ id, ...v })),
       // 절벽 낙하 — 「밀어서 떨어뜨리기」가 실제로 일어나는지.
       falls: G.fallLog?.() ?? null,
+      // 무기 강화가 **어느 갈림길에서 멈췄는지** — 게임이 직접 센 값.
+      upgradeTries: G.upgradeTries?.() ?? null,
       boss: {
         fought: bossSeen,
         // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
@@ -1905,6 +1907,13 @@ try {
     console.log(
       `             ${String(v.at).padStart(6)}초 ${v.anvil ? '모루  ' : '화톳불'} — 불티 ${v.embers} · 정련석 ${v.stones}` +
         ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
+    )
+  }
+  if (log.upgradeTries) {
+    const u = log.upgradeTries
+    console.log(
+      `             강화 시도 — B 눌림 ${u.seen}회 · 자리아님 ${u.notStation}회` +
+        ` · 소비됨 ${u.consumed}회 · 정련석X ${u.noStone}회 · 불티X ${u.noEmber}회 · 성공 ${u.done}회`,
     )
   }
   if ((log.fireSkips ?? []).length) {
