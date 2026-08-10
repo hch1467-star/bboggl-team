@@ -360,6 +360,9 @@ try {
     const greenSeen = new Set()
     let greenEvents = 0
     let greenAnswerable = 0
+    /** 예고 순간 **정면**에 있었던 횟수 / 정면 + 스킬까지 갖췄던 횟수. */
+    let greenInFront = 0
+    let greenReady = 0
     let rhythmSamples = 0
     /** 쓸 수 있는 스킬이 하나도 없던 표본 = **쿨다운 리듬이 압박이 된 시간** */
     let noSkillSamples = 0
@@ -650,6 +653,25 @@ try {
           greenSeen.add(t.entity)
           greenEvents++
           if (readyNow > 0) greenAnswerable++
+          /**
+           * **예고가 뜬 그 순간 내가 정면에 있었는가.**
+           *
+           * 반격 조건 셋 중 2번이 "정면"입니다(combat.ts). 그런데 봇에는
+           * 백어택을 노려 **등 뒤로 도는** 루틴이 있습니다 — 두 보상이
+           * 정반대 위치를 요구합니다.
+           *
+           * 지금 깔때기가 이렇습니다:
+           *   초록 예고 6~9회 → 답할 스킬 있음 3~6회 → **실제 반격 0~1회**
+           * 스킬은 병목이 아니고(67~75%), 마지막 칸에서 대부분이 샙니다.
+           * 그 손실이 **위치** 때문인지 타이밍 때문인지는 처방이 다릅니다
+           * (전자는 설계·안내, 후자는 예고 길이·사거리).
+           *
+           * ⚠️ 정면 여부는 **게임이 판단한 값**(`inFront`)을 그대로 씁니다.
+           * 봇이 각도를 다시 계산하면 규칙을 바꿨을 때 한쪽만 낡습니다 —
+           * 이번 세션에서 그 실수를 이미 여러 번 고쳤습니다.
+           */
+          if (t.inFront) greenInFront++
+          if (t.inFront && readyNow > 0) greenReady++
         }
         if (readyNow === 0) noSkillSamples++
         if (readyNow >= 3) manySkillSamples++
@@ -1854,6 +1876,8 @@ try {
       noStaminaPct: rhythmSamples ? Math.round((noStaminaSamples / rhythmSamples) * 100) : 0,
       greenEvents,
       greenAnswerable,
+      greenInFront,
+      greenReady,
       finishers: G.runStats().finishers,
       brokenUseRatio: brokenSamples ? Math.round((brokenUsedSamples / brokenSamples) * 100) : 0,
       /**
@@ -2095,7 +2119,8 @@ try {
       `             교전 중 — 쓸 스킬이 하나도 없던 시간 ${log.noSkillPct}%` +
       ` · 셋 이상 준비된 시간 ${log.manySkillPct}%` +
       ` · 스태미나가 콤보의 1/3 미만이던 시간 ${log.noStaminaPct}%\n` +
-      `             🟢 초록 예고 ${log.greenEvents}회 — 그중 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
+      `             🟢 초록 예고 ${log.greenEvents}회 — 정면 ${log.greenInFront ?? 0}회 · 정면+스킬 ${log.greenReady ?? 0}회` +
+      ` · 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
       ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회`,
   )
   const distTotal =
