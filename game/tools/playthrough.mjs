@@ -201,6 +201,8 @@ try {
     const fireVisits = []
     /** 화톳불에 가려다 **접은** 기록 — 접은 이유(걸어야 하는 거리)와 함께. */
     const fireSkips = []
+    /** 소비처로 가는 여행이 **어느 조건에서** 막혔는가(프레임 단위). */
+    const tripBlock = { noFire: 0, cantBuy: 0, noGrowth: 0, cooling: 0, open: 0 }
     /**
      * 마지막으로 화톳불에 닿았을 때의 지갑. **늘어났을 때만** 다시 갑니다.
      *
@@ -1358,6 +1360,23 @@ try {
       if (affordableAt < 0 && canUpgradeWeapon) affordableAt = Number(now().toFixed(1))
       const walletGrew =
         em.embers > lastFireWallet.embers || wu.stones > lastFireWallet.stones
+      /**
+       * **여행 조건이 어디서 막히는지 셉니다.**
+       *
+       * 소비처가 넷인데 판당 **한 번**만 들릅니다(불티 348 · 정련석 3~5 가
+       * 남은 채로 끝납니다). 조건이 넷이라 밖에서 보면 어느 것이 막는지
+       * 알 수 없습니다 — 강화가 안 되던 이유를 세 번 헛짚은 뒤에 배운 대로,
+       * **갈림길마다 이름을 붙여** 셉니다.
+       *
+       * 처방이 전부 다릅니다:
+       *   · 소비처없음 → 배치        · 못삼   → 경제(비용·수입)
+       *   · 지갑안늘어 → 수입/기준선  · 쿨다운 → 봇 규칙
+       */
+      if (!fire) tripBlock.noFire++
+      else if (!canUpgrade) tripBlock.cantBuy++
+      else if (!walletGrew) tripBlock.noGrowth++
+      else if (now() < fireCooldownUntil) tripBlock.cooling++
+      else tripBlock.open++
       if (fire && canUpgrade && walletGrew && now() >= fireCooldownUntil) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
@@ -1750,6 +1769,7 @@ try {
       foeSwings: Object.entries(G.foeSwingLog?.() ?? {}).map(([id, v]) => ({ id, ...v })),
       // 절벽 낙하 — 「밀어서 떨어뜨리기」가 실제로 일어나는지.
       falls: G.fallLog?.() ?? null,
+      tripBlock,
       // 무기 강화가 **어느 갈림길에서 멈췄는지** — 게임이 직접 센 값.
       upgradeTries: G.upgradeTries?.() ?? null,
       boss: {
@@ -1997,6 +2017,15 @@ try {
     console.log(
       `             ${String(v.at).padStart(6)}초 ${v.anvil ? '모루  ' : '화톳불'} — 불티 ${v.embers} · 정련석 ${v.stones}` +
         ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
+    )
+  }
+  if (log.tripBlock) {
+    const t = log.tripBlock
+    const total = Object.values(t).reduce((a, b) => a + b, 0) || 1
+    const pc = (n) => `${Math.round((n / total) * 100)}%`
+    console.log(
+      `             소비처 여행이 막힌 곳 — 소비처없음 ${pc(t.noFire)} · 못삼 ${pc(t.cantBuy)}` +
+        ` · 지갑안늘어 ${pc(t.noGrowth)} · 쿨다운 ${pc(t.cooling)} · **열림 ${pc(t.open)}**`,
     )
   }
   if (log.upgradeTries) {
