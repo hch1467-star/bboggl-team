@@ -11,7 +11,7 @@
  * 대신, 봇에게 존을 끝까지 걷게 하고 숫자를 받으면 됩니다.
  *
  * ── 봇은 잘 못 합니다. 그게 핵심입니다 ───────────────────────────
- * 이 봇은 4색을 구분하지 못하고 백어택도 노리지 않습니다. 목표를 향해 걷고,
+ * 이 봇은 4색을 구분하지 못합니다. 목표를 향해 걷고,
  * 적이 붙으면 때리고, 예고가 뜨면 구르고, 체력이 낮으면 마십니다.
  * 즉 **처음 플레이하는 사람의 하한선**에 가깝습니다.
  * 봇이 죽는 자리는 초보자도 죽는 자리이고, 봇이 걸어서 통과하는 구간은
@@ -361,6 +361,9 @@ try {
     let greenEvents = 0
     let greenAnswerable = 0
     /** 예고 순간 **정면**에 있었던 횟수 / 정면 + 스킬까지 갖췄던 횟수. */
+    /** 때릴 거리 안에 적이 있던 표본 / 그중 등 뒤를 잡고 있던 표본. */
+    let behindSamples = 0
+    let behindOk = 0
     let greenInFront = 0
     let greenReady = 0
     let rhythmSamples = 0
@@ -638,6 +641,29 @@ try {
          * 압박이었던 순간"과 "둘 다 여유였던 순간"이 안 보입니다.
          */
         rhythmSamples++
+        /**
+         * **등 뒤를 잡고 있던 시간**을 셉니다 — DESIGN.md 가 남겨 둔 질문의 답입니다.
+         *
+         * 백어택이 총 타격의 5~7% 인데, 원인 후보가 둘이고 처방이 정반대입니다:
+         *   · **기회가 없다**(적이 계속 돌아본다)  → 적 회전 속도·반응 지연
+         *   · **잡고도 안 친다**(붙어만 있다)      → 봇 행동 / 스킬 도형
+         *
+         * 갈리는 방법은 반격에서 쓴 것과 같습니다 — **시간과 결과를 같이**
+         * 봅니다. 등 뒤에 있던 시간이 5% 면 기회가 없는 것이고, 30% 인데
+         * 타격의 5% 만 등 뒤면 잡고도 안 치는 것입니다.
+         *
+         * ⚠️ 앞뒤 판정은 게임의 `inFront` 를 그대로 씁니다(각도 규칙을 봇이
+         * 다시 계산하면 한쪽만 낡습니다). 그리고 **때릴 수 있는 거리**(3m)
+         * 안에 있을 때만 셉니다 — 멀리서 등 뒤에 서 있는 시간은 기회가
+         * 아닙니다.
+         */
+        {
+          const close = G.threats(3).filter((t) => t.aggro)
+          if (close.length) {
+            behindSamples++
+            if (close.some((t) => !t.inFront)) behindOk++
+          }
+        }
         const slots = G.slotCooldowns().filter((sl) => !sl.empty)
         const readyNow = slots.filter((sl) => sl.cd <= 0).length
         /**
@@ -1876,6 +1902,8 @@ try {
       noStaminaPct: rhythmSamples ? Math.round((noStaminaSamples / rhythmSamples) * 100) : 0,
       greenEvents,
       greenAnswerable,
+      behindSamples,
+      behindOk,
       greenInFront,
       greenReady,
       finishers: G.runStats().finishers,
@@ -2169,6 +2197,8 @@ try {
     console.log('  보스전      조우하지 못함')
   }
   console.log(
+    `  백어택      ${log.backHits}/${log.hitsDealt}회 (${Math.round((log.backHits / Math.max(1, log.hitsDealt)) * 100)}%)` +
+      ` — 때릴 거리에서 등 뒤를 잡고 있던 시간 ${Math.round((log.behindOk / Math.max(1, log.behindSamples)) * 100)}%\n` +
     `  강인도      붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
       `              무너진 순간의 평균 체력 ${Math.round(log.breakHpAvg * 100)}% · 무방비인 채로 죽은 적 ${log.brokenDeaths}마리\n` +
       `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 스태미나가 모자랐던 프레임 ${log.finisherNoStamina})`,
