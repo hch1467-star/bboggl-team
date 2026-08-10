@@ -78,6 +78,8 @@ import {
   encounterEvents,
   enemyAiSystem,
   readChainsArmed,
+  readGreenOutcome,
+  resetGreenOutcome,
   readChainsLost,
   setAggroRangeOverride,
   setReachDistance,
@@ -469,6 +471,9 @@ class Game {
     setReachDistance(null)
     setBonfireReach(null)
     resetAttackTokens()
+    // 눈금도 같이 비웁니다 — 안 그러면 앞 판의 초록이 이번 판에 섞입니다
+    // (조합 프로브가 '앞 검사가 깨워 놓은 적'을 세던 것과 같은 실수).
+    resetGreenOutcome()
     resetStaminaSpent()
     this.regions = []
     this.currentRegion = ''
@@ -2291,6 +2296,10 @@ class Game {
     enemyHits: number
     poiseBreaks: number
     windupBreaks: number
+    /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
+    greenSwung: number
+    greenDied: number
+    greenBroken: number
     /** 무너진 순간의 평균 체력 비율(0~1) */
     breakHpAvg: number
     /** 무방비인 채로 죽은 적의 수 */
@@ -2318,6 +2327,9 @@ class Game {
     return {
       poiseBreaks: this.poiseBreaks,
       windupBreaks: this.windupBreaks,
+      greenSwung: readGreenOutcome().swung,
+      greenDied: readGreenOutcome().died,
+      greenBroken: readGreenOutcome().broken,
       breakHpAvg: this.poiseBreaks > 0 ? Number((this.breakHpSum / this.poiseBreaks).toFixed(3)) : 0,
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
@@ -3254,6 +3266,9 @@ declare global {
         enemyHits: number
         poiseBreaks: number
         windupBreaks: number
+        greenSwung: number
+        greenDied: number
+        greenBroken: number
         breakHpAvg: number
         brokenDeaths: number
         finishers: number

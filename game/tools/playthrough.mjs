@@ -1823,6 +1823,9 @@ try {
       inputExpired: G.runStats().inputExpired,
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,
+      greenSwung: G.runStats().greenSwung,
+      greenDied: G.runStats().greenDied,
+      greenBroken: G.runStats().greenBroken,
       regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
       regionDanger: Object.entries(regionDanger)
         .filter(([, v]) => v.seconds >= 3)
@@ -2178,7 +2181,9 @@ try {
       ` · 스태미나가 콤보의 1/3 미만이던 시간 ${log.noStaminaPct}%\n` +
       `             🟢 초록 예고 ${log.greenEvents}회 — 정면 ${log.greenInFront ?? 0}회 · 정면+스킬 ${log.greenReady ?? 0}회` +
       ` · 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
-      ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회`,
+      ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회\n` +
+      `             예고가 끝난 방식 — 휘두름까지 ${log.greenSwung ?? 0}회 · 적이 죽음 ${log.greenDied ?? 0}회` +
+      ` · 무너져 끊김 ${log.greenBroken ?? 0}회`,
   )
   /**
    * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ────────────────────────

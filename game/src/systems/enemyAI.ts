@@ -11,6 +11,7 @@ import {
   Velocity,
 } from '../core/components'
 import {
+  AttackIntent,
   ATTACK_COMMIT_GAP,
   MAX_CONCURRENT_ATTACKERS,
   MAX_CONCURRENT_WIDE,
@@ -290,6 +291,61 @@ function commitAttack(
    * 색과 소리가 어긋납니다.
    */
   sfx.telegraph(atk.intent as unknown as SfxIntent, Transform.x[e], Transform.z[e])
+}
+
+
+/**
+ * ── 🟢 초록 예고가 **어떻게 끝났는가** ──────────────────────────────
+ *
+ * 벤치가 이렇게 말합니다: `초록 예고 4회 · 실제 반격 1회`.
+ * 그런데 이 두 숫자만으로는 **왜 셋이 답 없이 끝났는지** 알 수 없습니다.
+ * 가능한 이야기가 서로 완전히 다른데 처방도 서로 반대입니다:
+ *
+ *   · 플레이어가 못 답했다        → 반격을 쉽게 (창·사거리·표시)
+ *   · 적이 예고 도중 **죽었다**   → 이 적의 체력/등장 거리 문제
+ *   · 휘두름까지 갔다(정상)       → 애초에 답 못 한 게 아님. 맞고 배우는 중
+ *
+ * 같은 자리에서 세 번 배운 것을 또 씁니다 — **결과 하나를 갈래마다 나눠
+ * 셉니다.** 그리고 봇이 아니라 **게임이** 셉니다: 예고가 끝나는 순간을
+ * 아는 것은 상태 기계뿐입니다.
+ *
+ * ⚠️ `countered` 는 여기서 세지 않습니다. 반격 판정은 combat.ts 가 하고,
+ *    이미 `runStats().counters` 로 나옵니다. 두 곳에서 같은 것을 세면
+ *    언젠가 두 숫자가 어긋나고, 그때 어느 쪽을 믿을지 알 수 없게 됩니다.
+ *    여기서는 **예고가 끝난 방식**만 셉니다.
+ */
+const greenOutcome = { swung: 0, died: 0, broken: 0 }
+/** 지금 초록 예고 중인 적들 — 프레임마다 갱신하고, 빠진 것을 결산합니다. */
+const greenWinding = new Set<number>()
+export function readGreenOutcome(): { swung: number; died: number; broken: number } {
+  return { ...greenOutcome }
+}
+export function resetGreenOutcome(): void {
+  greenOutcome.swung = 0
+  greenOutcome.died = 0
+  greenOutcome.broken = 0
+  greenWinding.clear()
+}
+
+/**
+ * 한 프레임의 결산. 지난 프레임에 초록 예고 중이던 적 가운데 **이제 아닌**
+ * 것들을 분류합니다. 상태를 보고 나누므로 순서에 의존하지 않습니다.
+ */
+function settleGreenWindups(): void {
+  for (const e of [...greenWinding]) {
+    if (isAlive(e) && Actor.state[e] === ActorState.Attack) {
+      const atk = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
+      if (atk.intent === AttackIntent.Counter && Actor.phase[e] === AttackPhase.Windup) continue
+      // 아직 공격 중인데 예고가 아니다 = 판정까지 갔다.
+      greenWinding.delete(e)
+      greenOutcome.swung++
+      continue
+    }
+    greenWinding.delete(e)
+    // 죽었는가, 아니면 무너져서(경직) 끊겼는가.
+    if (!isAlive(e) || Actor.state[e] === ActorState.Dead) greenOutcome.died++
+    else greenOutcome.broken++
+  }
 }
 
 export function enemyAiSystem(
@@ -812,6 +868,16 @@ export function enemyAiSystem(
       Velocity.z[e] += clampMag(nz * cfg.moveSpeed * chase * snareScale - Velocity.z[e], accel)
     }
   }
+
+  // 이번 프레임에 초록 예고 중인 적을 표시해 두고, 빠진 것들을 결산합니다.
+  for (let i = 0; i < enemies.count; i++) {
+    const e = ids[i]
+    if (!isAlive(e) || Actor.state[e] !== ActorState.Attack) continue
+    if (Actor.phase[e] !== AttackPhase.Windup) continue
+    if (attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent !== AttackIntent.Counter) continue
+    greenWinding.add(e)
+  }
+  settleGreenWindups()
 }
 
 function turnToward(e: number, targetRot: number, speedDegPerSec: number, dt: number): void {

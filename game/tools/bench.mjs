@@ -396,9 +396,47 @@ console.log(`  스킬 : 기본    ${fmt(pick((l) => (l.skillCasts ?? []).reduce(
 console.log(`  쓸 스킬 없음   ${fmt(pick((l) => l.noSkillPct), 0)}%`)
 console.log(`  셋 이상 준비   ${fmt(pick((l) => l.manySkillPct), 0)}%`)
 console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
+/**
+ * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ──────────────────────────
+ *
+ * ⚠️ 이 줄이 여기 있어야 하는 이유는 DESIGN.md 규칙 5 에 이미 적혀 있습니다:
+ * *"눈금은 여러 판을 보는 자리(벤치)에 있어야 합니다 — 한 판짜리 출력에만
+ * 있으면 한 판으로 판단하게 됩니다."* 선입력을 넣고 눈금을 만들면서
+ * `playthrough` 에만 붙였다가, 정작 3판 벤치를 돌리고 나서 **찾을 수 없었습니다.**
+ * 규칙을 적어 둔 사람이 같은 세션에서 그 규칙을 어겼습니다.
+ *
+ * 읽는 법 — 셋의 처방이 서로 다릅니다:
+ *   · `버려짐(만료)` 이 크면 → 창(0.55초)이 짧거나 빠져나올 자리가 늦게 옵니다
+ *   · `못 냄(자원)` 이 크면  → 버퍼가 아니라 **스태미나** 이야기입니다
+ *   · `평균 대기` 가 0에 가까우면 → 이미 Idle 일 때만 눌렀다는 뜻이라
+ *     버퍼가 하는 일이 없습니다(있으나 마나)
+ */
+{
+  const flow = (l) => (l.inputUsed ?? 0) + (l.inputExpired ?? 0) + (l.inputDropped ?? 0)
+  console.log(
+    `  선입력         ${fmt(pick(flow), 0)}회 중 이어짐 ${fmt(pick((l) => l.inputUsed ?? 0), 0)}회 ` +
+      `(${fmt(pick((l) => Math.round(((l.inputUsed ?? 0) / Math.max(1, flow(l))) * 100)), 0)}%)`,
+  )
+  console.log(
+    `                 버려짐(만료) ${fmt(pick((l) => l.inputExpired ?? 0), 0)}회 · ` +
+      `못 냄(자원) ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 · ` +
+      `평균 대기 ${fmt(pick((l) => l.inputWaitAvg ?? 0), 2)}초`,
+  )
+}
 
 console.log('\n  ── 배움과 성장 ────────────────────────')
 console.log(`  🟢 초록 예고   ${fmt(pick((l) => l.greenEvents ?? 0), 0)}회 · 실제 반격 ${fmt(pick((l) => l.counters), 0)}회`)
+/**
+ * **예고가 끝난 방식**을 나눠 봅니다. "초록 4회 · 반격 1회"만으로는
+ * 나머지 셋이 왜 답 없이 끝났는지 알 수 없고, 가능한 이야기마다 처방이
+ * 정반대입니다: 못 답한 것이면 반격을 쉽게, 적이 죽은 것이면 이 적의
+ * 체력·등장 거리, 휘두름까지 갔으면 애초에 문제가 아닙니다(맞고 배우는 중).
+ */
+console.log(
+  `                 끝난 방식 — 휘두름까지 ${fmt(pick((l) => l.greenSwung ?? 0), 0)}회 · ` +
+    `적이 죽음 ${fmt(pick((l) => l.greenDied ?? 0), 0)}회 · ` +
+    `무너져 끊김 ${fmt(pick((l) => l.greenBroken ?? 0), 0)}회`,
+)
 console.log(`  보물           ${fmt(pick((l) => Number(String(l.treasures).split('/')[0])), 0)} / ` +
   `${logs[0].treasures?.split('/')[1] ?? '?'}`)
 console.log(`  무기 강화      ${fmt(pick((l) => l.weaponUps ?? 0), 1)}회`)
