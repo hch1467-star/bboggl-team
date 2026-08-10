@@ -68,7 +68,7 @@ try {
   const charger = roster.find((r) => r.id === 'charger')
   const rush = charger.attacks[0]
   console.log(
-    `  [설정] 사거리 ${rush.reach}m · 부채꼴 ${charger.attacks.length}패턴 · ` +
+    `  [설정] 사거리 ${rush.reach}m · 돌진 ${rush.lungeSpeed} m/s · ` +
       `접근 ${charger.approachSpeed.toFixed(1)} m/s (전투 ${charger.moveSpeed})\n`,
   )
 
@@ -181,6 +181,95 @@ try {
       check(false, `${d}m — 예고를 관측했다`, '8초 안에 공격을 걸지 않았습니다')
     }
   }
+
+  /**
+   * ── ⚠️ 위 검사들의 **치명적인 한계** ─────────────────────────────
+   *
+   * 여기까지는 플레이어가 **가만히 서서 아무것도 안 합니다.** 그 조건에서
+   * 돌진은 7/7 로 통과했고, 저는 그걸 근거로 "기전은 설계대로 작동한다"고
+   * 적었습니다. 그런데 3판 벤치는 이 적의 **판정이 한 번도 안 뜬다**고
+   * 말했습니다(끊김 100%).
+   *
+   * 둘 다 맞았습니다. 프로브가 재던 상황이 **실제 전투에서 일어나지 않는
+   * 상황**이었을 뿐입니다. 진짜 전투에서 플레이어는 때립니다. 그리고
+   * 돌진은 적을 **플레이어의 사거리 안(3.1m)** 까지 끌고 들어옵니다 —
+   * 1.4초짜리 예고를 띄운 채로. 그 1.4초 동안 콤보가 들어가면 강인도(45)가
+   * 무너지고 휘두름은 영영 안 나옵니다.
+   *
+   * 그래서 같은 것을 **때리면서** 한 번 더 잽니다. 검사에서 빠져 있던
+   * 조건이 하필 결과를 뒤집는 조건이었습니다.
+   */
+  console.log('')
+  const fighting = await page.evaluate(async () => {
+    const G = window.__game
+    const out = []
+    for (let i = 0; i < 3; i++) {
+      G.reset()
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      const now = () => G.state().simElapsed
+      const wait = async (sec) => {
+        const t = now()
+        const dl = Date.now() + 30000
+        while (now() - t < sec && Date.now() < dl) await sleep()
+      }
+      await wait(0.4)
+      G.clearEnemies()
+      const p = G.state().player
+      const e = G.spawnEnemyKind('charger', p.x + 6.5, p.z)
+      G.aimAtWorld(p.x + 6.5, p.z)
+
+      let sawWindup = false
+      let reachedActive = false
+      let broken = false
+      let windupEndDist = -1
+      const t0 = now()
+      const dl = Date.now() + 60000
+      while (now() - t0 < 10 && Date.now() < dl) {
+        const info = G.enemyInfo(e)
+        if (!info) break
+        const s = G.state().player
+        const dist = Math.hypot(info.x - s.x, info.z - s.z)
+        // 플레이어는 **계속 때립니다** — 실제 전투가 그렇습니다.
+        G.aimAtWorld(info.x, info.z)
+        G.press('Mouse0')
+        G.release('Mouse0')
+        if (info.winding) {
+          sawWindup = true
+          windupEndDist = dist
+        } else if (sawWindup) {
+          // 예고가 끝났습니다. 공격 상태로 남아 있으면 판정까지 간 것이고,
+          // 경직/무너짐이면 끊긴 것입니다.
+          if (info.attacking) reachedActive = true
+          else broken = true
+          break
+        }
+        await sleep()
+      }
+      out.push({ sawWindup, reachedActive, broken, windupEndDist: Number(windupEndDist.toFixed(2)) })
+      G.clearEnemies()
+    }
+    return out
+  })
+  const sawN = fighting.filter((r) => r.sawWindup).length
+  const activeN = fighting.filter((r) => r.reachedActive).length
+  console.log(
+    `  [때리면서 6.5m] 예고 관측 ${sawN}/3 · 판정까지 감 ${activeN}/3 · ` +
+      `끊김 ${fighting.filter((r) => r.broken).length}/3 · ` +
+      `예고 끝 거리 ${fighting.map((r) => r.windupEndDist).join(' / ')}m`,
+  )
+  /**
+   * ⚠️ **여기에는 합격/불합격을 두지 않습니다.**
+   *
+   * 처음엔 "때리면서도 휘두름이 나온다"를 검사로 걸었습니다. 그런데 돌진을
+   * 11 과 0 으로 놓고 각각 재 보니 **예고 끝 거리가 똑같았습니다**
+   * (1.89/2.48/1.89 vs 1.84/2.33/1.83). 그 거리를 정하는 것은 적의 돌진이
+   * 아니라 **플레이어 자신의 파고들기**(beginAttack 의 dashSpeed)였습니다.
+   *
+   * 즉 이 검사는 적을 재는 척하면서 플레이어를 재고 있었습니다. 켜든 끄든
+   * 같은 답이 나오는 검사는 **가르는 힘이 없습니다.** 그래서 검사에서 빼고
+   * 관측값만 남깁니다 — 값 자체는 여전히 쓸모가 있습니다: 가만히 선 시험이
+   * 실제 전투를 **대표하지 않는다**는 것을 이 한 줄이 보여 줍니다.
+   */
 
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))

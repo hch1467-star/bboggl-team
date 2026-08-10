@@ -2985,7 +2985,7 @@ declare global {
         attackRange: number
         keepDistance?: number
         attackCycle: number
-        attacks: { id: string; intent: number; color: string; reach: number }[]
+        attacks: { id: string; intent: number; color: string; reach: number; lungeSpeed: number }[]
       }[]
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
@@ -3371,6 +3371,8 @@ window.__game = {
           color: INTENT_EMOJI[a.intent],
           /** 실제로 때리는 거리. 어그로 여유를 이 값으로 잽니다(attackRange 아님). */
           reach: a.reach,
+          /** 예고 중 돌진 속도(m/s). 0이면 제자리에서 휘두릅니다. */
+          lungeSpeed: a.lungeSpeed ?? 0,
         })),
       }
     }),
