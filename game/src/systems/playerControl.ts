@@ -603,6 +603,16 @@ export function playerControlSystem(ctx: ControlContext): void {
      * 쿨다운이라 못 쓴 것을 지워버리면, 쿨이 0.1초 뒤에 도는 흔한 경우에
      * 또 입력이 사라집니다.
      */
+    const takeBufferedSkill = (): { slot: number; def: SkillDef } | null => {
+      const buffered = Actor.bufferedSkill[p]
+      if (buffered === 0) return null
+      const slot = buffered - 1
+      const def = readySkill(slot)
+      if (!def) return null
+      Actor.bufferedSkill[p] = 0
+      Actor.bufferedSkillT[p] = 0
+      return { slot, def }
+    }
     /**
      * 눌러 둔 것을 **꺼내 씁니다.** 꺼내면 사라집니다 — 한 번 누른 것이
      * 두 번 나가면 안 됩니다.
@@ -618,16 +628,6 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedAttack[p] = 0
       Actor.bufferedAttackT[p] = 0
       return true
-    }
-    const takeBufferedSkill = (): { slot: number; def: SkillDef } | null => {
-      const buffered = Actor.bufferedSkill[p]
-      if (buffered === 0) return null
-      const slot = buffered - 1
-      const def = readySkill(slot)
-      if (!def) return null
-      Actor.bufferedSkill[p] = 0
-      Actor.bufferedSkillT[p] = 0
-      return { slot, def }
     }
 
     let moveScale = 1
@@ -805,9 +805,29 @@ export function playerControlSystem(ctx: ControlContext): void {
             endAttack(p, aimRot)
           }
         } else if (phase === AttackPhase.Recovery && Actor.bufferedAttack[p] === 1) {
-          // 후딜의 55%가 지났으면 즉시 다음 타로 이어집니다.
-          // 후딜을 끝까지 기다리게 하면 콤보가 "무겁게 끌리는" 느낌이 납니다.
-          if (Actor.timer[p] <= combo.recovery * TEMPO * PLAYER.tempo.comboCancel)
+          /**
+           * 후딜의 남은 비율이 문턱 아래면 다음 타로 이어집니다.
+           * 후딜을 끝까지 기다리게 하면 콤보가 "무겁게 끌리는" 느낌이 납니다.
+           *
+           * ── 단, **이어질 곳이 있을 때만** 잘라 냅니다 ────────────────
+           * 콤보 선입력을 콤보 끝에서 버리지 않게 고치고 나서, 이 줄이
+           * 조용히 다른 것을 바꾼다는 걸 알았습니다: 3타 무기의 3타째에서도
+           * 후딜이 잘려 나가고 곧바로 1타가 다시 나갑니다. 그러면 콤보에
+           * **마침표가 없어집니다** — 마지막 타의 긴 후딜(0.62초)이 그
+           * 한 방을 무겁게 만드는 장치인데, 그게 통째로 사라집니다.
+           *
+           * 잘라 내기는 "이어치기를 위한 것"이지 "빨리 끝내기 위한 것"이
+           * 아닙니다. 그래서 다음 타가 실제로 있을 때(또는 처형이 걸릴 때)만
+           * 자릅니다. 콤보가 바닥났으면 후딜을 끝까지 치르고, 눌러 둔 입력은
+           * **버려지지 않고 남아** 그 뒤에 새 콤보 1타로 나갑니다.
+           */
+          const hasNext = Actor.comboIndex[p] + 1 < weapon.combo.length
+          const canFinish =
+            Stamina.value[p] >= FINISHER.staminaCost && finisherTarget(p) >= 0
+          if (
+            (hasNext || canFinish) &&
+            Actor.timer[p] <= combo.recovery * TEMPO * PLAYER.tempo.comboCancel
+          )
             endAttack(p, aimRot)
         }
         break
