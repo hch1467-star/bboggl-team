@@ -110,6 +110,7 @@ import {
   finisherTarget,
   healEvents,
   playerControlSystem,
+  readInputFlow,
   readRhythm,
   readStaminaSpent,
   resetStaminaSpent,
@@ -2308,6 +2309,11 @@ class Game {
     skillCasts: number[]
     /** 기둥 1 — 스태미나로 낸 기본 공격 횟수 */
     lightSwings: number
+    /** 이어짐 눈금 — 선입력이 실제로 일했는가 (playerControl.ts readInputFlow) */
+    inputUsed: number
+    inputExpired: number
+    inputDropped: number
+    inputWaitAvg: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -2322,6 +2328,10 @@ class Game {
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
       skillCasts: readRhythm().skillCasts,
       lightSwings: readRhythm().lightSwings,
+      inputUsed: readInputFlow().used,
+      inputExpired: readInputFlow().expired,
+      inputDropped: readInputFlow().dropped,
+      inputWaitAvg: Number(readInputFlow().waitAvg.toFixed(3)),
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -3254,6 +3264,10 @@ declare global {
         staminaSpent: number
         skillCasts: number[]
         lightSwings: number
+        inputUsed: number
+        inputExpired: number
+        inputDropped: number
+        inputWaitAvg: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }

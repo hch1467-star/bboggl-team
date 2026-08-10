@@ -1818,6 +1818,11 @@ try {
     return {
       elapsed: Number((now() - t0).toFixed(1)),
       deaths: G.runStats().deaths,
+      // 이어짐 눈금 — 봇이 세는 게 아니라 **게임이 센 것**을 그대로 받습니다.
+      inputUsed: G.runStats().inputUsed,
+      inputExpired: G.runStats().inputExpired,
+      inputDropped: G.runStats().inputDropped,
+      inputWaitAvg: G.runStats().inputWaitAvg,
       regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
       regionDanger: Object.entries(regionDanger)
         .filter(([, v]) => v.seconds >= 3)
@@ -2174,6 +2179,26 @@ try {
       `             🟢 초록 예고 ${log.greenEvents}회 — 정면 ${log.greenInFront ?? 0}회 · 정면+스킬 ${log.greenReady ?? 0}회` +
       ` · 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
       ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회`,
+  )
+  /**
+   * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ────────────────────────
+   *
+   * 선입력(버퍼)을 넣고도 **그것이 일하는지 재는 것이 없었습니다.**
+   * 셋을 갈라 두는 이유는 처방이 다르기 때문입니다:
+   *   · `버려짐(만료)` 이 많다 → 창이 짧거나, 빠져나올 자리가 너무 늦게 옵니다
+   *   · `못 냄(자원)` 이 많다  → 버퍼 이야기가 아니라 **스태미나** 이야기입니다
+   * 뭉쳐 놓으면 어느 쪽인지 영영 못 가립니다.
+   *
+   * `평균 대기` 는 누른 순간부터 나온 순간까지입니다. 0에 가까우면 버퍼가
+   * 없어도 될 때만 눌렀다는 뜻이고, 창 길이에 가까우면 매번 아슬아슬하게
+   * 걸리고 있다는 뜻입니다.
+   */
+  const flowTotal = (log.inputUsed ?? 0) + (log.inputExpired ?? 0) + (log.inputDropped ?? 0)
+  console.log(
+    `  이어짐      선입력 ${flowTotal}회 — 이어짐 ${log.inputUsed ?? 0}회` +
+      ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, flowTotal)) * 100)}%)` +
+      ` · 버려짐(만료) ${log.inputExpired ?? 0}회 · 못 냄(자원) ${log.inputDropped ?? 0}회` +
+      ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist

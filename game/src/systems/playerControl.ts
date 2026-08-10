@@ -98,6 +98,10 @@ export function resetStaminaSpent(): void {
   staminaSpent = 0
   skillCasts.fill(0)
   lightSwings = 0
+  inputFlow.used = 0
+  inputFlow.expired = 0
+  inputFlow.dropped = 0
+  inputFlow.waitSum = 0
 }
 
 /**
@@ -121,6 +125,44 @@ const skillCasts = new Array<number>(8).fill(0)
 let lightSwings = 0
 export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
   return { skillCasts: skillCasts.slice(0, 5), lightSwings }
+}
+
+/**
+ * ── 이어짐을 재는 눈금 ─────────────────────────────────────────────
+ *
+ * 선입력(버퍼)을 넣고 나서 **그것이 실제로 일하고 있는지 재는 것이 없었습니다.**
+ * 이 프로젝트에서 반복해서 배운 것이 정확히 그 자리입니다 — 재지 않은
+ * 변경은 개선이 아니라 희망입니다.
+ *
+ * "부드럽다"는 느낌말은 셀 수 없으니 **세 가지 사건**으로 나눠 셉니다:
+ *
+ *   · `used`    눌러 둔 것이 실제로 이어져 나갔다      ← 버퍼가 일한 횟수
+ *   · `expired` 창이 지나도록 나갈 자리가 없어 버려졌다 ← 창이 짧거나 상황이 길다
+ *   · `dropped` 낼 수 없어서(자원 부족) 버렸다          ← 버퍼 문제가 아님
+ *
+ * 셋을 갈라 두는 이유는 처방이 서로 다르기 때문입니다. `expired` 가 많으면
+ * 창을 늘릴 후보이고, `dropped` 가 많으면 창이 아니라 스태미나 이야기이며,
+ * 둘을 뭉쳐 놓으면 어느 쪽인지 영영 못 가립니다.
+ *
+ * `waitSum` 은 **누른 순간부터 나온 순간까지**의 합입니다. 평균이 0에
+ * 가까우면 버퍼가 없어도 되는 상황(이미 Idle)에서만 눌렀다는 뜻이고,
+ * 창 길이에 가까우면 매번 아슬아슬하게 걸리고 있다는 뜻입니다.
+ *
+ * ⚠️ 봇이 아니라 **게임이** 셉니다. 누른 것과 나간 것은 다릅니다.
+ */
+const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0 }
+export function readInputFlow(): {
+  used: number
+  expired: number
+  dropped: number
+  waitAvg: number
+} {
+  return {
+    used: inputFlow.used,
+    expired: inputFlow.expired,
+    dropped: inputFlow.dropped,
+    waitAvg: inputFlow.used > 0 ? inputFlow.waitSum / inputFlow.used : 0,
+  }
 }
 /**
  * 플레이어 공격의 **앞뒤(예고·후딜) 배율.** 판정(active)은 안 건드립니다 —
@@ -500,7 +542,10 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedSkillT[p] = BUFFER_TIME
     } else if (Actor.bufferedSkillT[p] > 0) {
       Actor.bufferedSkillT[p] = Math.max(0, Actor.bufferedSkillT[p] - dt)
-      if (Actor.bufferedSkillT[p] === 0) Actor.bufferedSkill[p] = 0
+      if (Actor.bufferedSkillT[p] === 0) {
+        Actor.bufferedSkill[p] = 0
+        inputFlow.expired++
+      }
     }
     /**
      * 공격·구르기도 **같은 자리에서 같은 방식으로** 기억합니다.
@@ -515,14 +560,20 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedAttackT[p] = BUFFER_TIME
     } else if (Actor.bufferedAttackT[p] > 0) {
       Actor.bufferedAttackT[p] = Math.max(0, Actor.bufferedAttackT[p] - dt)
-      if (Actor.bufferedAttackT[p] === 0) Actor.bufferedAttack[p] = 0
+      if (Actor.bufferedAttackT[p] === 0) {
+        Actor.bufferedAttack[p] = 0
+        inputFlow.expired++
+      }
     }
     if (dodgePressed) {
       Actor.bufferedDodge[p] = 1
       Actor.bufferedDodgeT[p] = BUFFER_TIME
     } else if (Actor.bufferedDodgeT[p] > 0) {
       Actor.bufferedDodgeT[p] = Math.max(0, Actor.bufferedDodgeT[p] - dt)
-      if (Actor.bufferedDodgeT[p] === 0) Actor.bufferedDodge[p] = 0
+      if (Actor.bufferedDodgeT[p] === 0) {
+        Actor.bufferedDodge[p] = 0
+        inputFlow.expired++
+      }
     }
 
     // ---- 타이머 ----
@@ -617,14 +668,23 @@ export function playerControlSystem(ctx: ControlContext): void {
      * 눌러 둔 것을 **꺼내 씁니다.** 꺼내면 사라집니다 — 한 번 누른 것이
      * 두 번 나가면 안 됩니다.
      */
+    /**
+     * 기다린 시간을 위한 필드를 따로 두지 않습니다 — **남은 창에서 거꾸로**
+     * 나옵니다(`창 − 남은 시간`). 누른 프레임에는 남은 시간이 곧 창이라 0이고,
+     * 늦게 나갈수록 커집니다. 같은 뜻의 숫자를 두 곳에 두면 한쪽만 낡습니다.
+     */
     const takeBufferedDodge = (): boolean => {
       if (Actor.bufferedDodge[p] !== 1) return false
+      inputFlow.used++
+      inputFlow.waitSum += BUFFER_TIME - Actor.bufferedDodgeT[p]
       Actor.bufferedDodge[p] = 0
       Actor.bufferedDodgeT[p] = 0
       return true
     }
     const takeBufferedAttack = (): boolean => {
       if (Actor.bufferedAttack[p] !== 1) return false
+      inputFlow.used++
+      inputFlow.waitSum += BUFFER_TIME - Actor.bufferedAttackT[p]
       Actor.bufferedAttack[p] = 0
       Actor.bufferedAttackT[p] = 0
       return true
@@ -719,8 +779,13 @@ export function playerControlSystem(ctx: ControlContext): void {
            * 울립니다. 한 번 누른 것에 한 번 답해야 정보가 됩니다 —
            * 계속 울리면 그건 정보가 아니라 소음입니다.
            */
-          takeBufferedDodge()
-          takeBufferedAttack()
+          // ⚠️ `take*` 를 쓰면 "이어졌다(used)"로 세어집니다. 이건 이어진 게
+          //    아니라 **못 내서 버린 것**이므로 따로 셉니다.
+          if (Actor.bufferedDodge[p] === 1 || Actor.bufferedAttack[p] === 1) inputFlow.dropped++
+          Actor.bufferedDodge[p] = 0
+          Actor.bufferedDodgeT[p] = 0
+          Actor.bufferedAttack[p] = 0
+          Actor.bufferedAttackT[p] = 0
         }
         turnToward(p, aimRot, PLAYER.turnSpeedDeg, dt)
         break
