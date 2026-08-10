@@ -2147,6 +2147,16 @@ class Game {
     cameraViewSize: number
     cameraZoom: number
     attackTempo: number
+    /**
+     * 선입력 창(초)과 구르기 시간 — 템포 프로브가 숫자를 베껴 적지 않도록.
+     * 이 셋은 서로 묶인 값입니다: `inputBuffer >= dodgeDuration + dodgeCooldown`
+     * 이어야 연속 구르기가 선입력으로 이어집니다.
+     */
+    inputBuffer: number
+    dodgeDuration: number
+    dodgeCooldown: number
+    /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
+    actorStates: { idle: number; attack: number; dodge: number; skill: number }
     /** 원거리 적이 자기 사거리 위에 더 받는 여유(m). */
     levelAggroLead: number
     /** 어그로 천장(m) — 카메라가 세로로 담는 높이. */
@@ -2166,6 +2176,15 @@ class Game {
       cameraViewSize: CAMERA.viewSize,
       cameraZoom: this.cam.currentZoom(),
       attackTempo: PLAYER_CFG.tempo.attackScale,
+      inputBuffer: PLAYER_CFG.tempo.inputBuffer,
+      dodgeDuration: PLAYER_CFG.dodge.duration,
+      dodgeCooldown: PLAYER_CFG.dodge.cooldown,
+      actorStates: {
+        idle: ActorState.Idle,
+        attack: ActorState.Attack,
+        dodge: ActorState.Dodge,
+        skill: ActorState.Skill,
+      },
       levelAggroLead: LEVEL_AGGRO_LEAD,
       levelAggroMax: LEVEL_AGGRO_MAX,
       playerMoveSpeed: PLAYER_CFG.moveSpeed,
@@ -3192,6 +3211,12 @@ declare global {
         cameraViewSize: number
         cameraZoom: number
         attackTempo: number
+        /** 선입력 창(초) — 템포 프로브가 0.55 를 베껴 적지 않게 */
+        inputBuffer: number
+        dodgeDuration: number
+        dodgeCooldown: number
+        /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
+        actorStates: { idle: number; attack: number; dodge: number; skill: number }
         levelAggroLead: number
         levelAggroMax: number
         playerMoveSpeed: number

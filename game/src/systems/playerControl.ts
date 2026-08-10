@@ -162,11 +162,13 @@ const DASH_OVERSHOOT = 1.2
 /**
  * 스킬 선입력을 붙잡아 두는 시간(초).
  *
- * 0.45초는 "한 동작이 끝나가는 것을 보고 미리 누르는" 자연스러운 앞당김을
- * 전부 담으면서, 잊어버릴 만큼 길지는 않은 길이입니다.
- * 더 길게 잡으면 예전에 누른 스킬이 뜬금없이 튀어나옵니다.
+ * ⚠️ 예전에는 이 창이 **스킬에만** 있었습니다. 공격은 만료 없는 깃발
+ * 하나였고 구르기는 아예 버퍼가 없었습니다. 같은 손가락이 누르는 세
+ * 가지에 규칙이 셋이면, 손은 그중 가장 인색한 것에 맞춰 배웁니다 —
+ * "일단 기다렸다가 누른다". 그래서 셋이 **한 상수**를 씁니다.
+ * (길이의 근거는 balance.ts `PLAYER.tempo.inputBuffer` 주석에 있습니다.)
  */
-const SKILL_BUFFER_TIME = 0.45
+const BUFFER_TIME = PLAYER.tempo.inputBuffer
 
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2
@@ -284,7 +286,9 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.comboIndex[p] = index
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
+  // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
   Actor.bufferedAttack[p] = 0
+  Actor.bufferedAttackT[p] = 0
   spendStamina(p, c.staminaCost)
   // 기둥 1 — **스태미나로 낸 공격**. 쿨다운으로 낸 것과 나눠 셉니다.
   lightSwings++
@@ -394,6 +398,7 @@ function beginDrink(p: number): void {
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = VIAL.windup
   Actor.bufferedAttack[p] = 0
+  Actor.bufferedAttackT[p] = 0
   Actor.comboIndex[p] = 0
   Player.vials[p] = Math.max(0, Player.vials[p] - 1)
   sfx.cast(0)
@@ -403,7 +408,16 @@ function beginDodge(p: number, dirX: number, dirZ: number): void {
   Actor.state[p] = ActorState.Dodge
   Actor.timer[p] = PLAYER.dodge.duration
   Actor.comboIndex[p] = 0
-  Actor.bufferedAttack[p] = 0
+  /**
+   * ⚠️ **공격 선입력을 지우지 않습니다.** (예전에는 지웠습니다.)
+   *
+   * 그 한 줄이 "구르고 나서 바로 치기"를 불가능하게 만들고 있었습니다.
+   * 구르기를 시작하는 순간 눌러 둔 공격이 버려지니, 플레이어는 착지를
+   * **눈으로 확인하고** 다시 눌러야 했습니다. 소울류·오공에서 구르기가
+   * 공격 준비 동작으로 쓰이는 이유가 정확히 이 이어짐입니다.
+   */
+  Actor.bufferedDodge[p] = 0
+  Actor.bufferedDodgeT[p] = 0
   Actor.hitsLeft[p] = 0
   Player.dodgeDirX[p] = dirX
   Player.dodgeDirZ[p] = dirZ
@@ -483,10 +497,32 @@ export function playerControlSystem(ctx: ControlContext): void {
      */
     if (skillPressed >= 0) {
       Actor.bufferedSkill[p] = skillPressed + 1
-      Actor.bufferedSkillT[p] = SKILL_BUFFER_TIME
+      Actor.bufferedSkillT[p] = BUFFER_TIME
     } else if (Actor.bufferedSkillT[p] > 0) {
       Actor.bufferedSkillT[p] = Math.max(0, Actor.bufferedSkillT[p] - dt)
       if (Actor.bufferedSkillT[p] === 0) Actor.bufferedSkill[p] = 0
+    }
+    /**
+     * 공격·구르기도 **같은 자리에서 같은 방식으로** 기억합니다.
+     *
+     * 예전에는 공격 버퍼를 `case ActorState.Attack:` 안에서 세웠습니다.
+     * 그래서 공격 중에 누른 것만 기억되고, **구르는 중에 누른 공격은
+     * 통째로 사라졌습니다** — 구르고 나서 치려면 착지를 보고 다시 눌러야
+     * 했습니다. 상태마다 다른 데서 기억하면 반드시 이런 구멍이 생깁니다.
+     */
+    if (attackPressed) {
+      Actor.bufferedAttack[p] = 1
+      Actor.bufferedAttackT[p] = BUFFER_TIME
+    } else if (Actor.bufferedAttackT[p] > 0) {
+      Actor.bufferedAttackT[p] = Math.max(0, Actor.bufferedAttackT[p] - dt)
+      if (Actor.bufferedAttackT[p] === 0) Actor.bufferedAttack[p] = 0
+    }
+    if (dodgePressed) {
+      Actor.bufferedDodge[p] = 1
+      Actor.bufferedDodgeT[p] = BUFFER_TIME
+    } else if (Actor.bufferedDodgeT[p] > 0) {
+      Actor.bufferedDodgeT[p] = Math.max(0, Actor.bufferedDodgeT[p] - dt)
+      if (Actor.bufferedDodgeT[p] === 0) Actor.bufferedDodge[p] = 0
     }
 
     // ---- 타이머 ----
@@ -567,6 +603,22 @@ export function playerControlSystem(ctx: ControlContext): void {
      * 쿨다운이라 못 쓴 것을 지워버리면, 쿨이 0.1초 뒤에 도는 흔한 경우에
      * 또 입력이 사라집니다.
      */
+    /**
+     * 눌러 둔 것을 **꺼내 씁니다.** 꺼내면 사라집니다 — 한 번 누른 것이
+     * 두 번 나가면 안 됩니다.
+     */
+    const takeBufferedDodge = (): boolean => {
+      if (Actor.bufferedDodge[p] !== 1) return false
+      Actor.bufferedDodge[p] = 0
+      Actor.bufferedDodgeT[p] = 0
+      return true
+    }
+    const takeBufferedAttack = (): boolean => {
+      if (Actor.bufferedAttack[p] !== 1) return false
+      Actor.bufferedAttack[p] = 0
+      Actor.bufferedAttackT[p] = 0
+      return true
+    }
     const takeBufferedSkill = (): { slot: number; def: SkillDef } | null => {
       const buffered = Actor.bufferedSkill[p]
       if (buffered === 0) return null
@@ -597,7 +649,18 @@ export function playerControlSystem(ctx: ControlContext): void {
           beginSkill(p, queued.slot, queued.def, aimRot, ctx)
           break
         }
-        if (dodgePressed && canDodge) {
+        /**
+         * ⚠️ 이번 프레임의 키가 아니라 **버퍼**를 봅니다.
+         *
+         * Idle 은 싸우는 동안 거의 오지 않는 상태입니다(공격·후딜·구르기가
+         * 이어지므로). 그래서 "Idle 인 프레임에 정확히 눌렀는가"로 판정하면,
+         * 실제로는 눌렀는데 아무 일도 안 일어나는 순간이 계속 생깁니다.
+         * 처형이 안 나가던 것도 같은 이유였습니다(아래 endAttack 설계 노트).
+         */
+        const dodgeQueued = Actor.bufferedDodge[p] === 1
+        const attackQueued = Actor.bufferedAttack[p] === 1
+        if (dodgeQueued && canDodge) {
+          takeBufferedDodge()
           // 이동 입력이 있으면 그 방향으로, 없으면 조준 반대(뒤)로 구릅니다.
           const dx = hasMoveInput ? mx : -Math.sin(aimRot)
           const dz = hasMoveInput ? mz : -Math.cos(aimRot)
@@ -620,7 +683,7 @@ export function playerControlSystem(ctx: ControlContext): void {
           }
           break
         }
-        if (attackPressed) {
+        if (attackQueued) {
           /**
            * ---- 처형 ----
            *
@@ -631,10 +694,12 @@ export function playerControlSystem(ctx: ControlContext): void {
            */
           const fin = finisherTarget(p)
           if (fin >= 0 && Stamina.value[p] >= FINISHER.staminaCost) {
+            takeBufferedAttack()
             beginAttack(p, FINISH_COMBO, aimRot)
             break
           }
           if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
+            takeBufferedAttack()
             beginAttack(p, 0, aimRot)
             break
           }
@@ -645,13 +710,25 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 짧은 저음 하나로 "입력은 됐고, 지금은 자원이 없다"가 됩니다.
          * — 스태미나가 자원으로 작동하려면 **바닥났다는 사실이 들려야** 합니다.
          */
-        if (dodgePressed || attackPressed) sfx.deny()
+        if (dodgeQueued || attackQueued) {
+          sfx.deny()
+          /**
+           * 낼 수 없는 입력은 **버립니다.**
+           *
+           * 버퍼가 살아 있으면 자원이 찰 때까지 거절음이 **프레임마다**
+           * 울립니다. 한 번 누른 것에 한 번 답해야 정보가 됩니다 —
+           * 계속 울리면 그건 정보가 아니라 소음입니다.
+           */
+          takeBufferedDodge()
+          takeBufferedAttack()
+        }
         turnToward(p, aimRot, PLAYER.turnSpeedDeg, dt)
         break
       }
 
       case ActorState.Attack: {
-        if (attackPressed) Actor.bufferedAttack[p] = 1
+        // 선입력은 위(공용 장부)에서 이미 기억했습니다 — 여기서 또 세우면
+        // 상태마다 규칙이 갈립니다.
         moveScale = weapon.attackMoveScale
 
         const combo =
@@ -671,7 +748,8 @@ export function playerControlSystem(ctx: ControlContext): void {
             beginSkill(p, queued.slot, queued.def, aimRot, ctx)
             break
           }
-          if (dodgePressed && canDodge) {
+          if (Actor.bufferedDodge[p] === 1 && canDodge) {
+            takeBufferedDodge()
             const dx = hasMoveInput ? mx : -Math.sin(Transform.rotY[p])
             const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
             beginDodge(p, dx, dz)
@@ -758,7 +836,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 후딜이 끝나고 나서야 입력을 받으면 그 창을 놓칩니다.
         // 후딜의 후반부에서 기본 공격으로 이어갈 수 있게 하면
         // "커밋"은 유지하면서(전반부는 못 빠짐) 반격 창이 살아납니다.
-        if (attackPressed) Actor.bufferedAttack[p] = 1
+        // (선입력은 공용 장부에서 이미 기억합니다)
         if (
           phase === AttackPhase.Recovery &&
           Actor.bufferedAttack[p] === 1 &&
@@ -816,10 +894,11 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 후딜 후반에는 회피로도 빠져나갈 수 있습니다(기본 공격과 같은 규칙).
         if (
           phase === AttackPhase.Recovery &&
-          dodgePressed &&
+          Actor.bufferedDodge[p] === 1 &&
           canDodge &&
           Actor.timer[p] <= def.recovery * TEMPO * 0.5
         ) {
+          takeBufferedDodge()
           const dx = hasMoveInput ? mx : -Math.sin(Transform.rotY[p])
           const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
           beginDodge(p, dx, dz)
@@ -890,6 +969,27 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (Player.dodgeElapsed[p] >= d.duration) {
           Actor.state[p] = ActorState.Idle
           Player.dodgeCooldownT[p] = d.cooldown
+          /**
+           * ── 구르기 → 다음 동작이 이어지는 자리 ─────────────────────
+           *
+           * 여기서 **다음 동작을 직접 시작하지 않습니다.** 버퍼를 그대로 두고
+           * Idle 로 보내면 다음 프레임에 Idle 처리가 받아 갑니다.
+           *
+           * 처음에는 이 자리에서 바로 이어 붙였다가 두 가지가 걸렸습니다:
+           *
+           *  1. **구르기 쿨다운을 건너뜁니다.** `canDodge` 는 이 프레임 앞쪽에서
+           *     한 번 계산되는데, 쿨다운(0.12초)은 바로 윗줄에서 **지금** 걸립니다.
+           *     그래서 여기서 이어 구르면 0.54초짜리 연속 구르기가 0.42초가
+           *     됩니다 — 설계한 것보다 빠른 회피가 조용히 생깁니다.
+           *  2. **같은 규칙이 두 곳에 생깁니다.** 처형 우선순위·스태미나 문턱을
+           *     Idle 과 여기 양쪽에 적으면 언젠가 한쪽만 낡습니다.
+           *
+           * 실제로 이어짐을 막고 있던 것은 이 자리가 아니라 `beginDodge` 가
+           * **공격 선입력을 지우던 한 줄**이었습니다. 그걸 없앴으므로
+           * 구르면서 눌러 둔 공격은 이제 일어나는 즉시 나갑니다.
+           * 버퍼 창(0.55초)이 구르기 0.42 + 쿨다운 0.12 을 덮도록 잡힌 것도
+           * 정확히 이 경로를 위해서입니다.
+           */
         }
         break
       }
@@ -1035,7 +1135,17 @@ function endAttack(p: number, aimRot: number): void {
   } else {
     Actor.state[p] = ActorState.Idle
     Actor.comboIndex[p] = 0
-    Actor.bufferedAttack[p] = 0
+    /**
+     * ⚠️ **선입력을 지우지 않습니다.** (예전에는 지웠습니다.)
+     *
+     * 콤보가 바닥나는 자리(3타 무기면 3타째 뒤)에서 눌러 둔 것이 버려지면,
+     * 정확히 그 순간 한 박자가 비어 **콤보를 다시 시작하려면 착지를 보고
+     * 다시 눌러야** 합니다. 남겨 두면 다음 프레임 Idle 이 받아서 1타로
+     * 이어집니다.
+     *
+     * 무한 연타가 되지 않는 이유: 입력은 `consumePress` 라 **누를 때 한 번**만
+     * 잡힙니다. 꾹 눌러도 반복되지 않고, 스태미나가 그대로 문지기입니다.
+     */
     Actor.comboWindowT[p] = 0
   }
 }

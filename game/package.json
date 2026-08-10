@@ -39,7 +39,8 @@
     "bench": "node tools/bench.mjs",
     "sprint": "node tools/sprint-probe.mjs",
     "bypass": "node tools/bypass-probe.mjs",
-    "charge": "node tools/charge-probe.mjs"
+    "charge": "node tools/charge-probe.mjs",
+    "tempo": "node tools/tempo-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
