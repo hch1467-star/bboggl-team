@@ -1454,6 +1454,7 @@ try {
             vial: false,
             weapon: false,
             atStation: false,
+            atAfter: false,
             anvil: fire.anvil === true,
           }
           /**
@@ -1488,6 +1489,21 @@ try {
             tap('KeyB')
             await sleep()
             visit.weapon = G.weaponUpgradeInfo().level > beforeLevel
+            /**
+             * **누른 직후의 자리 상태**도 남깁니다.
+             *
+             * 한 판에서 이런 줄이 나왔습니다:
+             *   `화톳불 — 불티 106 · 정련석 1 · 무기 불티 부족(106/80)`
+             * 106 ≥ 80 이고 정련석도 1/1 인데 강화가 안 됐습니다. 즉
+             * `불티 부족` 은 **아무 조건에도 안 걸렸을 때 떨어지는 맨 끝
+             * 분류**였고, 라벨 자체가 거짓이었습니다.
+             *
+             * 후보는 이것입니다 — 화톳불의 강화는 `!rest.blocked` 에 걸려
+             * 있고, `blocked` 는 **적이 14m 안에 있으면** 참입니다. 모루에는
+             * 그 조건이 없습니다. 읽을 때는 자리였는데 누를 때 아니었으면
+             * 여기 `atAfter` 가 false 로 남습니다.
+             */
+            visit.atAfter = G.weaponUpgradeInfo().atStation === true
           }
           fireVisits.push(visit)
           lastFireWallet = { embers: G.emberInfo().embers, stones: G.weaponUpgradeInfo().stones }
@@ -1883,7 +1899,9 @@ try {
         ? '최대 단계'
         : v.stones < v.stoneNeed
           ? `정련석 ${v.stones}/${v.stoneNeed} 부족`
-          : `불티 부족(${v.embers - (v.vial ? v.vialCost : 0)}/${v.emberNeed})`
+            : v.embers - (v.vial ? v.vialCost : 0) < v.emberNeed
+              ? `불티 부족(${v.embers - (v.vial ? v.vialCost : 0)}/${v.emberNeed})`
+              : `**눌렀는데 안 됨** (자리 ${v.atStation ? 'O' : 'X'}→${v.atAfter ? 'O' : 'X'})`
     console.log(
       `             ${String(v.at).padStart(6)}초 ${v.anvil ? '모루  ' : '화톳불'} — 불티 ${v.embers} · 정련석 ${v.stones}` +
         ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
