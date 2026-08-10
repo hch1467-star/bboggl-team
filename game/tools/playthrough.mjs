@@ -1238,15 +1238,63 @@ try {
        * 화톳불 막힘 판정 · 여기). 그래서 게임 쪽은 **목록만** 주고,
        * 고르는 코드는 길찾기를 가진 이 한 곳에만 둡니다.
        */
+      /**
+       * ⚠️ **가까운 곳이 아니라 "가는 길에 있는 곳"을 고릅니다.**
+       *
+       * 구역별로 재 보니 곁길 넷이 전부 소비처 예산(45m) 밖이었습니다:
+       *   성벽마루 95% · 북쪽 단상 92% · 성문 벽감 69% · 남쪽 함몰지 58%
+       * 그리고 **보물 5개 중 4개가 그 넷에 있습니다** — 정련석이 나오는
+       * 유일한 곳입니다. 즉 정련석을 줍는 순간이 곧 소비처에서 가장 먼
+       * 순간입니다.
+       *
+       * 그 상태에서 **가장 가까운** 소비처를 고르면 답은 늘 **뒤쪽**이고,
+       * 46m 라 예산에 걸려 접습니다(실제 기록: `모루 46m · 그때 전부
+       * 불156m 불82m 모루70m 모루46m`). 그리고 30초 쿨다운까지 먹습니다.
+       *
+       * 사람은 그렇게 안 합니다. 되돌아가지 않고 **가는 길에 있는 다음
+       * 소비처**에서 씁니다. 이 존은 한 방향(+X)이라 더 그렇습니다.
+       * 그래서 기준을 거리에서 **돌아가는 비용**으로 바꿉니다:
+       *
+       *     비용 = (나→소비처) + (소비처→목표) − (나→목표)
+       *
+       * 가는 길에 있으면 0 에 가깝고, 뒤에 있으면 왕복만큼 커집니다.
+       * 소울류에서 "다음 화톳불에서 쓰지" 하는 그 판단을 그대로 옮긴 것입니다.
+       */
       let fire = null
       {
-        let bestD = Infinity
-        for (const sp of G.spendPoints?.() ?? []) {
-          const step = G.pathStep(sp.x, sp.z)
-          const d = step ? step.dist : Math.hypot(sp.x - p.x, sp.z - p.z)
-          if (d < bestD) {
-            bestD = d
-            fire = sp
+        const pts = G.spendPoints?.() ?? []
+        const obj = G.objective()
+        /**
+         * **목표까지 남은 거리**로 앞뒤를 가릅니다. 흐름장 한 번이면
+         * 플레이어와 모든 소비처를 같은 자로 잴 수 있습니다.
+         *   · `남은 거리(소비처) < 남은 거리(나)`  → 내 **앞**에 있습니다
+         *   · 그중 남은 거리가 **가장 큰** 것       → 가장 먼저 지나갈 곳
+         * 뒤에 있는 것이 아무리 가까워도 고르지 않습니다 — 되돌아가는
+         * 것은 사람도 안 하고, 실제로 그 46m 때문에 판마다 한 번밖에
+         * 못 들렀습니다.
+         */
+        const d = obj ? G.distancesToward?.(obj.x, obj.z, pts) : null
+        if (d && pts.length) {
+          let bestLeft = -Infinity
+          for (let i = 0; i < pts.length; i++) {
+            const left = d.points[i]
+            if (!Number.isFinite(left) || left >= d.player) continue // 뒤에 있거나 못 감
+            if (left > bestLeft) {
+              bestLeft = left
+              fire = pts[i]
+            }
+          }
+        }
+        // 앞에 아무것도 없으면(보스 직전) 예전처럼 **가장 가까운** 곳으로.
+        if (!fire) {
+          let bestD = Infinity
+          for (const sp of pts) {
+            const step = G.pathStep(sp.x, sp.z)
+            const dd = step ? step.dist : Math.hypot(sp.x - p.x, sp.z - p.z)
+            if (dd < bestD) {
+              bestD = dd
+              fire = sp
+            }
           }
         }
         if (!fire) fire = G.nearestBonfire()
@@ -1438,11 +1486,31 @@ try {
         if (fd < 2.6) {
           releaseAll()
           /**
-           * 봇은 **성수병 먼저, 남으면 무기**로 씁니다.
+           * ⚠️ **순서를 뒤집었습니다 — 정련석이 있으면 무기가 먼저입니다.**
            *
-           * 사람이라면 "지금 죽지 않는 것이 급한가, 다음 구간을 빨리 넘기고
-           * 싶은가"를 저울질하지만 봇은 그런 판단을 못 합니다. 가장 단순한
-           * 우선순위 하나만 씁니다 — 그리고 그게 초보자의 기본값이기도 합니다.
+           * 원래는 "성수병 먼저, 남으면 무기"였고 근거는 *"그게 초보자의
+           * 기본값"* 이었습니다. 그런데 그건 **잰 것이 아니라 제가 정한
+           * 가정**이었고, 그 가정 하나가 무기 축을 통째로 못 재게 만들고
+           * 있었습니다:
+           *
+           *   `39.2초 모루 — 불티 90 · 성수병 강화 · 무기 불티 부족(30/80)`
+           *   `끝: 불티 414 · 정련석 5 누적 · 무기 0강`
+           *
+           * 성수병(60)을 안 샀으면 90 ≥ 80 으로 무기가 올랐습니다. 화폐가
+           * 하나뿐이라 **싼 쪽이 늘 먼저 팔리고**, 비싼 쪽은 영영 순서를
+           * 못 받습니다. 그 결과 정련석 5개가 끝까지 안 쓰인 채 남습니다 —
+           * 무기 전용 자원이 **죽은 자원**이 된 것입니다.
+           *
+           * 뒤집는 근거는 희소성입니다. 불티는 잡으면 계속 나오지만(끝에
+           * 414 남음) 정련석은 **보물과 보스에서만** 나옵니다. 손에 쥔
+           * 희소하고 용도가 하나뿐인 것을 먼저 쓰는 편이 사람의 행동에
+           * 가깝고, `npm run upgrade` 의 주석이 내린 결론과도 같습니다 —
+           * *"불티가 아니라 정련석의 총량이 존을 제한합니다."*
+           *
+           * 남는 설계 질문은 그대로 적어 둡니다: **화폐 하나로 두 축을
+           * 사면 싼 쪽이 비싼 쪽을 굶깁니다.** 소울이 뼛조각과 티타나이트를
+           * 나눈 이유입니다. 봇의 순서를 바꾼 것은 그 질문을 **잴 수 있게**
+           * 만든 것이지 답한 것이 아닙니다.
            */
           const visit = {
             at: Number(now().toFixed(1)),
@@ -1501,10 +1569,6 @@ try {
             while (now() < until && read() === before) await sleep()
             return read() !== before
           }
-          if (em.upgradeCost > 0 && em.embers >= em.upgradeCost) {
-            tap('KeyV')
-            visit.vial = await applied(() => G.vialInfo().max, beforeVial)
-          }
           const w2 = G.weaponUpgradeInfo()
           if (w2.nextCost > 0 && G.emberInfo().embers >= w2.nextCost && w2.stones >= w2.nextStoneCost) {
             tap('KeyB')
@@ -1524,6 +1588,12 @@ try {
              * 여기 `atAfter` 가 false 로 남습니다.
              */
             visit.atAfter = G.weaponUpgradeInfo().atStation === true
+          }
+          // 무기를 사고 **남은 것**으로 성수병을 봅니다(값은 결제 후에 다시 읽습니다).
+          const em2 = G.emberInfo()
+          if (em2.upgradeCost > 0 && em2.embers >= em2.upgradeCost) {
+            tap('KeyV')
+            visit.vial = await applied(() => G.vialInfo().max, beforeVial)
           }
           fireVisits.push(visit)
           lastFireWallet = { embers: G.emberInfo().embers, stones: G.weaponUpgradeInfo().stones }

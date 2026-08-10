@@ -2093,6 +2093,32 @@ class Game {
     return { x: step.x, z: step.z, dist: dist ?? 0 }
   }
 
+  /**
+   * **목표까지의 걷는 거리** — 플레이어와 임의의 지점들을 한 번에.
+   *
+   * 왜 게임이 내주는가: 길찾기(흐름장)는 게임만 가지고 있습니다. 봇이
+   * 직선으로 대신 재면 벽 너머가 가깝게 보입니다 — 이 프로젝트에서
+   * 직선/경로를 혼동해 생긴 버그가 이미 넷입니다.
+   *
+   * 왜 한 번에: 흐름장은 **목적지 하나마다** 한 번 만듭니다. 지점마다
+   * 따로 물으면 그 수만큼 다시 만들어야 하고, 봇의 판단 루프는 벽시계에
+   * 묶여 있어서 그 비용이 그대로 **측정값을 흔듭니다**(느려진 봇이 더 못
+   * 싸우고, 그게 밸런스 변화로 잘못 기록됩니다).
+   */
+  debugDistancesToward(
+    toX: number,
+    toZ: number,
+    pts: { x: number; z: number }[],
+  ): { player: number; points: number[] } | null {
+    if (!this.terrain) return null
+    this.terrain.buildFlowField(toX, toZ)
+    const p = this.playerEntity
+    return {
+      player: this.terrain.pathDistance(Transform.x[p], Transform.z[p]) ?? Infinity,
+      points: pts.map((q) => this.terrain?.pathDistance(q.x, q.z) ?? Infinity),
+    }
+  }
+
   /** 두 지점 사이를 걸어서 통과할 수 있는가 — 게임의 통행 규칙 그대로. */
   debugWalkTest(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
     return this.terrain?.canWalk(fromX, fromZ, toX, toZ) ?? false
@@ -3116,6 +3142,11 @@ declare global {
       shortcutHint: () => 'ready' | 'locked' | 'open' | null
       walkTest: (fromX: number, fromZ: number, toX: number, toZ: number) => boolean
       pathStep: (toX: number, toZ: number) => { x: number; z: number; dist: number } | null
+      distancesToward: (
+        toX: number,
+        toZ: number,
+        pts: { x: number; z: number }[],
+      ) => { player: number; points: number[] } | null
       terrainInfo: () => {
         maxClimb: number
         heightStep: number
@@ -3415,6 +3446,7 @@ window.__game = {
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
   pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
+  distancesToward: (toX, toZ, pts) => game.debugDistancesToward(toX, toZ, pts),
   terrainInfo: () => game.debugTerrainInfo(),
   entityState: (e) => game.debugEntityState(e),
   teleportEntity: (e, x, z) => {
