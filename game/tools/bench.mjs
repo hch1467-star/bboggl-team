@@ -380,10 +380,39 @@ console.log(`  보스전         ${fmt(boss.map((l) => l.boss.engaged))}초`)
  */
 const resets = boss.filter((l) => (l.boss.resets ?? 0) > 0).length
 if (resets) console.log(`  ⚠️ 초기화        ${resets}/${boss.length}판에서 발생`)
+/**
+ * ── ⚠️ 구간 시간은 **초기화 없는 판만** 모읍니다 ────────────────────
+ *
+ * 이 줄이 왜 이렇게 됐는지: 초기화가 2/3판이던 벤치의 구간별 화력
+ * (23.5 → 31.4 → 44.3/초)에서 체력 배분을 거꾸로 풀어 경계를 옮겼습니다.
+ * 예상 5.3/6.1/6.9초를 미리 적고 다시 쟀더니 **16.5/6.8/11.0초** 가
+ * 나왔습니다 — 1단계는 체력을 줄였는데 시간이 늘었습니다.
+ *
+ * 두 벤치의 차이는 하나였습니다: **초기화 2/3판 vs 0판.**
+ * 보스가 이탈로 귀환하면 봇은 누적을 버리고 마지막 시도만 보고합니다.
+ * 그래서 "한 번 물러났다 다시 들어간 판"과 "한 번에 간 판"이 같은 칸에
+ * 섞여 있었고, 저는 그 섞인 중앙값으로 소수 둘째 자리를 계산했습니다.
+ *
+ * 경고를 위에 한 줄 찍는 것만으로는 부족했습니다 — 실제로 그 경고가
+ * 찍혀 있는데도 아래 숫자를 그냥 읽었습니다. 그래서 **섞이지 않게**
+ * 만듭니다. 비교할 수 있는 것끼리만 모읍니다.
+ */
+const cleanBoss = boss.filter((l) => (l.boss.resets ?? 0) === 0)
+const phaseSrc = cleanBoss.length > 0 ? cleanBoss : boss
+const phaseNote =
+  cleanBoss.length > 0
+    ? cleanBoss.length < boss.length
+      ? ` (초기화 없는 ${cleanBoss.length}판만)`
+      : ''
+    : ' ⚠️ 초기화 없는 판이 없습니다 — 아래 수치로 배분을 계산하지 마세요'
 for (let i = 0; i < 3; i++) {
-  const times = boss.map((l) => l.boss.phaseTime?.[i])
-  const dps = boss.map((l) => (l.boss.phaseBands?.[i] ?? 0) / Math.max(0.1, l.boss.phaseTime?.[i] ?? 0))
-  console.log(`  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초`)
+  const times = phaseSrc.map((l) => l.boss.phaseTime?.[i])
+  const dps = phaseSrc.map(
+    (l) => (l.boss.phaseBands?.[i] ?? 0) / Math.max(0.1, l.boss.phaseTime?.[i] ?? 0),
+  )
+  console.log(
+    `  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초${i === 0 ? phaseNote : ''}`,
+  )
 }
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
