@@ -436,19 +436,32 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
  *
  * 읽는 법 — 셋의 처방이 서로 다릅니다:
  *   · `버려짐(만료)` 이 크면 → 창(0.55초)이 짧거나 빠져나올 자리가 늦게 옵니다
- *   · `못 냄(자원)` 이 크면  → 버퍼가 아니라 **스태미나** 이야기입니다
+ *   · `누른 순간 못 냄` 이 크면 → 버퍼가 아니라 **스태미나** 이야기입니다
  *   · `평균 대기` 가 0에 가까우면 → 이미 Idle 일 때만 눌렀다는 뜻이라
  *     버퍼가 하는 일이 없습니다(있으나 마나)
  */
 {
-  const flow = (l) => (l.inputUsed ?? 0) + (l.inputExpired ?? 0) + (l.inputDropped ?? 0)
+  /**
+   * ⚠️ **합계가 누른 횟수와 같지 않습니다.**
+   *
+   * 처음엔 셋(이어짐·만료·못 냄)을 더해 "선입력 N회"라고 찍었는데, 그
+   * 뒤에 거절 처리를 고치면서 뜻이 바뀌었습니다. 예전에는 못 내면 버퍼를
+   * **버렸으므로** 셋이 배타적이었습니다. 지금은 버리지 않고 거절음만
+   * 한 번 내므로, **누른 순간 못 냈던 입력이 잠시 뒤 나갈 수 있습니다** —
+   * 그러면 `못 냄` 과 `이어짐` 에 둘 다 세어집니다.
+   *
+   * 그래서 분모를 `이어짐 + 만료`(결말이 난 것)로 잡고, `못 냄` 은
+   * 그 위에 겹쳐 놓는 값으로 따로 적습니다. 고친 코드에 맞춰 표기를
+   * 안 고치면, 다음에 읽는 사람은 **없는 사건을 세게** 됩니다.
+   */
+  const settled = (l) => (l.inputUsed ?? 0) + (l.inputExpired ?? 0)
   console.log(
-    `  선입력         ${fmt(pick(flow), 0)}회 중 이어짐 ${fmt(pick((l) => l.inputUsed ?? 0), 0)}회 ` +
-      `(${fmt(pick((l) => Math.round(((l.inputUsed ?? 0) / Math.max(1, flow(l))) * 100)), 0)}%)`,
+    `  선입력         결말 ${fmt(pick(settled), 0)}회 중 이어짐 ${fmt(pick((l) => l.inputUsed ?? 0), 0)}회 ` +
+      `(${fmt(pick((l) => Math.round(((l.inputUsed ?? 0) / Math.max(1, settled(l))) * 100)), 0)}%) · ` +
+      `버려짐(만료) ${fmt(pick((l) => l.inputExpired ?? 0), 0)}회`,
   )
   console.log(
-    `                 버려짐(만료) ${fmt(pick((l) => l.inputExpired ?? 0), 0)}회 · ` +
-      `못 냄(자원) ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 · ` +
+    `                 그중 누른 순간엔 못 냈던 것 ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 (겹침) · ` +
       `평균 대기 ${fmt(pick((l) => l.inputWaitAvg ?? 0), 2)}초`,
   )
 }

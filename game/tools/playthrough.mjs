@@ -2192,18 +2192,23 @@ try {
    * 선입력(버퍼)을 넣고도 **그것이 일하는지 재는 것이 없었습니다.**
    * 셋을 갈라 두는 이유는 처방이 다르기 때문입니다:
    *   · `버려짐(만료)` 이 많다 → 창이 짧거나, 빠져나올 자리가 너무 늦게 옵니다
-   *   · `못 냄(자원)` 이 많다  → 버퍼 이야기가 아니라 **스태미나** 이야기입니다
+   *   · `누른 순간 못 냄` 이 많다 → 버퍼가 아니라 **스태미나** 이야기입니다
+   *
+   * ⚠️ 셋의 합은 누른 횟수와 **같지 않습니다.** 못 낸 입력을 버리지 않고
+   * 창이 남은 동안 살려 두므로, 누른 순간 못 냈다가 잠시 뒤 나가면 두 칸에
+   * 모두 세어집니다. 분모는 결말이 난 것(이어짐+만료)입니다.
    * 뭉쳐 놓으면 어느 쪽인지 영영 못 가립니다.
    *
    * `평균 대기` 는 누른 순간부터 나온 순간까지입니다. 0에 가까우면 버퍼가
    * 없어도 될 때만 눌렀다는 뜻이고, 창 길이에 가까우면 매번 아슬아슬하게
    * 걸리고 있다는 뜻입니다.
    */
-  const flowTotal = (log.inputUsed ?? 0) + (log.inputExpired ?? 0) + (log.inputDropped ?? 0)
+  const settled = (log.inputUsed ?? 0) + (log.inputExpired ?? 0)
   console.log(
-    `  이어짐      선입력 ${flowTotal}회 — 이어짐 ${log.inputUsed ?? 0}회` +
-      ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, flowTotal)) * 100)}%)` +
-      ` · 버려짐(만료) ${log.inputExpired ?? 0}회 · 못 냄(자원) ${log.inputDropped ?? 0}회` +
+    `  이어짐      결말 ${settled}회 — 이어짐 ${log.inputUsed ?? 0}회` +
+      ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, settled)) * 100)}%)` +
+      ` · 버려짐(만료) ${log.inputExpired ?? 0}회\n` +
+      `             그중 누른 순간엔 못 냈던 것 ${log.inputDropped ?? 0}회 (겹침)` +
       ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초`,
   )
   const distTotal =
