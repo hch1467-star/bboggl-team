@@ -73,10 +73,29 @@ try {
 
   console.log(`\n🥁 보스 페이스 실험대 — ${RUNS}판, 같은 시작 · 같은 정책\n`)
 
+  /**
+   * ── 강화 단계만 바꿔 가며 돌립니다 ─────────────────────────────
+   *
+   * 앞선 실험대가 강화 0단계에서 3단계를 못 끝냈습니다(화력 5.1/초,
+   * 3판 중 2판 시간초과). 그런데 벤치(강화된 무기 + 똑똑한 봇)에서는
+   * 3단계 화력이 28.7 로 오릅니다. **둘 다 사실일 수 있습니다** —
+   * 3단계가 "성장을 요구하는 구간"이면 그게 정상이니까요.
+   *
+   * 그래서 **강화 단계 하나만** 바꿉니다. 나머지는 전부 같습니다.
+   *   · 0단계에서 못 끝내고 뒤 단계에서 끝난다 → 성장 관문. 설계대로입니다.
+   *   · 어느 단계에서도 못 끝낸다               → 구간 자체가 벽입니다.
+   *   · 0단계에서도 끝난다                      → 앞 결과가 정책 탓이었습니다.
+   *
+   * 한 변수만 움직이는 것이 요점입니다. 오늘 되돌린 셋 중 둘이 "여러 개가
+   * 같이 움직이는 자리에서 하나를 지목한" 것이었습니다.
+   */
+  const LEVELS = [0, 2, 5]
+  const byLevel = new Map()
   const runs = []
+  for (const level of LEVELS) {
   for (let i = 0; i < RUNS; i++) {
-    process.stdout.write(`  ${i + 1}/${RUNS}판… `)
-    const r = await page.evaluate(async () => {
+    process.stdout.write(`  +${level} ${i + 1}/${RUNS}판… `)
+    const r = await page.evaluate(async (wLv) => {
       const G = window.__game
       const sleep = () => new Promise((r) => setTimeout(r, 8))
       const now = () => G.state().simElapsed
@@ -100,7 +119,7 @@ try {
        * "화력이 오르는 것"이 장비 때문인지 전투 중 자원(집중·처형) 때문인지
        * 갈립니다.
        */
-      G.setWeaponLevel(0, 0)
+      G.setWeaponLevel(0, wLv)
       G.setEmbers(0)
 
       const be0 = G.bossEncounter()
@@ -128,7 +147,14 @@ try {
        * 목적 자체가 무너집니다. 90초를 넘기면 그 판은 "시간초과"로 남기고
        * 넘어갑니다 — 안 끝나는 것도 정보입니다.
        */
-      while (now() - t0 < 90 && Date.now() < dl) {
+      /**
+       * 판당 상한 45초. 강화 0·2단계는 어차피 안 끝나므로(60초 넘게 3단계에
+       * 머무릅니다) 상한을 길게 잡아 봐야 **똑같이 시간초과가 나오면서
+       * 전체 실행만 못 끝냅니다.** 실제로 75초로 뒀다가 3단계 실행이
+       * 통째로 시간 제한에 걸려 마지막 판을 못 봤습니다.
+       * 가르려는 것은 "끝나는가"이지 "몇 초에 끝나는가"가 아닙니다.
+       */
+      while (now() - t0 < 45 && Date.now() < dl) {
         const be = G.bossEncounter()
         if (!be || be.hp <= 0) {
           killed = true
@@ -202,13 +228,35 @@ try {
         phaseTime: phaseTime.map((v) => Number(v.toFixed(1))),
         phaseDmg: phaseDmg.map((v) => Math.round(v)),
       }
-    })
+    }, level)
     if (!r) {
       console.log('보스를 못 찾음')
       continue
     }
     console.log(`${r.killed ? '처치' : '시간초과'} ${r.total}초 · ${r.phaseTime.join(' / ')}`)
     runs.push(r)
+    if (!byLevel.has(level)) byLevel.set(level, [])
+    byLevel.get(level).push(r)
+  }
+  }
+
+  console.log('\n  ── 강화 단계별 (한 변수만 다름) ──────')
+  for (const [lv, rs] of byLevel) {
+    const kills = rs.filter((r) => r.killed).length
+    console.log(
+      `  +${lv}            처치 ${kills}/${rs.length}판 · 전체 ${fmt(rs.map((r) => r.total))}초 · ` +
+        `3단계 ${fmt(rs.map((r) => r.phaseTime[2]))}초 · ` +
+        `3단계 화력 ${fmt(rs.map((r) => r.phaseDmg[2] / Math.max(0.1, r.phaseTime[2])))}/초`,
+    )
+  }
+  {
+    const lo = byLevel.get(LEVELS[0]) ?? []
+    const hi = byLevel.get(LEVELS[LEVELS.length - 1]) ?? []
+    const loKill = lo.filter((r) => r.killed).length
+    const hiKill = hi.filter((r) => r.killed).length
+    console.log(
+      `\n  → ${hiKill > loKill ? '강화가 3단계를 뚫는 열쇠입니다 (성장 관문)' : hiKill === lo.length && loKill === lo.length ? '강화 없이도 끝납니다' : '강화를 최대로 해도 안 끝납니다 — 구간 자체를 봐야 합니다'}`,
+    )
   }
 
   if (runs.length < 2) {
