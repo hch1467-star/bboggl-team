@@ -219,6 +219,89 @@ try {
     check(false, '🟣 갈고리를 관측했다', '20초 안에 갈고리를 걸지 않았습니다')
   }
 
+  // ---- 4.5 등 뒤 창이 **한 대 넣을 시간보다 길다** (기둥 3) ----
+  //
+  // DESIGN.md 기둥 3: 등 뒤를 잡히면 적이 바로 안 돕니다(반응 지연 + 느린
+  // 회전). 그 창이 **한 대 넣는 시간보다 짧으면** 백어택은 시스템으로만
+  // 존재하고 실제로는 못 씁니다 — 예전 플레이 테스트에서 실제로 그랬습니다.
+  //
+  // ⚠️ 벤치의 `백어택 6%` 로는 이걸 못 봅니다. 그 숫자는 **봇이 등 뒤로
+  // 도는지**를 재고 있고, 봇은 원래 안 돕니다. 게임이 창을 주는지는
+  // 게임 쪽에서 재야 합니다 — 봇은 밸런스를 재고 실험대는 규칙을 잽니다.
+  const backWindow = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    const now = () => G.state().simElapsed
+    const wait = async (sec) => {
+      const t0 = now()
+      const dl = Date.now() + 30000
+      while (now() - t0 < sec && Date.now() < dl) await sleep()
+    }
+    // (1) 기본 공격 한 대가 판정까지 가는 데 걸리는 시간
+    G.reset()
+    await wait(0.5)
+    G.clearEnemies()
+    await wait(0.3)
+    const t0 = now()
+    G.press('Mouse0')
+    G.release('Mouse0')
+    let swingAt = -1
+    {
+      const dl = Date.now() + 30000
+      while (now() - t0 < 3 && Date.now() < dl) {
+        const p = G.state().player
+        if (p.state === 1 && p.phase === 1) {
+          swingAt = now() - t0
+          break
+        }
+        await sleep()
+      }
+    }
+    // (2) 등 뒤를 잡았을 때 등 뒤로 남아 있는 시간
+    G.reset()
+    await wait(0.5)
+    G.clearEnemies()
+    const p0 = G.state().player
+    const e = G.spawnEnemyKind('grunt', p0.x + 2.2, p0.z)
+    await wait(0.4)
+    /**
+     * 적의 **등 뒤**로 옮겨 놓습니다.
+     *
+     * ⚠️ 처음엔 `info.x + 2.2` 로 적 너머에 놓았다가 `0초` 가 나왔습니다.
+     * 그건 "적이 플레이어를 보고 있다"고 가정한 자리인데, 소환 직후의 적은
+     * 아직 안 돌아섰을 수 있습니다(회전 130°/초). 그러면 옆에 세워 놓고
+     * "등 뒤가 유지되나"를 물은 셈입니다.
+     * 가정하지 않고 **바라보는 방향의 정반대**로 계산해서 놓습니다.
+     */
+    const info = G.enemyInfo(e)
+    if (!info) return { swingAt, window: -1 }
+    G.teleportPlayer(info.x - Math.sin(info.rotY) * 2.2, info.z - Math.cos(info.rotY) * 2.2)
+    await sleep()
+    const start = now()
+    // ⚠️ `window` 라는 이름을 쓰면 안 됩니다 — 페이지 안에서 도는 코드라
+    //    브라우저 전역 `window` 를 가려 `__game` 을 못 찾습니다.
+    let stayed = -1
+    const dl = Date.now() + 40000
+    while (now() - start < 6 && Date.now() < dl) {
+      const s = G.state().player
+      const i2 = G.enemyInfo(e)
+      if (!i2) break
+      if (!G.testBehind(s.x, s.z, i2.x, i2.z, i2.rotY)) {
+        stayed = now() - start
+        break
+      }
+      await sleep()
+    }
+    if (stayed < 0) stayed = 6
+    G.clearEnemies()
+    return { swingAt: Number(swingAt.toFixed(2)), window: Number(stayed.toFixed(2)) }
+  })
+  check(
+    backWindow.swingAt > 0 && backWindow.window > backWindow.swingAt,
+    '등 뒤 창이 기본 공격 한 대보다 길다 (백어택을 실제로 쓸 수 있다)',
+    `등 뒤로 남는 시간 ${backWindow.window}초 vs 한 대 넣는 데 ${backWindow.swingAt}초`,
+  )
+
   // ---- 5. 선입력 창이 가장 긴 이어짐을 덮는다 ----
   //
   // 이 검사가 없어서 실제로 깨져 있었습니다(연속 구르기가 막힘).
