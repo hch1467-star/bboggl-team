@@ -2161,6 +2161,10 @@ class Game {
     inputBuffer: number
     dodgeDuration: number
     dodgeCooldown: number
+    /** 구르기 이동 거리(m) — 🟡 반경이 이보다 커야 "굴러선 못 빠져나온다"가 성립합니다 */
+    dodgeDistance: number
+    /** 기본 공격 한 대가 채우는 집중 — 3타 콤보 = 1점이라는 약속을 검사하려면 필요합니다 */
+    focusPerLightHit: number
     /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
     actorStates: { idle: number; attack: number; dodge: number; skill: number }
     /** 원거리 적이 자기 사거리 위에 더 받는 여유(m). */
@@ -2185,6 +2189,8 @@ class Game {
       inputBuffer: PLAYER_CFG.tempo.inputBuffer,
       dodgeDuration: PLAYER_CFG.dodge.duration,
       dodgeCooldown: PLAYER_CFG.dodge.cooldown,
+      dodgeDistance: PLAYER_CFG.dodge.distance,
+      focusPerLightHit: FOCUS.perLightHit,
       actorStates: {
         idle: ActorState.Idle,
         attack: ActorState.Attack,
@@ -2999,7 +3005,16 @@ declare global {
         attackRange: number
         keepDistance?: number
         attackCycle: number
-        attacks: { id: string; intent: number; color: string; reach: number; lungeSpeed: number }[]
+        attacks: {
+          id: string
+          intent: number
+          color: string
+          reach: number
+          lungeSpeed: number
+          /** 예고 길이와 부채꼴 — 색끼리의 **관계**를 검사하려면 필요합니다 */
+          windup: number
+          arcDeg: number
+        }[]
       }[]
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
@@ -3239,6 +3254,8 @@ declare global {
         inputBuffer: number
         dodgeDuration: number
         dodgeCooldown: number
+        dodgeDistance: number
+        focusPerLightHit: number
         /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
         actorStates: { idle: number; attack: number; dodge: number; skill: number }
         levelAggroLead: number
@@ -3391,6 +3408,8 @@ window.__game = {
           reach: a.reach,
           /** 예고 중 돌진 속도(m/s). 0이면 제자리에서 휘두릅니다. */
           lungeSpeed: a.lungeSpeed ?? 0,
+          windup: a.windup,
+          arcDeg: a.arcDeg,
         })),
       }
     }),
