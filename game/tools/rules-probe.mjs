@@ -133,23 +133,91 @@ try {
       .join(' · '),
   )
 
-  // ---- 4. 🟣 끌어당김은 물러나도 소용없을 만큼 강하다 ----
+  // ---- 4. 🟣 끌어당김은 **굴러도 못 벗어난다** ----
   //
-  // "🟣 보라 — 아예 사거리 밖으로. 뒤로 빠져도 끌려옵니다."
-  // 끌어당기는 세기가 구르기 거리보다 약하면 구르기가 정답이 되어
-  // 보라가 빨강으로 무너집니다.
-  const pulls = attacks.filter((a) => a.intent === PULL)
-  const pullInfo = await page.evaluate(() => {
-    // pull 세기는 로스터에 없으므로 패턴 정의에서 직접 읽습니다.
-    return window.__game.enemyRoster().flatMap((r) =>
-      r.attacks.filter((a) => a.intent === 3).map((a) => ({ id: a.id, reach: a.reach })),
-    )
+  // DESIGN.md 4색 표: "🟣 보라 — 아예 사거리 밖으로. 뒤로 빠져도 끌려옵니다.
+  // 굴러도 착지 후 끌려옵니다." 이 문장이 이 색의 **존재 이유**입니다 —
+  // 구르기로 벗어날 수 있으면 보라는 그냥 빨강이고, 색이 하나 줄어듭니다.
+  //
+  // ⚠️ 이건 설정값 비교로는 검사할 수 없습니다. `pull` 은 세기(m/s)이고
+  // 구르기는 거리(m)라 **단위가 다릅니다.** 그래서 실제로 굴러 보고
+  // **끝난 자리**를 잽니다 — 설정이 아니라 결과를 봅니다.
+  const hooked = await page.evaluate(async () => {
+    const G = window.__game
+    const out = []
+    for (let i = 0; i < 3; i++) {
+      G.reset()
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      const now = () => G.state().simElapsed
+      const wait = async (sec) => {
+        const t0 = now()
+        const dl = Date.now() + 30000
+        while (now() - t0 < sec && Date.now() < dl) await sleep()
+      }
+      await wait(0.4)
+      G.clearEnemies()
+      const p0 = G.state().player
+      // 갈고리 사거리 안쪽에 세웁니다.
+      // ⚠️ 시작 거리를 **사거리 절반쯤**에 둡니다.
+      // 처음엔 9m(사거리 12m)에 뒀다가 걸렸습니다 — 거기서 뒤로 4.2m 구르면
+      // 13.2m 라 **사거리를 벗어나 그냥 빗나갑니다.** 그러면 재고 있는 것이
+      // "끌림이 구르기를 이기는가"가 아니라 "가장자리에서 벗어날 수 있는가"가
+      // 됩니다. 가장자리에서 벗어나는 것은 당연하고, 설계가 주장하는 바도
+      // 아닙니다. 사거리 **안**에서 굴렀을 때를 물어야 합니다.
+      const e = G.spawnEnemyKind('dragger', p0.x + 6, p0.z)
+      // 예고가 뜨기를 기다렸다가, **판정 직전에 뒤로 구릅니다.**
+      let rolled = false
+      let startDist = -1
+      const t0 = now()
+      const dl = Date.now() + 60000
+      while (now() - t0 < 20 && Date.now() < dl) {
+        const info = G.enemyInfo(e)
+        if (!info) break
+        const s = G.state().player
+        const d = Math.hypot(info.x - s.x, info.z - s.z)
+        if (info.winding && !rolled) {
+          // 적 반대쪽으로 굴러 달아납니다 — 사람이 하는 그 대응.
+          startDist = d
+          G.aimAtWorld(info.x, info.z)
+          G.press('Space')
+          G.release('Space')
+          rolled = true
+        }
+        if (rolled && !info.winding && info.attacking) {
+          // 판정이 뜬 뒤 끌림이 끝나기를 기다립니다.
+          await wait(1.2)
+          const s2 = G.state().player
+          const info2 = G.enemyInfo(e)
+          const endDist = info2 ? Math.hypot(info2.x - s2.x, info2.z - s2.z) : -1
+          out.push({ startDist: Number(startDist.toFixed(2)), endDist: Number(endDist.toFixed(2)) })
+          break
+        }
+        await sleep()
+      }
+      G.clearEnemies()
+    }
+    return out
   })
-  check(
-    pulls.length > 0,
-    '🟣 끌어당김 패턴이 존재한다',
-    pullInfo.map((a) => `${a.id} ${a.reach}m`).join(' · '),
-  )
+  if (hooked.length) {
+    const medEnd = [...hooked.map((h) => h.endDist)].sort((a, b) => a - b)[Math.floor(hooked.length / 2)]
+    const medStart = [...hooked.map((h) => h.startDist)].sort((a, b) => a - b)[Math.floor(hooked.length / 2)]
+    /**
+     * 견줄 대상은 **방해받지 않은 구르기**입니다 — 그냥 굴렀다면 도달했을
+     * 거리(시작 + 구르기 거리). 끌림이 일을 했다면 그보다 확실히 가까워야
+     * 합니다. "시작보다 가까운가"로 물으면 안 됩니다: 끄는 자는 거리를
+     * 유지하는 적이라 판정 뒤에 스스로 물러나서, 끌림이 성공해도 최종
+     * 거리는 시작보다 멀 수 있습니다.
+     */
+    const cleanEscape = medStart + t.dodgeDistance
+    check(
+      medEnd < cleanEscape - 1,
+      '🟣 갈고리는 굴러 달아나도 **그냥 구른 것보다 가깝게** 끝난다 (구르기가 답이 아니다)',
+      `그냥 굴렀다면 ${cleanEscape.toFixed(1)}m · 실제 ${medEnd}m · ` +
+        hooked.map((h) => `${h.startDist}→${h.endDist}`).join(' · '),
+    )
+  } else {
+    check(false, '🟣 갈고리를 관측했다', '20초 안에 갈고리를 걸지 않았습니다')
+  }
 
   // ---- 5. 선입력 창이 가장 긴 이어짐을 덮는다 ----
   //
