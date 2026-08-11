@@ -268,6 +268,7 @@ try {
     let lastNearDist = 0
     let lastHpSample = G.state().player.hp
     let bossSeen = false
+    let bossWeaponLevel = -1
     /** ── 보스전 계측 — 존의 절정 60초를 처음으로 재 봅니다 ── */
     let bossStart = 0
     let bossFightTime = 0
@@ -893,6 +894,19 @@ try {
       if (be && be.encounter > 0 && !bossSeen) {
         bossSeen = true
         bossStart = now()
+        /**
+         * **보스 앞에 설 때의 무기 강화 단계.**
+         *
+         * 실험대(`npm run pace`)가 강화 단계 하나만 바꿔 재 보니 3단계가
+         * 이렇게 갈렸습니다: +0 처치 0/2 · +2 처치 1/2 · +5 처치 2/2.
+         * 그러니 "실제 플레이에서 보스 앞에 설 때 몇 단계인가"가 곧
+         * **3단계가 벽인지 관문인지**를 정합니다.
+         *
+         * 지금까지 벤치는 `무기 강화 N회` 만 냈습니다. 그건 **누른 횟수**이지
+         * 도달한 단계가 아닙니다 — 무기를 바꿔 가며 올렸다면 한 무기의
+         * 단계는 그보다 낮습니다. 결론을 가르는 값이므로 직접 읽습니다.
+         */
+        bossWeaponLevel = G.state().loadout.weaponLevel
         // ⚠️ 여기서 **처음 맞춰 둡니다.** 0으로 두면 첫 프레임에
         // "지금까지 흐른 시간 전부"가 1단계에 더해집니다 —
         // 실제로 1단계가 113초로 찍혔습니다(보스전은 25초인데).
@@ -1823,6 +1837,7 @@ try {
       inputExpired: G.runStats().inputExpired,
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,
+      bossWeaponLevel,
       greenSwung: G.runStats().greenSwung,
       greenDied: G.runStats().greenDied,
       greenCountered: G.runStats().greenCountered,
@@ -2204,6 +2219,10 @@ try {
    * 걸리고 있다는 뜻입니다.
    */
   const settled = (log.inputUsed ?? 0) + (log.inputExpired ?? 0)
+  console.log(
+    `  보스 앞 장비  무기 강화 +${log.bossWeaponLevel ?? '?'} 단계에서 보스와 만났습니다` +
+      ` (실험대: +0 못 끝냄 · +2 절반 · +5 처치)`,
+  )
   console.log(
     `  이어짐      결말 ${settled}회 — 이어짐 ${log.inputUsed ?? 0}회` +
       ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, settled)) * 100)}%)` +
