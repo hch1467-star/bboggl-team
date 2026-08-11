@@ -374,6 +374,67 @@ try {
     check(false, '🟣 갈고리를 관측했다', '20초 안에 갈고리를 걸지 않았습니다')
   }
 
+  /**
+   * ---- 4b. 🟣 의 **정답이 실제로 성립하는가** ----
+   *
+   * 위 검사(4)는 🟣 의 **오답**만 막습니다 — "굴러선 못 벗어난다". 그런데
+   * DESIGN.md 4색 표에서 🟣 의 정답은 **"아예 사거리 밖으로"** 입니다.
+   * 🟡·🔵 과 똑같은 구멍이 여기에도 있었습니다: 오답은 막아 뒀는데 정답이
+   * 성립하는지는 안 봤습니다. 사거리를 조금만 늘리면 🟣 는 **굴러도 안 되고
+   * 물러나도 안 되는** 색이 됩니다.
+   *
+   * 정답에 해당하는 움직임은 "한 번 구르기"가 아니라 **끝까지 물러나기**입니다:
+   *   구르기 거리 + (예고에서 구르기를 뺀 나머지 시간 동안 걷기)
+   *
+   * ⚠️ 구르기 시간은 무기마다 다릅니다(쌍단검 0.357초). 빠른 구르기는 걸을
+   *    시간이 더 남아 **유리하므로**, 가장 불리한 쪽 — **가장 느린 구르기**로
+   *    잽니다. 최악을 통과하면 나머지는 자동입니다.
+   *
+   * ⚠️ 어느 거리에서 재느냐가 이 검사의 전부입니다. `minRange` 는 그 패턴이
+   *    걸릴 수 있는 **가장 가까운** 거리인데, 끄는 자는 그 값이 3m 입니다.
+   *    3m 에서는 12m 밖으로 못 나갑니다 — 그런데 그건 결함이 아닙니다.
+   *    **3m 에서는 끌려 봤자 갈 데가 없기 때문**입니다(이미 붙어 있습니다).
+   *    벌이 큰 거리에서 답이 있으면 됩니다. 그래서 적이 **실제로 유지하는
+   *    거리**(`keepDistance`)를 쓰고, 없으면 `minRange` 를 씁니다.
+   *    아래에 "몇 m 부터 물러나면 벗어나는가"도 같이 찍습니다 — 검사는
+   *    아니고 관측입니다.
+   */
+  // (PULL 은 파일 위에서 이미 선언했습니다)
+  const slowestRoll = dodgeScales.reduce((m, w) => (w.duration > m.duration ? w : m), dodgeScales[0])
+  const retreatOf = (windup) =>
+    slowestRoll.distance + t.playerMoveSpeed * Math.max(0, windup - slowestRoll.duration)
+  const pulls = byIntent(PULL).map((a) => {
+    const foe = roster.find((r) => r.attacks.some((x) => x.id === a.id))
+    const retreat = retreatOf(a.windup)
+    // 판정은 `reach + 내 반지름` 까지 닿습니다(combat.ts). 그 밖으로 나가야 합니다.
+    const out = a.reach + t.playerRadius
+    return {
+      from: a.from,
+      // 적이 실제로 그 거리를 유지하면 거기서, 아니면 걸릴 수 있는 가장 가까운 곳에서.
+      at: foe?.keepDistance ?? a.minRange,
+      basis: foe?.keepDistance != null ? 'keepDistance' : 'minRange',
+      retreat,
+      out,
+      floor: out - retreat,
+    }
+  })
+  check(
+    pulls.length > 0 && pulls.every((p) => p.at + p.retreat > p.out),
+    '🟣 는 **끝까지 물러나면** 사거리 밖으로 나간다 (이 색의 정답이 실제로 성립한다)',
+    pulls
+      .map(
+        (p) =>
+          `${p.from} ${p.at}m(${p.basis})에서 ${p.out.toFixed(1)}m 밖으로 · ` +
+          `물러나면 ${(p.at + p.retreat).toFixed(1)}m (여유 ${(p.at + p.retreat - p.out).toFixed(1)}m)`,
+      )
+      .join(' · '),
+  )
+  console.log(
+    `     ↳ [관측] 물러나서 벗어날 수 있는 최소 거리 — ` +
+      pulls.map((p) => `${p.from} ${p.floor.toFixed(1)}m 이상`).join(' · ') +
+      ` (가장 느린 구르기 ${slowestRoll.name} ${slowestRoll.duration}초 기준)`,
+  )
+
   // ---- 4.5 등 뒤 창이 **한 대 넣을 시간보다 길다** (기둥 3) ----
   //
   // DESIGN.md 기둥 3: 등 뒤를 잡히면 적이 바로 안 돕니다(반응 지연 + 느린

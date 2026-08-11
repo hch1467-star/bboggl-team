@@ -3099,6 +3099,13 @@ declare global {
           recovery: number
           /** 🔵 이 공격에 맞으면 걸리는 속박 시간(초). 0이면 안 묶습니다. */
           snare: number
+          /**
+           * 이 패턴을 고르는 거리 구간. 🟣 의 정답("사거리 밖으로")이
+           * 성립하는지는 **어느 거리에서 걸리느냐**에 달려 있으므로,
+           * 프로브가 "가장 가까이서 걸릴 수 있는 거리"를 알아야 합니다.
+           */
+          minRange: number
+          maxRange: number
         }[]
       }[]
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
@@ -3514,6 +3521,8 @@ window.__game = {
           active: a.active,
           recovery: a.recovery,
           snare: a.snare ?? 0,
+          minRange: a.minRange,
+          maxRange: a.maxRange,
         })),
       }
     }),
