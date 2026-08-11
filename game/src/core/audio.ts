@@ -33,6 +33,19 @@ export const enum SfxIntent {
   Sweep = 1,
   Snare = 2,
   Pull = 3,
+  /**
+   * 🟢 반격.
+   *
+   * ⚠️ **빠져 있었습니다.** AttackIntent 에 Counter(4) 를 추가하면서 여기는
+   * 안 늘렸고, 호출부가 `as unknown as SfxIntent` 로 캐스팅하고 있어서
+   * 타입 검사가 아무 말도 못 했습니다. 결과적으로 **네 색은 소리가 나고
+   * 초록만 조용했습니다.**
+   *
+   * 하필 초록입니다. 다른 넷은 "피하라"라서 못 들어도 반사로 구르면 되지만,
+   * 초록은 **정반대**(앞으로 나가 스킬)를 요구합니다 — 반사로는 절대 안
+   * 나오는 동작이라 신호가 가장 필요한 색인데 그 색만 신호가 없었습니다.
+   */
+  Counter = 4,
 }
 
 /**
@@ -457,6 +470,34 @@ class Sfx {
       case SfxIntent.Pull:
         this.toneVoice({ type: 'sawtooth', duration: 0.42, startHz: 700, endHz: 190, gain: 0.11, x, z })
         break
+      case SfxIntent.Counter:
+        /**
+         * 🟢 반격 — 넷과 **다른 종류의 소리**여야 합니다.
+         *
+         * 나머지 넷은 전부 "위험이 온다"는 경보입니다. 초록은 경보가 아니라
+         * **기회**를 알립니다. 같은 문법(부풀거나 미끄러지는 톤)으로 만들면
+         * 귀에는 그냥 다섯 번째 위험으로 들리고, 몸은 또 구릅니다.
+         *
+         * 그래서 유일하게 **맑은 두 음(종소리)** 으로 잡았습니다. 위로 4도
+         * 올라가는 두 음은 경보가 아니라 신호로 들립니다 — 로스트아크의
+         * 카운터, 세키로의 튕기기 신호가 전부 이 계열입니다.
+         *
+         * 두 번 치는 이유는 **화면과 맞추기 위해서**입니다. 초록만 도형이
+         * 깜빡이는데(visuals.ts), 소리도 두 번 울리면 눈과 귀가 같은 것을
+         * 말합니다. 색이 안 보이는 사람에게는 이 박자가 색을 대신합니다.
+         */
+        this.toneVoice({ type: 'triangle', duration: 0.16, startHz: 990, endHz: 990, gain: 0.13, x, z })
+        this.toneVoice({ type: 'triangle', duration: 0.26, startHz: 1320, endHz: 1320, gain: 0.12, delay: 0.13, x, z })
+        break
+      default: {
+        /**
+         * 색을 하나 더 만들면 **여기서 컴파일이 막힙니다.**
+         * 이 파일이 조용해진 이유가 정확히 "막아 주는 것이 없어서"였습니다.
+         */
+        const missing: never = intent
+        void missing
+        break
+      }
     }
   }
 

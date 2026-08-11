@@ -32,6 +32,19 @@ import {
 import { BOSS_ARENA, LEVEL_AGGRO_LEAD, LEVEL_AGGRO_MAX, POISE } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
+
+/**
+ * 예고 색 → 예고음. **표 없이 캐스팅으로 넘기다가 🟢 이 조용해졌습니다**
+ * (아래 sfx.telegraph 호출부 설계 노트). `Record` 라서 AttackIntent 에
+ * 값을 하나 더하면 여기서 컴파일이 막힙니다.
+ */
+const INTENT_TO_SFX: Record<AttackIntent, SfxIntent> = {
+  [AttackIntent.Strike]: SfxIntent.Strike,
+  [AttackIntent.Sweep]: SfxIntent.Sweep,
+  [AttackIntent.Snare]: SfxIntent.Snare,
+  [AttackIntent.Pull]: SfxIntent.Pull,
+  [AttackIntent.Counter]: SfxIntent.Counter,
+}
 import { combatRng } from '../core/rng'
 import { isBehindPoint } from './combat'
 import { time } from '../core/time'
@@ -286,11 +299,22 @@ function commitAttack(
    * 보스 연계에서는 이게 더 중요해집니다. 🔵 뒤에 🔴 이 붙는다는 걸
    * **화면을 다시 안 봐도** 알 수 있어야 무적 타이밍을 잡을 수 있습니다.
    *
-   * AttackIntent 와 SfxIntent 는 값이 1:1로 같습니다(0~3). 일부러 같게 맞춰서
-   * 변환 표를 만들지 않았습니다 — 표가 있으면 색을 추가할 때 한쪽만 고쳐서
-   * 색과 소리가 어긋납니다.
+   * ⚠️ 예전 주석은 이렇게 적혀 있었습니다: *"값이 1:1로 같으니 일부러 변환
+   * 표를 만들지 않았다 — 표가 있으면 색을 추가할 때 한쪽만 고쳐서 색과
+   * 소리가 어긋난다."*
+   *
+   * **정확히 그 일이 표 없이 일어났습니다.** AttackIntent 에 🟢 Counter(4) 를
+   * 더하면서 SfxIntent 는 0~3 에 머물렀고, 이 자리의 `as unknown as` 캐스팅이
+   * 타입 검사를 통째로 지워 버려서 아무도 알려 주지 않았습니다. 초록만
+   * **소리 없이** 예고되고 있었습니다.
+   *
+   * 표가 위험한 게 아니라 **검사받지 않는 변환**이 위험했던 것입니다.
+   * 그래서 캐스팅을 지우고 `Record<AttackIntent, SfxIntent>` 로 바꿉니다 —
+   * 색을 하나 만들면 이 표가 **컴파일 단계에서** 먼저 막습니다.
+   * 같은 실수를 INTENT_EMOJI 가 배열이었을 때 이미 한 번 했고(`undefined🟢`),
+   * Record 로 바꿔서 잡았습니다. 그 교훈이 여기까지는 안 왔던 것입니다.
    */
-  sfx.telegraph(atk.intent as unknown as SfxIntent, Transform.x[e], Transform.z[e])
+  sfx.telegraph(INTENT_TO_SFX[atk.intent], Transform.x[e], Transform.z[e])
 }
 
 

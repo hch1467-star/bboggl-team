@@ -28,11 +28,16 @@ const CUES = [
   { name: 'swing', args: [1.0, 0], label: '휘두르기(무거움)' },
   { name: 'impact', args: [0, 0], label: '타격(일반)' },
   { name: 'impact', args: [1, 1], label: '타격(강+치명)' },
-  // 예고음은 위치가 있는 소리 — 두 번째 인자는 플레이어로부터의 거리(m).
-  { name: 'telegraph', args: [0, 3], label: '예고 🔴 Strike' },
-  { name: 'telegraph', args: [1, 3], label: '예고 🟡 Sweep' },
-  { name: 'telegraph', args: [2, 3], label: '예고 🔵 Snare' },
-  { name: 'telegraph', args: [3, 3], label: '예고 🟣 Pull' },
+  /**
+   * ⚠️ 예고음은 **여기에 손으로 적지 않습니다.** 게임에서 읽어 옵니다.
+   *
+   * 예전에는 네 줄이 손으로 적혀 있었습니다(🔴🟡🔵🟣). 그러다 🟢 반격이
+   * 색으로 추가됐는데 이 목록은 안 늘었고, 그래서 **초록만 소리가 없는
+   * 상태를 이 프로브가 통과시켰습니다.** 목록을 베껴 적는 순간 프로브는
+   * "있는 것"이 아니라 "적어 둔 것"을 검사하게 됩니다.
+   *
+   * 지금은 아래에서 `enemyRoster()` 가 실제로 쓰는 의도를 모아 만듭니다.
+   */
   { name: 'dodge', args: [0, 0], label: '회피' },
   { name: 'hurt', args: [0, 0], label: '피격' },
   { name: 'death', args: [0, 0], label: '처치(잡몹)' },
@@ -94,9 +99,24 @@ try {
   if (state.state !== 'running') {
     console.log('\n⚠️  오디오가 running 이 아니라 파형 측정을 건너뜁니다.')
   } else {
+    /**
+     * 게임이 **실제로 쓰는** 예고 색을 모아 큐 목록을 만듭니다.
+     * 색을 하나 더 만들면 이 프로브가 저절로 그 색까지 검사합니다.
+     */
+    const roster = await page.evaluate(() => window.__game.enemyRoster())
+    const intents = new Map()
+    for (const r of roster) {
+      for (const a of r.attacks) if (!intents.has(a.intent)) intents.set(a.intent, a.color)
+    }
+    const telegraphCues = [...intents.entries()]
+      .sort((a, b) => a[0] - b[0])
+      // 예고음은 위치가 있는 소리 — 두 번째 인자는 플레이어로부터의 거리(m).
+      .map(([intent, emoji]) => ({ name: 'telegraph', args: [intent, 3], label: `예고 ${emoji}` }))
+    console.log(`\n  (게임이 쓰는 예고 색 ${telegraphCues.length}가지를 읽어 왔습니다)`)
+
     // ---- 2. 큐마다 실제 파형이 나오는가 ----
     console.log('\n  [파형 진폭 — 0이면 소리가 안 난 것]')
-    for (const cue of CUES) {
+    for (const cue of [...CUES, ...telegraphCues]) {
       const peak = await page.evaluate(
         async ({ name, args }) => {
           // 이전 소리가 남아 있으면 다른 큐의 진폭을 빌려옵니다. 충분히 재웁니다.
