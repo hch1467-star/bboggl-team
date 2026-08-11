@@ -147,6 +147,7 @@ console.log(
         byFoe.set(f.id, {
           sw: [],
           com: [],
+          chn: [],
           hit: [],
           dead: [],
           live: [],
@@ -158,6 +159,8 @@ console.log(
         })
       byFoe.get(f.id).sw.push(f.swings)
       byFoe.get(f.id).com.push(f.commits ?? 0)
+      // 연계로 이어져 나온 예고. 잡몹 연계가 **도달하는지** 보는 유일한 눈금입니다.
+      byFoe.get(f.id).chn.push(f.chained ?? 0)
       /**
        * 백분율은 **판마다 먼저 낸 뒤** 그 값들의 중앙값을 봅니다.
        *
@@ -203,7 +206,9 @@ console.log(
         `  ${id.padEnd(10)} 예고 ${fmt(v.com, 0)}회 → 판정 ${fmt(v.sw, 0)}회` +
           (com > 0 ? ` (끊김 ${Math.round(((com - sw) / com) * 100)}%)` : '') +
           ` · 적중 ${fmt(v.hit, 0)}회 (${Math.round((hit / Math.max(1, sw)) * 100)}%)` +
-          ` · 처치 ${fmt(v.dead, 0)}마리 → 마리당 예고 ${(com / Math.max(1, dead)).toFixed(2)}회`,
+          ` · 처치 ${fmt(v.dead, 0)}마리 → 마리당 예고 ${(com / Math.max(1, dead)).toFixed(2)}회` +
+          // 연계가 있는 종류에만 붙입니다 — 없는 적에 0회를 찍으면 줄만 길어집니다.
+          (median(v.chn) > 0 ? ` · 그중 연계 ${fmt(v.chn, 0)}회` : ''),
       )
       /**
        * **깨어 있던 시간을 다섯으로 나눠** 한 줄 더 붙입니다.

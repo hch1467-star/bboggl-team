@@ -213,6 +213,8 @@ class Game {
       deaths?: number
       /** 예고를 건 횟수. `swings`(판정 도달)와의 차이가 **끊긴 공격**입니다. */
       commits?: number
+      /** 그중 **연계로 이어져 나온** 예고. 잡몹 연계가 실제로 도달하는지. */
+      chained?: number
       /** 아래 다섯은 **살아 있던 시간의 분해**입니다(초, 시뮬레이션 시간). */
       aggroT?: number
       atkT?: number
@@ -938,6 +940,20 @@ class Game {
         if (this.windingLastFrame.has(e)) continue
         const rec = (this.foeSwingLog[enemyDef(Enemy.kind[e]).id] ??= { swings: 0, hits: 0 })
         rec.commits = (rec.commits ?? 0) + 1
+        /**
+         * **연계로 나온 예고인가.**
+         *
+         * ⚠️ 잡몹 연계를 넣고 나서야 이게 없다는 걸 알았습니다. 벤치의
+         *    "연계 예약/발동" 중 **발동은 보스만 셉니다**(bossSwingLog).
+         *    그래서 잡몹 연계가 실제로 이어졌는지는 **어디에도 안 남아
+         *    있었습니다.**
+         *
+         *    예약은 전역이라 1.0 → 6.5 회로 뛴 것이 보였는데, 그건
+         *    "예약됐다"까지입니다. 예약과 발동을 갈라 세려고 만든 눈금이
+         *    정작 잡몹에는 절반만 있었던 셈입니다 — inputCancels 때와
+         *    똑같은 구멍입니다.
+         */
+        if (Enemy.chained[e] === 1) rec.chained = (rec.chained ?? 0) + 1
       }
 
       this.swungLastFrame.clear()
