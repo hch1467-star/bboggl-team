@@ -135,25 +135,37 @@ try {
   const refund = await page.evaluate(async () => {
     const G = window.__game
     /** 같은 슬롯을 같은 조건에서 한 번 쓰고, 쓴 직후의 쿨다운을 읽습니다. */
-    const cast = async (waitForWindup) => {
+    const cast = async (shouldCounter) => {
       const e = await window.__t.duel(0, 2.0)
-      if (waitForWindup) {
-        const ok = await window.__t.until(() => G.enemyInfo(e)?.winding === true, 12)
-        if (!ok) return null
-      } else {
-        // 예고가 **아닌** 순간에 씁니다 — 같은 스킬, 같은 거리, 반격만 없음.
-        const ok = await window.__t.until(() => G.enemyInfo(e)?.winding === false, 12)
-        if (!ok) return null
+      const ok = await window.__t.until(() => G.enemyInfo(e)?.winding === true, 12)
+      if (!ok) return null
+      /**
+       * ⚠️ 기준선은 **구조로** 만듭니다, 타이밍으로 만들지 않습니다.
+       *
+       * 처음엔 "예고가 아닌 순간에 쓴다"로 잡았는데, 스킬에도 선행동작이
+       * 있어서 날아가는 사이에 적이 초록을 켜 버렸습니다 — 기준선인데
+       * 반격이 1회 나왔습니다. 프로브가 조건을 **유지하지 못한** 것입니다
+       * (이 파일 아래 "등 뒤" 검사에서 이미 한 번 밟은 함정입니다).
+       *
+       * 그래서 같은 초록 예고 중에 **등 뒤로 옮겨** 씁니다. 등 뒤에서는
+       * 반격이 성립하지 않는 것이 규칙이라 타이밍과 무관하게 확실합니다.
+       * 스킬도, 거리도, 예고 시점도 같고 **각도 하나만** 다릅니다.
+       */
+      if (!shouldCounter) {
+        const info = G.enemyInfo(e)
+        const a = info.rotY + Math.PI
+        G.teleportPlayer(info.x + Math.sin(a) * 1.6, info.z + Math.cos(a) * 1.6)
+        await window.__t.runFor(0.05)
       }
       const before = G.counterCount()
-      const es = G.entityState(e)
+      const es = G.enemyInfo(e)
       G.aimAtWorld(es.x, es.z)
       G.press('KeyQ')
       G.release('KeyQ')
       // 시전이 끝나고 판정이 지나갈 만큼만. 오래 기다리면 쿨다운이 자연히 줄어
       // 두 판을 비교할 수 없습니다.
       await window.__t.runFor(0.6)
-      return { cd: G.slotCooldowns()[0], countered: G.counterCount() - before }
+      return { cd: G.slotCooldowns()[0].cd, countered: G.counterCount() - before }
     }
     const hit = await cast(true)
     const miss = await cast(false)
@@ -162,7 +174,7 @@ try {
   const r = refund.hit && refund.miss
   check(
     r && refund.miss.countered === 0 && refund.miss.cd > 0,
-    '기준선 — 반격이 아닌 시전은 쿨다운이 그대로 돈다',
+    '기준선 — 반격이 아닌 시전(등 뒤)은 쿨다운이 그대로 돈다',
     r ? `반격 ${refund.miss.countered}회 · 쿨다운 ${refund.miss.cd.toFixed(2)}초` : '측정 못 함',
   )
   check(

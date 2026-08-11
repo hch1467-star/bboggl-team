@@ -366,6 +366,16 @@ try {
       }
       out.push({ name, secondAt: Number(secondAt.toFixed(2)) })
     }
+    /**
+     * ⚠️ **바꾼 것은 되돌립니다.** 처음엔 안 되돌렸고, 그래서 뒤따르는
+     *    "콤보 한 바퀴 = 집중 1점" 검사가 4타 쌍단검을 든 채로 돌아
+     *    엉뚱하게 실패했습니다. 프로브가 남긴 상태가 **다른 검사의
+     *    결과를 바꾼** 것이라, 실패를 보고도 원인을 게임에서 찾게 됩니다.
+     *    (덕분에 진짜 구멍을 하나 찾긴 했습니다 — combat.ts 집중 주석 참고.)
+     */
+    G.press('Digit1')
+    G.release('Digit1')
+    await wait(0.4)
     return out
   }, t.actorStates)
   const shortest = cfgCounter.normalBrokenTime
@@ -399,17 +409,89 @@ try {
     `천장 ${t.levelAggroMax}m vs 시야 ${t.cameraViewSize}m`,
   )
 
-  // ---- 7. 집중은 "콤보 하나 = 1점" ----
-  //
-  // balance.ts FOCUS: "3타 콤보를 다 넣으면 딱 1점입니다. 콤보 하나 = 1점이
-  // 손에 남는 단위가 되어야 세는 것이 부담이 아닙니다."
-  // 무기 콤보 길이를 바꾸면 이 약속이 조용히 깨집니다.
-  const comboLen = await page.evaluate(() => window.__game.state().loadout.comboLength)
-  const perCombo = t.focusPerLightHit * comboLen
+  /**
+   * ---- 7. **모든 무기가** 콤보 하나에 집중 1점 ----
+   *
+   * balance.ts FOCUS: *"3타 콤보를 다 넣으면 딱 1점입니다. 콤보 하나 = 1점이
+   * 손에 남는 단위가 되어야 세는 것이 부담이 아닙니다."*
+   *
+   * ⚠️ 예전 검사는 **설정값을 곱했습니다** (`perLightHit × 콤보 길이`).
+   *    그건 지금 든 무기 하나만 보는 데다, 값이 무기별로 달라지면 아예
+   *    뜻을 잃습니다. 실제로 이 검사는 4타 무기를 든 채로 돌자마자
+   *    깨졌고, 그때 드러난 것이 **쌍단검이 콤보마다 36% 더 벌고 있었다**는
+   *    사실이었습니다.
+   *
+   *    그래서 곱하지 않고 **때려서 잽니다.** 무기 셋을 차례로 들고 콤보를
+   *    한 바퀴 다 넣은 뒤 집중을 읽습니다. 약속을 지키는지는 게임이
+   *    답할 일이고, 프로브는 세기만 합니다.
+   */
+  const focusPerCombo = await page.evaluate(async ([states]) => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    const now = () => G.state().simElapsed
+    const wait = async (sec) => {
+      const t0 = now()
+      const dl = Date.now() + 30000
+      while (now() - t0 < sec && Date.now() < dl) await sleep()
+    }
+    const out = []
+    for (let w = 0; w < 3; w++) {
+      G.reset()
+      await wait(0.4)
+      G.clearEnemies()
+      await wait(0.2)
+      G.press(`Digit${w + 1}`)
+      G.release(`Digit${w + 1}`)
+      await wait(0.4)
+      const info = G.weaponTable()[w]
+      // 죽지 않는 표적 — 시험 도중 쓰러지면 남은 타가 허공을 칩니다.
+      const p0 = G.state().player
+      const e = G.spawnEnemyKind('grunt', p0.x + 1.8, p0.z)
+      await wait(0.3)
+      G.setHp(e, 100000)
+      G.freezeEnemies(true)
+      G.setFocus(0)
+      let swings = 0
+      let wasActive = false
+      const t0 = now()
+      const dl = Date.now() + 40000
+      G.aimAtWorld(G.enemyInfo(e).x, G.enemyInfo(e).z)
+      G.press('Mouse0')
+      G.release('Mouse0')
+      while (swings < info.comboLength && now() - t0 < 8 && Date.now() < dl) {
+        const p = G.state().player
+        const active = p.state === states.attack && p.phase === 1
+        if (active && !wasActive) {
+          swings++
+          if (swings < info.comboLength) {
+            G.aimAtWorld(G.enemyInfo(e).x, G.enemyInfo(e).z)
+            G.press('Mouse0')
+            G.release('Mouse0')
+          }
+        }
+        wasActive = active
+        await sleep()
+      }
+      await wait(0.4)
+      out.push({
+        name: info.name,
+        steps: info.comboLength,
+        swings,
+        focus: Number(G.focusInfo().focus.toFixed(2)),
+      })
+      G.freezeEnemies(false)
+      G.clearEnemies()
+    }
+    // 바꾼 것은 되돌립니다(위 두 대 검사에서 배운 것).
+    G.press('Digit1')
+    G.release('Digit1')
+    await wait(0.3)
+    return out
+  }, [t.actorStates])
   check(
-    perCombo >= 0.95 && perCombo <= 1.15,
-    '기본 콤보 한 바퀴가 집중 1점을 채운다',
-    `${comboLen}타 × ${t.focusPerLightHit} = ${perCombo.toFixed(2)}점`,
+    focusPerCombo.every((w) => w.swings === w.steps && w.focus >= 0.95 && w.focus <= 1.15),
+    '**모든 무기가** 콤보 한 바퀴에 집중 1점을 채운다',
+    focusPerCombo.map((w) => `${w.name} ${w.steps}타 → ${w.focus}점`).join(' · '),
   )
 
   // ---- 8. 달리기는 탈출구이되 공짜가 아니다 ----

@@ -41,6 +41,28 @@
  *     JND 의 열 배쯤을 잡습니다.
  *
  * 그래서 **ΔE 25** 를 문턱으로 씁니다. 재고 나서 고르지 않았습니다.
+ *
+ * ── 어느 **순간**을 재는가 ─────────────────────────────────────────
+ * 예고는 투명도가 0.12 → 0.54 로 차오릅니다("점점 위험해진다"). 그래서
+ * "예고 색"은 하나가 아니라 시간에 따라 달라집니다. 어느 순간을 재는지
+ * 정하지 않으면 이 프로브는 아무 말도 못 합니다.
+ *
+ * ⚠️ 중간에 한 번 헛짚었고, 그 기록을 남깁니다. "지금은 띄우자마자 찍으니
+ *    **가장 흐린 순간**을 재고 있다"고 판단해서, 예고가 절반쯤 지날 때까지
+ *    기다리도록 고쳤습니다. 그런데 실제로 재 보니 그 전제가 틀렸습니다:
+ *
+ *      `freezeEnemies(true)` 상태에서는 예고 타이머가 **멈춰 있고**,
+ *      멈춘 자리가 네 패턴 모두 **남은 시간 25%** 로 똑같습니다.
+ *      (0.195/0.78 · 0.338/1.35 · 0.23/0.92 — 전부 정확히 25%)
+ *
+ *    즉 원래부터 **75% 지난 지점**, 투명도로는 0.44 쯤을 재고 있었습니다.
+ *    가장 흐린 순간이 아니라 오히려 **넉넉한 순간**이었습니다.
+ *    그리고 "절반까지 기다리기"는 타이머가 안 흐르니 즉시 참이 되어,
+ *    렌더러가 새 예고를 그리기도 전에 화면을 찍었습니다 — 그래서 결과가
+ *    **한 칸씩 밀렸습니다**(첫 패턴은 13px, 나머지는 앞 패턴의 색).
+ *
+ * 결론: 얼어붙은 상태가 **네 패턴에 똑같이** 적용되므로 비교에는 오히려
+ * 이상적입니다. 기다리지 않고, 렌더러가 새 예고를 그릴 두 프레임만 줍니다.
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -139,9 +161,19 @@ try {
   const measured = []
   for (let i = 0; i < 4; i++) {
     await page.evaluate(([b, n]) => window.__game.forceAttack(b, n), [boss, i])
+    /**
+     * 렌더러가 **새 예고를 그린 뒤**에 찍어야 합니다. 두 프레임을 주는
+     * 이유가 이것입니다 — 한 프레임만 주고 찍었더니 앞 패턴의 화면이
+     * 찍혀 결과가 통째로 한 칸씩 밀렸습니다.
+     */
     await page.evaluate(
       () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
     )
+    // 얼어붙은 예고는 네 패턴 모두 "남은 시간 25%" 에 멈춥니다(위 설계 노트).
+    const at = await page.evaluate(([b]) => {
+      const i = window.__game.enemyInfo(b)
+      return i ? Number((1 - i.timer / i.windup).toFixed(2)) : -1
+    }, [boss])
     await page.evaluate(() => window.__game.setPaused(true))
     const shot = await page.screenshot()
     await page.evaluate(() => window.__game.setPaused(false))
@@ -151,7 +183,7 @@ try {
       check(false, `${name} 예고가 화면에 나타났다`, '달라진 픽셀이 없습니다')
       continue
     }
-    measured.push({ name, ...r })
+    measured.push({ name, at, ...r })
     await page.waitForTimeout(150)
   }
 
@@ -161,7 +193,7 @@ try {
     check(
       d >= MIN_DELTA_E,
       `${m.name} 예고가 그 자리 바탕과 구분된다`,
-      `ΔE ${d.toFixed(1)} · 예고 rgb(${m.lit}) vs 바탕 rgb(${m.ground}) · ${m.pixels}px`,
+      `ΔE ${d.toFixed(1)} · 예고 rgb(${m.lit}) vs 바탕 rgb(${m.ground}) · ${m.pixels}px · 예고 ${Math.round(m.at * 100)}% 지점`,
     )
   }
 

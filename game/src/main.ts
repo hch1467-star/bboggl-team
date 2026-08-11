@@ -3487,6 +3487,14 @@ window.__game = {
       rotY: Number(Transform.rotY[entity].toFixed(3)),
       /** 현재 단계의 남은 시간(초) — 완벽 회피 타이밍을 재려면 필요합니다. */
       timer: Number(Actor.timer[entity].toFixed(3)),
+      /**
+       * 지금 패턴의 예고 길이(초).
+       *
+       * `timer` 만 있으면 "절반쯤 지났는가"를 물을 수 없습니다 — 분모가
+       * 없으니까요. 프로브가 예고 길이를 베껴 적는 순간 그 파일이 또 하나의
+       * 진실이 되므로, 게임이 알려 줍니다.
+       */
+      windup: attackAt(kind, Enemy.attackIndex[entity]).windup,
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       staggered: Actor.state[entity] === ActorState.Stagger,

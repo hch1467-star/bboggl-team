@@ -784,7 +784,26 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       Actor.state[a] === ActorState.Attack &&
       Actor.comboIndex[a] !== HEAVY_COMBO
     ) {
-      Player.focus[a] = Math.min(FOCUS.max, Player.focus[a] + FOCUS.perLightHit)
+      /**
+       * ── 한 대가 채우는 양은 **무기마다 다릅니다** ──────────────────
+       *
+       * 설계가 약속한 것은 "한 대가 0.34점"이 아니라 **"콤보 한 바퀴 =
+       * 1점"** 입니다(balance.ts FOCUS 설계 노트). 그런데 고정값 0.34 는
+       * **3타 무기에서만** 그 약속을 지킵니다.
+       *
+       * `npm run rules` 가 잡았습니다 — 그것도 실수로. 새 검사가 무기를
+       * 바꿔 놓고 되돌리지 않는 바람에 4타 쌍단검이 걸린 채로 검사가
+       * 돌았고, `4타 × 0.34 = 1.36점` 이 나왔습니다. 프로브의 버그가
+       * **진짜 구멍을 열어 보여준 것**입니다: 쌍단검은 콤보 한 바퀴마다
+       * 집중을 36% 더 벌고 있었습니다.
+       *
+       * 그래서 값을 무기 길이에서 **끌어냅니다.** 이렇게 두면 무기를
+       * 몇 타로 만들든 약속이 저절로 지켜집니다 — 다음 사람이 4타 무기를
+       * 추가하면서 이 상수를 같이 고쳐야 한다는 걸 몰라도 됩니다.
+       * `perLightHit` 은 이제 **3타 기준선**으로만 남습니다.
+       */
+      const steps = weaponOf(a).combo.length
+      Player.focus[a] = Math.min(FOCUS.max, Player.focus[a] + 1 / Math.max(1, steps))
     }
 
     hitEvents.push({
