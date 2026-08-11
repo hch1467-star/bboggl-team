@@ -39,6 +39,7 @@
     "bench": "node tools/bench.mjs",
     "sprint": "node tools/sprint-probe.mjs",
     "bypass": "node tools/bypass-probe.mjs",
+    "trap": "node tools/trap-probe.mjs",
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",
