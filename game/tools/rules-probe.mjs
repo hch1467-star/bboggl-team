@@ -59,6 +59,7 @@ try {
   console.log('\n📐 약속 검증 — 값이 아니라 값 **사이**를 봅니다\n')
 
   const t = await page.evaluate(() => window.__game.terrainInfo())
+  const cfgCounter = await page.evaluate(() => window.__game.counterInfo())
   const roster = await page.evaluate(() => window.__game.enemyRoster())
   const attacks = roster.flatMap((r) => r.attacks.map((a) => ({ ...a, from: r.name })))
   const byIntent = (i) => attacks.filter((a) => a.intent === i)
@@ -300,6 +301,80 @@ try {
     backWindow.swingAt > 0 && backWindow.window > backWindow.swingAt,
     '등 뒤 창이 기본 공격 한 대보다 길다 (백어택을 실제로 쓸 수 있다)',
     `등 뒤로 남는 시간 ${backWindow.window}초 vs 한 대 넣는 데 ${backWindow.swingAt}초`,
+  )
+
+  /**
+   * ---- 4.6 **모든** 무기가 무너짐 창 안에 두 대를 넣을 수 있다 ----
+   *
+   * NRFTW 공략들이 처벌 창을 설명하는 단위가 일관됩니다:
+   * *"옆으로 굴러 **빠른 공격 2~3대**로 처벌하라."* 초가 아니라 **대수**입니다.
+   *
+   * 우리는 지금까지 무방비를 **초로만** 재고 있었습니다(반격 2.4초 등).
+   * 초는 무기가 바뀌면 뜻이 달라집니다 — 같은 창에 단검은 여러 대,
+   * 대검은 한 대가 들어갑니다. 무기를 하나 느리게 만들면서 창을 안 늘리면
+   * **그 무기만 조용히 처벌을 못 하게** 되고, 초로 재는 한 안 보입니다.
+   *
+   * 한 대는 이미 위(4.5)에서 봤습니다. 여기서는 **두 대**를 봅니다 —
+   * 한 대만 들어가는 창은 "처벌"이 아니라 "겨우 한 방"이고, 그러면
+   * 무너뜨릴 이유가 백어택 한 대와 다를 게 없습니다.
+   *
+   * ⚠️ 계산하지 않고 **재서** 얻습니다. 두 번째 타는 선입력·후딜 취소가
+   *    맞물려 결정되므로, 콤보 시간을 나누는 식으로는 틀립니다.
+   */
+  const twoHits = await page.evaluate(async (states) => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    const now = () => G.state().simElapsed
+    const wait = async (sec) => {
+      const t0 = now()
+      const dl = Date.now() + 30000
+      while (now() - t0 < sec && Date.now() < dl) await sleep()
+    }
+    const out = []
+    for (let w = 0; w < 3; w++) {
+      G.reset()
+      await wait(0.4)
+      G.clearEnemies()
+      await wait(0.2)
+      G.press(`Digit${w + 1}`)
+      G.release(`Digit${w + 1}`)
+      await wait(0.5)
+      const name = G.weaponTable()[w].name
+      const t0 = now()
+      let swings = 0
+      let secondAt = -1
+      let wasActive = false
+      G.press('Mouse0')
+      G.release('Mouse0')
+      const dl = Date.now() + 40000
+      while (now() - t0 < 6 && Date.now() < dl) {
+        const p = G.state().player
+        const active = p.state === states.attack && p.phase === 1
+        // 판정이 **뜨는 순간**만 셉니다. 판정은 여러 프레임 유지됩니다.
+        if (active && !wasActive) {
+          swings++
+          if (swings === 2) {
+            secondAt = now() - t0
+            break
+          }
+          // 다음 타를 눌러 둡니다 — 사람이 하는 그대로(선입력).
+          G.press('Mouse0')
+          G.release('Mouse0')
+        }
+        wasActive = active
+        await sleep()
+      }
+      out.push({ name, secondAt: Number(secondAt.toFixed(2)) })
+    }
+    return out
+  }, t.actorStates)
+  const shortest = cfgCounter.normalBrokenTime
+  const worst = twoHits.reduce((a, b) => (b.secondAt > a.secondAt ? b : a), twoHits[0])
+  check(
+    twoHits.every((x) => x.secondAt > 0 && x.secondAt <= shortest),
+    `모든 무기가 가장 짧은 무너짐 창 안에 **두 대**를 넣는다 (처벌이 무기를 안 가린다)`,
+    `창 ${shortest}초 · ` + twoHits.map((x) => `${x.name} ${x.secondAt}초`).join(' · ') +
+      ` (가장 느린 것 ${worst.name})`,
   )
 
   // ---- 5. 선입력 창이 가장 긴 이어짐을 덮는다 ----

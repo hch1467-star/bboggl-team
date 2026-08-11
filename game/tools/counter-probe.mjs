@@ -122,6 +122,58 @@ try {
   }
 
   /**
+   * ---- 성공한 반격은 쿨다운을 일부 돌려받는다 ----
+   *
+   * 왜 넣었나: 지금까지 반격은 **위험한 쪽인데 보상이 없었습니다.**
+   * 빗나가면 슬롯 하나가 통째로 죽는데, 구르기는 빗나가도 기력만 조금
+   * 씁니다. 잘하는 사람일수록 반격을 안 쓰게 되는 모양이었습니다.
+   *
+   * ⚠️ **두 판을 같이 봅니다.** "성공하면 줄어든다"만 재면 그냥 쿨다운
+   *    단축과 구분이 안 됩니다. 빗나간 판을 **기준선**으로 두어야
+   *    "성공했기 때문에" 줄었다고 말할 수 있습니다.
+   */
+  const refund = await page.evaluate(async () => {
+    const G = window.__game
+    /** 같은 슬롯을 같은 조건에서 한 번 쓰고, 쓴 직후의 쿨다운을 읽습니다. */
+    const cast = async (waitForWindup) => {
+      const e = await window.__t.duel(0, 2.0)
+      if (waitForWindup) {
+        const ok = await window.__t.until(() => G.enemyInfo(e)?.winding === true, 12)
+        if (!ok) return null
+      } else {
+        // 예고가 **아닌** 순간에 씁니다 — 같은 스킬, 같은 거리, 반격만 없음.
+        const ok = await window.__t.until(() => G.enemyInfo(e)?.winding === false, 12)
+        if (!ok) return null
+      }
+      const before = G.counterCount()
+      const es = G.entityState(e)
+      G.aimAtWorld(es.x, es.z)
+      G.press('KeyQ')
+      G.release('KeyQ')
+      // 시전이 끝나고 판정이 지나갈 만큼만. 오래 기다리면 쿨다운이 자연히 줄어
+      // 두 판을 비교할 수 없습니다.
+      await window.__t.runFor(0.6)
+      return { cd: G.slotCooldowns()[0], countered: G.counterCount() - before }
+    }
+    const hit = await cast(true)
+    const miss = await cast(false)
+    return { hit, miss }
+  })
+  const r = refund.hit && refund.miss
+  check(
+    r && refund.miss.countered === 0 && refund.miss.cd > 0,
+    '기준선 — 반격이 아닌 시전은 쿨다운이 그대로 돈다',
+    r ? `반격 ${refund.miss.countered}회 · 쿨다운 ${refund.miss.cd.toFixed(2)}초` : '측정 못 함',
+  )
+  check(
+    r && refund.hit.countered > 0 && refund.hit.cd < refund.miss.cd,
+    '반격에 **성공하면** 그 슬롯 쿨다운을 일부 돌려받는다',
+    r
+      ? `성공 ${refund.hit.cd.toFixed(2)}초 vs 빗나감 ${refund.miss.cd.toFixed(2)}초`
+      : '측정 못 함',
+  )
+
+  /**
    * ---- 등 뒤에서는 성립하지 않아야 합니다 ----
    *
    * 순서가 중요합니다. 처음에는 **먼저 등 뒤에 세우고 예고를 기다렸는데**,

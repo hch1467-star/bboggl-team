@@ -372,6 +372,8 @@ function beginSkill(
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = def.windup * TEMPO
   Actor.skillSlot[p] = slot
+  // 환급은 **시전 하나에 한 번**입니다(components.ts counterRefunded 설계 노트).
+  Player.counterRefunded[p] = 0
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
   Actor.comboIndex[p] = 0

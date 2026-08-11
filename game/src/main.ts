@@ -91,7 +91,9 @@ import { bonfireSystem, setBonfireReach, type Bonfire } from './systems/bonfire'
 import { deathEvents, healthSystem } from './systems/health'
 import {
   SLOT_COUNT,
+  cooldownOf,
   grantRune,
+  setCooldown,
   setWeaponLevel,
   skillForSlot,
   weaponLevel,
@@ -1112,7 +1114,22 @@ class Game {
       this.cam.addTrauma(COUNTER.trauma)
       requestHitstop(COUNTER.hitstop)
       sfx.bossPhase()
-      this.hud.showBanner('반격!', '2.4초 무방비', 1.4)
+      /**
+       * ── 성공했을 때만 쿨다운을 일부 돌려줍니다 ────────────────────
+       *
+       * 근거는 balance.ts COUNTER.cooldownRefund 설계 노트에 있습니다.
+       * 한 줄로: 지금까지 반격은 **위험한 쪽인데 보상이 없었습니다.**
+       * 빗나가면 슬롯이 통째로 죽고, 구르기는 빗나가도 기력만 조금 씁니다.
+       *
+       * ⚠️ 여기(반격이 **성립한** 자리)에서만 합니다. 시전하는 자리에서
+       *    깎으면 그건 반격 보상이 아니라 그냥 쿨다운 단축입니다.
+       */
+      if (Player.counterRefunded[p] === 0) {
+        Player.counterRefunded[p] = 1
+        const slot = Actor.skillSlot[p]
+        setCooldown(p, slot, cooldownOf(p, slot) * (1 - COUNTER.cooldownRefund))
+      }
+      this.hud.showBanner('반격!', '2.4초 무방비 · 쿨다운 환급', 1.4)
       // 무너짐(6방향)보다 촘촘한 12방향 — 같은 불꽃이라도 밀도가 다르면
       // "더 큰 일이 일어났다"가 읽힙니다.
       for (let i = 0; i < 12; i++) {
