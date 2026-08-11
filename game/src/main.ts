@@ -2217,6 +2217,7 @@ class Game {
     levelAggroMax: number
     /** 플레이어 이동 속도(m/s) — "지나가는 데 몇 초"를 프로브가 직접 계산하도록. */
     playerMoveSpeed: number
+    playerRadius: number
   } {
     return {
       maxClimb: MAX_CLIMB,
@@ -2246,6 +2247,7 @@ class Game {
       levelAggroLead: LEVEL_AGGRO_LEAD,
       levelAggroMax: LEVEL_AGGRO_MAX,
       playerMoveSpeed: PLAYER_CFG.moveSpeed,
+      playerRadius: PLAYER_CFG.radius,
     }
   }
 
@@ -3057,6 +3059,8 @@ declare global {
         name: string
         maxHp: number
         height: number
+        /** 몸 반지름 — "밀착해도 이만큼은 떨어져 있다"를 재려면 필요합니다. */
+        radius: number
         moveSpeed: number
         /** 사거리 밖에서 내는 속도 — 추격을 잴 때 봐야 하는 값 */
         approachSpeed: number
@@ -3332,6 +3336,7 @@ declare global {
         levelAggroLead: number
         levelAggroMax: number
         playerMoveSpeed: number
+        playerRadius: number
       }
       entityState: (e: number) => {
         hp: number
@@ -3458,6 +3463,7 @@ window.__game = {
         name: d.name,
         maxHp: d.maxHp,
         height: d.height,
+        radius: d.radius,
         moveSpeed: d.moveSpeed,
         /**
          * **사거리 밖에서 실제로 내는 속도.** 프로브가 `moveSpeed`만 보고
