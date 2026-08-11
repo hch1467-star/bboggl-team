@@ -1,3 +1,4 @@
+import { applyTweaks } from './tweak'
 /**
  * 게임의 모든 튜닝 수치를 여기 한 곳에 모읍니다.
  *
@@ -1369,3 +1370,21 @@ export const KILL_FEEDBACK = {
   hitstop: 0.13,
   trauma: 0.45,
 } as const
+
+/**
+ * ── 실험용 덮어쓰기를 **여기서** 적용합니다 ─────────────────────────
+ *
+ * 파일 맨 아래인 이유: 이 파일을 가져다 쓰는 쪽이 모듈 초기화 때 값을
+ * 붙잡아 두는 자리가 있습니다(예: playerControl.ts 의
+ * `const TEMPO = PLAYER.tempo.attackScale`). main.ts 같은 데서 나중에
+ * 덮어쓰면 그런 값들은 **옛날 값을 쥔 채로** 남고, A/B 는 조용히
+ * 아무것도 안 바꾼 두 판을 비교하게 됩니다.
+ *
+ * `as const` 는 컴파일 타임 표시라 실행 중 대입은 됩니다. 타입 검사만
+ * 여기서 한 번 벗겨 냅니다 — 이 한 줄 밖으로는 안 나갑니다.
+ */
+applyTweaks({
+  CAMERA, PLAYER, GRUNT, BOSS, VIAL, BOSS_ARENA, POISE, FINISHER, EMBER,
+  WEAPON_UPGRADE, BONFIRE, ARCHER, CHARGER, FOCUS, COUNTER, FALL, BINDER,
+  DRAGGER, COMBAT, TREASURE, WORLD, KILL_FEEDBACK,
+} as unknown as Record<string, unknown>)

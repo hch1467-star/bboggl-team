@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
 import { RUNE_ORDER, SKILLS, WEAPONS } from './config/arsenal'
 import {
   BOSS_ARENA,
@@ -2989,6 +2990,15 @@ class Game {
 }
 
 const canvas = document.getElementById('game') as HTMLCanvasElement
+/**
+ * 실험용 덮어쓰기 중 **아무도 못 알아들은 것**이 있으면 여기서 터집니다.
+ *
+ * 설정 파일들이 각자 applyTweaks 를 부른 뒤이므로, 남아 있다는 것은
+ * 경로 오타라는 뜻입니다. 조용히 넘기면 A 와 B 가 사실 같은 설정으로
+ * 돌고, 그 벤치는 "차이 없음"을 **정확하게 틀리게** 보고합니다.
+ */
+assertAllTweaksApplied()
+
 const game = new Game(canvas)
 game.start()
 
@@ -3250,6 +3260,7 @@ declare global {
         count: number
       }
       breakEnemy: (entity: number) => void
+      tweaks: () => { path: string; from: number; to: number }[]
       /** 무기별 구르기 — 거리·시간·무적창·값. 프로브가 arsenal 을 안 읽게. */
       dodgeScales: () => {
         id: string
@@ -3632,6 +3643,8 @@ window.__game = {
    * `rules` 의 "🟡 반경 > 구르기" 약속이 걸린 값이라, 여기서 나오는 숫자가
    * 곧 그 검사의 근거가 됩니다.
    */
+  /** 이번 판에 덮어쓴 설정 — 보고서가 "무엇을 바꿔 돌렸나"를 적을 수 있게. */
+  tweaks: () => appliedTweaks(),
   dodgeScales: () =>
     WEAPONS.map((w) => ({
       id: w.id,

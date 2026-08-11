@@ -61,7 +61,16 @@ try {
   const page = await browser.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  await page.goto(`http://localhost:${PORT}/?lowfx=1`)
+  /**
+   * `PLAY_TWEAK` 이 있으면 그 설정을 덮어쓰고 켭니다(config/tweak.ts).
+   * A/B 를 **한 프로세스 안에서 번갈아** 돌리려고 만든 통로입니다 —
+   * 실험대를 커밋 단위로 가르면 기계가 느려지는 드리프트가 나중 쪽에
+   * 통째로 얹힙니다.
+   */
+  const tweak = process.env.PLAY_TWEAK
+  await page.goto(
+    `http://localhost:${PORT}/?lowfx=1` + (tweak ? `&tweak=${encodeURIComponent(tweak)}` : ''),
+  )
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 30000 })
   // 이전 실행의 세이브가 남아 있으면 조건이 매번 달라집니다.
   await page.evaluate(() => window.__game.resetProgress())
@@ -1869,6 +1878,8 @@ try {
        * "쓰이질 않았다"인지 가릴 수가 없습니다.
        */
       inputCancels: G.runStats().inputCancels ?? 0,
+      /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
+      tweaks: G.tweaks ? G.tweaks() : [],
       inputExpired: G.runStats().inputExpired,
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,

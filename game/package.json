@@ -37,6 +37,7 @@
     "chain": "node tools/chain-probe.mjs",
     "anvil": "node tools/anvil-probe.mjs",
     "bench": "node tools/bench.mjs",
+    "ab": "node tools/ab.mjs",
     "sprint": "node tools/sprint-probe.mjs",
     "bypass": "node tools/bypass-probe.mjs",
     "trap": "node tools/trap-probe.mjs",
