@@ -202,6 +202,75 @@ try {
   check(tested >= 3, '연계를 최소 3개 시험했다', `${tested}개`)
 
   /**
+   * ---- 3. **잡몹도** 연계한다 ----
+   *
+   * 지금까지 연계는 보스에만 있었습니다. 그러면 잡몹 구간에서 배우는 것이
+   * *"휘두르고 나면 후딜은 공짜"* 인데, 보스에서 그게 거짓이 됩니다 —
+   * 가르치는 순서가 거꾸로입니다(enemies.ts chains 설계 노트).
+   *
+   * ⚠️ 엘든 링에서 배운 **금지선**도 같이 겁니다. 그 게임의 지연 공격
+   *    비판은 "반응이 아니라 암기를 요구한다"였습니다. 그러니 이어지는
+   *    두 번째도 **예고를 통째로 보여줘야** 합니다. 예고를 줄이는 순간
+   *    이건 난이도가 아니라 기억력 시험이 됩니다.
+   */
+  const grunt = await page.evaluate(async () => {
+    const G = window.__game
+    G.reset()
+    await window.__t.runFor(0.4)
+    G.clearEnemies()
+    await window.__t.runFor(0.3)
+    const e = G.spawnEnemyKind('grunt', 6, 0)
+    await window.__t.runFor(0.3)
+    G.setHp(e, 100000) // 시험 도중 죽으면 연계를 못 봅니다
+    const roster = G.enemyRoster().find((r) => r.id === 'grunt')
+    const trigger = 'grunt_jab'
+    const idx = roster.attacks.findIndex((a) => a.id === trigger)
+    if (idx < 0) return { ok: false, why: 'grunt_jab 을 못 찾음' }
+    G.forceAttack(e, idx)
+    await window.__t.runFor(0.05)
+    const armed = G.enemyInfo(e)
+    await window.__t.until(() => G.enemyInfo(e)?.attackPhase !== 0, 3)
+    // 첫 타가 끝나고 두 번째가 시작되기를 기다립니다.
+    await window.__t.until(() => G.enemyInfo(e)?.winding === true, 4)
+    const second = G.enemyInfo(e)
+    const full = roster.attacks.find((a) => a.id === (second?.attackId ?? ''))?.windup ?? 0
+    /**
+     * **세 번째는 없어야 합니다.** 자기 자신으로 잇는 연계라, 연계가 또
+     * 연계를 걸면 적이 끝없이 휘두릅니다(enemyAI commitAttack 설계 노트).
+     */
+    const thirdArmed = second?.chainNext ?? ''
+    return {
+      ok: true,
+      armed: armed?.chainNext ?? '',
+      secondId: second?.attackId ?? '',
+      secondWinding: second?.winding ?? false,
+      windupLeft: second?.timer ?? 0,
+      fullWindup: full,
+      thirdArmed,
+    }
+  })
+  check(
+    grunt.ok && grunt.armed === 'grunt_jab',
+    '잡몹 🔴 뒤에 🔴 이 예약된다 (잡몹이 보스의 문법을 미리 가르친다)',
+    grunt.ok ? `예약 "${grunt.armed}"` : grunt.why,
+  )
+  check(
+    grunt.ok && grunt.secondId === 'grunt_jab' && grunt.secondWinding,
+    '그 연계가 실제로 이어진다',
+    `이어진 것 "${grunt.secondId}"`,
+  )
+  check(
+    grunt.ok && grunt.fullWindup > 0 && grunt.windupLeft >= grunt.fullWindup - 0.12,
+    '⚠️ 이어진 타도 예고를 **다 보여준다** (암기가 아니라 반응으로 풀리게)',
+    `남은 예고 ${grunt.windupLeft?.toFixed(2)}초 / 정상 ${grunt.fullWindup}초`,
+  )
+  check(
+    grunt.ok && grunt.thirdArmed === '',
+    '⚠️ 세 번째는 없다 (연계가 또 연계를 걸면 끝없이 휘두릅니다)',
+    grunt.thirdArmed ? `세 번째로 "${grunt.thirdArmed}" 가 예약됨` : '없음',
+  )
+
+  /**
    * ── 계기가 실제로 세는가 ────────────────────────────────────────
    *
    * 위의 검사는 전부 `enemyInfo()` 로 봅니다. 그런데 **자동 플레이 보고서**는

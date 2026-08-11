@@ -250,10 +250,16 @@ export const encounterEvents: EncounterEvent[] = []
  * 조용히 어긋납니다(4색 예고에서 이미 겪은 종류의 버그입니다).
  */
 export function chainIndexFor(kind: number, phaseIdx: number, attackIndex: number): number {
-  // 연계는 보스 페이즈에만 있는 개념입니다. 다른 종류는 항상 "없음".
-  if (kind !== EnemyKind.Boss) return NO_CHAIN
   const list = attacksFor(kind)
-  const chainId = bossPhase(phaseIdx).chains?.[list[attackIndex]?.id ?? '']
+  const from = list[attackIndex]?.id ?? ''
+  /**
+   * 보스는 **페이즈마다** 연계가 다릅니다(2페이즈 🔵→🟡, 3페이즈 🔵→🟣).
+   * 잡몹은 페이즈가 없으므로 종류 정의에 붙습니다(enemies.ts chains).
+   * 두 자리를 **한 함수**로 모으는 이유는 이 파일 아래 commitAttack 설계
+   * 노트와 같습니다 — 갈라 두면 한쪽에만 예고음이 붙는 식으로 어긋납니다.
+   */
+  const chainId =
+    kind === EnemyKind.Boss ? bossPhase(phaseIdx).chains?.[from] : enemyDef(kind).chains?.[from]
   if (!chainId) return NO_CHAIN
   const idx = list.findIndex((a) => a.id === chainId)
   return idx >= 0 ? idx : NO_CHAIN
@@ -276,8 +282,17 @@ function commitAttack(
   Actor.nextHitT[e] = 0
   Enemy.chained[e] = chained ? 1 : 0
 
-  // 이 패턴 뒤에 따라붙을 연계를 지금 정해 둡니다.
-  Enemy.chainNext[e] = chainIndexFor(kind, Enemy.phase[e], index)
+  /**
+   * 이 패턴 뒤에 따라붙을 연계를 지금 정해 둡니다.
+   *
+   * ⚠️ **연계에서 또 연계를 걸지 않습니다**(`chained` 면 무조건 없음).
+   *    지금까지는 보스 표가 전부 한 방향(🔵→🟡, 🟣→🟡)이라 저절로
+   *    끝났습니다. 그런데 잡몹에 `grunt_jab → grunt_jab` 같은 **자기
+   *    자신으로의 연계**를 넣는 순간, 이 줄은 영원히 다음 연계를 예약해서
+   *    적이 **끝없이 휘두릅니다.** 표만 보고는 안 보이는 종류의 고장이라
+   *    규칙 자체를 여기 못 박습니다: 연계는 **두 번까지**.
+   */
+  Enemy.chainNext[e] = chained ? NO_CHAIN : chainIndexFor(kind, Enemy.phase[e], index)
   /**
    * **예약된 연계의 수**를 셉니다.
    *
