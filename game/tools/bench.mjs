@@ -410,8 +410,23 @@ for (let i = 0; i < 3; i++) {
   const dps = phaseSrc.map(
     (l) => (l.boss.phaseBands?.[i] ?? 0) / Math.max(0.1, l.boss.phaseTime?.[i] ?? 0),
   )
+  /**
+   * **처형·붕괴를 구간별로 같이 냅니다.**
+   *
+   * 5판 벤치가 화력이 구간마다 11.8 → 23.1 → 38.8/초 로 **3.3배** 오른다고
+   * 말합니다. 그런데 그 숫자만으로는 고칠 곳을 못 정합니다. 오르는 이유가
+   * 무엇이냐에 따라 처방이 완전히 다르기 때문입니다:
+   *
+   *   · 처형/붕괴가 뒤로 몰린다 → 체력 배분이 아니라 **강인도** 이야기입니다
+   *   · 고르게 퍼져 있다        → 스킬·집중이 쌓이는 것이고, 배분으로 풉니다
+   *
+   * 지난번에 이걸 안 보고 배분부터 계산했다가 되돌렸습니다. 갈래를 먼저 셉니다.
+   */
+  const fin = phaseSrc.map((l) => l.boss.phaseFinishers?.[i] ?? 0)
+  const brk = phaseSrc.map((l) => l.boss.phaseBreaks?.[i] ?? 0)
   console.log(
-    `  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초${i === 0 ? phaseNote : ''}`,
+    `  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초 · ` +
+      `처형 ${fmt(fin, 1)} · 붕괴 ${fmt(brk, 1)}${i === 0 ? phaseNote : ''}`,
   )
 }
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)
