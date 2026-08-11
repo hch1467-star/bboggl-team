@@ -2092,6 +2092,23 @@ class Game {
     this.cam.snapTo(x, z)
   }
 
+  /**
+   * 적 하나를 원하는 자리에 세웁니다 — `debugTeleport` 의 적 판.
+   *
+   * 🏹 엄폐 검증에 필요했습니다. "화살 선 위에 잡몹을 세워 두고 쏘게 한다"를
+   * 하려면 그 잡몹이 **그 자리에 있어야** 하는데, 살아 있는 잡몹은 예고
+   * 1.25초 동안 3m 를 걸어와서 선을 벗어납니다. `freezeEnemies` 는 전부
+   * 얼려서 궁수까지 안 쏘게 되므로 쓸 수 없었습니다.
+   */
+  debugTeleportEnemy(e: number, x: number, z: number): void {
+    if (!isAlive(e)) return
+    Transform.x[e] = x
+    Transform.z[e] = z
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    Velocity.x[e] = 0
+    Velocity.z[e] = 0
+  }
+
   /** 사다리 상태 — 프로브가 상수를 베끼지 않고 게임에서 읽도록. */
   debugBossSwingLog(): Record<
     string,
@@ -3248,6 +3265,8 @@ declare global {
       enemyCount: () => number
       setVials: (n: number) => void
       teleportPlayer: (x: number, z: number) => void
+      /** 적을 원하는 자리에 세웁니다 — 🏹 엄폐처럼 **자리**가 전부인 검증용. */
+      teleportEnemy: (entity: number, x: number, z: number) => void
       nearestBonfire: () => { x: number; z: number } | null
       /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
       spendPoints: () => { x: number; z: number; anvil: boolean }[]
@@ -3646,6 +3665,7 @@ window.__game = {
   enemyCount: () => countLivingEnemies(),
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
+  teleportEnemy: (entity, x, z) => game.debugTeleportEnemy(entity, x, z),
   nearestBonfire: () => game.debugNearestBonfire(),
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),

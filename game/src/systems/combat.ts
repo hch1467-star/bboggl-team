@@ -131,6 +131,11 @@ export interface AttackSpec {
   finisher?: boolean
   /** 무기별 강인도 배율 (arsenal.ts WeaponDef.poiseScale) */
   poiseScale?: number
+  /**
+   * 🏹 **몸에 막힙니다** — 부채꼴 안에서 가장 가까운 **하나**만, 진영을 안 가리고.
+   * 근거는 enemyAttacks.ts `projectile` 주석(엄폐).
+   */
+  projectile?: boolean
   /** 다단히트 횟수 */
   hits: number
   /** 판정 중심 (point 스킬용). 없으면 시전자 위치. */
@@ -265,6 +270,7 @@ function enemySpec(e: number): AttackSpec {
     healSelf: 0,
     snare: def.snare,
     pull: def.pull,
+    projectile: def.projectile,
     // 🟡 광역만 머무릅니다. 다른 색은 "한 순간"이 정체성입니다.
     lingers: def.intent === AttackIntent.Sweep,
   }
@@ -535,24 +541,19 @@ function applyHit(a: number, spec: AttackSpec): boolean {
   const tids = targets.run()
   const tcount = targets.count
 
-  for (let j = 0; j < tcount; j++) {
-    const t = tids[j]
-    if (t === a) continue
-
-    // 아군 오사 방지 — 플레이어는 적만, 적은 플레이어만 때립니다.
-    const targetIsPlayer = hasComponent(Player, t)
-    if (attackerIsPlayer === targetIsPlayer) continue
-
-    if (Actor.state[t] === ActorState.Dead) continue
-    if (Health.invulnT[t] > 0) continue
-
+  /**
+   * 판정 도형 안에 있는가 — 있으면 거리를, 아니면 -1.
+   *
+   * 아래 루프와 **같은 함수**를 씁니다. 엄폐(누가 화살을 막는가)를 고를 때와
+   * 실제로 때릴 때의 기준이 다르면, "막았는데 안 맞았다" 같은 유령이 생깁니다.
+   */
+  const shapeDist = (t: number): number => {
     const dx = Transform.x[t] - originX
     const dz = Transform.z[t] - originZ
     const dist = Math.hypot(dx, dz)
     // 판정 거리에 대상 반지름을 더합니다. 안 더하면 덩치 큰 적을
     // 코앞에서 때려도 빗나가는 것처럼 느껴집니다.
-    if (dist > spec.range + Body.radius[t]) continue
-
+    if (dist > spec.range + Body.radius[t]) return -1
     /**
      * cone 만 각도 검사를 합니다. circle/point 는 반경 안이면 전부 맞습니다.
      *
@@ -574,8 +575,56 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     if (spec.shape === 'cone' && dist > 0.0001) {
       const dot = (dx * fx + dz * fz) / dist
       const slack = Math.atan2(Body.radius[t], dist)
-      if (dot < Math.cos(Math.min(Math.PI, halfArc + slack))) continue
+      if (dot < Math.cos(Math.min(Math.PI, halfArc + slack))) return -1
     }
+    return dist
+  }
+
+  /**
+   * ---- 🏹 엄폐 — 화살은 **처음 만나는 몸**에 박힙니다 ----
+   *
+   * 여기서만 아군 오사 방지를 **끕니다.** 진영을 안 가리고 가장 가까운
+   * 하나를 고르고, 나머지는 전부 건너뜁니다.
+   *
+   * ⚠️ 무적 상태(`invulnT`)인 대상도 **막는 쪽으로는 셉니다.** 무적은
+   *    "피해를 안 받는다"이지 "몸이 없다"가 아닙니다. 이걸 빼면 방금 맞은
+   *    잡몹을 화살이 통과해서, 플레이어가 보기에 이유 없이 뚫립니다.
+   */
+  let blocker = -1
+  if (spec.projectile) {
+    let nearest = Infinity
+    for (let j = 0; j < tcount; j++) {
+      const t = tids[j]
+      if (t === a) continue
+      if (Actor.state[t] === ActorState.Dead) continue
+      const d = shapeDist(t)
+      if (d < 0 || d >= nearest) continue
+      nearest = d
+      blocker = t
+    }
+    if (blocker < 0) return false
+  }
+
+  for (let j = 0; j < tcount; j++) {
+    const t = tids[j]
+    if (t === a) continue
+
+    const targetIsPlayer = hasComponent(Player, t)
+    // 아군 오사 방지 — 플레이어는 적만, 적은 플레이어만 때립니다.
+    // 단 🏹 몸에 막히는 공격은 **막은 그 하나**만 때립니다(진영 무관).
+    if (spec.projectile) {
+      if (t !== blocker) continue
+    } else if (attackerIsPlayer === targetIsPlayer) {
+      continue
+    }
+
+    if (Actor.state[t] === ActorState.Dead) continue
+    if (Health.invulnT[t] > 0) continue
+
+    const dist = shapeDist(t)
+    if (dist < 0) continue
+    const dx = Transform.x[t] - originX
+    const dz = Transform.z[t] - originZ
 
     /**
      * ---- 🥋 완벽 회피 ----

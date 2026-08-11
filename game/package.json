@@ -48,6 +48,7 @@
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",
+    "cover": "node tools/cover-probe.mjs",
     "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {
