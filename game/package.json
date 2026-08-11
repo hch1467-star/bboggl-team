@@ -41,7 +41,8 @@
     "bypass": "node tools/bypass-probe.mjs",
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
-    "rules": "node tools/rules-probe.mjs"
+    "rules": "node tools/rules-probe.mjs",
+    "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
