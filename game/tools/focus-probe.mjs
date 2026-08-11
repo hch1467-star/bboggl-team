@@ -163,6 +163,62 @@ try {
     `${timedRoll.dodges}번 시도 · ${timedRoll.focus}점`,
   )
 
+  /**
+   * ---- 2b. 완벽 회피의 **즉시** 보상 — 확정 치명타 창 ----
+   *
+   * 집중은 나중에 쓸 자원입니다. 넘긴 그 순간 손에 쥐는 게 없으면
+   * "잘했다"가 느낌으로 안 옵니다. 그래서 창을 하나 더 엽니다.
+   *
+   * 여기서 재는 것은 **치명타가 떴는가**가 아니라 **창이 열리고 닫히는가**
+   * 입니다. 치명타는 기본 확률로도 뜨니 한두 번 떴다고 확정이라는 증거가
+   * 못 됩니다. 창의 개폐는 확률이 안 끼는 값이라 한 번으로 판정됩니다.
+   */
+  const critWindow = await page.evaluate(async () => {
+    const G = window.__game
+    const e = await window.__t.dummy(1.8)
+    const win = G.focusInfo().perfectDodgeCritWindow
+    let opened = -1
+    const until = G.state().elapsed + 20
+    while (G.state().elapsed < until) {
+      const info = G.enemyInfo(e)
+      if (!info) break
+      if (info.winding && info.timer <= 0.15) {
+        G.press('Space')
+        G.release('Space')
+        await window.__t.runFor(0.5)
+        opened = G.focusInfo().critT
+        if (opened > 0) break
+      }
+      await new Promise((r) => setTimeout(r, 8))
+    }
+    if (opened <= 0) return { opened: 0 }
+    // 창이 열린 채로 한 대 칩니다. 창은 이 한 방에 닫혀야 합니다.
+    const critsBefore = G.state().critHits
+    G.press('Mouse0')
+    G.release('Mouse0')
+    await window.__t.runFor(0.9)
+    return {
+      opened,
+      win,
+      closed: G.focusInfo().critT,
+      crits: G.state().critHits - critsBefore,
+    }
+  })
+  check(
+    critWindow.opened > 0,
+    '완벽 회피 순간 확정 치명타 창이 열린다',
+    critWindow.opened > 0
+      ? `${critWindow.opened.toFixed(2)}초 남음 (창 ${critWindow.win}초)`
+      : '창이 열리지 않았습니다 — 완벽 회피를 못 만들었거나 보상이 안 붙었습니다',
+  )
+  check(
+    critWindow.opened > 0 && critWindow.crits >= 1 && critWindow.closed === 0,
+    '그 창에서 때리면 치명타가 나고 창이 닫힌다 (한 방만)',
+    critWindow.opened > 0
+      ? `치명타 ${critWindow.crits}회 · 남은 창 ${critWindow.closed}초`
+      : '앞 검사가 실패해 잴 수 없었습니다',
+  )
+
   // ---- 3. 태운 점수만큼 강타가 세진다 ----
   const heavy = await page.evaluate(async () => {
     const G = window.__game

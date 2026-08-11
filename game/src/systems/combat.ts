@@ -603,7 +603,18 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     const back =
       attackerIsPlayer && !targetIsPlayer && spec.shape === 'cone' && isBackAttack(a, t)
     const critChance = COMBAT.baseCritChance + (back ? COMBAT.backCritBonus : 0)
-    const crit = !spec.noCrit && spec.damage > 0 && combatRng.chance(critChance)
+    /**
+     * 🥋 **완벽 회피 뒤의 한 대는 확정 치명타입니다.**
+     *
+     * 확률을 올리는 게 아니라 **확정**으로 둔 이유: 확률이면 잘 굴렀는데도
+     * 아무 일이 없는 판이 생기고, 그러면 플레이어는 회피와 보상을 잇지
+     * 못합니다. 보상은 원인과 **매번** 붙어 있어야 배워집니다.
+     * (창이 끝나는 것은 아래 playerControl 의 타이머가 처리합니다.)
+     */
+    const perfect = !targetIsPlayer && hasComponent(Player, a) && Player.perfectCritT[a] > 0
+    const crit =
+      !spec.noCrit && spec.damage > 0 && (perfect || combatRng.chance(critChance))
+    if (perfect && !spec.noCrit && spec.damage > 0) Player.perfectCritT[a] = 0
 
     /**
      * ---- 🟢 반격 성립 판정 ----

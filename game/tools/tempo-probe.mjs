@@ -22,9 +22,17 @@
  * 버퍼가 없으면 이 시간이 "다음에 다시 누를 때까지"로 벌어지고,
  * 버퍼가 있으면 "동작이 끝나는 순간"에 붙습니다.
  *
- * ⚠️ 커밋은 버퍼와 다릅니다. **선행동작 중에 눌렀다고 즉시 구르면 안 됩니다.**
- *    그건 이어짐이 아니라 취소이고, 소울류에서 공격이 무거운 이유를 지웁니다.
- *    그래서 "안 나가는 것"도 같이 검사합니다.
+ * ⚠️ **취소 회피가 들어오면서 이 파일의 규칙 하나가 뒤집혔습니다.**
+ *
+ *    예전에는 "선행동작 중에 눌러도 즉시 구르면 안 된다"를 검사했습니다.
+ *    커밋을 지키자는 뜻이었고, 그 뜻 자체는 지금도 옳습니다. 다만 커밋을
+ *    지키는 방법을 **막는 것**에서 **값을 매기는 것**으로 바꿨습니다:
+ *    나갈 수는 있되 기력 25+20=45 를 냅니다(최대의 거의 절반).
+ *
+ *    그래서 검사도 바꿨습니다 — "안 나간다"가 아니라 **"기력이 있으면
+ *    나가고, 없으면 안 나간다"** 입니다. 뒤집힌 검사를 조용히 지우지
+ *    않고 여기 남겨 둡니다: 어느 날 취소가 너무 강하다고 판단하면
+ *    되돌릴 자리가 어디인지 이 문단이 알려 줍니다.
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -137,30 +145,67 @@ try {
     rollAttack.ok ? `누르고 ${rollAttack.delay.toFixed(2)}초 뒤 (구르기 ${t.dodgeDuration}초)` : rollAttack.why || '끝내 안 나감',
   )
 
-  // ---- 2. 공격 중에 누른 구르기가 후딜에 나가는가 ----
+  // ---- 2. 공격 중에 누른 구르기가 **즉시** 나가는가 (취소 회피) ----
+  //
+  // 기력을 가득 채워 두고 잽니다. 모자란 경우는 바로 다음 검사입니다 —
+  // 한 실험에 변수를 둘 넣으면 실패했을 때 어느 쪽 때문인지 못 가립니다.
+  const cancelCost = t.dodgeStaminaCost + t.dodgeCancelExtraCost
   const attackRoll = await lab(`
+    G.setStamina(100)
     tap('Mouse0')
     const atk = await until(() => st() === St.attack, 1.0)
     if (atk < 0) return { ok: false, why: '공격이 시작되지 않음' }
+    const before = G.snapshot().player.stamina
     // 선행동작 한복판에서 누릅니다.
     await wait(0.05)
     const pressedAt = now()
     tap('Space')
-    // 눌러도 **즉시** 구르면 안 됩니다 — 커밋이 지켜지는지 먼저 봅니다.
-    await wait(0.08)
-    const instant = st() === St.dodge
     const dodgedAt = await until(() => st() === St.dodge, 2.5)
-    return { ok: dodgedAt > 0, instant, delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1 }
+    // 굴러 나간 **직후** 기력을 읽습니다 — 회복이 붙기 전이어야 합니다.
+    const after = G.snapshot().player.stamina
+    return { ok: dodgedAt > 0, delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1, spent: before - after }
   `)
+  // 프레임이 ~0.1초이므로 "즉시"는 한 프레임 안쪽을 뜻합니다.
+  const instant = attackRoll.ok && attackRoll.delay <= 0.15
   check(
-    attackRoll.ok,
-    '공격 선행동작 중에 눌러 둔 구르기가 후딜에 나간다',
+    attackRoll.ok && instant,
+    '공격 선행동작 중에 누른 구르기가 **즉시** 나간다 (취소 회피)',
     attackRoll.ok ? `누르고 ${attackRoll.delay.toFixed(2)}초 뒤` : attackRoll.why || '끝내 안 나감',
   )
   check(
-    attackRoll.instant === false,
-    '⚠️ 그렇다고 **즉시** 구르지는 않는다 (버퍼는 취소가 아니다)',
-    attackRoll.instant ? '선행동작이 취소됐습니다 — 커밋이 무너집니다' : '선행동작은 끝까지 갑니다',
+    attackRoll.ok && Math.abs(attackRoll.spent - cancelCost) < 3,
+    `취소에는 추가 기력이 붙는다 (기본 ${t.dodgeStaminaCost} + 추가 ${t.dodgeCancelExtraCost})`,
+    attackRoll.ok ? `실제로 ${attackRoll.spent.toFixed(1)} 소모` : '측정 못 함',
+  )
+
+  // ---- 2b. 기력이 모자라면 취소되지 않는가 ----
+  //
+  // 값을 매겨 막는다는 설계가 실제로 막고 있는지 봅니다. 여기가 통과하지
+  // 않으면 "값을 매겼다"는 말은 장식이고 취소는 사실상 공짜입니다.
+  const poorCancel = await lab(`
+    tap('Mouse0')
+    const atk = await until(() => st() === St.attack, 1.0)
+    if (atk < 0) return { ok: false, why: '공격이 시작되지 않음' }
+    // 취소에는 모자라고 **일반 구르기에는 충분한** 값으로 맞춥니다.
+    // 이래야 "구르기 자체가 안 되는 것"과 "취소만 안 되는 것"이 갈립니다.
+    G.setStamina(${(cancelCost - 5).toFixed(0)})
+    await wait(0.05)
+    const pressedAt = now()
+    tap('Space')
+    await wait(0.15)
+    const cancelled = st() === St.dodge
+    const dodgedAt = await until(() => st() === St.dodge, 2.5)
+    return { ok: true, cancelled, delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1 }
+  `)
+  check(
+    poorCancel.ok && poorCancel.cancelled === false,
+    '⚠️ 기력이 모자라면 취소되지 않는다 (값이 실제로 막는다)',
+    poorCancel.cancelled ? '기력이 없는데도 취소됐습니다' : '선행동작은 끝까지 갑니다',
+  )
+  check(
+    poorCancel.ok && poorCancel.delay > 0,
+    '…대신 눌러 둔 것은 살아남아 후딜에서 나간다 (버려지지 않는다)',
+    poorCancel.delay > 0 ? `누르고 ${poorCancel.delay.toFixed(2)}초 뒤` : '끝내 안 나감',
   )
 
   // ---- 3. 창이 지나면 버려지는가 ----

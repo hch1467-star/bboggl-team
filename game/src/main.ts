@@ -1082,13 +1082,21 @@ class Game {
      * 지금까지 구르기는 잘 써도 "안 맞았다"가 전부였습니다. 여기서 집중이
      * 차오르면 회피가 **공격 준비**가 됩니다 — 오공이 완벽 회피에 집중을
      * 주는 이유가 이것입니다.
+     *
+     * 그런데 집중은 **나중에 쓸 자원**입니다. 완벽 회피를 해낸 그 순간
+     * 손에 쥐는 게 없으면 "잘했다"는 느낌이 안 옵니다. 그래서 여기서
+     * 확정 치명타 창(perfectCritT)을 같이 엽니다 — 넘긴 즉시 반격하면
+     * **반드시** 크리티컬입니다. 로스트아크의 백어택처럼 "정확히 해낸
+     * 사람만 받는 확정 보상"이고, 운(치명타 확률)이 끼지 않아야
+     * 플레이어가 인과를 배울 수 있습니다.
      */
     for (const d of perfectDodgeEvents) {
       Player.focus[p] = Math.min(FOCUS.max, Player.focus[p] + FOCUS.perPerfectDodge)
+      Player.perfectCritT[p] = FOCUS.perfectDodgeCritWindow
       this.cam.addTrauma(0.18)
       sfx.pickup()
       this.vfx.spawnHitSpark(d.x, d.y + 1.1, d.z, 1.1)
-      this.hud.showBanner('완벽 회피', '집중 +1', 0.9)
+      this.hud.showBanner('완벽 회피', '집중 +1 · 다음 일격 확정 치명타', 0.9)
     }
     perfectDodgeEvents.length = 0
 
@@ -2163,6 +2171,8 @@ class Game {
     dodgeCooldown: number
     /** 구르기 이동 거리(m) — 🟡 반경이 이보다 커야 "굴러선 못 빠져나온다"가 성립합니다 */
     dodgeDistance: number
+    dodgeStaminaCost: number
+    dodgeCancelExtraCost: number
     /** 기본 공격 한 대가 채우는 집중 — 3타 콤보 = 1점이라는 약속을 검사하려면 필요합니다 */
     focusPerLightHit: number
     /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
@@ -2190,6 +2200,8 @@ class Game {
       dodgeDuration: PLAYER_CFG.dodge.duration,
       dodgeCooldown: PLAYER_CFG.dodge.cooldown,
       dodgeDistance: PLAYER_CFG.dodge.distance,
+      dodgeStaminaCost: PLAYER_CFG.dodge.staminaCost,
+      dodgeCancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
       focusPerLightHit: FOCUS.perLightHit,
       actorStates: {
         idle: ActorState.Idle,
@@ -2330,6 +2342,8 @@ class Game {
     inputExpired: number
     inputDropped: number
     inputWaitAvg: number
+    /** 공격/스킬을 끊고 구른 횟수. inputUsed 안에 **포함**된 값입니다. */
+    inputCancels: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -2352,6 +2366,7 @@ class Game {
       inputExpired: readInputFlow().expired,
       inputDropped: readInputFlow().dropped,
       inputWaitAvg: Number(readInputFlow().waitAvg.toFixed(3)),
+      inputCancels: readInputFlow().cancels,
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -3071,6 +3086,7 @@ declare global {
         damagePerPoint: number
       }
       setFocus: (n: number) => void
+      setStamina: (n: number) => void
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -3255,6 +3271,8 @@ declare global {
         dodgeDuration: number
         dodgeCooldown: number
         dodgeDistance: number
+        dodgeStaminaCost: number
+        dodgeCancelExtraCost: number
         focusPerLightHit: number
         /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */
         actorStates: { idle: number; attack: number; dodge: number; skill: number }
@@ -3303,6 +3321,7 @@ declare global {
         inputExpired: number
         inputDropped: number
         inputWaitAvg: number
+        inputCancels: number
       }
       /** 세이브 검증용 — 저장 여부 · 진행 초기화 */
       saveInfo: () => { saveId: string; treasuresTaken: number }
@@ -3478,9 +3497,23 @@ window.__game = {
     perLightHit: FOCUS.perLightHit,
     perPerfectDodge: FOCUS.perPerfectDodge,
     damagePerPoint: FOCUS.damagePerPoint,
+    perfectDodgeCritWindow: FOCUS.perfectDodgeCritWindow,
+    // 지금 남은 확정 치명타 시간. 규칙은 게임이 굴리고 실험대는 **읽기만** 합니다.
+    critT: Number(Player.perfectCritT[game.debugPlayerEntity()].toFixed(3)),
   }),
   setFocus: (n) => {
     Player.focus[game.debugPlayerEntity()] = Math.max(0, Math.min(FOCUS.max, n))
+  },
+  /**
+   * 실험대 전용 — 기력을 원하는 값으로 맞춥니다.
+   *
+   * "기력이 모자라면 취소가 안 된다"를 검사하려면 **모자란 상태를 만들어야**
+   * 하는데, 굴러서 빼면 굴린 만큼 쿨다운·회복지연이 함께 걸려 무엇 때문에
+   * 안 된 것인지 못 가립니다. setFocus·setHp 와 같은 성격의 장치입니다.
+   */
+  setStamina: (n) => {
+    const p = game.debugPlayerEntity()
+    Stamina.value[p] = Math.max(0, Math.min(Stamina.max[p], n))
   },
   threats: (range) => game.debugThreats(range),
   slotCooldowns: () => game.debugSlotCooldowns(),

@@ -102,6 +102,7 @@ export function resetStaminaSpent(): void {
   inputFlow.expired = 0
   inputFlow.dropped = 0
   inputFlow.waitSum = 0
+  inputFlow.cancels = 0
 }
 
 /**
@@ -150,18 +151,21 @@ export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
  *
  * ⚠️ 봇이 아니라 **게임이** 셉니다. 누른 것과 나간 것은 다릅니다.
  */
-const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0 }
+const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0 }
 export function readInputFlow(): {
   used: number
   expired: number
   dropped: number
   waitAvg: number
+  cancels: number
 } {
   return {
     used: inputFlow.used,
     expired: inputFlow.expired,
     dropped: inputFlow.dropped,
     waitAvg: inputFlow.used > 0 ? inputFlow.waitSum / inputFlow.used : 0,
+    // 공격을 도중에 끊고 구른 횟수. `used` 안에 포함된 값이라 더하면 안 됩니다.
+    cancels: inputFlow.cancels,
   }
 }
 /**
@@ -580,6 +584,15 @@ export function playerControlSystem(ctx: ControlContext): void {
     tickCooldowns(p)
     if (dt > 0) {
       Player.dodgeCooldownT[p] = Math.max(0, Player.dodgeCooldownT[p] - dt)
+      /**
+       * 완벽 회피 확정 치명타 창.
+       *
+       * 여기서 깎습니다 — 쿨다운·기력과 **같은 자리**입니다. 시간이 흐르는
+       * 값은 한 곳에서 다 흐르게 두어야, 나중에 "왜 이건 안 줄지?"를
+       * 찾으러 파일을 뒤지지 않습니다. 소비는 combat.ts 가 합니다(때린 쪽이
+       * 판정을 아는 유일한 자리라서).
+       */
+      Player.perfectCritT[p] = Math.max(0, Player.perfectCritT[p] - dt)
       if (Stamina.regenDelayT[p] > 0) {
         Stamina.regenDelayT[p] = Math.max(0, Stamina.regenDelayT[p] - dt)
       } else if (Stamina.value[p] < Stamina.max[p]) {
@@ -687,6 +700,48 @@ export function playerControlSystem(ctx: ControlContext): void {
       inputFlow.waitSum += BUFFER_TIME - Actor.bufferedAttackT[p]
       Actor.bufferedAttack[p] = 0
       Actor.bufferedAttackT[p] = 0
+      return true
+    }
+
+    /** 지금 이 자리에서 구르면 어디로 구를지. 이동 입력이 없으면 등 뒤로. */
+    const dodgeDir = (): [number, number] =>
+      hasMoveInput ? [mx, mz] : [-Math.sin(Transform.rotY[p]), -Math.cos(Transform.rotY[p])]
+
+    /**
+     * 🥋 **공격 취소 회피** — 선행동작/판정 중에 굴러 빠져나갑니다.
+     *
+     * 지금까지 규칙은 "휘두르기 시작하면 후딜까지 못 뺀다"였습니다. 커밋을
+     * 지키자는 뜻은 옳았지만, 실제로 일어나는 일은 **예고를 봤는데 몸이
+     * 안 움직이는 것**이었습니다. 위키드·소울류가 이걸 푸는 방식은 취소를
+     * 막는 게 아니라 **값을 매기는 것**입니다: 나갈 수는 있되, 나가면
+     * 다음 한 번을 못 나갑니다.
+     *
+     * 그래서 무적이 아니라 **기력**으로 막습니다. 25(기본) + 20(추가) = 45 —
+     * 최대 기력의 거의 절반이라 연속 두 번은 불가능하고, 취소하고 나면
+     * 다음 구르기까지 회복을 기다려야 합니다. 즉 "실수 한 번은 되돌릴 수
+     * 있지만, 되돌리는 것을 전략으로 쓸 수는 없다"가 됩니다.
+     *
+     * 후딜 탈출은 여기 해당하지 않습니다 — 그건 이미 휘두름이 끝난 뒤라
+     * 취소할 게 없고, 예전처럼 기본 값 그대로입니다(아래 Recovery 분기).
+     */
+    const cancelCost =
+      PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) + PLAYER.dodge.cancelExtraCost
+    const tryDodgeCancel = (): boolean => {
+      if (Actor.bufferedDodge[p] !== 1) return false
+      // 쿨다운은 그대로 지킵니다 — 기력만 있으면 무한히 구르는 길이 되면 안 됩니다.
+      if (Player.dodgeCooldownT[p] > 0) return false
+      /**
+       * 기력이 모자라면 **버퍼를 그대로 둡니다.** 지우면 조금 뒤 후딜에서
+       * 나갈 수 있었던 구르기가 사라집니다 — takeBufferedSkill 이 경고하는
+       * 것과 똑같은 함정입니다. 못 나가면 그냥 취소가 아닌 게 될 뿐입니다.
+       */
+      if (Stamina.value[p] < cancelCost) return false
+      takeBufferedDodge()
+      // 추가분만 여기서, 기본분은 beginDodge 가 무기 배율까지 얹어 뺍니다.
+      spendStamina(p, PLAYER.dodge.cancelExtraCost)
+      const [dx, dz] = dodgeDir()
+      beginDodge(p, dx, dz)
+      inputFlow.cancels++
       return true
     }
 
@@ -852,6 +907,9 @@ export function playerControlSystem(ctx: ControlContext): void {
             }
             sfx.deny()
           }
+        } else if (tryDodgeCancel()) {
+          // 선행동작·판정 중 취소 회피. 값은 위 tryDodgeCancel 설계 노트 참고.
+          break
         }
 
         // 선행동작 중에는 느리게나마 방향을 틀 수 있습니다(완전 고정은 답답함).
@@ -1001,11 +1059,20 @@ export function playerControlSystem(ctx: ControlContext): void {
           Actor.timer[p] <= def.recovery * TEMPO * 0.5
         ) {
           takeBufferedDodge()
-          const dx = hasMoveInput ? mx : -Math.sin(Transform.rotY[p])
-          const dz = hasMoveInput ? mz : -Math.cos(Transform.rotY[p])
+          const [dx, dz] = dodgeDir()
           beginDodge(p, dx, dz)
           break
         }
+
+        /**
+         * 스킬도 취소할 수 있습니다 — 값은 공격과 **같습니다.**
+         *
+         * 다르게 매기고 싶은 유혹이 있었습니다(스킬은 쿨다운을 태우니까
+         * 더 비싸게, 같은). 안 했습니다: 규칙이 둘이면 플레이어는 둘 다
+         * 못 외우고, "이번엔 왜 안 나가지"만 남습니다. 쿨다운을 날린다는
+         * 손해 자체가 이미 스킬 쪽 추가 대가입니다.
+         */
+        if (phase !== AttackPhase.Recovery && tryDodgeCancel()) break
 
         if (phase === AttackPhase.Windup) {
           // 지점 지정 스킬도 몸은 시전 방향으로 돌아야 자세가 자연스럽습니다.
