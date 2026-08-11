@@ -41,6 +41,7 @@
     "bypass": "node tools/bypass-probe.mjs",
     "trap": "node tools/trap-probe.mjs",
     "contrast": "node tools/contrast-probe.mjs",
+    "secret": "node tools/secret-probe.mjs",
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",
