@@ -118,9 +118,17 @@ try {
       const t0 = now()
       let killed = false
       let slot = 0
-      const dl = Date.now() + 240000
+      let wasWinding = false
+      const dl = Date.now() + 150000
 
-      while (now() - t0 < 180 && Date.now() < dl) {
+      /**
+       * 판당 상한 90초. 처음엔 180초로 뒀다가 **전체가 시간 제한에 걸려**
+       * 결과를 하나도 못 봤습니다(5판 × 180초 > 900초). 실험대는 벤치와
+       * 달리 여러 판을 빨리 돌려 폭을 보는 것이 목적이므로, 한 판이 길면
+       * 목적 자체가 무너집니다. 90초를 넘기면 그 판은 "시간초과"로 남기고
+       * 넘어갑니다 — 안 끝나는 것도 정보입니다.
+       */
+      while (now() - t0 < 90 && Date.now() < dl) {
         const be = G.bossEncounter()
         if (!be || be.hp <= 0) {
           killed = true
@@ -152,8 +160,30 @@ try {
         if (dist > 3.2) G.teleportPlayer(info.x - 2.6, info.z)
         G.aimAtWorld(info.x, info.z)
 
-        if (info.winding) {
+        /**
+         * ⚠️ 처음엔 `예고 중이면 구른다`로 두었다가 결과가 뒤집혔습니다:
+         *
+         *     1단계 화력 34.1/초 → 3단계 **2.9/초** · 처치 0/3판
+         *
+         * 벤치는 화력이 **오른다**고 하는데 실험대는 12배 떨어진다고 했습니다.
+         * 원인은 보스가 아니라 정책이었습니다. 3단계는 쿨다운이 0.55배라
+         * 예고가 거의 끊이지 않는데, `예고 중이면 구른다`는 매 프레임 구르기만
+         * 시도합니다. 스태미나가 마르면 **아무것도 안 하고 서 있습니다** —
+         * 공격은 `else` 가지에 있으니 영영 안 옵니다.
+         *
+         * 그래서 예고 **한 번에 한 번만** 구르고, 스태미나가 모자라면
+         * 그냥 때립니다. 사람이 하는 것도 그것입니다 — 못 구르면 맞더라도
+         * 넣습니다. 여전히 결정적이고(같은 규칙), 굶지 않습니다.
+         */
+        const stam = G.state().player.stamina
+        const newTelegraph = info.winding && !wasWinding
+        wasWinding = info.winding
+        if (newTelegraph && stam >= 25) {
           tap('Space')
+        } else if (info.winding && stam < 25) {
+          tap('Mouse0')
+        } else if (info.winding) {
+          // 이미 이 예고에 대응했습니다 — 겹쳐 구르지 않습니다.
         } else {
           const ready = G.slotCooldowns().filter((s) => !s.empty && s.cd <= 0)
           if (ready.length > 0) {
