@@ -3250,6 +3250,15 @@ declare global {
         count: number
       }
       breakEnemy: (entity: number) => void
+      /** 무기별 구르기 — 거리·시간·무적창·값. 프로브가 arsenal 을 안 읽게. */
+      dodgeScales: () => {
+        id: string
+        name: string
+        distance: number
+        duration: number
+        staminaCost: number
+        iFrames: number
+      }[]
       weaponTable: () => {
         id: string
         name: string
@@ -3616,6 +3625,27 @@ window.__game = {
    * 프로브가 arsenal.ts 의 숫자를 베껴 적으면, 무기를 손보는 순간
    * "무기가 서로 다른가"라는 검증이 조용히 옛 무기를 재게 됩니다.
    */
+  /**
+   * 무기별 구르기 — **거리·시간·값**을 한 줄로.
+   *
+   * 프로브가 arsenal.ts 를 읽어 계산하지 않게 게임이 내줍니다. 특히 거리는
+   * `rules` 의 "🟡 반경 > 구르기" 약속이 걸린 값이라, 여기서 나오는 숫자가
+   * 곧 그 검사의 근거가 됩니다.
+   */
+  dodgeScales: () =>
+    WEAPONS.map((w) => ({
+      id: w.id,
+      name: w.name,
+      distance: PLAYER_CFG.dodge.distance,
+      duration: Number((PLAYER_CFG.dodge.duration * (w.dodgeDurationScale ?? 1)).toFixed(3)),
+      staminaCost: Number((PLAYER_CFG.dodge.staminaCost * (w.dodgeCostScale ?? 1)).toFixed(1)),
+      iFrames: Number(
+        (
+          (PLAYER_CFG.dodge.iFrameEnd - PLAYER_CFG.dodge.iFrameStart) *
+          (w.dodgeDurationScale ?? 1)
+        ).toFixed(3),
+      ),
+    })),
   weaponTable: () =>
     WEAPONS.map((w) => ({
       id: w.id,

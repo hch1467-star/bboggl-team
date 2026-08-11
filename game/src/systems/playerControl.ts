@@ -454,7 +454,8 @@ function beginDrink(p: number): void {
 
 function beginDodge(p: number, dirX: number, dirZ: number): void {
   Actor.state[p] = ActorState.Dodge
-  Actor.timer[p] = PLAYER.dodge.duration
+  // 무기마다 구르는 시간이 다릅니다 — 거리는 같고 속도만(arsenal.ts 설계 노트).
+  Actor.timer[p] = PLAYER.dodge.duration * (weaponOf(p).dodgeDurationScale ?? 1)
   Actor.comboIndex[p] = 0
   /**
    * ⚠️ **공격 선입력을 지우지 않습니다.** (예전에는 지웠습니다.)
@@ -1128,16 +1129,22 @@ export function playerControlSystem(ctx: ControlContext): void {
       case ActorState.Dodge: {
         Player.dodgeElapsed[p] += dt
         const d = PLAYER.dodge
-        const progress = Math.min(1, Player.dodgeElapsed[p] / d.duration)
+        /**
+         * 무기마다 구르는 **시간**이 다릅니다(arsenal.ts dodgeDurationScale).
+         * 거리는 그대로라, 빠른 무기는 같은 4.2m 를 더 빨리 지나갑니다 —
+         * `distance / dur` 가 그만큼 커지므로 속도 곡선이 알아서 맞습니다.
+         */
+        const dur = d.duration * (weapon.dodgeDurationScale ?? 1)
+        const progress = Math.min(1, Player.dodgeElapsed[p] / dur)
         // 속도 곡선: 시작이 빠르고 끝이 느립니다. 등속으로 굴리면
         // "미끄러지는" 느낌이 나고 무적 타이밍도 읽기 어려워집니다.
         // (1.6 - 1.2t)의 0~1 적분이 정확히 1이라 총 이동거리는 distance가 됩니다.
-        const speed = (d.distance / d.duration) * (1.6 - 1.2 * progress)
+        const speed = (d.distance / dur) * (1.6 - 1.2 * progress)
         Velocity.x[p] = Player.dodgeDirX[p] * speed
         Velocity.z[p] = Player.dodgeDirZ[p] * speed
         moveScale = 0
 
-        if (Player.dodgeElapsed[p] >= d.duration) {
+        if (Player.dodgeElapsed[p] >= dur) {
           Actor.state[p] = ActorState.Idle
           Player.dodgeCooldownT[p] = d.cooldown
           /**

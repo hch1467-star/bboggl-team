@@ -898,7 +898,16 @@ export function isInIFrames(e: number): boolean {
   if (!hasComponent(Player, e)) return false
   if (Actor.state[e] === ActorState.Dodge) {
     const t = Player.dodgeElapsed[e]
-    return t >= PLAYER.dodge.iFrameStart && t <= PLAYER.dodge.iFrameEnd
+    /**
+     * 무적 창도 구르기 시간과 **같은 배율**로 늘고 줍니다.
+     *
+     * 절대 시간으로 고정해 두면, 빠른 무기는 구르기의 더 큰 **비율**이
+     * 무적이 되어 "값도 싸고 무적도 길다"는 이중 특혜가 됩니다. 비율을
+     * 맞추면 남는 차이는 템포 하나입니다 — 그리고 빠른 무기는 무적 창이
+     * 절대 시간으로 짧아져 **완벽 회피가 더 빡빡해집니다.** 공짜가 아닙니다.
+     */
+    const scale = weaponOf(e).dodgeDurationScale ?? 1
+    return t >= PLAYER.dodge.iFrameStart * scale && t <= PLAYER.dodge.iFrameEnd * scale
   }
   if (Actor.state[e] === ActorState.Skill) {
     const def = skillForSlot(e, Actor.skillSlot[e])

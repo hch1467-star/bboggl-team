@@ -81,6 +81,25 @@ try {
     `가장 작은 노랑 ${minSweep}m vs 구르기 ${t.dodgeDistance}m` +
       ` · ${sweeps.map((a) => `${a.from} ${a.reach}m`).join(' · ')}`,
   )
+  /**
+   * ⚠️ 위 검사는 구르기 거리를 **하나**로 봅니다. 무기마다 구르기가 달라지는
+   *    순간 그 전제가 조용히 깨집니다 — 가벼운 무기 하나만 4.6m 를 넘겨도
+   *    그 무기에게는 🟡 이 그냥 🔴 이 되고, 색이 하나 사라집니다.
+   *
+   *    지금은 무기마다 **시간**만 다르고 거리는 같게 만들어 두었습니다
+   *    (arsenal.ts dodgeDurationScale). 그 약속을 여기서 못 박습니다 —
+   *    누가 무기별 거리를 넣는 순간 이 줄이 먼저 막습니다.
+   */
+  const weapons = await page.evaluate(() => window.__game.weaponTable())
+  const dodgeScales = await page.evaluate(() => window.__game.dodgeScales())
+  const maxDodge = Math.max(...dodgeScales.map((w) => w.distance))
+  check(
+    maxDodge < minSweep,
+    '무기를 바꿔도 구르기 거리는 그대로다 (가장 긴 구르기 < 가장 작은 노랑)',
+    `가장 긴 구르기 ${maxDodge}m vs 노랑 ${minSweep}m · ` +
+      dodgeScales.map((w) => `${w.name} ${w.distance}m/${w.duration}초`).join(' · '),
+  )
+  void weapons
 
   // ---- 2. 🔴 빨강은 **좁아서** 옆으로 굴러 빠져나온다 ----
   //
