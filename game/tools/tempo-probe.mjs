@@ -149,31 +149,48 @@ try {
   //
   // 기력을 가득 채워 두고 잽니다. 모자란 경우는 바로 다음 검사입니다 —
   // 한 실험에 변수를 둘 넣으면 실패했을 때 어느 쪽 때문인지 못 가립니다.
+  /**
+   * ⚠️ **"굴렀다"로는 취소인지 아닌지 못 가립니다.**
+   *
+   * 처음엔 "누르고 0.15초 안에 구르기 상태가 되면 취소"로 셌습니다.
+   * 그런데 기본 공격의 선행동작은 0.1초대라, 그 사이에 후딜까지 가서
+   * **원래부터 있던 후딜 탈출**이 나가도 똑같이 보입니다. 실제로 기력을
+   * 40 으로 낮춘 검사가 그 이유로 잘못 통과했습니다(취소된 게 아니라
+   * 후딜에서 나간 것이었습니다).
+   *
+   * 그래서 시각으로 추측하지 않고 **게임이 센 횟수**(`inputCancels`)를
+   * 읽습니다. 취소인지 아닌지는 그 분기를 실제로 탄 코드만 알고,
+   * 이 프로젝트의 규칙은 "게임이 판정하고 실험대는 읽는다" 입니다.
+   */
   const cancelCost = t.dodgeStaminaCost + t.dodgeCancelExtraCost
   const attackRoll = await lab(`
     G.setStamina(100)
     tap('Mouse0')
     const atk = await until(() => st() === St.attack, 1.0)
     if (atk < 0) return { ok: false, why: '공격이 시작되지 않음' }
-    const before = G.snapshot().player.stamina
-    // 선행동작 한복판에서 누릅니다.
-    await wait(0.05)
+    const before = G.state().player.stamina
+    const cancelsBefore = G.runStats().inputCancels
     const pressedAt = now()
     tap('Space')
     const dodgedAt = await until(() => st() === St.dodge, 2.5)
     // 굴러 나간 **직후** 기력을 읽습니다 — 회복이 붙기 전이어야 합니다.
-    const after = G.snapshot().player.stamina
-    return { ok: dodgedAt > 0, delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1, spent: before - after }
+    const after = G.state().player.stamina
+    return {
+      ok: dodgedAt > 0,
+      delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1,
+      spent: before - after,
+      cancels: G.runStats().inputCancels - cancelsBefore,
+    }
   `)
-  // 프레임이 ~0.1초이므로 "즉시"는 한 프레임 안쪽을 뜻합니다.
-  const instant = attackRoll.ok && attackRoll.delay <= 0.15
   check(
-    attackRoll.ok && instant,
-    '공격 선행동작 중에 누른 구르기가 **즉시** 나간다 (취소 회피)',
-    attackRoll.ok ? `누르고 ${attackRoll.delay.toFixed(2)}초 뒤` : attackRoll.why || '끝내 안 나감',
+    attackRoll.ok && attackRoll.cancels === 1,
+    '공격 중에 누른 구르기가 공격을 **끊고** 나간다 (취소 회피)',
+    attackRoll.ok
+      ? `취소 ${attackRoll.cancels}회 · 누르고 ${attackRoll.delay.toFixed(2)}초 뒤`
+      : attackRoll.why || '끝내 안 나감',
   )
   check(
-    attackRoll.ok && Math.abs(attackRoll.spent - cancelCost) < 3,
+    attackRoll.cancels === 1 && Math.abs(attackRoll.spent - cancelCost) < 3,
     `취소에는 추가 기력이 붙는다 (기본 ${t.dodgeStaminaCost} + 추가 ${t.dodgeCancelExtraCost})`,
     attackRoll.ok ? `실제로 ${attackRoll.spent.toFixed(1)} 소모` : '측정 못 함',
   )
@@ -189,21 +206,23 @@ try {
     // 취소에는 모자라고 **일반 구르기에는 충분한** 값으로 맞춥니다.
     // 이래야 "구르기 자체가 안 되는 것"과 "취소만 안 되는 것"이 갈립니다.
     G.setStamina(${(cancelCost - 5).toFixed(0)})
-    await wait(0.05)
+    const cancelsBefore = G.runStats().inputCancels
     const pressedAt = now()
     tap('Space')
-    await wait(0.15)
-    const cancelled = st() === St.dodge
     const dodgedAt = await until(() => st() === St.dodge, 2.5)
-    return { ok: true, cancelled, delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1 }
+    return {
+      ok: true,
+      cancels: G.runStats().inputCancels - cancelsBefore,
+      delay: dodgedAt > 0 ? dodgedAt - pressedAt : -1,
+    }
   `)
   check(
-    poorCancel.ok && poorCancel.cancelled === false,
+    poorCancel.cancels === 0,
     '⚠️ 기력이 모자라면 취소되지 않는다 (값이 실제로 막는다)',
-    poorCancel.cancelled ? '기력이 없는데도 취소됐습니다' : '선행동작은 끝까지 갑니다',
+    poorCancel.cancels > 0 ? '기력이 없는데도 끊고 나갔습니다' : '공격은 끝까지 갑니다',
   )
   check(
-    poorCancel.ok && poorCancel.delay > 0,
+    poorCancel.cancels === 0 && poorCancel.delay > 0,
     '…대신 눌러 둔 것은 살아남아 후딜에서 나간다 (버려지지 않는다)',
     poorCancel.delay > 0 ? `누르고 ${poorCancel.delay.toFixed(2)}초 뒤` : '끝내 안 나감',
   )

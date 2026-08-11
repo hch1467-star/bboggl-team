@@ -192,16 +192,62 @@ try {
       await new Promise((r) => setTimeout(r, 8))
     }
     if (opened <= 0) return { opened: 0 }
-    // 창이 열린 채로 한 대 칩니다. 창은 이 한 방에 닫혀야 합니다.
+    /**
+     * ⚠️ **굴렀으면 멀어져 있습니다.** 처음엔 그 자리에서 그냥 쳤는데
+     * 치명타 0회였습니다 — 기능이 아니라 계측기 문제였습니다. 구르기는
+     * 4.2m 를 가고 무기 사거리는 그보다 짧으니, 헛방을 친 것입니다.
+     *
+     * 사람이 실제로 하는 것을 그대로 합니다: **다가가서** 칩니다.
+     * 이 재현이 중요한 이유가 하나 더 있습니다 — 다가가는 데 드는
+     * 시간이 창보다 길면 보상은 설계상 못 받는 것이 됩니다.
+     * 그러면 고칠 곳은 창 길이지 프로브가 아닙니다.
+     */
+    const held = new Set()
+    const hold = (k) => { if (!held.has(k)) { held.add(k); G.press(k) } }
+    const release = (k) => { if (held.has(k)) { held.delete(k); G.release(k) } }
+    const moveToward = (dx, dz) => {
+      const cam = G.cameraAxes()
+      const fwd = dx * cam.forwardX + dz * cam.forwardZ
+      const right = dx * cam.rightX + dz * cam.rightZ
+      const dead = 0.25
+      fwd > dead ? hold('KeyW') : release('KeyW')
+      fwd < -dead ? hold('KeyS') : release('KeyS')
+      right > dead ? hold('KeyD') : release('KeyD')
+      right < -dead ? hold('KeyA') : release('KeyA')
+    }
     const critsBefore = G.state().critHits
+    const openedAt = G.state().simElapsed
+    let dist = 99
+    // 창이 남아 있는 동안만 다가갑니다 — 창 밖에서 때리면 검사가 무의미합니다.
+    while (G.focusInfo().critT > 0) {
+      const info = G.enemyInfo(e)
+      const p = G.state().player
+      if (!info) break
+      dist = Math.hypot(info.x - p.x, info.z - p.z)
+      if (dist < 2.0) break
+      moveToward(info.x - p.x, info.z - p.z)
+      // 겨냥은 매 프레임 적에게. 안 하면 다가가긴 해도 **딴 데를 칩니다.**
+      G.aimAtWorld(info.x, info.z)
+      await new Promise((r) => setTimeout(r, 8))
+    }
+    for (const k of [...held]) release(k)
+    const closedIn = G.state().simElapsed - openedAt
+    // 창이 열린 채로 한 대 칩니다. 창은 이 한 방에 닫혀야 합니다.
+    const info2 = G.enemyInfo(e)
+    if (info2) G.aimAtWorld(info2.x, info2.z)
+    const hpBefore = info2 ? info2.hp : 0
     G.press('Mouse0')
     G.release('Mouse0')
     await window.__t.runFor(0.9)
     return {
       opened,
       win,
+      dist: Number(dist.toFixed(2)),
+      closedIn: Number(closedIn.toFixed(2)),
       closed: G.focusInfo().critT,
       crits: G.state().critHits - critsBefore,
+      // 맞았는지부터 확인합니다 — 헛방이면 창이 소비된 게 아니라 만료된 것입니다.
+      landed: (() => { const i = G.enemyInfo(e); return i ? Number((hpBefore - i.hp).toFixed(1)) : -1 })(),
     }
   })
   check(
@@ -213,9 +259,9 @@ try {
   )
   check(
     critWindow.opened > 0 && critWindow.crits >= 1 && critWindow.closed === 0,
-    '그 창에서 때리면 치명타가 나고 창이 닫힌다 (한 방만)',
+    '그 창에서 다가가 때리면 치명타가 나고 창이 닫힌다 (한 방만)',
     critWindow.opened > 0
-      ? `치명타 ${critWindow.crits}회 · 남은 창 ${critWindow.closed}초`
+      ? `${critWindow.closedIn}초 걸려 ${critWindow.dist}m 까지 접근 · ${critWindow.landed} 피해 · 치명타 ${critWindow.crits}회 · 남은 창 ${critWindow.closed}초`
       : '앞 검사가 실패해 잴 수 없었습니다',
   )
 
