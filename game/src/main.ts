@@ -23,7 +23,14 @@ import {
   WEAPON_UPGRADE,
   WORLD,
 } from './config/balance'
-import { INTENT_COLOR, INTENT_EMOJI, INTENT_LABEL, attackAt, attacksFor } from './config/enemyAttacks'
+import {
+  INTENT_COLOR,
+  INTENT_EMOJI,
+  INTENT_LABEL,
+  SNARE_MOVE_SCALE,
+  attackAt,
+  attacksFor,
+} from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { ENEMY_DEFS, enemyDef, kindFromId } from './config/enemies'
 import {
@@ -2218,6 +2225,12 @@ class Game {
     /** 플레이어 이동 속도(m/s) — "지나가는 데 몇 초"를 프로브가 직접 계산하도록. */
     playerMoveSpeed: number
     playerRadius: number
+    /**
+     * 🔵 속박에 걸렸을 때의 걷기 배율. 이 색의 **정답이 왜 무적 프레임인지**를
+     * 검사하려면 필요합니다 — 속박이 무는 것은 "걷기"뿐이라서, 뒤따르는
+     * 🟡(걸어서 이탈)을 못 걸어 나오는지가 이 색의 존재 이유입니다.
+     */
+    snareMoveScale: number
   } {
     return {
       maxClimb: MAX_CLIMB,
@@ -2248,6 +2261,7 @@ class Game {
       levelAggroMax: LEVEL_AGGRO_MAX,
       playerMoveSpeed: PLAYER_CFG.moveSpeed,
       playerRadius: PLAYER_CFG.radius,
+      snareMoveScale: SNARE_MOVE_SCALE,
     }
   }
 
@@ -3076,6 +3090,15 @@ declare global {
           /** 예고 길이와 부채꼴 — 색끼리의 **관계**를 검사하려면 필요합니다 */
           windup: number
           arcDeg: number
+          /**
+           * 판정·후딜. 연계가 **언제 오는지**는 이 둘이 정합니다
+           * (판정 끝 → 후딜 끝 → 다음 예고 시작). 🔵 속박이 다음 공격까지
+           * 살아 있는지를 재려면 프로브가 이 시간표를 알아야 합니다.
+           */
+          active: number
+          recovery: number
+          /** 🔵 이 공격에 맞으면 걸리는 속박 시간(초). 0이면 안 묶습니다. */
+          snare: number
         }[]
       }[]
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
@@ -3488,6 +3511,9 @@ window.__game = {
           lungeSpeed: a.lungeSpeed ?? 0,
           windup: a.windup,
           arcDeg: a.arcDeg,
+          active: a.active,
+          recovery: a.recovery,
+          snare: a.snare ?? 0,
         })),
       }
     }),

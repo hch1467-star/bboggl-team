@@ -137,6 +137,105 @@ try {
       .join(' · '),
   )
 
+  /**
+   * ---- 1c. 🔵 속박의 **정답이 왜 무적 프레임인가** ----
+   *
+   * DESIGN.md 4색 표: *"🔵 파랑 — 반드시 무적 프레임. 맞으면 묶여서
+   * **다음 공격을 못 피합니다.** 피해는 12로 작습니다 — 무서운 건 다음입니다."*
+   *
+   * 이 색은 **피해로 벌하지 않습니다.** 그러니 "다음을 못 피한다"가 거짓이면
+   * 🔵 는 12뎀짜리 약한 🔴 이고, 색이 하나 장식이 됩니다. 그런데 그 문장이
+   * 성립하는지 **한 번도 확인한 적이 없습니다.**
+   *
+   * ⚠️ **처음 세운 잣대가 틀렸습니다. 기록으로 남깁니다.**
+   *    처음엔 "🔵 의 판정 시간 < 무적 창"으로 재려 했습니다. 무적으로 넘기려면
+   *    판정이 무적 창보다 짧아야 한다는 생각이었습니다. 틀렸고, 게다가
+   *    **이미 DESIGN.md 「머무는 판정」에 적혀 있는 내용**이었습니다 —
+   *    combat.ts 에서 **머무는 판정(`lingers`)은 🟡 뿐**입니다.
+   *    나머지 색은 판정이 뜨는 **첫 프레임 한 번**만 해석되고 `hitsLeft` 가
+   *    바로 0이 됩니다. 즉 🔵 의 판정 0.14초는 무적과 아무 상관이 없고,
+   *    그 검사는 **통과해도 아무것도 증명하지 못했을** 것입니다.
+   *
+   * 코드를 읽고 나서야 진짜 약속이 보였습니다. 속박이 실제로 하는 일은
+   * playerControl.ts 에 못박혀 있습니다:
+   *
+   *   > **회피 구르기와 대시는 막지 않습니다.** … 걷는 속도만 죽여서
+   *   > **다음 예고를 피하기 어렵게** 만드는 것이 이 상태이상의 전부입니다.
+   *
+   * 그러면 속박이 **막을 수 있는 색은 하나뿐**입니다 — 정답이 "걸어서 이탈"인
+   * 🟡. 뒤에 🔴 가 오면 구르면 그만이라 속박은 거의 공짜입니다.
+   * 그래서 이 검사는 **🔵 → 🟡 연계**를 봅니다. 그 연계에서 묶인 몸으로
+   * 걸어 나올 수 있으면, 이 색의 존재 이유가 통째로 무너집니다.
+   *
+   * 재는 법은 1b 와 **똑같은 식**이고 부호만 반대입니다:
+   *   · 안 묶였으면 예고 안에 걸어 나올 수 있어야 한다 (🟡 의 정답)
+   *   · 묶였으면 걸어 나올 수 **없어야** 한다 (🔵 의 존재 이유)
+   */
+  const SNARE = 2
+  const bossPhases = await page.evaluate(() => window.__game.bossTuning())
+  const bossDef = roster.find((r) => r.attacks.some((a) => a.intent === SNARE && a.snare > 0))
+  const snareChains = []
+  for (const ph of bossPhases) {
+    for (const [fromId, toId] of Object.entries(ph.chains ?? {})) {
+      const from = attacks.find((a) => a.id === fromId)
+      const to = attacks.find((a) => a.id === toId)
+      if (!from || !to) continue
+      if (from.intent !== SNARE || to.intent !== SWEEP) continue
+      // 이 페이즈의 **실제** 예고 길이(페이즈 배율이 이미 곱해져 나옵니다).
+      const windup = ph.windups.find((w) => w.id === toId)?.seconds ?? to.windup
+      /**
+       * 시간표: 속박은 **판정 첫 프레임**에 걸립니다. 거기서부터
+       * 남은 판정 → 후딜 → (연계는 쿨다운 없이) 다음 예고 시작.
+       */
+      const toWindupStart = from.active + from.recovery
+      const left = Math.max(0, from.snare - toWindupStart)
+      const bound = Math.min(left, windup)
+      const free = windup - bound
+      const gap = t.playerRadius + (bossDef?.radius ?? 0)
+      snareChains.push({
+        phase: ph.name,
+        from: fromId,
+        to: toId,
+        need: to.reach - gap,
+        walkFree: t.playerMoveSpeed * windup,
+        walkBound: t.playerMoveSpeed * (t.snareMoveScale * bound + free),
+        bound,
+      })
+    }
+  }
+  /**
+   * ⚠️ **비어 있으면 통과가 아니라 실패입니다.** 🔵 뒤에 🟡 이 하나도 안 오면
+   *    위 검사는 아무것도 안 보고 조용히 통과합니다 — 이 저장소에서 가장
+   *    비싼 고장이 늘 "아무 말도 안 하는 계측기"였습니다.
+   */
+  check(
+    snareChains.length > 0,
+    '🔵 뒤에 🟡 이 실제로 이어진다 (속박이 물 것이 있다)',
+    snareChains.length
+      ? snareChains.map((c) => `${c.phase} ${c.from}→${c.to}`).join(' · ')
+      : '🔵→🟡 연계가 없습니다 — 속박은 구르기를 안 막으므로 물 색이 없습니다',
+  )
+  if (snareChains.length) {
+    check(
+      snareChains.every((c) => c.walkFree > c.need),
+      '   ↳ 안 묶였으면 그 🟡 을 걸어서 빠져나온다 (🟡 의 정답이 여기서도 산다)',
+      snareChains
+        .map((c) => `${c.to} ${c.need.toFixed(1)}m 필요 / 자유 ${c.walkFree.toFixed(1)}m`)
+        .join(' · '),
+    )
+    check(
+      snareChains.every((c) => c.walkBound < c.need),
+      '   ↳ **묶이면** 그 🟡 을 걸어서 못 빠져나온다 (🔵 이 색인 이유)',
+      snareChains
+        .map(
+          (c) =>
+            `${c.to} ${c.need.toFixed(1)}m 필요 / 묶인 채 ${c.walkBound.toFixed(1)}m` +
+            ` (예고 중 ${c.bound.toFixed(2)}초 묶임)`,
+        )
+        .join(' · '),
+    )
+  }
+
   // ---- 2. 🔴 빨강은 **좁아서** 옆으로 굴러 빠져나온다 ----
   //
   // ⚠️ 처음엔 "빨강 사거리 < 구르기 거리"로 적었다가 걸렸습니다 —
