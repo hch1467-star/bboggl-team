@@ -62,6 +62,8 @@ console.log(
 )
 
 const logs = []
+/** 벽시계에 걸려 잘린 판 수 — 집계에는 안 들어가지만 반드시 보고합니다. */
+let wallCut = 0
 for (let i = 0; i < RUNS; i++) {
   const out = path.join(dir, `run${i}.json`)
   process.stdout.write(`  ${i + 1}/${RUNS}판 도는 중… `)
@@ -78,12 +80,36 @@ for (let i = 0; i < RUNS; i++) {
     continue
   }
   const log = JSON.parse(readFileSync(out, 'utf8'))
+  /**
+   * ── 벽시계로 잘린 판은 **집계에 넣지 않습니다** ──────────────────
+   *
+   * 이 컨테이너는 GPU 가 없어 프레임률이 판마다 흔들립니다. 같은 420
+   * 시뮬레이션초가 벽시계로는 452~900초 넘게까지 벌어졌습니다. 예전에는
+   * 900초를 넘기면 자식이 통째로 죽어 **그 판의 모든 것이 사라졌습니다**
+   * (3판 중 2판이 그렇게 날아가 아무 결론도 못 낸 벤치가 있었습니다).
+   *
+   * 이제는 판이 스스로 멈추고 기록을 남기지만, 그 기록을 다른 판과
+   * 섞으면 안 됩니다. 중간에 잘린 판은 처치도 피해도 적으니 **"쉬웠던
+   * 판"처럼 보여** 모든 중앙값을 아래로 끌어내립니다. 그건 게임이 아니라
+   * 기계를 재는 것입니다.
+   */
+  if (log.wallStopped) {
+    wallCut++
+    console.log(`⏱️ 벽시계로 잘림 — 집계에서 뺍니다 (${secs}초)`)
+    continue
+  }
   logs.push(log)
   console.log(
     `${log.clearedAt > 0 ? `★ ${log.clearedAt}초 클리어` : '클리어 못함'} · 사망 ${log.deaths} (${secs}초)`,
   )
 }
 rmSync(dir, { recursive: true, force: true })
+
+if (wallCut > 0) {
+  console.log(
+    `\n  ⚠️ ${RUNS}판 중 ${wallCut}판이 **기계가 느려** 중간에 잘렸습니다 — 아래 수치는 나머지 ${logs.length}판입니다.`,
+  )
+}
 
 if (logs.length < 2) {
   console.log('\n❌ 판이 2개 미만이라 집계할 수 없습니다\n')

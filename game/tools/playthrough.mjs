@@ -28,6 +28,27 @@ const PORT = 5191
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 /** 시뮬레이션 기준 최대 플레이 시간(초). 넘으면 "막혔다"로 봅니다. */
 const TIME_LIMIT = Number(process.env.PLAY_LIMIT ?? 420)
+/**
+ * ── 벽시계 안전줄(초) ──────────────────────────────────────────────
+ *
+ * 위 제한은 **시뮬레이션 시간**입니다. 그게 옳습니다 — 프레임률이 흔들려도
+ * 같은 양의 게임을 재려면 시뮬레이션 시계를 봐야 합니다.
+ *
+ * 그런데 그 때문에 **벽시계로는 얼마나 걸릴지 알 수 없습니다.** 이 컨테이너는
+ * GPU 가 없어 ~10fps 로 도는데, 그 값이 판마다 흔들립니다. 실제로 이렇게
+ * 나왔습니다 (같은 420 시뮬레이션초):
+ *
+ *     452초 · 593초 · 692초 · 550초 · 900초↑ · 900초↑
+ *
+ * bench.mjs 는 자식 프로세스를 900초 벽시계로 죽입니다. 죽으면 JSON 을
+ * 못 쓰고 **그 판의 모든 것이 사라집니다.** 실제로 3판 중 2판이 그렇게
+ * 통째로 날아갔고, 그 벤치는 아무 결론도 못 냈습니다.
+ *
+ * 그래서 스스로 먼저 멈춥니다. 잘린 판은 `wallStopped` 로 표시해서
+ * 벤치가 **집계에서 빼되 몇 판이 잘렸는지는 말하게** 합니다. 조용히
+ * 섞이면 "짧게 끝난 판"으로 오해되어 모든 수치를 아래로 끌어내립니다.
+ */
+const WALL_LIMIT = Number(process.env.PLAY_WALL ?? 720)
 
 const server = await createServer({ root: '.', server: { port: PORT }, logLevel: 'error' })
 await server.listen()
@@ -48,7 +69,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -426,7 +447,14 @@ try {
       if (recentActs.length > 90) recentActs.shift()
     }
 
+    const wallDeadline = Date.now() + WALL * 1000
+    let wallStopped = false
     while (now() - t0 < LIMIT) {
+      // 벽시계 안전줄 — 기계가 느린 판을 통째로 잃지 않기 위한 것(위 설계 노트).
+      if (Date.now() > wallDeadline) {
+        wallStopped = true
+        break
+      }
       const st = G.state()
       const vi = G.vialInfo()
       const p = st.player
@@ -1860,6 +1888,8 @@ try {
         .map(([name, seconds]) => ({ name, seconds: Number(seconds.toFixed(1)) }))
         .sort((a, b) => b.seconds - a.seconds),
       hitLimit: now() - t0 >= LIMIT - 1,
+      /** 벽시계 안전줄에 걸려 **중간에 잘렸는가.** 집계에서 빼야 합니다. */
+      wallStopped,
       bossSwings: Object.entries(G.bossSwingLog()).map(([id, v]) => ({ id, ...v })),
       /** 적 종류별 휘두름/적중 — "이 적이 존에서 제 일을 하는가" */
       foeSwings: Object.entries(G.foeSwingLog?.() ?? {}).map(([id, v]) => ({ id, ...v })),
@@ -2028,7 +2058,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? ''])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
