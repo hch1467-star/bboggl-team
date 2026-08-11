@@ -43,6 +43,7 @@
     "contrast": "node tools/contrast-probe.mjs",
     "secret": "node tools/secret-probe.mjs",
     "retry": "node tools/retry-probe.mjs",
+    "teach": "node tools/teach-probe.mjs",
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",
