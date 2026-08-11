@@ -499,6 +499,7 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
   console.log(
     `  선입력         결말 ${fmt(pick(settled), 0)}회 중 이어짐 ${fmt(pick((l) => l.inputUsed ?? 0), 0)}회 ` +
       `(${fmt(pick((l) => Math.round(((l.inputUsed ?? 0) / Math.max(1, settled(l))) * 100)), 0)}%) · ` +
+    `공격 끊고 구르기 ${fmt(pick((l) => l.inputCancels ?? 0), 0)}회 · ` +
       `버려짐(만료) ${fmt(pick((l) => l.inputExpired ?? 0), 0)}회`,
   )
   console.log(

@@ -1862,6 +1862,13 @@ try {
       deaths: G.runStats().deaths,
       // 이어짐 눈금 — 봇이 세는 게 아니라 **게임이 센 것**을 그대로 받습니다.
       inputUsed: G.runStats().inputUsed,
+      /**
+       * 공격을 끊고 구른 횟수. **A/B 를 8판 돌리고 나서야 이게 없다는 걸
+       * 알았습니다.** 취소 회피를 켜고 끄고 비교했는데, 정작 봇이 그 기능을
+       * 몇 번 썼는지 모르는 채였습니다 — 차이가 없어도 "효과가 없다"인지
+       * "쓰이질 않았다"인지 가릴 수가 없습니다.
+       */
+      inputCancels: G.runStats().inputCancels ?? 0,
       inputExpired: G.runStats().inputExpired,
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,
