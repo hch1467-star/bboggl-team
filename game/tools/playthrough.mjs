@@ -28,15 +28,30 @@ const PORT = 5191
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 /** 시뮬레이션 기준 최대 플레이 시간(초). 넘으면 "막혔다"로 봅니다. */
 /**
- * 옛 돌기 조건으로 되돌리는 스위치 — `PLAY_NOFLANK=1`.
- * 봇 정책이 바뀌면 벤치의 기준선이 통째로 움직이므로, 옛것과 새것을
- * **번갈아** 돌려 견줄 수 있어야 합니다.
+ * 돌기를 **후딜에만** 하도록 좁히는 스위치 — `PLAY_RECOVERY_ONLY=1`.
+ *
+ * ── 기본값이 "아무 때나"인 이유 (재서 정했습니다) ──────────────────
+ * 실험대(`npm run flank`)는 분명히 말했습니다: **판정 중에 적 둘레를 돌면
+ * 잡몹 기준 매번 −14, 후딜부터 돌면 −0.** 그래서 후딜로 좁히는 것이
+ * 옳아 보였습니다. 그런데 존에서 네 판을 견주니 정반대였습니다:
+ *
+ *   짝1  백어택 25% → 16% · 받은피해 425 → 463 · 클리어 → 실패
+ *   짝2  백어택 31% → 15% · 받은피해 128 → 547 · 사망 0 → 1
+ *
+ * **세 지표 모두, 두 짝 모두** 좁힌 쪽이 나빴습니다. 이유는 짐작이 갑니다 —
+ * 후딜은 짧고, 여럿이 달려드는 존에서는 그 창을 잡을 기회 자체가 드뭅니다.
+ * 창을 기다리다 **아무것도 안 하는 시간**이, 가끔 칼에 스치는 값보다 비쌌습니다.
+ *
+ * > 실험대가 옳았던 것은 **국소적인 사실**(그 순간 덜 맞는다)이고,
+ * > 존이 답한 것은 **정책**(그렇게 놀면 손해다)입니다. 둘 다 참입니다.
+ *
+ * 그래서 기본은 넓게 두고, 좁힌 쪽은 스위치로 남겨 다음에 다시 잽니다.
  *
  * ⚠️ 봇의 판단 고리는 **브라우저 안에서** 돕니다(`page.evaluate`). 그래서
  *    이 상수를 그냥 참조하면 `ReferenceError` 로 죽습니다 — 실제로 그렇게
  *    네 판을 통째로 날렸습니다. 값은 **인자로 넘겨야** 합니다.
  */
-const OLD_FLANK = process.env.PLAY_NOFLANK === '1'
+const RECOVERY_ONLY = process.env.PLAY_RECOVERY_ONLY === '1'
 
 const TIME_LIMIT = Number(process.env.PLAY_LIMIT ?? 420)
 /**
@@ -89,7 +104,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, OLD_FLANK]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -1301,7 +1316,7 @@ try {
          *
          * 구간 판정은 게임의 `recovering` 을 읽습니다(봇이 시간을 세지 않게).
          */
-        const canWin = OLD_FLANK ? true : !!einfo && einfo.recovering
+        const canWin = RECOVERY_ONLY ? !!einfo && einfo.recovering : true
         if (circleUntil === 0 && es && !behindMe && canWin && near.dist < 4) circleUntil = now() + 1.2
         if (es && !behindMe && canWin && now() < circleUntil && near.dist < 4) {
           markAct('돌기')
@@ -2147,7 +2162,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, OLD_FLANK])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
