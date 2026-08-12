@@ -365,6 +365,28 @@ try {
       const st0 = G.runStats?.() ?? {}
       let lastBreak = st0.poiseBreaks ?? 0
       let lastFin = st0.bossFinishers ?? 0
+      /**
+       * 🧾 **연계도 구간별로 셉니다.**
+       *
+       * 설계는 *"1단계에는 연계가 없고, 2단계가 🔵→🔴 을, 3단계가 🟣→🔴 과
+       * 🔵→🟡 을 더한다"* 입니다. `npm run chain` 은 그 연계가 **걸리는지**를
+       * 강제로 확인하지만, **실제 싸움에서 몇 번이나 나오는지**는 아무도
+       * 안 셌습니다. 한 판에 한 번도 안 나오면 그 페이즈의 정체성은
+       * 화면에 없는 것과 같습니다 — 이 저장소가 보물 0개·연계 0회로
+       * 이미 두 번 겪은 모양입니다.
+       *
+       * ⚠️ **여기서 나온 0 을 게임 탓으로 읽으면 안 됩니다.** 이 실험대의
+       *    손은 쉬지 않고 때리므로 매 페이즈 보스를 무너뜨리고, 무너지면
+       *    예약이 취소됩니다. 실제 존 판에서는 예약 24 · 발동 21(88%)로
+       *    멀쩡히 나옵니다. 이 칸은 *"연계가 고장났나"* 가 아니라
+       *    **"공격을 안 멈추면 연계가 봉쇄되는가"** 를 재는 칸입니다.
+       *    (그 구분을 못 하고 방아쇠 가중치를 올렸다가 되돌렸습니다 —
+       *     enemyAI `chainShownPhase` 주석.)
+       */
+      const armed = [0, 0, 0]
+      const fired = [0, 0, 0]
+      let lastArmed = st0.chainsArmed ?? 0
+      let lastFired = st0.chainsFired ?? 0
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -413,14 +435,23 @@ try {
           fins[i] += (st.bossFinishers ?? 0) - lastFin
           lastFin = st.bossFinishers ?? 0
         }
+        if ((st.chainsArmed ?? 0) > lastArmed) {
+          armed[i] += (st.chainsArmed ?? 0) - lastArmed
+          lastArmed = st.chainsArmed ?? 0
+        }
+        if ((st.chainsFired ?? 0) > lastFired) {
+          fired[i] += (st.chainsFired ?? 0) - lastFired
+          lastFired = st.chainsFired ?? 0
+        }
         await sleep()
       }
-      return { intro: intro[0], trans: trans[0], phase, breaks, fins, killed: done }
+      return { intro: intro[0], trans: trans[0], phase, breaks, fins, armed, fired, killed: done }
     })
     shapes.push(r)
     console.log(
       `     ${run + 1}판 — 인트로 ${r.intro.toFixed(1)} · 전환 ${r.trans.toFixed(1)} · 1단계 ${r.phase[0].toFixed(1)} · 2단계 ${r.phase[1].toFixed(1)} · 3단계 ${r.phase[2].toFixed(1)}초` +
-        ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
+        ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
+        ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
     )
   }
 
