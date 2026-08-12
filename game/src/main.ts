@@ -3030,6 +3030,18 @@ class Game {
 
   /** 가장 가까운 적 (검증 및 디버깅용) */
   private nearestEnemy(): {
+    /**
+     * **엔티티 번호.** 이게 없어서 봇의 「등 뒤로 돌기」 가지가 **한 번도
+     * 실행되지 않았습니다.**
+     *
+     * 봇은 `G.entityState(near.entity)` 로 그 적의 방향을 읽으려 했는데,
+     * 이 객체에 `entity` 가 없어서 `undefined` 가 넘어갔고, 돌아온 null 이
+     * 그대로 조건을 막았습니다. **오류도 경고도 없었습니다** — 가지가
+     * 조용히 없는 것과 같아졌고, 그 상태로 여러 라운드 동안 "백어택이 왜
+     * 6~7% 인가"를 논했습니다. 자동 플레이 여덟 판의 가지 분포에서
+     * 「돌기」는 **0%**, 아예 목록에 없었습니다.
+     */
+    entity: number
     x: number
     z: number
     dist: number
@@ -3037,7 +3049,7 @@ class Game {
     playerBehind: boolean
   } | null {
     const p = this.playerEntity
-    let best: { x: number; z: number; dist: number; hp: number; playerBehind: boolean } | null = null
+    let best: { entity: number; x: number; z: number; dist: number; hp: number; playerBehind: boolean } | null = null
     const ids = enemyQuery.run()
     for (let i = 0; i < enemyQuery.count; i++) {
       const e = ids[i]
@@ -3056,6 +3068,7 @@ class Game {
           z: Transform.z[e],
           dist: d,
           hp: Health.hp[e],
+          entity: e,
           playerBehind: isBackAttack(p, e),
         }
       }
@@ -3138,6 +3151,7 @@ class Game {
         ? {
             x: Number(near.x.toFixed(3)),
             z: Number(near.z.toFixed(3)),
+            entity: near.entity,
             dist: Number(near.dist.toFixed(3)),
             hp: Number(near.hp.toFixed(1)),
             playerBehind: near.playerBehind,
