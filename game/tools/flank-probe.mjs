@@ -82,7 +82,9 @@ try {
       1.8,
       Math.min(...foe.attacks.map((a) => (a.minRange + Math.min(a.maxRange, a.reach)) / 2)),
     )
-    const r = await page.evaluate(async ([id, moveSpeed, playerR, stand]) => {
+    // 그 적의 가장 긴 판정 시간 — "판정이 끝난 뒤"를 게임 데이터로 정합니다.
+    const activeMax = Math.max(...foe.attacks.map((a) => a.active))
+    const r = await page.evaluate(async ([id, moveSpeed, playerR, stand, activeMax]) => {
       const G = window.__game
       const sleep = () => new Promise((res) => setTimeout(res, 8))
       const now = () => G.state().simElapsed
@@ -92,7 +94,22 @@ try {
         while (now() - t0 < sec && Date.now() < dl) await sleep()
       }
       const runs = []
-      for (let attempt = 0; attempt < 3; attempt++) {
+      /**
+       * ── **언제부터 돌기 시작하는가** 를 두 가지로 돌려 봅니다 ──────────
+       *
+       * 봇에게 "커밋하면 돌아라"를 가르쳤더니 네 판 비교에서 부호가 갈렸고,
+       * 한 판은 받은 피해가 192 늘었습니다. 기계 고장을 의심하기 전에
+       * **기제**를 하나 떠올렸습니다: 커밋에는 **판정(active)** 도 들어갑니다.
+       * 그때 적 둘레를 도는 것은 **휘두르는 칼 안으로 걸어 들어가는 것**이고,
+       * 🟡 광역은 판정이 예고 내내 **머무릅니다**(combat.ts lingers).
+       *
+       * 그래서 같은 자리에서 두 가지를 재서 가릅니다:
+       *   A. 판정이 뜨자마자 돌기
+       *   B. **판정이 끝난 뒤**(후딜부터) 돌기
+       * 사람이 하는 것은 B 입니다 — 맞을 것을 피하고 나서 돕니다.
+       */
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const waitActive = attempt % 2 === 1
         G.reset()
         await wait(0.4)
         G.clearEnemies()
@@ -119,6 +136,12 @@ try {
           await sleep()
         }
         if (!committed) continue
+        // 변형 B: 판정이 끝날 때까지 제자리에서 기다립니다.
+        if (waitActive) {
+          const info0 = G.enemyInfo(e)
+          if (info0) G.teleportPlayer(info0.x - stand, info0.z)
+          await wait(activeMax)
+        }
 
         /**
          * 판정이 뜬 순간부터 **걷는 속도로** 등 뒤를 향해 돕니다.
@@ -128,6 +151,7 @@ try {
         let last = now()
         let behindAt = -1
         let released = -1
+        const hp0 = G.state().player.hp
         const dl2 = Date.now() + 60000
         while (now() - startT < 6 && Date.now() < dl2) {
           const info = G.enemyInfo(e)
@@ -165,11 +189,16 @@ try {
           await sleep()
         }
         if (released < 0) released = now() - startT
-        runs.push({ behindAt: Number(behindAt.toFixed(2)), window: Number(released.toFixed(2)) })
+        runs.push({
+          waitActive,
+          behindAt: Number(behindAt.toFixed(2)),
+          window: Number(released.toFixed(2)),
+          hpLost: Number((hp0 - G.state().player.hp).toFixed(1)),
+        })
         G.clearEnemies()
       }
       return runs
-    }, [foe.id, t.playerMoveSpeed, t.playerRadius, stand])
+    }, [foe.id, t.playerMoveSpeed, t.playerRadius, stand, activeMax])
     results.push({ name: foe.name, runs: r })
   }
 
@@ -226,6 +255,27 @@ try {
     )
   }
 
+  /**
+   * ---- 판정부터 도는 것과 후딜부터 도는 것 ----
+   * 이 두 줄이 봇에게 무엇을 가르칠지 정합니다.
+   */
+  const lost = (f) => {
+    const v = results.flatMap((r) => r.runs.filter(f).map((x) => x.hpLost))
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : -1
+  }
+  const fromActive = lost((x) => !x.waitActive)
+  const fromRecovery = lost((x) => x.waitActive)
+  check(
+    fromActive >= 0 && fromRecovery >= 0,
+    '두 시작 시점을 다 관측했다 (판정부터 / 후딜부터)',
+    `판정부터 ${fromActive.toFixed(1)} · 후딜부터 ${fromRecovery.toFixed(1)} (평균 받은 피해)`,
+  )
+  check(
+    fromRecovery <= fromActive,
+    '**후딜부터** 도는 쪽이 덜 맞는다 (판정 중에 도는 것은 칼 안으로 걸어드는 것)',
+    `판정부터 ${fromActive.toFixed(1)} vs 후딜부터 ${fromRecovery.toFixed(1)}`,
+  )
+
   console.log('\n  [적별] 등 뒤에 닿기까지 / 커밋이 풀릴 때까지 (여유)')
   for (const r of results) {
     const b = r.runs.length ? med(r.runs.map((x) => x.behindAt)) : -1
@@ -234,7 +284,7 @@ try {
       `    ${r.name.padEnd(7)} ${b < 0 ? '   못 돎' : `${b.toFixed(2)}초`}` +
         `  창 ${w < 0 ? '?' : `${w.toFixed(2)}초`}` +
         `  ${b >= 0 && w >= 0 ? `(여유 ${(w - b).toFixed(2)}초)` : ''}  · ` +
-        r.runs.map((x) => (x.behindAt < 0 ? '✗' : `${x.behindAt}`)).join(' '),
+        r.runs.map((x) => `${x.waitActive ? '후' : '판'}${x.behindAt < 0 ? '✗' : x.behindAt}/-${x.hpLost}`).join(' '),
     )
   }
 

@@ -1265,8 +1265,24 @@ try {
          *    때문에 배운 것).
          */
         const einfo = es ? G.enemyInfo(near.entity) : null
-        const committed = !!einfo && einfo.attacking && !einfo.winding
-        const canWin = OLD_FLANK ? true : committed
+        /**
+         * ⚠️ **판정이 아니라 후딜입니다.**
+         *
+         * 처음엔 `attacking && !winding` — 즉 **판정 + 후딜**을 한 덩어리로
+         * 봤습니다. 네 판 비교에서 부호가 갈렸고 한 판은 받은 피해가 192
+         * 늘었습니다. 기계 탓을 하기 전에 기제를 의심했고, `npm run flank`
+         * 로 두 시작 시점을 갈라 재니 답이 명확했습니다:
+         *
+         *   판정부터 돌기 → 잡몹 기준 **매번 −14** (3/3)
+         *   후딜부터 돌기 → **매번 −0**   (3/3)
+         *
+         * 휘두르는 칼 안으로 걸어 들어가는 것이니 당연합니다. 🟡 광역은
+         * 판정이 머무르기까지 합니다. 사람이 하는 것도 후자입니다 —
+         * 맞을 것을 넘기고 **나서** 돕니다.
+         *
+         * 구간 판정은 게임의 `recovering` 을 읽습니다(봇이 시간을 세지 않게).
+         */
+        const canWin = OLD_FLANK ? true : !!einfo && einfo.recovering
         if (circleUntil === 0 && es && !behindMe && canWin && near.dist < 4) circleUntil = now() + 1.2
         if (es && !behindMe && canWin && now() < circleUntil && near.dist < 4) {
           markAct('돌기')

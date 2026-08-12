@@ -3327,6 +3327,8 @@ declare global {
          */
         attacking: boolean
         winding: boolean
+        /** 후딜(판정이 끝난 무방비 구간)인가 — 등 뒤로 돌 수 있는 진짜 창. */
+        recovering: boolean
         rotY: number
         timer: number
         brokenT: number
@@ -3793,6 +3795,22 @@ window.__game = {
       windup: attackAt(kind, Enemy.attackIndex[entity]).windup,
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
+      /**
+       * **후딜 중인가** — 판정이 이미 끝나 무방비인 구간.
+       *
+       * 봇이 `attacking && !winding` 으로 판정과 후딜을 **한 덩어리로**
+       * 보고 있었습니다. 그런데 `npm run flank` 로 재 보니 둘은 완전히
+       * 다른 구간입니다: 판정 중에 적 둘레를 돌면 잡몹 기준 **매번 14**
+       * 를 맞고(3/3), 후딜부터 돌면 **매번 0** 입니다. 휘두르는 칼 안으로
+       * 걸어 들어가는 것이니 당연합니다 — 🟡 광역은 판정이 머무르기까지
+       * 합니다(combat.ts lingers).
+       *
+       * 구간을 가르는 것은 **게임이** 합니다. 봇이 `active` 시간을 베껴
+       * 세고 있으면 판정 길이를 바꾸는 날 봇만 옛 시간표로 돕니다.
+       */
+      recovering:
+        Actor.state[entity] === ActorState.Attack &&
+        Actor.phase[entity] === AttackPhase.Recovery,
       staggered: Actor.state[entity] === ActorState.Stagger,
       broken: Enemy.brokenT[entity] > 0,
       poise: Number(Enemy.poise[entity].toFixed(1)),
