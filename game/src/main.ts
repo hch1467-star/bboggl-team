@@ -18,6 +18,7 @@ import {
   LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
   POISE,
+  reactionTime,
   TREASURE,
   VIAL,
   WEAPON_UPGRADE,
@@ -3377,6 +3378,15 @@ declare global {
        */
       /** 🟢 반격 검증용 */
       counterInfo: () => { brokenTime: number; normalBrokenTime: number; damageMultiplier: number }
+      /**
+       * 사람이 반응하는 데 걸리는 시간 예산 — 프로브가 **읽습니다**(balance.ts REACTION).
+       * 색 가짓수는 게임이 **자기 데이터에서 세어** 넘깁니다.
+       */
+      reactionBudget: () => {
+        simple: number
+        choice: number
+        colors: { intent: number; emoji: string; label: string }[]
+      }
       counterCount: () => number
       /** 🥋 집중 검증용 */
       focusInfo: () => {
@@ -3549,6 +3559,8 @@ declare global {
         duration: number
         staminaCost: number
         iFrames: number
+        /** 누른 뒤 **무적이 시작되기까지의 지연** — 반응 예산 계산에 필요합니다. */
+        iFrameStart: number
       }[]
       weaponTable: () => {
         id: string
@@ -3564,6 +3576,12 @@ declare global {
         poiseScale: number
         lastStepDamage: number
         maxRange: number
+        /**
+         * 누르고 나서 **판정이 뜨기까지**(초). 🟢 반격처럼 "예고 안에 한 대를
+         * 꽂아야" 성립하는 색을 검사하려면 이 값이 필요합니다.
+         * (이 선언값이 실제와 같다는 것은 `npm run feel` 이 라이브로 잽니다.)
+         */
+        firstHitAt: number
       }[]
       bossSwingLog: () => Record<
         string,
@@ -3854,6 +3872,33 @@ window.__game = {
     normalBrokenTime: POISE.brokenTime,
     damageMultiplier: COUNTER.damageMultiplier,
   }),
+  /**
+   * 예산을 프로브가 스스로 정하지 않게 여기서 넘겨줍니다.
+   *
+   * ⚠️ 색 가짓수도 **프로브가 세면 안 됩니다.** 프로브에 "4색"이라고 적어
+   *    뒀다가 🟢 이 다섯째로 들어온 것을 놓쳤습니다. 여기서 실제 패턴
+   *    표를 훑어 세면, 색을 추가한 그날 예산이 저절로 올라갑니다.
+   */
+  reactionBudget: () => {
+    const seen = new Map<number, { intent: number; emoji: string; label: string }>()
+    for (const key of Object.keys(ENEMY_DEFS)) {
+      for (const a of attacksFor(Number(key) as EnemyKind)) {
+        if (!seen.has(a.intent)) {
+          seen.set(a.intent, {
+            intent: a.intent,
+            emoji: INTENT_EMOJI[a.intent],
+            label: INTENT_LABEL[a.intent],
+          })
+        }
+      }
+    }
+    const colors = [...seen.values()].sort((x, y) => x.intent - y.intent)
+    return {
+      simple: Number(reactionTime(1).toFixed(3)),
+      choice: Number(reactionTime(colors.length).toFixed(3)),
+      colors,
+    }
+  },
   counterCount: () => game.debugCounterCount(),
   focusInfo: () => ({
     focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
@@ -3995,6 +4040,9 @@ window.__game = {
           (w.dodgeDurationScale ?? 1)
         ).toFixed(3),
       ),
+      iFrameStart: Number(
+        (PLAYER_CFG.dodge.iFrameStart * (w.dodgeDurationScale ?? 1)).toFixed(3),
+      ),
     })),
   weaponTable: () =>
     WEAPONS.map((w) => ({
@@ -4015,6 +4063,7 @@ window.__game = {
       /** 마무리 타의 피해 — 처형(마무리 타 × 배율)을 계산하려면 필요합니다. */
       lastStepDamage: w.combo[w.combo.length - 1].damage,
       maxRange: Math.max(...w.combo.map((c) => c.range)),
+      firstHitAt: w.combo[0].windup,
     })),
   /** 보스가 어떤 색을 몇 번 휘두르고 몇 번 맞혔는가 — 절정이 위험한지 재는 값. */
   bossSwingLog: () => game.debugBossSwingLog(),

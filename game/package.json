@@ -56,7 +56,8 @@
     "flank": "node tools/flank-probe.mjs",
     "guard": "node tools/guard.mjs",
     "feel": "node tools/feel-probe.mjs",
-    "pace": "node tools/pace-probe.mjs"
+    "pace": "node tools/pace-probe.mjs",
+    "react": "node tools/react-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
