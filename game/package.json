@@ -49,6 +49,7 @@
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",
     "cover": "node tools/cover-probe.mjs",
+    "climb": "node tools/climb-probe.mjs",
     "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {

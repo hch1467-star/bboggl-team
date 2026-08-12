@@ -57,6 +57,7 @@ import {
   CELL_SIZE,
   HEIGHT_STEP,
   MAX_CLIMB,
+  VOID,
   cellToWorld,
   loadLevelFromStorage,
   worldToCell,
@@ -2093,6 +2094,84 @@ class Game {
   }
 
   /**
+   * 지형의 **세로면**들을 화면 좌표로 돌려줍니다 — 레벨 문법 가독성 검증용.
+   *
+   * ⚠️ 프로브가 지형 데이터를 직접 읽고 카메라 행렬을 흉내 내면, 카메라
+   *    각도를 바꾸는 날 **프로브만 옛 화면을 검사**하게 됩니다. 그래서 투영은
+   *    게임이 합니다 — 실제로 그리는 그 카메라로.
+   *
+   * `drop` 은 이 면의 낙차(단 수)입니다. `MAX_CLIMB` 이하면 넘어갈 수 있는
+   * 턱, 그보다 크면 벽입니다. **판정은 게임 규칙 그대로** 씁니다.
+   */
+  private readonly faceRay = new THREE.Raycaster()
+
+  debugFaceSamples(): { sx: number; sy: number; drop: number; climbable: boolean }[] {
+    const t = this.terrain
+    if (!t) return []
+    const cam = this.cam.camera
+    const el = this.renderer.domElement
+    const { w, h } = t.level
+    const originX = (-w / 2) * CELL_SIZE
+    const originZ = (-h / 2) * CELL_SIZE
+    const out: { sx: number; sy: number; drop: number; climbable: boolean }[] = []
+    const v = new THREE.Vector3()
+    for (let cz = 0; cz < h; cz++) {
+      for (let cx = 0; cx < w; cx++) {
+        const lvl = t.levelAtCell(cx, cz)
+        if (lvl === VOID) continue
+        /**
+         * **카메라를 향한 면만** 봅니다. 등진 면은 자기 지형에 가려서
+         * 화면에 없고, 그걸 표본에 넣으면 엉뚱한 픽셀을 재게 됩니다.
+         * 카메라가 +x·+z 쪽에서 내려다보므로 그 두 방향 면이 보입니다.
+         */
+        for (const [nx, nz, dx, dz] of [
+          [cx + 1, cz, 1, 0],
+          [cx, cz + 1, 0, 1],
+        ] as const) {
+          const nLvl = t.levelAtCell(nx, nz)
+          if (nLvl !== VOID && nLvl >= lvl) continue
+          const drop = nLvl === VOID ? 99 : lvl - nLvl
+          // 면의 한가운데 — 위아래 가장자리는 이웃 면과 섞여서 못 씁니다.
+          const midY = (lvl * HEIGHT_STEP + (nLvl === VOID ? lvl * HEIGHT_STEP - 5 : nLvl * HEIGHT_STEP)) / 2
+          v.set(
+            originX + (cx + 0.5 + dx * 0.5) * CELL_SIZE,
+            midY,
+            originZ + (cz + 0.5 + dz * 0.5) * CELL_SIZE,
+          )
+          const wx = v.x
+          const wy = v.y
+          const wz = v.z
+          v.project(cam)
+          if (v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) continue
+          /**
+           * ⚠️ **가려진 면은 버립니다.** 처음엔 화면 안이기만 하면 표본에
+           *    넣었는데, 직교 쿼터뷰에서는 앞쪽 지형이 뒤쪽 면을 통째로
+           *    가립니다. 그러면 "벽을 쟀다"고 믿으면서 실제로는 그 앞의
+           *    윗면이나 턱을 재게 되고, **벽을 밝게 칠할수록 벽이 밝아지는
+           *    게 아니라 턱을 밝게 칠해도 벽이 밝아집니다.**
+           *    (실제로 그 증상으로 잡았습니다 — 턱만 밝혔는데 벽 표본이
+           *     rgb 20 → 23 으로 같이 올라갔습니다.)
+           *
+           *    그래서 그 자리로 광선을 쏴서 **처음 맞는 것이 이 면인지**
+           *    확인합니다. 눈에 안 보이는 면은 가독성과 무관합니다.
+           */
+          this.faceRay.setFromCamera(new THREE.Vector2(v.x, v.y), cam)
+          const hit = this.faceRay.intersectObject(t.group, true)[0]
+          if (!hit) continue
+          if (hit.point.distanceTo(new THREE.Vector3(wx, wy, wz)) > 0.35) continue
+          out.push({
+            sx: Math.round(((v.x + 1) / 2) * el.clientWidth),
+            sy: Math.round(((1 - v.y) / 2) * el.clientHeight),
+            drop,
+            climbable: drop <= MAX_CLIMB,
+          })
+        }
+      }
+    }
+    return out
+  }
+
+  /**
    * 적 하나를 원하는 자리에 세웁니다 — `debugTeleport` 의 적 판.
    *
    * 🏹 엄폐 검증에 필요했습니다. "화살 선 위에 잡몹을 세워 두고 쏘게 한다"를
@@ -3267,6 +3346,8 @@ declare global {
       teleportPlayer: (x: number, z: number) => void
       /** 적을 원하는 자리에 세웁니다 — 🏹 엄폐처럼 **자리**가 전부인 검증용. */
       teleportEnemy: (entity: number, x: number, z: number) => void
+      /** 지형 세로면의 화면 좌표 + 낙차 — 레벨 문법이 눈에 읽히는지 검증용. */
+      faceSamples: () => { sx: number; sy: number; drop: number; climbable: boolean }[]
       nearestBonfire: () => { x: number; z: number } | null
       /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
       spendPoints: () => { x: number; z: number; anvil: boolean }[]
@@ -3666,6 +3747,7 @@ window.__game = {
   setVials: (n) => game.debugSetVials(n),
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   teleportEnemy: (entity, x, z) => game.debugTeleportEnemy(entity, x, z),
+  faceSamples: () => game.debugFaceSamples(),
   nearestBonfire: () => game.debugNearestBonfire(),
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),
