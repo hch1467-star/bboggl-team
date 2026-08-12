@@ -23,6 +23,17 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+/**
+ * ⚠️ **이 값은 반드시 `page.evaluate` 의 인자로 넘겨야 합니다.**
+ *
+ * 봇의 판단 고리는 **브라우저 안에서** 돕니다. Node 쪽 import 는 거기서
+ * 안 보입니다. 두 회차 전에 `OLD_FLANK` 로 똑같이 데여서 **경고까지 적어
+ * 뒀는데**, 이번에 `DETOUR_BUDGET` 으로 그대로 반복했습니다 — 벤치 4판이
+ * 3~9초 만에 전부 죽었습니다.
+ *
+ * 주석은 읽는 사람에게만 말합니다. 그래서 `npm run guard` 가 이 실수를
+ * 기계적으로 막습니다(evaluate 안에서 모듈 상수를 참조하면 실패).
+ */
 import { DETOUR_BUDGET } from './policy.mjs'
 
 const PORT = 5191
@@ -105,7 +116,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -205,8 +216,8 @@ try {
     }
     const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
-    // 곁길 예산 — 근거는 이 파일 맨 위 `TREASURE_DETOUR` 주석.
-    const TREASURE_DETOUR = DETOUR_BUDGET
+    // 곁길 예산 — 근거는 tools/policy.mjs. **인자로 받습니다**(아래 ⚠️).
+    const TREASURE_DETOUR = DETOUR
     let treasureCooldownUntil = 0
     let treasureTripUntil = 0
     /** 지금 나가 있는 곁길 왕복(있으면). 주우면 닫고 detours 에 넣습니다. */
@@ -2157,7 +2168,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
