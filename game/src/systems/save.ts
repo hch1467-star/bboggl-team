@@ -33,6 +33,7 @@
 
 import { EMBER, VIAL, WEAPON_UPGRADE } from '../config/balance'
 import { Loadout, Player } from '../core/components'
+import { readLearnedActions, restoreLearnedActions } from './playerControl'
 import { exportTripods, importTripods, type TripodSaveData } from './tripod'
 
 /**
@@ -104,6 +105,13 @@ export interface SaveData {
    * 파밍으로 못 얻는 것을 잃게 하면 되찾을 방법이 없어 막다른 길이 됩니다.
    */
   stones: number
+  /**
+   * 이미 **해낸** 조작들. 화면 아래 안내가 다시 안 뜨게 하려고 남깁니다.
+   *
+   * 진행(불티·강화)과 달리 이건 **손에 익은 것**이라 죽어도 안 잃습니다 —
+   * 죽었다고 키를 잊지는 않으니까요.
+   */
+  learned: string[]
 }
 
 /**
@@ -166,6 +174,7 @@ export function loadSave(levelId: string): SaveData | null {
       bosses: Array.isArray(d.bosses) ? d.bosses.filter((t) => typeof t === 'string') : [],
       ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
       stones: Number(d.stones) || 0,
+      learned: Array.isArray(d.learned) ? d.learned.filter((v) => typeof v === 'string') : [],
       weaponLevels: Array.isArray(d.weaponLevels)
         ? d.weaponLevels.slice(0, 3).map((v) => Number(v) || 0)
         : [0, 0, 0],
@@ -217,6 +226,7 @@ export function captureSave(
     treasures: [...treasures],
     weaponLevels: [Loadout.wLv0[player], Loadout.wLv1[player], Loadout.wLv2[player]],
     stones: Player.stones[player],
+    learned: readLearnedActions(),
     bosses: [...bosses],
     ladders: [...ladders],
     tripods: exportTripods(),
@@ -237,6 +247,7 @@ export function applySave(save: SaveData, player: number): void {
   Loadout.wLv2[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[2] ?? 0)
   Player.embers[player] = save.embers
   Player.stones[player] = save.stones ?? 0
+  restoreLearnedActions(save.learned ?? [])
   // 0이면 예전 세이브 — 기본값을 그대로 둡니다(강화한 적이 없다는 뜻).
   if (save.vialsMax > 0) {
     Player.vialsMax[player] = Math.min(EMBER.vialMax, Math.max(VIAL.charges, save.vialsMax))

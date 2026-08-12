@@ -124,6 +124,7 @@ import {
   healEvents,
   playerControlSystem,
   readInputFlow,
+  readLearnedActions,
   readRhythm,
   readStaminaSpent,
   resetStaminaSpent,
@@ -650,6 +651,15 @@ class Game {
     sfx.tickMusic(time.realDt)
 
     // ---- 1.4 음소거 (M) ----
+    /**
+     * F1 — 조작표를 통째로 펼칩니다.
+     *
+     * "배우면 사라지는 안내"에는 **다시 찾아볼 곳**이 반드시 있어야 합니다.
+     * 없으면 그건 사라지는 안내가 아니라 그냥 사라진 안내입니다.
+     */
+    if (consumePress('F1')) {
+      this.hud.toggleAllControls()
+    }
     if (consumePress('KeyM')) {
       this.hud.showBanner(sfx.toggleMute() ? '음소거' : '소리 켜짐', 'M 키로 전환', 1.1)
     }
@@ -1433,6 +1443,8 @@ class Game {
     this.hud.setVials(Player.vials[p], Player.vialsMax[p])
     this.hud.setFocus(Player.focus[p], FOCUS.max)
     this.hud.setStones(Player.stones[p])
+    // 해낸 조작은 화면에서 내립니다(hud.ts markLearned 설계 노트).
+    this.hud.applyLearned(readLearnedActions())
     this.hud.setEmbers(Player.embers[p])
     if (this.bossEntity >= 0 && isAlive(this.bossEntity) && Health.hp[this.bossEntity] > 0) {
       const b = this.bossEntity

@@ -299,6 +299,7 @@ export function finisherTarget(p: number): number {
 }
 
 function beginAttack(p: number, index: number, aimRot: number): void {
+  noteLearned(index === HEAVY_COMBO ? 'heavy' : 'attack')
   const c =
     index === HEAVY_COMBO
       ? heavyStep(weaponOf(p), Player.focusSpent[p])
@@ -441,7 +442,37 @@ function beginSkill(
  * 회복 시점에 깎으면 "맞으면 취소되고 병도 돌아온다"가 되어,
  * 아무 때나 눌러도 손해가 없는 **판단 없는 버튼**이 됩니다.
  */
+/**
+ * ── 실제로 **해낸** 동작들 ─────────────────────────────────────
+ *
+ * 화면 아래 조작표는 그 동작을 해내면 한 줄씩 사라집니다(hud.ts markLearned).
+ * 여기서 모으는 이유는 하나입니다 — **키를 누른 것이 아니라 동작이 일어난
+ * 것**을 세야 하기 때문입니다. 기력이 없어 구르기가 안 나갔는데 안내가
+ * 사라지면, 못 배운 채로 안내만 잃습니다. 그래서 입력 처리 자리가 아니라
+ * **동작이 실제로 시작되는 자리**에서 표시합니다.
+ */
+const learnedActions = new Set<string>()
+
+/** 조준이 돌아간 누적 각도 — 위 `aim` 판정용. */
+let aimTurned = 0
+let lastAimRot = 0
+
+function noteLearned(id: string): void {
+  learnedActions.add(id)
+}
+
+/** 이번 프레임까지 해낸 동작들. 게임 루프가 읽어 HUD·세이브로 넘깁니다. */
+export function readLearnedActions(): string[] {
+  return [...learnedActions]
+}
+
+/** 세이브에서 읽은 것을 되살립니다(다시 열었을 때 안내가 되돌아오지 않게). */
+export function restoreLearnedActions(ids: readonly string[]): void {
+  for (const id of ids) learnedActions.add(id)
+}
+
 function beginDrink(p: number): void {
+  noteLearned('vial')
   Actor.state[p] = ActorState.Drink
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = VIAL.windup
@@ -453,6 +484,7 @@ function beginDrink(p: number): void {
 }
 
 function beginDodge(p: number, dirX: number, dirZ: number): void {
+  noteLearned('dodge')
   Actor.state[p] = ActorState.Dodge
   // 무기마다 구르는 시간이 다릅니다 — 거리는 같고 속도만(arsenal.ts 설계 노트).
   Actor.timer[p] = PLAYER.dodge.duration * (weaponOf(p).dodgeDurationScale ?? 1)
@@ -607,6 +639,9 @@ export function playerControlSystem(ctx: ControlContext): void {
 
     // ---- 장비 교체 (전투 중에는 불가) ----
     if (idle && weaponPressed >= 0 && weaponPressed < WEAPONS.length) {
+      // **실제로 바뀐 때만** 셉니다 — 들고 있는 무기 키를 다시 눌러도
+      // 아무 일이 안 일어나고, 그건 배운 것이 아닙니다.
+      if (Loadout.weapon[p] !== weaponPressed) noteLearned('weapon')
       Loadout.weapon[p] = weaponPressed
       Actor.comboIndex[p] = 0
       ctx.onLoadoutChange()
@@ -643,15 +678,29 @@ export function playerControlSystem(ctx: ControlContext): void {
     }
     const mLen = Math.hypot(mx, mz)
     const hasMoveInput = mLen > 0.001
+    if (hasMoveInput) noteLearned('move')
     if (hasMoveInput) {
       mx /= mLen
       mz /= mLen
     }
 
     // ---- 조준 ----
+    /**
+     * 조준은 "눌렀는가"로 못 셉니다 — 마우스는 가만 둬도 움직입니다.
+     * 그래서 **바라보는 방향이 실제로 크게 바뀌었는지**를 누적해서 봅니다.
+     * 반 바퀴(180°)를 돌렸으면 조준이 무엇인지 알게 된 것으로 봅니다.
+     */
     const aimDx = ctx.aimX - Transform.x[p]
     const aimDz = ctx.aimZ - Transform.z[p]
     const aimRot = Math.hypot(aimDx, aimDz) > 0.05 ? Math.atan2(aimDx, aimDz) : Transform.rotY[p]
+    if (!learnedActions.has('aim')) {
+      let d = aimRot - lastAimRot
+      while (d > Math.PI) d -= Math.PI * 2
+      while (d < -Math.PI) d += Math.PI * 2
+      aimTurned += Math.abs(d)
+      lastAimRot = aimRot
+      if (aimTurned > Math.PI) noteLearned('aim')
+    }
 
     const canDodge =
       Stamina.value[p] >= PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) &&
@@ -1243,6 +1292,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         isDown('ShiftLeft') || isDown('ShiftRight')
       const canSprint = wantSprint && hasMoveInput && Actor.state[p] === ActorState.Idle
       if (canSprint) {
+        noteLearned('sprint')
         Player.sprintT[p] = Math.min(PLAYER.sprint.rampUp, Player.sprintT[p] + dt)
       } else {
         Player.sprintT[p] = 0

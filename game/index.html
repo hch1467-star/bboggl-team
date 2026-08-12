@@ -202,6 +202,15 @@
       .slot.ready { border-color: rgba(255, 212, 121, 0.5); }
 
       #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      /* 배운 줄은 **사라지되 자리도 안 남깁니다.** 흐리게만 두면 화면은 그대로
+         좁고, 이 변경의 목적(세상을 더 보여주기)이 사라집니다. */
+      #controls .key.learned { display: none; }
+      /* F1 로 펼치면 배운 것도 숨긴 것도 전부 보입니다 — 다시 찾아볼 곳이
+         없으면 "사라지는 안내"는 그냥 사라진 안내입니다. */
+      #controls.showAll .key.learned, #controls.showAll .key[data-always] { display: block; }
+      #controls .key[data-always] { display: none; }
+      #controlsHint { margin-top: 4px; font-size: 11px; color: #6b7280; letter-spacing: 0.02em; }
+      #controlsHint kbd { font-size: 10px; }
       .key {
         background: rgba(13, 16, 23, 0.72);
         border: 1px solid rgba(150, 175, 220, 0.18);
@@ -308,7 +317,7 @@
       #restart:hover { background: #ffe0a0; }
 
       @media (max-width: 620px) {
-        #controls { display: none; }
+        #controls, #controlsHint { display: none; }
         #vitals { width: 68vw; }
         .slot { width: 52px; height: 44px; }
         .slot .nm { font-size: 10px; }
@@ -415,24 +424,37 @@
             <div class="slot" id="slot4"><span class="cd"></span><span class="cdText"></span><span class="key">G</span><span class="nm">-</span></div>
           </div>
         </div>
+        <!--
+          ── 조작표는 **배우면 사라집니다** ────────────────────────────
+          `data-learn` 은 "이 줄이 가르치는 동작"의 이름입니다. 그 동작을
+          실제로 해내면 그 줄만 조용히 사라집니다. 근거는 main.ts 의
+          `markLearned` 주석 참고.
+
+          `data-always` 가 붙은 것은 **싸우는 동안 쓰지 않는 것**이라
+          처음부터 F1 뒤에 있습니다 — 화면에 남을 자격은 전투 중에 쓰는
+          것에만 있습니다.
+        -->
         <div id="controls">
-          <div class="key"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 걷기 &nbsp; <kbd>Shift</kbd> 달리기 (공격하면 풀림)</div>
-          <div class="key"><kbd>마우스</kbd> 조준</div>
-          <div class="key"><kbd>좌클릭</kbd> 공격 (집중 +) &nbsp; <kbd>우클릭</kbd> 강타 (집중 소모)</div>
-          <div class="key"><kbd>Space</kbd> 회피 구르기 (무적)</div>
-          <div class="key"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 무기 교체</div>
-          <div class="key"><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>
-          <div class="key"><kbd>T</kbd> 트라이포드</div>
-          <div class="key"><kbd>X</kbd> 성수병 (회복)</div>
-          <div class="key"><kbd>V</kbd> 성수병 강화 · 사다리 &nbsp; <kbd>B</kbd> 무기 강화</div>
-          <div class="key"><kbd>M</kbd> 소리 끄기/켜기</div>
-          <a class="key" href="./?mode=arena" style="color: #9fd2ff; text-decoration: none"
+          <div class="key" data-learn="move"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 걷기</div>
+          <div class="key" data-learn="sprint"><kbd>Shift</kbd> 달리기 (공격하면 풀림)</div>
+          <div class="key" data-learn="aim"><kbd>마우스</kbd> 조준</div>
+          <div class="key" data-learn="attack"><kbd>좌클릭</kbd> 공격 (집중 +)</div>
+          <div class="key" data-learn="heavy"><kbd>우클릭</kbd> 강타 (집중 소모)</div>
+          <div class="key" data-learn="dodge"><kbd>Space</kbd> 회피 구르기 (무적)</div>
+          <div class="key" data-learn="vial"><kbd>X</kbd> 성수병 (회복)</div>
+          <div class="key" data-learn="weapon"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 무기 교체</div>
+          <div class="key" data-always><kbd>Tab</kbd><kbd>C</kbd> 룬 교체</div>
+          <div class="key" data-always><kbd>T</kbd> 트라이포드</div>
+          <div class="key" data-always><kbd>V</kbd> 성수병 강화 · 사다리 &nbsp; <kbd>B</kbd> 무기 강화</div>
+          <div class="key" data-always><kbd>M</kbd> 소리 끄기/켜기</div>
+          <a class="key" data-always href="./?mode=arena" style="color: #9fd2ff; text-decoration: none"
             >⚔ 전투 시험장</a
           >
-          <a class="key" href="./editor.html" style="color: #ffd479; text-decoration: none"
+          <a class="key" data-always href="./editor.html" style="color: #ffd479; text-decoration: none"
             >🛠 레벨 에디터</a
           >
         </div>
+        <div id="controlsHint"><kbd>F1</kbd> 조작표</div>
       </div>
     </div>
 

@@ -51,6 +51,7 @@
     "cover": "node tools/cover-probe.mjs",
     "climb": "node tools/climb-probe.mjs",
     "zones": "node tools/zones-probe.mjs",
+    "hints": "node tools/hints-probe.mjs",
     "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {

@@ -57,7 +57,9 @@ export function initInput(canvas: HTMLElement): void {
   window.addEventListener('keydown', (e) => {
     // 브라우저 기본 동작(스페이스 스크롤 등) 차단
     // Tab(포커스 이동)·Space(스크롤)·방향키(스크롤)는 게임 조작으로 씁니다.
-    if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault()
+    // F1 은 브라우저 도움말을 엽니다 — 게임이 쓰는 키는 브라우저에서 뺏어옵니다.
+    if (e.code === 'Space' || e.code === 'Tab' || e.code === 'F1' || e.code.startsWith('Arrow'))
+      e.preventDefault()
     if (e.repeat) return
     press(e.code)
   })

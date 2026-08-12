@@ -165,6 +165,49 @@ export class Hud {
   }
 
   /**
+   * ── 배운 조작은 화면에서 내립니다 ──────────────────────────────
+   *
+   * 이 게임은 화면 아래 **열한 줄짜리 조작표**를 늘 띄우고 있었습니다.
+   * DESIGN.md 는 그것을 두고 *"조작표이지 규칙이 아니다"* 라고 적어 뒀지만,
+   * 적어 두기만 하고 치우지는 않았습니다. 세로 690px 화면에서 그 표와
+   * 스킬바가 **아래쪽 3분의 1**을 먹고 있었습니다 — 쿼터뷰 게임에서
+   * 화면은 곧 정보이고, 그 자리는 세상이 차지해야 할 자리입니다.
+   *
+   * 안내를 그냥 지우지 않는 이유: 처음 여는 사람은 키를 모릅니다. 그래서
+   * **셀레스트·하데스가 쓰는 방식**을 씁니다 — 안내는 그 동작을 **해낼
+   * 때까지만** 있습니다. 안내의 일은 "어떻게 하는가"에 답하는 것이고,
+   * 한 번 해내면 그 질문은 끝납니다.
+   *
+   * ⚠️ **키를 누른 것이 아니라 동작이 일어난 것**으로 셉니다. 기력이 없어
+   *    구르기가 안 나갔는데 안내가 사라지면, 못 배운 채로 안내만 잃습니다.
+   */
+  markLearned(id: string): void {
+    const node = document.querySelector(`#controls .key[data-learn="${id}"]`)
+    if (!node || node.classList.contains('learned')) return
+    node.classList.add('learned')
+  }
+
+  /** 세이브에서 읽은 목록을 한 번에 반영합니다(다시 열었을 때). */
+  applyLearned(ids: readonly string[]): void {
+    for (const id of ids) this.markLearned(id)
+  }
+
+  /** F1 — 배운 것과 숨긴 것까지 전부 펼칩니다. */
+  toggleAllControls(): boolean {
+    const box = document.getElementById('controls')
+    if (!box) return false
+    const on = box.classList.toggle('showAll')
+    const hint = document.getElementById('controlsHint')
+    if (hint) hint.textContent = on ? '' : 'F1 조작표'
+    return on
+  }
+
+  /** 아직 안 배운 줄 수 — 검증이 "정말 줄었는가"를 물을 수 있게. */
+  visibleControlCount(): number {
+    return document.querySelectorAll('#controls .key[data-learn]:not(.learned)').length
+  }
+
+  /**
    * 사다리 안내.
    *
    * `locked`(아래에서 올려다봄)일 때 안내를 **끄지 않는** 것이 핵심입니다.
