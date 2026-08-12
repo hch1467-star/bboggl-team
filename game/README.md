@@ -67,6 +67,7 @@ npm run dev        # 개발 서버 (http://localhost:5173)
 | 명령 | 하는 일 |
 |---|---|
 | `npm run build` | 타입 검사 + 프로덕션 빌드 |
+| `npm run shape` | 적 종류가 **윤곽만으로** 갈리는지 (크기를 지우고 IoU 비교) |
 | `npm run hints` | 조작 안내가 **배우면 물러나는지** (`F1` 로 되돌아오는지) |
 | `npm run verify` | **헤드리스 브라우저로 게임을 실제 조작하며 103개 항목 자동 검증** |
 | `npm run vfx` | 이펙트를 하나씩 격리해 스크린샷 (VFX 디버깅용) |
