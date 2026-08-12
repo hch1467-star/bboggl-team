@@ -27,6 +27,17 @@ import { createServer } from 'vite'
 const PORT = 5191
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 /** 시뮬레이션 기준 최대 플레이 시간(초). 넘으면 "막혔다"로 봅니다. */
+/**
+ * 옛 돌기 조건으로 되돌리는 스위치 — `PLAY_NOFLANK=1`.
+ * 봇 정책이 바뀌면 벤치의 기준선이 통째로 움직이므로, 옛것과 새것을
+ * **번갈아** 돌려 견줄 수 있어야 합니다.
+ *
+ * ⚠️ 봇의 판단 고리는 **브라우저 안에서** 돕니다(`page.evaluate`). 그래서
+ *    이 상수를 그냥 참조하면 `ReferenceError` 로 죽습니다 — 실제로 그렇게
+ *    네 판을 통째로 날렸습니다. 값은 **인자로 넘겨야** 합니다.
+ */
+const OLD_FLANK = process.env.PLAY_NOFLANK === '1'
+
 const TIME_LIMIT = Number(process.env.PLAY_LIMIT ?? 420)
 /**
  * ── 벽시계 안전줄(초) ──────────────────────────────────────────────
@@ -78,7 +89,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, OLD_FLANK]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -1222,17 +1233,42 @@ try {
          *      데인 무한 왕복 버그와 같은 함정입니다.
          */
         const es = G.entityState(near.entity)
-        const behindMe =
-          es &&
-          (() => {
-            const dx = p.x - es.x
-            const dz = p.z - es.z
-            const d = Math.hypot(dx, dz) || 1
-            // 적이 보는 방향과 반대쪽에 있는가 (게임의 backArcDeg 와 같은 뜻)
-            return (dx * Math.sin(es.rotY) + dz * Math.cos(es.rotY)) / d < -0.34
-          })()
-        if (circleUntil === 0 && es && !behindMe && near.dist < 4) circleUntil = now() + 1.2
-        if (es && !behindMe && now() < circleUntil && near.dist < 4) {
+        /**
+         * ⚠️ **등 뒤 판정을 봇이 다시 계산하지 않습니다.**
+         *
+         * 여기 원래 `< -0.34` 가 박혀 있었습니다. 그건 `backArcDeg = 140°`
+         * 의 코사인인데, **게임이 그 각도를 바꾸면 봇만 옛 규칙으로 돌게**
+         * 됩니다. 이 저장소가 스스로 적어 둔 규칙 그대로입니다:
+         *
+         *   > 규칙은 한 곳에만. 게임이 판단하고 봇·프로브는 **읽습니다.**
+         */
+        const behindMe = es ? G.testBehind(p.x, p.z, es.x, es.z, es.rotY) : false
+
+        /**
+         * ── **언제** 도는가 — 이번 라운드에 바뀐 것 ──────────────────
+         *
+         * 예전에는 "가깝고, 예고가 안 떠 있고, 등 뒤가 아니면" 돌았습니다.
+         * 그런데 `npm run flank` 로 재 보니 **돌 수 있는 때가 정해져 있습니다:**
+         *
+         *   적이 공격을 커밋한 동안(판정+후딜)에만 이깁니다.
+         *   잡몹 0.55초 / 보스 1.13초면 등 뒤에 닿고, 창은 2.32 / 1.95초.
+         *
+         * 커밋 밖에서는 적이 150°/초로 따라 돕니다. 그동안은 **때리지도
+         * 피하지도 않는 시간**만 쌓입니다. 실제로 예전 봇의 백어택은 6~7%
+         * 에 머물렀습니다 — 돌긴 도는데 **이길 수 없는 때에** 돌았습니다.
+         *
+         * 소울류에서 사람이 하는 것도 같습니다: 휘두르는 걸 보고 나서 돕니다.
+         *
+         * ⚠️ `PLAY_NOFLANK=1` 이면 옛 조건으로 돕니다. 봇 정책을 바꾸면
+         *    벤치의 모든 기준선이 움직이므로, **같은 빌드에서** 옛것과 새것을
+         *    번갈아 돌려 비교할 수 있어야 합니다(ab.mjs 가 기계 드리프트
+         *    때문에 배운 것).
+         */
+        const einfo = es ? G.enemyInfo(near.entity) : null
+        const committed = !!einfo && einfo.attacking && !einfo.winding
+        const canWin = OLD_FLANK ? true : committed
+        if (circleUntil === 0 && es && !behindMe && canWin && near.dist < 4) circleUntil = now() + 1.2
+        if (es && !behindMe && canWin && now() < circleUntil && near.dist < 4) {
           markAct('돌기')
           // 적의 **등 뒤 지점**으로 걸어갑니다. 접선으로 도는 것보다
           // 단순하고, 적이 돌면 목표점도 같이 돌아서 저절로 추적이 됩니다.
@@ -2076,7 +2112,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, OLD_FLANK])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
