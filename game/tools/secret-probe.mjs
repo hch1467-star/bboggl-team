@@ -42,6 +42,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { DETOUR_BUDGET } from './policy.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5214
@@ -144,7 +145,27 @@ try {
     `${trail.length}걸음 · 마지막 목표 "${walk.goal?.label ?? '?'}"`,
   )
 
-  /** 보물에서 동선까지의 최단 거리. */
+  /**
+   * 보물에서 동선까지 — **두 가지로** 잽니다.
+   *
+   * ── 직선거리로만 재다가 네 번째로 데였습니다 ────────────────────
+   * 여기 원래 `Math.hypot` 하나였습니다. 그래서 이 프로브는 다섯 보물이
+   * 전부 *"동선에서 17~18m"* 라고 **통과**시켜 왔습니다. 그런데 같은 날
+   * 벤치 4판은 이렇게 찍었습니다:
+   *
+   *   (41,−7)  4/4판 못 주움 · 가장 가까이 간 거리 **57~104m**
+   *   (33,−15) 4/4판 못 주움 · **68~112m**
+   *
+   * 둘 다 맞습니다. **눈으로는 18m 지만 발로는 57m** 입니다 — 사이에
+   * 벽이 있으면 돌아가야 하니까요. 이 저장소가 직선거리로 데인 것이
+   * 이번이 네 번째입니다(적 어그로 · 화톳불 막힘 · 소비처 고르기).
+   * 그때마다 주석을 적었는데 **새로 쓴 프로브에서 되살아났습니다.**
+   *
+   *   · 직선거리 → **"보이는가"** 를 묻는 데는 맞습니다(빛기둥은 벽을 뚫고
+   *     보입니다). 그래서 시야 검사에는 그대로 씁니다.
+   *   · **걸어야 하는 거리** → "갈 만한가"를 묻는 유일한 자입니다.
+   *     길찾기는 게임이 합니다(`distancesToward`).
+   */
   const nearest = (tx, tz) => {
     let best = Infinity
     for (const p of trail) {
@@ -154,16 +175,55 @@ try {
     return best
   }
 
-  const seen = walk.treasures.map((v) => ({ ...v, d: nearest(v.x, v.z) }))
+  /** 동선의 각 걸음에서 그 보물까지 **걸어야 하는 거리** 중 가장 짧은 것. */
+  const walkNear = async (tx, tz) => {
+    const r = await page.evaluate(
+      ([x, z, pts]) => window.__game.distancesToward(x, z, pts),
+      [tx, tz, trail.map((p) => ({ x: p.x, z: p.z }))],
+    )
+    if (!r || !Array.isArray(r.points)) return -1
+    const ok = r.points.filter((v) => v >= 0)
+    return ok.length ? Math.min(...ok) : -1
+  }
+
+  const seen = []
+  for (const v of walk.treasures) {
+    seen.push({ ...v, d: nearest(v.x, v.z), walk: await walkNear(v.x, v.z) })
+  }
   const hidden = seen.filter((v) => v.d > t.cameraViewSize)
   console.log('')
   for (const v of seen) {
     const ok = v.d <= t.cameraViewSize
     console.log(
       `    ${ok ? '·' : '⚠️'} (${Math.round(v.x)}, ${Math.round(v.z)})` +
-        `  동선까지 ${v.d.toFixed(1)}m ${ok ? '' : `— 시야 ${t.cameraViewSize}m 밖`}`,
+        `  눈으로 ${v.d.toFixed(1)}m · **발로 ${v.walk < 0 ? '?' : `${v.walk.toFixed(0)}m`}**` +
+        `${ok ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
     )
   }
+  /**
+   * ---- **걸어서 갈 만한가** ----
+   *
+   * 위 검사는 *"보이는가"* 를 묻습니다(빛기둥은 벽을 뚫고 보이므로 직선거리가
+   * 맞습니다). 그런데 보인다고 갈 수 있는 것은 아닙니다. 봇은 곁길을
+   * **걸어야 하는 거리**로 자르고(`DETOUR_BUDGET`), 그 예산을 넘는 보물은
+   * 규칙상 **영영 안 갑니다.** 실제로 벤치 4판에서 두 보물이 4/4판 미획득
+   * 이었고, 이 프로브는 같은 보물들을 "동선에서 18m"라며 통과시키고
+   * 있었습니다 — 눈으로 18m, 발로 48m.
+   *
+   * ⚠️ 예산은 봇에서 **읽어 옵니다.** 여기 40을 적으면 예산을 바꾸는 날
+   *    이 검사만 옛 값으로 통과합니다.
+   */
+  const far = seen.filter((v) => v.walk < 0 || v.walk > DETOUR_BUDGET)
+  check(
+    far.length === 0,
+    `모든 보물이 **걸어서** 곁길 예산 안에 있다 (${DETOUR_BUDGET}m)`,
+    far.length === 0
+      ? `가장 먼 것이 발로 ${Math.max(...seen.map((v) => v.walk)).toFixed(0)}m`
+      : far
+          .map((v) => `(${Math.round(v.x)}, ${Math.round(v.z)}) 발로 ${v.walk.toFixed(0)}m`)
+          .join(' · '),
+  )
+
   console.log('')
   check(
     hidden.length === 0,

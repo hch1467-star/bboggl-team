@@ -26,7 +26,7 @@
  * (실제로 그렇게 두 판을 날린 적이 있습니다.)
  */
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -60,6 +60,35 @@ console.log(
     (WEAPON ? ` · 무기 고정 ${WEAPON}번` : '') +
     '\n',
 )
+
+/**
+ * 찍은 것을 **파일로도 남깁니다.**
+ *
+ * 이번에 40분짜리 벤치를 돌려 놓고 `| tail -45` 로 받는 바람에 맨 앞의
+ * 클리어·받은 피해·사망·백어택을 **통째로 잃었습니다.** 40분짜리 측정이
+ * 파이프 한 조각에 날아가면 안 됩니다.
+ *
+ * 출력 자리를 38군데 고치는 대신 `console.log` 를 **한 번 감쌉니다** —
+ * 나중에 줄을 더 넣는 사람이 "여기도 파일에 남겨야 하나"를 신경 쓸 필요가
+ * 없어야 합니다. 빠뜨릴 자리를 아예 안 만드는 쪽이 늘 낫습니다.
+ */
+const OUT_PATH = process.env.BENCH_OUT || path.join(ROOT, 'tools/last-bench.txt')
+const captured = []
+{
+  const real = console.log.bind(console)
+  console.log = (...args) => {
+    captured.push(args.join(' '))
+    real(...args)
+  }
+  const flush = () => {
+    try {
+      writeFileSync(OUT_PATH, captured.join('\n') + '\n')
+    } catch {
+      /* 남기지 못해도 벤치 자체를 죽이지는 않습니다. */
+    }
+  }
+  process.on('exit', flush)
+}
 
 const logs = []
 /** 벽시계에 걸려 잘린 판 수 — 집계에는 안 들어가지만 반드시 보고합니다. */

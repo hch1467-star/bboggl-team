@@ -23,6 +23,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { DETOUR_BUDGET } from './policy.mjs'
 
 const PORT = 5191
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
@@ -204,14 +205,8 @@ try {
     }
     const startWeaponLevels = G.weaponUpgradeInfo().levels.slice()
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
-    /**
-     * 곁길 예산 — **걸어야 하는 거리**로 자릅니다(직선 아님).
-     *
-     * 40m 로 잡은 근거: 이 존의 곁길 셋(북쪽 단상 · 숨은 벽감 · 남쪽 함몰지)은
-     * 전부 주 동선에서 **보이는** 거리에 있습니다(기둥 4 설계). 40m 면
-     * "보이니까 들른다"는 되고, "존을 되돌아간다"는 안 됩니다.
-     */
-    const TREASURE_DETOUR = 40
+    // 곁길 예산 — 근거는 이 파일 맨 위 `TREASURE_DETOUR` 주석.
+    const TREASURE_DETOUR = DETOUR_BUDGET
     let treasureCooldownUntil = 0
     let treasureTripUntil = 0
     /** 지금 나가 있는 곁길 왕복(있으면). 주우면 닫고 detours 에 넣습니다. */
