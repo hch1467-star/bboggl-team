@@ -52,6 +52,7 @@
     "climb": "node tools/climb-probe.mjs",
     "zones": "node tools/zones-probe.mjs",
     "hints": "node tools/hints-probe.mjs",
+    "shape": "node tools/shape-probe.mjs",
     "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {

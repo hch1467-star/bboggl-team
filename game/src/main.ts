@@ -2130,6 +2130,25 @@ class Game {
     return hit.point.distanceTo(new THREE.Vector3(wx, wy, wz)) <= 0.35
   }
 
+  /**
+   * 월드 한 점의 화면 좌표.
+   *
+   * 실루엣을 재려고 만들었습니다. 처음엔 화면 전체를 빈 화면과 빼서
+   * "달라진 픽셀"을 적이라고 봤는데, **HUD 의 「남은 적」 숫자가 같이
+   * 바뀌면서** 테두리 상자가 화면 절반으로 부풀었습니다. 그 상자로
+   * 정규화하니 서로 다른 두 적이 IoU 1.00 으로 나왔습니다 — 적이 아니라
+   * 글자를 견주고 있었던 것입니다. 잴 곳을 좁히려면 좌표가 필요합니다.
+   */
+  debugScreenPos(x: number, y: number, z: number): { sx: number; sy: number } | null {
+    const el = this.renderer.domElement
+    const v = new THREE.Vector3(x, y, z).project(this.cam.camera)
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null
+    return {
+      sx: Math.round(((v.x + 1) / 2) * el.clientWidth),
+      sy: Math.round(((1 - v.y) / 2) * el.clientHeight),
+    }
+  }
+
   /** 구역 목록 — 프로브가 레벨 JSON 을 따로 읽지 않도록. */
   debugRegionList(): {
     name: string
@@ -3433,6 +3452,8 @@ declare global {
       faceSamples: () => { sx: number; sy: number; drop: number; climbable: boolean }[]
       /** 화면에 보이는 바닥 윗면 + 그 칸의 구역 이름 — 구역 색조 검증용. */
       groundSamples: () => { sx: number; sy: number; region: string }[]
+      /** 월드 좌표를 화면 좌표로 — 프로브가 카메라 행렬을 흉내 내지 않게. */
+      screenPos: (x: number, y: number, z: number) => { sx: number; sy: number } | null
       /** 구역 목록 — 이름·격자 범위·한가운데 월드 좌표·색조. */
       regionList: () => {
         name: string
@@ -3847,6 +3868,7 @@ window.__game = {
   teleportEnemy: (entity, x, z) => game.debugTeleportEnemy(entity, x, z),
   faceSamples: () => game.debugFaceSamples(),
   groundSamples: () => game.debugGroundSamples(),
+  screenPos: (x, y, z) => game.debugScreenPos(x, y, z),
   regionList: () => game.debugRegionList(),
   /**
    * 예고 4색의 RGB — 프로브가 색을 베껴 적지 않도록 게임이 내보냅니다.

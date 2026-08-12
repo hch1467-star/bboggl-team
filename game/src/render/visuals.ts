@@ -200,6 +200,113 @@ function capsuleFor(kind: EnemyKind): THREE.CapsuleGeometry {
   return new THREE.CapsuleGeometry(cfg.radius, cfg.height - cfg.radius * 2, 6, 12)
 }
 
+/**
+ * ── 종류마다 다른 **실루엣 표식** ─────────────────────────────────
+ *
+ * 이 파일에는 오래 이렇게 적혀 있었습니다:
+ *
+ *   > 적은 전부 붉은 계열, 종류는 명도·채도와 **실루엣**으로 가릅니다.
+ *
+ * 그런데 실제로 만들던 것은 **크기만 다른 같은 캡슐 여섯 개**였습니다.
+ * 실루엣이라 부를 것이 없었고, 검사도 `키 차이 0.3m` 하나뿐이라
+ * "같은 모양을 조금 늘린 것"을 통과시키고 있었습니다. 쿼터뷰에서 적은
+ * 화면의 몇십 픽셀이라, 0.3m 차이는 **모양이 아니라 크기**입니다.
+ *
+ * 읽히는 실루엣의 규칙은 오버워치·디아블로가 같은 말로 정리해 뒀습니다:
+ * **윤곽만 보고 무엇인지 알 수 있어야 합니다.** 색이 아니라 윤곽인 이유는,
+ * 색은 배경·조명·색각에 따라 흔들리지만 윤곽은 안 흔들리기 때문입니다.
+ *
+ * ⚠️ **손으로 적은 목록을 만들지 않습니다.** 이 파일이 이미 그 실수를 한 번
+ *    했고(🟢 달려드는 자를 세 곳에서 빠뜨려 몸도 예고도 안 보였습니다),
+ *    같은 자리에 또 심을 이유가 없습니다. 표식은 **그 적이 하는 일**에서
+ *    유도합니다 — 묶는 적은 집게, 끄는 적은 갈고리, 달려드는 적은 뿔,
+ *    멀리서 쏘는 적은 활. 적을 새로 넣어도 표식은 저절로 붙습니다.
+ */
+function silhouetteFor(kind: EnemyKind, mat: THREE.Material): THREE.Mesh[] {
+  const cfg = enemyDef(kind)
+  const atks = attacksFor(kind)
+  const has = (i: AttackIntent) => atks.some((a) => a.intent === i)
+  const reach = atks.reduce((m, a) => Math.max(m, a.reach), 0)
+  const out: THREE.Mesh[] = []
+  const r = cfg.radius
+  const h = cfg.height
+
+  if (kind === EnemyKind.Boss) {
+    /**
+     * 보스 — 벌어진 뿔 **한 쌍 + 넓은 어깨판.**
+     *
+     * 뿔만 달았더니 쏘는 자(머리 위의 활)와 IoU 0.74 로, 기준 0.75 에
+     * 0.01 차이였습니다. 통과는 했지만 **그건 여유가 아닙니다** — 조명이나
+     * 카메라를 조금만 건드려도 뒤집힙니다. 그리고 하필 보스는 이 존에서
+     * 한눈에 읽혀야 할 **첫 번째** 상대입니다.
+     *
+     * 그래서 위로만 뻗던 것을 **옆으로도** 벌립니다. 크기를 지운 뒤에도
+     * 남는 것이 "위가 넓은 사다리꼴"이라, 위로 가늘게 솟는 활과 구조가
+     * 다릅니다. 큰 것이 아니라 **다른 것**으로 읽히게 하는 게 목적입니다.
+     */
+    for (const side of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(r * 0.22, h * 0.5, 5), mat)
+      horn.position.set(side * r * 0.72, h * 0.92, 0)
+      horn.rotation.z = side * -0.45
+      out.push(horn)
+      const pauldron = new THREE.Mesh(new THREE.BoxGeometry(r * 0.85, r * 0.4, r * 0.9), mat)
+      pauldron.position.set(side * r * 1.05, h * 0.72, 0)
+      pauldron.rotation.z = side * -0.25
+      out.push(pauldron)
+    }
+  } else if (has(AttackIntent.Snare)) {
+    // 🔵 묶는 적 — 좌우로 길게 뻗은 집게 팔. 폭이 넓어져 윤곽이 T자가 됩니다.
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(r * 2.1, r * 0.3, r * 0.3), mat)
+      arm.position.set(side * r * 1.25, h * 0.68, 0)
+      arm.rotation.z = side * 0.22
+      out.push(arm)
+    }
+  } else if (has(AttackIntent.Pull)) {
+    // 🟣 끄는 적 — 등에 솟은 갈고리 장대. 세로로 튀어나와 키가 커 보입니다.
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.12, r * 0.12, h * 0.85, 5), mat)
+    pole.position.set(-r * 0.75, h * 0.95, -r * 0.35)
+    pole.rotation.z = 0.3
+    out.push(pole)
+    const hook = new THREE.Mesh(new THREE.TorusGeometry(r * 0.42, r * 0.11, 4, 8, Math.PI * 1.3), mat)
+    hook.position.set(-r * 1.15, h * 1.3, -r * 0.35)
+    hook.rotation.set(Math.PI / 2, 0, 0.3)
+    out.push(hook)
+  } else if (has(AttackIntent.Counter)) {
+    /**
+     * 🟢 달려드는 적 — **가슴 높이에서 앞으로 뻗은 넓은 뿔.**
+     *
+     * 처음엔 머리 위에 세웠는데 쏘는 자의 활과 겹쳐 IoU 0.80 이 나왔습니다
+     * (기준 0.75). 둘 다 "머리 위에 뭐가 있는 놈"이라 윤곽이 닮았던 것입니다.
+     * 이 적의 정체는 **앞으로 돌진**이므로 무게를 앞·아래로 내렸습니다 —
+     * 낮고 넓은 쐐기 대 높고 가는 활, 이제 위아래로 갈립니다.
+     */
+    for (const side of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(r * 0.3, h * 0.62, 5), mat)
+      // 앞이 아니라 **앞·옆·아래**로 뻗습니다. 정면으로만 뻗으면 이 카메라에서
+      // 짧아 보여(원근 단축) 윤곽이 거의 안 바뀝니다.
+      horn.position.set(side * r * 1.15, h * 0.46, r * 0.7)
+      horn.rotation.x = 1.25
+      horn.rotation.z = side * 0.85
+      out.push(horn)
+    }
+  } else if (reach >= 10) {
+    /**
+     * 🔴 멀리서 쏘는 적 — **머리 위로 솟은 큰 활.**
+     * 이 적의 정체는 거리이고, 거리에서 읽히려면 **위로** 튀어야 합니다.
+     */
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(h * 0.42, r * 0.11, 4, 14, Math.PI * 1.15), mat)
+    bow.position.set(r * 0.15, h * 1.02, -r * 0.5)
+    bow.rotation.set(0, Math.PI / 2, Math.PI * 0.5)
+    out.push(bow)
+  }
+  for (const m of out) {
+    m.castShadow = true
+    m.receiveShadow = true
+  }
+  return out
+}
+
 /** 무기를 든 팔이 쉬는 자세(라디안). 몸 오른쪽에 비스듬히 내려둔 상태. */
 const REST_SWING = 0.75
 const REST_TILT = 0.25
@@ -319,6 +426,9 @@ export class Visuals {
     body.castShadow = true
     body.receiveShadow = true
     group.add(body)
+
+    // 종류를 윤곽으로 가르는 표식(위 silhouetteFor 설계 노트).
+    if (!isPlayer) for (const part of silhouetteFor(enemyKind, material)) group.add(part)
 
     // 무기를 휘두르는 축 — 어깨 높이에 둡니다.
     const swingPivot = new THREE.Group()
