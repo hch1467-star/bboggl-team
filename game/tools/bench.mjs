@@ -564,6 +564,13 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
  *    맞아야 합니다. 그래서 판마다 잔액을 구해 그대로 늘어놓습니다.
  */
 {
+  /**
+   * ⚠️ **발동을 세는 자리를 옮겼습니다.** 예전에는 `foeSwings[].chained`
+   *    (판정에 들어간 순간 main.ts 가 센 값)를 썼는데, 예약은 **예고가
+   *    시작될 때** 소비됩니다. 그 사이에 적이 죽으면 예약은 사라졌는데
+   *    발동에도 안 잡혀 어느 칸에도 안 들어갔습니다 — 잔액 4~7회의 정체입니다.
+   *    이제 예약과 같은 줄에서 센 `chainsFired` 를 씁니다.
+   */
   const rests = boss.map((l) => {
     const d = l.boss.chainsDropped ?? {}
     /**
@@ -573,7 +580,14 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
      *    으로 남았는데, 그건 사라진 게 아니라 **잡몹이 실제로 발동시킨 것**을
      *    보스 장부에서 찾고 있었던 것입니다. 같은 무리를 견주어야 합니다.
      */
-    const fired = (l.foeSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0)
+    /**
+     * ⚠️ 위 주석대로 **무리**는 맞췄는데 **시점**이 틀려 있었습니다.
+     *    `foeSwings[].chained` 는 적이 **판정(Active)** 에 들어갈 때 세고,
+     *    예약은 **예고가 시작될 때** 소비됩니다. 그 사이에 죽으면 예약은
+     *    사라졌는데 발동에도 안 잡혀 어느 칸에도 안 들어갑니다.
+     *    이제 예약과 **같은 줄**에서 센 값을 씁니다.
+     */
+    const fired = l.boss.chainsFired ?? (l.foeSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0)
     const st = (l.boss.chainsLost ?? []).reduce((a, b) => a + b, 0)
     return (
       (l.boss.chainsArmed ?? 0) -
@@ -583,6 +597,7 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
         (d.leash ?? 0) +
         (d.death ?? 0) +
         (d.overwrite ?? 0) +
+        (d.wiped ?? 0) +
         (l.boss.chainsPending ?? 0))
     )
   })
@@ -595,6 +610,8 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
       ` · 귀환 ${m((l) => l.boss.chainsDropped?.leash ?? 0)}` +
       ` · 사망 ${m((l) => l.boss.chainsDropped?.death ?? 0)}` +
       ` · 덮어씀 ${m((l) => l.boss.chainsDropped?.overwrite ?? 0)}` +
+      // 화톳불에서 적을 전부 갈아 끼울 때 함께 사라진 예약 — 오래 비어 있던 칸입니다.
+      ` · 통째지움 ${m((l) => l.boss.chainsDropped?.wiped ?? 0)}` +
       ` · 판 끝에 남음 ${m((l) => l.boss.chainsPending ?? 0)}`,
   )
   console.log(

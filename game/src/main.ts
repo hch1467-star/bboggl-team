@@ -93,6 +93,9 @@ import {
   enemyAiSystem,
   readChainsArmed,
   resetChainLedger,
+  noteChainDeath,
+  noteChainsWiped,
+  readChainsFired,
   resetPhaseTeaching,
   setPhaseTeaching,
   readChainsDropped,
@@ -1428,6 +1431,8 @@ class Game {
             0.8 + Math.random() * 0.7,
           )
         }
+        // ⚠️ 지우기 **전에** 예약을 셉니다 — 이 자리를 빠뜨려서 잔액이 남았습니다.
+        noteChainDeath(death.entity)
         this.visuals.detach(death.entity)
         destroyEntity(death.entity)
       }
@@ -1961,6 +1966,8 @@ class Game {
       const ids = enemyQuery.run()
       const doomed: number[] = []
       for (let i = 0; i < enemyQuery.count; i++) doomed.push(ids[i])
+      // ⚠️ 지우기 **전에** 예약을 셉니다 — 엔티티가 사라지면 아무도 못 셉니다.
+      noteChainsWiped()
       for (const e of doomed) {
         this.visuals.detach(e)
         destroyEntity(e)
@@ -2162,6 +2169,8 @@ class Game {
       const ids = enemyQuery.run()
       const doomed: number[] = []
       for (let i = 0; i < enemyQuery.count; i++) doomed.push(ids[i])
+      // ⚠️ 지우기 **전에** 예약을 셉니다 — 엔티티가 사라지면 아무도 못 셉니다.
+      noteChainsWiped()
       for (const e of doomed) {
         this.visuals.detach(e)
         destroyEntity(e)
@@ -2882,6 +2891,8 @@ class Game {
     bossFinishers: number
     /** 연계가 예약된 횟수 — 실제 발동 수와 비교해 "안 나온다"의 원인을 가릅니다. */
     chainsArmed: number
+    /** 예약이 실제로 쓰인 횟수 — 예약과 같은 자리에서 셉니다(enemyAI 설계 노트). */
+    chainsFired: number
     /** 예약된 연계가 무너짐으로 끊긴 횟수 — `[예고, 휘두름, 후딜]` 박자별 */
     chainsLost: [number, number, number]
     /** 무너짐 말고 다른 이유로 사라진 예약 — 장부가 맞아떨어지게(enemyAI 설계 노트). */
@@ -2916,6 +2927,7 @@ class Game {
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
       chainsArmed: readChainsArmed(),
+      chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),
       chainsPending: countChainsPending(),
       chainsLost: readChainsLost(),
@@ -3981,6 +3993,7 @@ declare global {
         finishers: number
         bossFinishers: number
         chainsArmed: number
+        chainsFired: number
         chainsLost: [number, number, number]
         dodgeStamina: number
         staminaSpent: number

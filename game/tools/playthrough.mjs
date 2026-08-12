@@ -2080,6 +2080,8 @@ try {
         resets: bossResets,
         finishers: G.runStats().bossFinishers,
         chainsArmed: G.runStats().chainsArmed,
+        // 예약과 **같은 자리**에서 센 발동 — 나란히 뺄 수 있는 유일한 짝입니다.
+        chainsFired: G.runStats().chainsFired,
         chainsLost: G.runStats().chainsLost,
         chainsDropped: G.runStats().chainsDropped,
         chainsPending: G.runStats().chainsPending,
@@ -2473,7 +2475,7 @@ try {
         `              보스의 시간 — 예고 ${bud.windup}초 · 휘두름 ${bud.active}초 · 후딜 ${bud.recovery}초 · 쿨다운 ${bud.cooldown}초\n` +
         `                          · 무너짐 ${bud.broken}초(${log.boss.breaks}회) · 페이즈전환 ${bud.transition}초 · 대기·이동 ${bud.idle}초\n` +
         `                          → 실제로 공격에 쓴 시간 ${actPct}% · ${swingRate}초에 한 번 휘두름\n` +
-        `              보스에게 들어간 처형 ${log.boss.finishers}회 · 연계 예약 ${log.boss.chainsArmed}회` +
+        `              보스에게 들어간 처형 ${log.boss.finishers}회 · 연계 예약 ${log.boss.chainsArmed}회 · 발동 ${log.boss.chainsFired ?? 0}회` +
           ` · 무너져서 끊긴 연계 ${(log.boss.chainsLost ?? []).reduce((a, b) => a + b, 0)}회`          + ` [예고 ${log.boss.chainsLost?.[0] ?? 0} · 휘두름 ${log.boss.chainsLost?.[1] ?? 0} · 후딜 ${log.boss.chainsLost?.[2] ?? 0}]`,
     )
     for (const a of log.bossSwings) {

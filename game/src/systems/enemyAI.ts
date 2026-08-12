@@ -129,8 +129,15 @@ let commitGapT = 0
 
 /** 연계가 예약된 횟수 — 실제로 발동한 횟수와 비교합니다(commitAttack 설계 노트). */
 let chainsArmed = 0
+/** 예약이 **실제로 쓰인** 횟수 — 예약과 같은 줄에서 셉니다(위 설계 노트). */
+let chainsFired = 0
 export function readChainsArmed(): number {
   return chainsArmed
+}
+
+/** 예약이 실제로 쓰인 횟수. 예약과 **같은 자리**에서 세므로 나란히 뺄 수 있습니다. */
+export function readChainsFired(): number {
+  return chainsFired
 }
 
 /**
@@ -172,7 +179,57 @@ export function readChainsLost(): [number, number, number] {
  *
  *     예약 = 발동 + 무너짐 + 페이즈전환 + 귀환 + 사망 + 판이 끝날 때 남은 것
  */
-const chainsDropped = { phase: 0, leash: 0, death: 0, overwrite: 0 }
+const chainsDropped = { phase: 0, leash: 0, death: 0, overwrite: 0, wiped: 0 }
+
+/**
+ * **한꺼번에 지워진 예약** — 화톳불에서 쉬거나 부활할 때 적을 전부 없애고
+ * 다시 깝니다. 그때 예약을 안고 있던 적은 `Dead` 상태를 거치지 않고
+ * **엔티티째 사라지므로**, 아래 사망 분기가 영영 안 봅니다.
+ *
+ * ── 이게 오래 걸린 이유 ────────────────────────────────────────────
+ * 장부가 여러 라운드 동안 **잔액 4~7회**를 냈고, 그때마다 결말 칸은 전부
+ * 0이었습니다(무너짐 0 · 페이즈전환 0 · 귀환 0 · 사망 0 · 덮어씀 0).
+ * 결말이 전부 0인데 잔액이 남는다는 건 **분류가 모자란 것**이지 어느
+ * 분류가 틀린 게 아닙니다 — 그런데 저는 계속 있는 칸들을 의심했습니다.
+ *
+ * 장부가 안 맞을 때 물어야 할 것은 *"어느 칸이 틀렸나"* 가 아니라
+ * **"내가 아직 칸을 안 만든 결말이 있나"** 입니다.
+ */
+/**
+ * **죽어서 사라지는 적 하나**의 예약을 셉니다.
+ *
+ * ⚠️ 아래 사망 분기(`state === Dead`)만으로는 못 잡습니다. 프레임 순서가
+ *    이렇기 때문입니다:
+ *
+ *      enemyAiSystem → resolveAttacks(여기서 죽음) → 사망 처리(엔티티 파괴)
+ *
+ *    즉 **판정으로 죽은 적은 AI 가 `Dead` 를 한 번도 못 보고** 그 프레임에
+ *    사라집니다. 예약을 안고 있었으면 그대로 증발합니다 — 결말 칸이 전부
+ *    0인데 잔액만 남던 마지막 조각입니다.
+ *
+ *    "지우기 전에 세라"는 규칙은 한 군데만 지켜서는 소용이 없습니다.
+ *    **지우는 자리마다** 지켜야 합니다.
+ */
+export function noteChainDeath(e: number): void {
+  if (Enemy.chainNext[e] !== NO_CHAIN) {
+    chainsDropped.death++
+    Enemy.chainNext[e] = NO_CHAIN
+  }
+}
+
+export function noteChainsWiped(): number {
+  let n = 0
+  const ids = enemies.run()
+  for (let i = 0; i < enemies.count; i++) {
+    const e = ids[i]
+    if (Enemy.chainNext[e] !== NO_CHAIN) {
+      n++
+      Enemy.chainNext[e] = NO_CHAIN
+    }
+  }
+  chainsDropped.wiped += n
+  return n
+}
 
 /**
  * 🎓 **1단계가 아직 안 보여준 색** — 보스별로 기록합니다.
@@ -291,6 +348,8 @@ export function resetChainLedger(): void {
   chainsDropped.leash = 0
   chainsDropped.death = 0
   chainsDropped.overwrite = 0
+  chainsDropped.wiped = 0
+  chainsFired = 0
 }
 
 /**
@@ -450,6 +509,28 @@ function commitAttack(
    * 페이즈 길이나 체력을 손대게 됩니다 — **엉뚱한 것을 고치는 길**입니다.
    */
   if (!chained && Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.overwrite++
+  /**
+   * **발동은 여기서 셉니다** — 예약이 소비되는 바로 그 줄에서.
+   *
+   * ── 잔액 4~7회를 여러 라운드 끌고 온 진짜 이유 ────────────────────
+   * 지금까지 "발동"은 main.ts 가 셌습니다. 적이 **판정(Active)** 에 들어갈 때
+   * `chained` 표시를 보고 세는 방식이었습니다. 그런데 예약은 여기, **예고가
+   * 시작되는 순간** 소비됩니다. 둘 사이에는 예고 하나가 통째로 들어 있고,
+   * 그 사이에 적이 죽으면 이렇게 됩니다:
+   *
+   *   · 예약: 소비됨 (chainNext = NO_CHAIN)
+   *   · 발동: 안 세짐 (판정까지 못 감)
+   *   · 사망: 안 세짐 (셀 때는 이미 chainNext 가 비어 있음)
+   *
+   * **어느 칸에도 안 들어갑니다.** 결말 칸이 전부 0인데 잔액만 남던 이유가
+   * 이것이었습니다.
+   *
+   * 이 저장소가 같은 병으로 이미 한 번 결론을 물렸습니다 — 수명이 다른 두
+   * 숫자를 나란히 놓고 뺀 것입니다. 그래서 이번엔 **예약과 발동을 같은
+   * 줄에서** 셉니다. 나란히 놓고 뺄 수 있으려면 **같은 자리에서 세야**
+   * 합니다.
+   */
+  if (chained) chainsFired++
   Enemy.chainNext[e] = chained ? NO_CHAIN : chainIndexFor(kind, Enemy.phase[e], index)
   /**
    * **예약된 연계의 수**를 셉니다.
