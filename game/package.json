@@ -57,7 +57,8 @@
     "guard": "node tools/guard.mjs",
     "feel": "node tools/feel-probe.mjs",
     "pace": "node tools/pace-probe.mjs",
-    "react": "node tools/react-probe.mjs"
+    "react": "node tools/react-probe.mjs",
+    "blame": "node tools/blame-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

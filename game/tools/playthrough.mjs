@@ -2135,6 +2135,24 @@ try {
       stonesEarned: G.weaponUpgradeInfo().earnedStones,
       minHp: Number(minHp.toFixed(1)),
       damageTaken: Number(damageTaken.toFixed(0)),
+      /**
+       * 🩸 **맞은 한 대마다 공정했는가.** 판정은 게임이 예고 중에 내려 두었고
+       * (main.ts `noteHurt`), 여기서는 세기만 합니다. 아레나에서 잡몹으로만
+       * 확인한 것이라, 화면 밖에서 오는 한 대(🏹 궁수 12m · 🟣 끄는 자 12m)가
+       * 실제로 있는지는 **존을 다 돈 이 판**에서만 보입니다.
+       */
+      hurt: (() => {
+        const t = { fair: 0, unseen: 0, tooFast: 0, unknown: 0 }
+        // 'locked:stamina' 처럼 **이유가 붙어** 옵니다. 앞머리로 뭉치지 않고
+        // 그대로 셉니다 — 뭉치면 어디를 고칠지 다시 알 수 없어집니다.
+        for (const r of G.hurtLedger()) t[r.verdict] = (t[r.verdict] ?? 0) + 1
+        return t
+      })(),
+      /** 억울한 한 대의 **정체** — 무엇이, 얼마나 보였는지. 처방이 갈리는 곳입니다. */
+      unfairHits: G.hurtLedger()
+        .filter((r) => r.verdict !== 'fair')
+        .slice(0, 6)
+        .map((r) => ({ id: r.attackId, why: r.verdict, tel: r.telegraph, seen: r.seen, free: r.free })),
       maxAggro,
       avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
       multiRatio: Number(((multiSamples / Math.max(1, aggroSamples)) * 100).toFixed(0)),
@@ -2297,6 +2315,30 @@ try {
   )
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
+  {
+    /**
+     * 🩸 기둥 2의 합격 기준을 **숫자로** 답합니다 — *"내가 못 봤네"가 아니라
+     * "내가 못 피했네"*. fair 가 아닌 한 대는 플레이어 잘못이 아닙니다.
+     */
+    const h = log.hurt ?? {}
+    const total = Object.values(h).reduce((a, b) => a + b, 0)
+    const pct = (n) => (total ? Math.round((n / total) * 100) : 0)
+    const locks = Object.entries(h)
+      .filter(([k, v]) => k.startsWith('locked:') && v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k.slice(7)} ${v}`)
+      .join(' · ')
+    console.log(
+      `  맞은 이유   ${total}대 · 못 피함 ${h.fair ?? 0}(${pct(h.fair ?? 0)}%)` +
+        ` · 못 봄 ${h.unseen ?? 0} · 예고가 짧음 ${h.tooFast ?? 0} · 출처불명 ${h.unknown ?? 0}`,
+    )
+    console.log(`              손이 묶임 — ${locks || '없음'}`)
+    for (const u of log.unfairHits ?? []) {
+      console.log(
+        `              ${u.id.padEnd(14)} ${u.why.padEnd(7)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초`,
+      )
+    }
+  }
   console.log(
     `  동시 교전   교전 중 평균 ${log.avgAggro}마리 · 둘 이상인 시간 ${log.multiRatio}% · 최대 ${log.maxAggro}마리`,
   )

@@ -155,6 +155,43 @@ console.log(`  클리어 시간    ${fmt(cleared.map((l) => l.clearedAt))}초`)
 console.log(`  사망           ${fmt(pick((l) => l.deaths), 1)}회`)
 console.log(`  처치           ${fmt(pick((l) => l.kills), 0)}마리`)
 console.log(`  받은 피해      ${fmt(pick((l) => l.damageTaken), 0)}`)
+/**
+ * 🩸 **맞은 이유** — 기둥 2의 합격 기준을 숫자로 답합니다.
+ *
+ * ⚠️ 이 줄이 **처음엔 없었습니다.** playthrough 의 보고서에만 넣어 두고
+ *    벤치를 돌렸는데, 벤치는 자기 집계를 따로 찍기 때문에 40분을 돌리고도
+ *    장부가 한 글자도 안 나왔습니다. 이 저장소에서 제일 비싼 고장이 늘
+ *    **"아무 말도 안 하는 계측기"** 인데, 그걸 또 만들었습니다.
+ *
+ * fair 가 아닌 한 대는 **플레이어 잘못이 아닙니다.** 화면 밖에서 왔거나
+ * (unseen), 손이 묶여 있었거나(locked), 예고가 반응 시간보다 짧았습니다
+ * (tooFast). 셋 다 처방이 다르므로 칸을 나눠 둡니다.
+ */
+{
+  const keys = new Set()
+  for (const l of logs) for (const k of Object.keys(l.hurt ?? {})) keys.add(k)
+  const sum = (f) => logs.reduce((a, l) => a + (l.hurt?.[f] ?? 0), 0)
+  const total = [...keys].reduce((a, k) => a + sum(k), 0)
+  const pct = (n) => (total ? Math.round((n / total) * 100) : 0)
+  const locks = [...keys]
+    .filter((k) => k.startsWith('locked:') && sum(k) > 0)
+    .sort((a, b) => sum(b) - sum(a))
+    .map((k) => `${k.slice(7)} ${sum(k)}`)
+    .join(' · ')
+  console.log(
+    `  맞은 이유      ${total}대(전 판 합) · 못 피함 ${sum('fair')}(${pct(sum('fair'))}%)` +
+      ` · 못 봄 ${sum('unseen')} · 예고가 짧음 ${sum('tooFast')} · 출처불명 ${sum('unknown')}`,
+  )
+  console.log(`                 손이 묶임 — ${locks || '없음'}`)
+  // 억울한 한 대는 **정체를 찍습니다** — 숫자만으로는 어디를 고칠지 못 정합니다.
+  const bad = logs.flatMap((l) => l.unfairHits ?? []).slice(0, 8)
+  for (const u of bad) {
+    console.log(
+      `                 ${u.id.padEnd(14)} ${u.why.padEnd(7)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초`,
+    )
+  }
+  if (total === 0) console.log('                 ⚠️ 장부가 비었습니다 — 계측기를 먼저 의심하십시오')
+}
 console.log(`  쓴 무기        ${[...new Set(pick((l) => l.weaponId))].join(', ')}`)
 console.log(
   `  백어택         ${fmt(pick((l) => l.backHits ?? 0), 0)}회 / 총 타격 ${fmt(pick((l) => l.hitsDealt ?? 0), 0)}회` +

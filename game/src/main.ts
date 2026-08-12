@@ -37,6 +37,7 @@ import { ENEMY_DEFS, enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
   ActorState,
+  Body,
   Enemy,
   EnemyKind,
   Health,
@@ -239,6 +240,50 @@ class Game {
     }
   > = {}
   private readonly foeLastSwing = new Map<number, string>()
+
+  /**
+   * ── 🩸 **피격 장부** — 맞은 한 대마다 "공정했는가"를 적습니다 ──────
+   *
+   * DESIGN.md 기둥 2의 합격 기준은 프로젝트 내내 여섯 군데에 적혀 있습니다:
+   *
+   *   > 죽었을 때 **"내가 못 봤네"** 가 아니라 **"내가 못 피했네"** 라고
+   *   > 말해야 합니다.
+   *
+   * 그런데 **한 번도 잰 적이 없습니다.** 적어 두기만 한 기준은 지켜지는지
+   * 알 수 없고, 이 저장소에서 그런 것은 늘 조용히 무너져 있었습니다
+   * (보물 0개 · 연계 0회 · 안 보이던 초록 예고 · 죽은 봇의 돌기 분기).
+   *
+   * 재는 법은 **맞은 뒤가 아니라 예고 중에** 모읍니다. 맞고 나서 되짚으면
+   * 이미 화면도 상태도 바뀌어 있어서, 남는 것은 추측뿐입니다.
+   * 하데스가 죽은 뒤 "무엇에게 죽었는가"를 보여 주는 것과 같은 장치인데,
+   * 우리는 **죽음만이 아니라 맞은 것 전부**를 적습니다 — 죽음은 표본이
+   * 너무 적어서 판이 끝나도 몇 줄 안 나옵니다.
+   */
+  private readonly hurtWatch = new Map<
+    number,
+    {
+      id: string
+      intent: number
+      start: number
+      seen: number
+      free: number
+      /** 손이 묶여 있던 **이유별** 시간. 처방이 갈리므로 칸을 나눕니다. */
+      blocked: Record<string, number>
+    }
+  >()
+  private hurtLedger: {
+    attackId: string
+    intent: number
+    /** 실제로 보여준 예고 시간(초) */
+    telegraph: number
+    /** 그중 때린 쪽이 **화면 안에** 있던 시간 */
+    seen: number
+    /** 그중 플레이어가 **답할 수 있던**(구르기를 시작할 수 있던) 시간 */
+    free: number
+    damage: number
+    /** fair · unseen · locked · tooFast · unknown */
+    verdict: string
+  }[] = []
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
   private anvils: { x: number; y: number; z: number }[] = []
@@ -494,6 +539,10 @@ class Game {
     // (조합 프로브가 '앞 검사가 깨워 놓은 적'을 세던 것과 같은 실수).
     resetGreenOutcome()
     resetStaminaSpent()
+    // 🩸 피격 장부도 **판 시작에만** 지웁니다(연계 장부에서 배운 것 — 화톳불마다
+    //    지우면 예약과 발동의 수명이 달라져 서로 비교할 수 없게 됩니다).
+    this.hurtLedger = []
+    this.hurtWatch.clear()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -684,6 +733,8 @@ class Game {
     if (playerAlive) playerControlSystem(this.controlCtx)
     enemyAiSystem(p, playerAlive, this.controlCtx)
     physicsSystem()
+    // 🩸 예고 중에 모읍니다 — 맞고 나서 되짚으면 화면도 상태도 이미 바뀝니다.
+    this.watchTelegraphs(p)
     resolveAttacks()
 
     // ---- 3. 타격 피드백 ----
@@ -706,28 +757,33 @@ class Game {
        */
       if (hit.victimIsPlayer && hit.damage > 0) {
         this.enemyHits++
-        // 어느 **종류**가 맞혔는지 — 판정 중인 적을 찾아 귀속시킵니다.
-        for (const [e, id] of this.foeLastSwing) {
-          if (!isAlive(e)) continue
-          if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
-            const rec = (this.foeSwingLog[id] ??= { swings: 0, hits: 0 })
-            rec.hits++
-            break
-          }
+        // 🩸 이 한 대가 공정했는지를 **맞은 자리에서** 적습니다.
+        this.noteHurt(hit.attacker, hit.attackId, hit.damage)
+        /**
+         * ── 귀속을 **추측에서 사실로** 바꿨습니다 ────────────────────
+         *
+         * 예전에는 이랬습니다: *"지금 판정 단계에 있는 적을 찾아서, 처음
+         * 찾은 쪽의 것으로 친다."* 적이 하나면 맞지만, 둘이 동시에 판정에
+         * 들어가 있으면 **먼저 발견된 쪽이 가져갑니다.** 잡몹 다섯에
+         * 둘러싸인 상황이 흔하니 드문 일도 아니었습니다.
+         *
+         * 이제 타격 사건이 때린 쪽(`hit.attacker`)을 직접 들고 옵니다.
+         * 알고 있는 것을 다시 추측할 이유가 없습니다.
+         */
+        const byKind = this.foeLastSwing.get(hit.attacker)
+        if (byKind) {
+          const rec = (this.foeSwingLog[byKind] ??= { swings: 0, hits: 0 })
+          rec.hits++
         }
-        // 어느 색이 맞혔는지 — 직전에 그 보스가 휘두른 패턴으로 귀속시킵니다.
-        for (const [e, id] of this.bossLastSwing) {
-          if (!isAlive(e)) continue
-          if (Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Active) {
-            const rec = (this.bossSwingLog[id] ??= {
-              swings: 0,
-              hits: 0,
-              chained: 0,
-              byPhase: [0, 0, 0],
-            })
-            rec.hits++
-            break
-          }
+        const byColor = this.bossLastSwing.get(hit.attacker)
+        if (byColor) {
+          const rec = (this.bossSwingLog[byColor] ??= {
+            swings: 0,
+            hits: 0,
+            chained: 0,
+            byPhase: [0, 0, 0],
+          })
+          rec.hits++
         }
       }
       if (hit.victimIsPlayer) {
@@ -2144,6 +2200,170 @@ class Game {
    * 정규화하니 서로 다른 두 적이 IoU 1.00 으로 나왔습니다 — 적이 아니라
    * 글자를 견주고 있었던 것입니다. 잴 곳을 좁히려면 좌표가 필요합니다.
    */
+  /**
+   * 🩸 예고가 도는 동안 **공정함의 재료**를 모읍니다.
+   *
+   * 매 프레임, 예고 단계에 있는 적마다 두 가지를 시뮬레이션 시간으로 더합니다:
+   *
+   *   · **보였는가** — 그 적이 화면 안에 있었는가. 화면 밖에서 날아온 한 대는
+   *     플레이어가 *"내가 못 봤네"* 라고 말하게 되는 바로 그 경우입니다.
+   *   · **답할 수 있었는가** — 그 순간 구르기를 **시작할 수 있었는가**.
+   *     예고를 다 봤어도 후딜·경직·기력 때문에 손이 묶여 있었으면,
+   *     본 것은 아무 소용이 없습니다.
+   *
+   * ⚠️ **벽시계가 아니라 시뮬레이션 시간(`time.dt`)으로 셉니다.** 이 컨테이너는
+   *    GPU가 없어 프레임이 들쭉날쭉하고, 히트스톱 중에는 게임이 아예 멈춥니다.
+   *    벽시계로 세면 게임이 아니라 컨테이너를 재게 됩니다.
+   */
+  private watchTelegraphs(p: number): void {
+    const dt = time.dt
+    const ids = enemyQuery.run()
+    const live = new Set<number>()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      live.add(e)
+      const winding =
+        Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Windup
+      if (!winding) continue
+      const id = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
+      let rec = this.hurtWatch.get(e)
+      /**
+       * 패턴이 바뀌면 **새 예고**입니다. 같은 적이 연달아 휘두를 때 앞
+       * 예고의 시간이 뒤로 넘어가면, 없던 여유를 있는 것처럼 적게 됩니다.
+       */
+      if (!rec || rec.id !== id) {
+        rec = {
+          id,
+          intent: attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent,
+          start: time.simElapsed,
+          seen: 0,
+          free: 0,
+          blocked: {},
+        }
+        this.hurtWatch.set(e, rec)
+      }
+      if (this.onScreen(e)) rec.seen += dt
+      const why = this.answerBlock(p)
+      if (why === '') rec.free += dt
+      else rec.blocked[why] = (rec.blocked[why] ?? 0) + dt
+    }
+    // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
+    for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
+  }
+
+  /** 그 적이 지금 화면 안에 있는가 (몸 가운데 높이 기준). */
+  private onScreen(e: number): boolean {
+    const v = new THREE.Vector3(
+      Transform.x[e],
+      Transform.y[e] + Body.height[e] * 0.5,
+      Transform.z[e],
+    ).project(this.cam.camera)
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return false
+    // z > 1 이면 카메라 뒤(또는 far 밖)입니다. 화면 좌표만 보면 뒤에 있는 적도 통과합니다.
+    return v.z <= 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1
+  }
+
+  /**
+   * 지금 이 프레임에 **구르기를 시작할 수 있는가.**
+   *
+   * ⚠️ 값을 새로 정하지 않고 playerControl 이 실제로 쓰는 조건을 그대로
+   *    옮겨 적습니다 — 경직·사망·마시는 중이 아니고, 쿨다운이 없고, 기력이
+   *    충분할 것. 휘두르는 중(예고·판정)에는 **취소 추가분**까지 있어야
+   *    하는 것도 같습니다(playerControl `cancelCost`).
+   */
+  private answerBlock(p: number): string {
+    const st = Actor.state[p]
+    /**
+     * ⚠️ **순서가 곧 처방입니다.** "손이 묶였다"를 한 칸으로 두면
+     *    39%가 나와도 어디를 고쳐야 할지 모릅니다 — 내가 기력을 다 쓴 것과
+     *    맞아서 굳은 것은 **책임이 반대**입니다. 앞의 것은 소울류가 말하는
+     *    정당한 대가이고, 뒤의 것은 *"한 대 맞으면 다음 대도 맞는"* 연쇄로
+     *    소울류에서 가장 미움받는 모양입니다.
+     */
+    if (st === ActorState.Dead) return 'dead'
+    if (st === ActorState.Stagger) return 'stagger'
+    if (st === ActorState.Drink) return 'drink'
+    if (Player.dodgeCooldownT[p] > 0) return 'cooldown'
+    const swinging =
+      (st === ActorState.Attack || st === ActorState.Skill) &&
+      Actor.phase[p] !== AttackPhase.Recovery
+    const cost =
+      PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) +
+      (swinging ? PLAYER_CFG.dodge.cancelExtraCost : 0)
+    if (Stamina.value[p] < cost) return 'stamina'
+    return ''
+  }
+
+  /**
+   * 🩸 맞은 한 대를 장부에 적습니다.
+   *
+   * 판정의 **순서가 곧 뜻**입니다. 둘 다 나쁠 수 있으므로 더 앞선 실패를
+   * 적습니다: 예고 자체가 짧았으면 보이든 말든 소용이 없고, 안 보였으면
+   * 손이 자유로웠는지는 물을 필요가 없습니다.
+   *
+   *   tooFast — 예고가 반응 시간보다 짧았다 (원리적으로 못 읽음)
+   *   unseen  — 예고는 있었는데 **화면 밖**이었다 ("내가 못 봤네")
+   *   locked  — 봤지만 **손이 묶여** 있었다 ("손쓸 방법이 없었네")
+   *   fair    — 볼 수 있었고 답할 수 있었다 ("내가 못 피했네")
+   *
+   * ⚠️ 기록이 없는 한 대는 **조용히 버리지 않고** `unknown` 으로 남깁니다.
+   *    이 저장소에서 가장 비쌌던 고장이 늘 "아무 말도 안 하는 계측기"였습니다.
+   */
+  private noteHurt(attacker: number, attackId: string, damage: number): void {
+    const rec = this.hurtWatch.get(attacker)
+    const budget = reactionTime(this.colorCount())
+    if (!rec) {
+      this.hurtLedger.push({
+        attackId: attackId || '?',
+        intent: -1,
+        telegraph: 0,
+        seen: 0,
+        free: 0,
+        damage,
+        verdict: 'unknown',
+      })
+      return
+    }
+    const telegraph = time.simElapsed - rec.start
+    // 묶여 있던 이유 중 **가장 오래 묶은 것**을 붙입니다.
+    const worst = Object.entries(rec.blocked).sort((x, y) => y[1] - x[1])[0]
+    const verdict =
+      telegraph < budget
+        ? 'tooFast'
+        : rec.seen < budget
+          ? 'unseen'
+          : rec.free < budget
+            ? `locked:${worst ? worst[0] : '?'}`
+            : 'fair'
+    this.hurtLedger.push({
+      attackId: rec.id,
+      intent: rec.intent,
+      telegraph: Number(telegraph.toFixed(3)),
+      seen: Number(rec.seen.toFixed(3)),
+      free: Number(rec.free.toFixed(3)),
+      damage,
+      verdict,
+    })
+  }
+
+  /** 🩸 장부를 그대로 내보냅니다 — 판정은 이미 게임이 내렸습니다. */
+  debugHurtLedger(): typeof this.hurtLedger {
+    return this.hurtLedger
+  }
+
+  /** 실제로 쓰이는 예고 색 가짓수 — 반응 예산이 여기에 달려 있습니다. */
+  private colorCount(): number {
+    if (this.colorCountCache === 0) {
+      const seen = new Set<number>()
+      for (const key of Object.keys(ENEMY_DEFS)) {
+        for (const a of attacksFor(Number(key) as EnemyKind)) seen.add(a.intent)
+      }
+      this.colorCountCache = seen.size
+    }
+    return this.colorCountCache
+  }
+  private colorCountCache = 0
+
   debugScreenPos(x: number, y: number, z: number): { sx: number; sy: number } | null {
     const el = this.renderer.domElement
     const v = new THREE.Vector3(x, y, z).project(this.cam.camera)
@@ -3387,6 +3607,19 @@ declare global {
         choice: number
         colors: { intent: number; emoji: string; label: string }[]
       }
+      /**
+       * 🩸 **피격 장부** — 맞은 한 대마다 볼 수 있었는지·답할 수 있었는지.
+       * 판정은 **게임이** 내리고 프로브는 세기만 합니다.
+       */
+      hurtLedger: () => {
+        attackId: string
+        intent: number
+        telegraph: number
+        seen: number
+        free: number
+        damage: number
+        verdict: string
+      }[]
       counterCount: () => number
       /** 🥋 집중 검증용 */
       focusInfo: () => {
@@ -3879,6 +4112,7 @@ window.__game = {
    *    뒀다가 🟢 이 다섯째로 들어온 것을 놓쳤습니다. 여기서 실제 패턴
    *    표를 훑어 세면, 색을 추가한 그날 예산이 저절로 올라갑니다.
    */
+  hurtLedger: () => game.debugHurtLedger(),
   reactionBudget: () => {
     const seen = new Map<number, { intent: number; emoji: string; label: string }>()
     for (const key of Object.keys(ENEMY_DEFS)) {

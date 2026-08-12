@@ -55,6 +55,20 @@ export interface HitEvent {
   crit: boolean
   victimIsPlayer: boolean
   killed: boolean
+  /**
+   * **누가 때렸는가** — 엔티티 번호.
+   *
+   * ── 왜 넣었나 (귀속을 추측에서 사실로) ────────────────────────
+   * 지금까지 main.ts 는 "맞은 순간 **판정 단계에 있는 적**을 찾아서" 그
+   * 적의 것으로 귀속시켰습니다. 적이 하나일 때는 맞지만, 둘이 동시에
+   * 판정에 들어가 있으면 **먼저 찾은 쪽**이 가져갑니다. 이 저장소가
+   * 장부 때문에 결론을 두 번 물린 적이 있는데, 원인은 늘 이런
+   * "그럴듯한 추측"이었습니다. 때린 쪽은 여기서 이미 알고 있으므로
+   * 추측할 이유가 없습니다.
+   */
+  attacker: number
+  /** 적의 공격이면 그 패턴 id. 플레이어의 공격이면 빈 문자열. */
+  attackId: string
 }
 
 /**
@@ -525,6 +539,8 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       crit: false,
       victimIsPlayer: attackerIsPlayer,
       killed: false,
+      attacker: a,
+      attackId: '',
     })
   }
 
@@ -889,6 +905,8 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       crit,
       victimIsPlayer: targetIsPlayer,
       killed,
+      attacker: a,
+      attackId: attackerIsPlayer ? '' : attackAt(Enemy.kind[a], Enemy.attackIndex[a]).id,
     })
     landed = true
   }
