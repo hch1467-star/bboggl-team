@@ -470,6 +470,19 @@ console.log(
 }
 
 console.log('\n  ── 보스 ──────────────────────────────')
+{
+  /**
+   * ⚠️ **조우 연출을 1단계에서 떼어 냈습니다.**
+   *
+   * 보스는 조우 직후 잠깐 노려보기만 합니다 — 싸움이 아닙니다. 그런데
+   * 그 시간이 1단계에 얹혀 있었고, 저는 그 숫자를 보고 *"1단계가 보스전의
+   * 절반을 먹는다"* 를 두 번 적었다가 두 번 물렸습니다.
+   * `npm run boss` 를 고치다 같은 고장이 여기에도 있는 것을 찾았습니다 —
+   * **한 계기에서 고친 고장은 다른 계기에도 있는지 찾아봐야 합니다.**
+   */
+  const intro = boss.map((l) => l.boss.introTime ?? 0)
+  console.log(`  조우 연출      ${fmt(intro)}초 (싸움이 아닙니다 — 1단계와 따로 셉니다)`)
+}
 console.log(`  보스전         ${fmt(boss.map((l) => l.boss.engaged))}초`)
 /**
  * 초기화(귀환)가 섞이면 "긴 보스전"과 "죽고 다시 걸어온 판"이 같은 숫자로
@@ -504,9 +517,15 @@ const phaseNote =
     : ' ⚠️ 초기화 없는 판이 없습니다 — 아래 수치로 배분을 계산하지 마세요'
 for (let i = 0; i < 3; i++) {
   const times = phaseSrc.map((l) => l.boss.phaseTime?.[i])
-  const dps = phaseSrc.map(
-    (l) => (l.boss.phaseBands?.[i] ?? 0) / Math.max(0.1, l.boss.phaseTime?.[i] ?? 0),
-  )
+  /**
+   * ⚠️ **못 잰 구간은 집계에서 뺍니다.** 보스전 중에 죽으면 누적이
+   *    초기화되어 어떤 구간이 0초로 남습니다. 그걸 하한 0.1 로 나누면
+   *    `2170/초` 같은 값이 나오고, 그 한 판이 중앙값과 범위를 통째로
+   *    끌고 갑니다. 못 잰 것은 **빼는 것**이지 큰 값이 아닙니다.
+   */
+  const dps = phaseSrc
+    .filter((l) => (l.boss.phaseTime?.[i] ?? 0) >= 0.5)
+    .map((l) => (l.boss.phaseBands?.[i] ?? 0) / l.boss.phaseTime[i])
   /**
    * **처형·붕괴를 구간별로 같이 냅니다.**
    *

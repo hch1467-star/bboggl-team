@@ -347,6 +347,7 @@ try {
     let bossWindingSamples = 0
     const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
     const bossPhaseTime = [0, 0, 0]
+    let bossIntroTime = 0
     /**
      * ── 페이즈별 **실효 화력** ───────────────────────────────────────
      *
@@ -1007,7 +1008,19 @@ try {
         // 보스가 자리로 걸어 돌아가는 시간까지 페이즈 시간에 더하고 있었습니다.
         const engaged = be.encounter > 0 && be.encounter < 3
         if (engaged) {
-          bossPhaseTime[Math.min(2, be.phase)] += dtB
+          /**
+           * ⚠️ **인트로(encounter 1)를 1단계에 더하고 있었습니다.**
+           *
+           * 조우 연출 동안 보스는 노려보기만 합니다 — 싸움이 아닙니다.
+           * 그걸 1단계에 얹으면 1단계가 실제보다 길어 보이고, 실제로 저는
+           * 그 숫자를 보고 *"1단계가 보스전의 절반을 먹는다"* 를 두 번
+           * 적었다가 두 번 물렸습니다(DESIGN.md 「두 번 적었다가…」).
+           * `npm run boss` 가 같은 자리에서 인트로를 따로 세도록 고치고 나서야
+           * 여기도 같은 고장인 것을 알았습니다 — **한 번 고친 고장은 다른
+           * 계기에도 있는지 찾아봐야 합니다.**
+           */
+          if (be.encounter === 1) bossIntroTime += dtB
+          else bossPhaseTime[Math.min(2, be.phase)] += dtB
           bossEngaged += dtB
         } else if (bossSeen) bossDisengaged += dtB
         if (!engaged && bossWasEngaged) {
@@ -1023,6 +1036,7 @@ try {
           bossPhaseTime[0] = 0
           bossPhaseTime[1] = 0
           bossPhaseTime[2] = 0
+          bossIntroTime = 0
           bossEngaged = 0
           bossBreaks = 0
           bossPhaseDamage[0] = 0
@@ -2028,6 +2042,7 @@ try {
         attackRange: bossAttackRange,
         dist: bossDist,
         phaseTime: bossPhaseTime.map((v) => Number(v.toFixed(1))),
+        introTime: Number(bossIntroTime.toFixed(1)),
         budget: Object.fromEntries(
           Object.entries(bossBudget).map(([k, v]) => [k, Number(v.toFixed(1))]),
         ),
@@ -2437,11 +2452,21 @@ try {
         `              받은 피해 ${log.boss.damageTaken} (그 사이 최저 체력 ${log.boss.minHp}) · 준 피해 ${log.boss.damageDealt}/${log.boss.maxHp}\n` +
         `              보스가 사거리(${log.boss.attackRange}m) 안에 있던 시간 ${log.boss.inRangePct}% · 예고를 띄우고 있던 시간 ${log.boss.windingPct}%\n` +
         `              거리 분포 — 2.5m 미만 ${pct(log.boss.dist.near)}% · 2.5~5m ${pct(log.boss.dist.mid)}% · 5~9m ${pct(log.boss.dist.far)}% · 9m 이상 ${pct(log.boss.dist.away)}%\n` +
-        `              페이즈별 시간 — 1단계 ${log.boss.phaseTime[0]}초 · 2단계 ${log.boss.phaseTime[1]}초 · 3단계 ${log.boss.phaseTime[2]}초\n` +
+        `              페이즈별 시간 — 인트로 ${log.boss.introTime ?? 0}초 · 1단계 ${log.boss.phaseTime[0]}초 · 2단계 ${log.boss.phaseTime[1]}초 · 3단계 ${log.boss.phaseTime[2]}초\n` +
         `              페이즈별 실효 화력 — ${(log.boss.phaseBands ?? [])
           .map(
             (b, i) =>
-              `${i + 1}단계 ${(b / Math.max(0.1, log.boss.phaseTime[i])).toFixed(1)}/초` +
+              /**
+               * ⚠️ **0초짜리 구간에 화력을 계산하면 안 됩니다.**
+               *
+               * `2단계 0초 · 실효 화력 2170.0/초` 가 찍혔습니다. 217 을
+               * 하한 0.1 로 나눈 값입니다. 그 구간은 **재지 못한 것**이지
+               * 화력이 2170인 것이 아닙니다(보스전 중 사망으로 누적이
+               * 초기화되면 이렇게 됩니다). 못 잰 것을 그럴듯한 숫자로
+               * 내놓는 계기가 이 저장소에서 제일 비쌌습니다 —
+               * 못 쟀으면 **못 쟀다고** 적습니다.
+               */
+              `${i + 1}단계 ${log.boss.phaseTime[i] < 0.5 ? '못 쟀음' : `${(b / log.boss.phaseTime[i]).toFixed(1)}/초`}` +
               ` (구간 체력 ${Math.round(b)} ÷ ${log.boss.phaseTime[i]}초 · 처형 ${log.boss.phaseFinishers?.[i] ?? 0} · 붕괴 ${log.boss.phaseBreaks?.[i] ?? 0})`,
           )
           .join('\n                             ')}\n` +

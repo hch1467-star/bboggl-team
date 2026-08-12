@@ -198,6 +198,47 @@ try {
     clashes.length === 0 ? '겹침 없음' : clashes.join(' · '),
   )
 
+  /**
+   * ---- 3. **보스가 쓸 색을 존이 먼저 가르쳤는가** ----
+   *
+   * ── 위 1번이 **비어서 통과할 수 있었습니다** ────────────────────
+   * 1번은 *"🟢 보다 피하는 색을 먼저 만난다"* 를 봅니다. 그런데 🟢 을 쓰는
+   * 적이 동선에 **하나도 없으면** `firstCounter < 0` 이 되어 그대로
+   * 통과합니다. 즉 *가르친 적이 없으면 순서 위반도 없다* 는 이유로 초록불이
+   * 켜집니다 — 이 저장소에서 가장 비싼 고장인 **"아무 말도 안 하는 계측기"**
+   * 의 교과서적인 모양입니다.
+   *
+   * ── 왜 하필 보스 기준인가 ──────────────────────────────────────
+   * 방금 보스에 **1단계 학습 잠금**을 넣었습니다 — 색을 몇 가지 보여주기
+   * 전에는 2단계로 안 넘어갑니다(enemyAI `taughtInPhase1`). 그건 보스가
+   * *자기 문법*을 가르치는 장치이지, **존이 할 일을 대신하는 장치가
+   * 아닙니다.** 보스 앞에서 처음 보는 색이 있으면 그 색은 이 게임에서 가장
+   * 위험한 자리에서 처음 배우게 됩니다. 소울류가 절대 안 하는 일입니다.
+   *
+   * 그래서 묻습니다: **보스가 쓰는 색 전부를, 보스에 닿기 전에 만나는가.**
+   */
+  {
+    const bossDef = roster.find((r) => r.id === 'boss')
+    const bossColors = bossDef ? [...new Set(bossDef.attacks.map((a) => a.color))] : []
+    // 동선에서 만나는 적들이 가르치는 색 (보스 제외 — 위 `foes` 가 이미 뺐습니다).
+    const taught = new Set()
+    for (const o of order) for (const c of colorsOf(o.kind)) taught.add(c)
+    const missing = bossColors.filter((c) => !taught.has(c))
+    console.log(
+      `  [보스가 쓰는 색] ${bossColors.join(' ')} · [존이 가르치는 색] ${[...taught].join(' ')}\n`,
+    )
+    check(
+      bossColors.length > 0,
+      '보스의 색을 실제로 읽어 왔다 (빈 목록으로 통과하지 않게)',
+      `${bossColors.length}색`,
+    )
+    check(
+      missing.length === 0,
+      '보스가 쓰는 색을 **존이 먼저 다 가르친다** (보스 앞에서 처음 보는 색이 없다)',
+      missing.length ? `못 가르친 색 ${missing.join(' ')}` : `${bossColors.length}색 전부`,
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {
