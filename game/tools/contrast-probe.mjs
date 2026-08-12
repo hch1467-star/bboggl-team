@@ -69,7 +69,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
-import { decodePng, deltaE } from './png.mjs'
+import { CVD_KINDS, decodePng, deltaE, luminance, simulateCvd } from './png.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5213
@@ -93,6 +93,58 @@ const browser = await chromium.launch({
   executablePath: execPath,
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
 })
+
+/**
+ * **정해 둔 지면 지점들**의 색을 두 장에서 각각 읽습니다.
+ *
+ * ── 왜 "달라진 픽셀 전부"에서 여기로 바꿨는가 ──────────────────────
+ * 예전 방식(아래 `telegraphVsGround`)은 두 장을 견줘 **달라진 픽셀을 전부**
+ * 모았습니다. 넷까지는 잘 돌았는데, 🟢 을 재기 시작하자 무너졌습니다:
+ *
+ *     🟢 예고 rgb(60,77,76) vs 바탕 rgb(69,73,82) — 예고가 바탕보다 **어둡다**
+ *
+ * 밝은 민트색을 덮어 그린 자리가 바탕보다 어두울 수는 없습니다. 즉 이건
+ * 게임이 아니라 **계기가 틀린 것**이었습니다. 원인은 둘이었습니다:
+ *
+ *   1. 🟢 예고는 **깜빡입니다**(visuals.ts — 요구하는 동작이 정반대라
+ *      일부러 그렇게 만들었습니다). 어느 프레임에 찍히느냐로 값이 갈립니다.
+ *   2. 달라진 픽셀에는 **보스의 몸**도 들어옵니다. 예고가 뜨는 동안 몸이
+ *      발광하기 때문입니다. 그래서 🟢 만 바탕 평균이 rgb(69,73,82) 로
+ *      다른 넷(rgb 30~52)보다 훨씬 밝게 나왔습니다 — 지면이 아니라
+ *      **보스를 재고 있었습니다.**
+ *
+ * 그래서 "달라진 곳"을 찾지 않고, **어디를 볼지 먼저 정합니다**: 부채꼴
+ * 안쪽 지면 위의 점들을 게임에게 화면 좌표로 물어보고 거기만 읽습니다.
+ * 몸도, 배경도, 깜빡임이 만든 헛것도 섞이지 않습니다.
+ */
+function sampleTelegraph(basePng, litPng, spots) {
+  const a = decodePng(basePng)
+  const b = decodePng(litPng)
+  let n = 0
+  const g = [0, 0, 0]
+  const l = [0, 0, 0]
+  for (const s of spots) {
+    const x = Math.round(s.sx)
+    const y = Math.round(s.sy)
+    if (x < 0 || y < 0 || x >= a.width || y >= a.height) continue
+    const i = (y * a.width + x) * 4
+    // 바탕이 이미 밝으면 지면이 아니라 몸일 수 있습니다 — 그런 점은 버립니다.
+    if (a.data[i] > 120 || a.data[i + 1] > 120) continue
+    g[0] += a.data[i]
+    g[1] += a.data[i + 1]
+    g[2] += a.data[i + 2]
+    l[0] += b.data[i]
+    l[1] += b.data[i + 1]
+    l[2] += b.data[i + 2]
+    n++
+  }
+  if (n < 6) return null
+  return {
+    ground: g.map((v) => Math.round(v / n)),
+    lit: l.map((v) => Math.round(v / n)),
+    pixels: n,
+  }
+}
 
 /** 두 장을 견줘 "달라진 픽셀"만 골라 평균 색 두 개를 냅니다. */
 function telegraphVsGround(basePng, litPng) {
@@ -159,7 +211,14 @@ try {
   const bossDef = roster.find((r) => r.attacks.length >= 4) ?? roster[0]
 
   const measured = []
-  for (let i = 0; i < 4; i++) {
+  /**
+   * ⚠️ **`i < 4` 로 박혀 있었습니다.** 색이 넷이던 시절의 숫자인데, 🟢 반격이
+   *    다섯째로 들어온 뒤에도 그대로였습니다. 즉 이 프로브는 몇 라운드 동안
+   *    **🟢 을 한 번도 안 재고** 초록불을 켜고 있었습니다. 같은 실수를
+   *    `npm run react` 에서도 했습니다(거기선 예산이 4지선다에 묶여 있었습니다).
+   *    이제 보스가 가진 패턴 수만큼 돕니다 — 색을 늘리면 여기가 저절로 늘어납니다.
+   */
+  for (let i = 0; i < bossDef.attacks.length; i++) {
     await page.evaluate(([b, n]) => window.__game.forceAttack(b, n), [boss, i])
     /**
      * 렌더러가 **새 예고를 그린 뒤**에 찍어야 합니다. 두 프레임을 주는
@@ -174,13 +233,56 @@ try {
       const i = window.__game.enemyInfo(b)
       return i ? Number((1 - i.timer / i.windup).toFixed(2)) : -1
     }, [boss])
-    await page.evaluate(() => window.__game.setPaused(true))
-    const shot = await page.screenshot()
-    await page.evaluate(() => window.__game.setPaused(false))
-    const r = telegraphVsGround(base, shot)
+    /**
+     * 부채꼴 안 **지면 위의 점들**을 게임에게 화면 좌표로 물어봅니다.
+     * 사거리의 35~80% 구간을 씁니다 — 안쪽은 몸에 가리고, 맨 끝은 도형의
+     * 가장자리라 반칸만 칠해집니다.
+     */
+    const geo = bossDef.attacks[i]
+    const groundSpots = await page.evaluate(
+      ([b, reach, arcDeg]) => {
+        const G = window.__game
+        const info = G.enemyInfo(b)
+        if (!info) return []
+        const out = []
+        const half = ((arcDeg / 2) * Math.PI) / 180
+        for (const frac of [0.35, 0.5, 0.65, 0.8]) {
+          for (const t of [-0.7, -0.35, 0, 0.35, 0.7]) {
+            const ang = info.rotY + half * t
+            const r = reach * frac
+            // 예고 판은 지면 바로 위(y=0.04)에 깔립니다.
+            const p = G.screenPos(info.x + Math.sin(ang) * r, 0.05, info.z + Math.cos(ang) * r)
+            if (p) out.push(p)
+          }
+        }
+        return out
+      },
+      [boss, geo.reach, geo.arcDeg],
+    )
+    /**
+     * 🟢 은 **깜빡입니다.** 한 장만 찍으면 어느 위상에 걸리느냐로 값이
+     * 갈립니다. 여러 장 찍어 **가장 진한 순간**을 씁니다 — 깜빡이는 표시는
+     * 사람 눈에도 가장 진한 순간이 기준이 됩니다(안 깜빡이는 넷은 어느
+     * 장을 골라도 같으므로 이 규칙이 불공평하지 않습니다).
+     */
+    let shot = null
+    let bestSum = -1
+    for (let k = 0; k < 4; k++) {
+      await page.evaluate(() => window.__game.setPaused(true))
+      const one = await page.screenshot()
+      await page.evaluate(() => window.__game.setPaused(false))
+      const probe = sampleTelegraph(base, one, groundSpots)
+      const sum = probe ? deltaE(probe.lit, probe.ground) : -1
+      if (sum > bestSum) {
+        bestSum = sum
+        shot = one
+      }
+      await page.waitForTimeout(45)
+    }
+    const r = sampleTelegraph(base, shot, groundSpots)
     const name = bossDef.attacks[i]?.color ?? `패턴${i}`
     if (!r) {
-      check(false, `${name} 예고가 화면에 나타났다`, '달라진 픽셀이 없습니다')
+      check(false, `${name} 예고가 화면에 나타났다`, '지면 표본을 못 잡았습니다')
       continue
     }
     measured.push({ name, at, ...r })
@@ -214,6 +316,114 @@ try {
       worst.d >= MIN_DELTA_E,
       '네 색이 서로 구분된다 (가장 헷갈리는 한 쌍 기준)',
       `${worst.a} vs ${worst.b} — ΔE ${worst.d.toFixed(1)}`,
+    )
+  }
+
+  /**
+   * ---- 3. **색각 이상인 사람에게도 갈리는가** ----
+   *
+   * enemyAttacks.ts 가 색을 정하며 적어 둔 문장입니다:
+   *
+   *   > 색맹(적록)을 고려해 **밝기와 채도도 함께** 벌려 두었습니다. 색만으로
+   *   > 구분하게 만들면 남성 약 8%가 빨강/노랑을 구분하지 못합니다.
+   *
+   * 옳은 판단인데 **한 번도 확인한 적이 없습니다.** 위 1·2번은 정상 시야
+   * 에서만 재므로 이 문장을 검사하지 않습니다. 같은 화면을 그 사람 눈으로
+   * 바꿔 놓고 다시 잽니다(png.mjs `simulateCvd` — Machado 2009 계수).
+   */
+  const worstPair = (map) => {
+    let worst = { d: Infinity, a: '', b: '' }
+    for (let i = 0; i < measured.length; i++) {
+      for (let j = i + 1; j < measured.length; j++) {
+        const d = deltaE(map(measured[i].lit), map(measured[j].lit))
+        if (d < worst.d) worst = { d, a: measured[i].name, b: measured[j].name }
+      }
+    }
+    return worst
+  }
+  console.log('')
+  const cvdCollisions = []
+  if (measured.length >= 2) {
+    /**
+     * ⚠️ **여기에 "색각 이상에서도 ΔE 25 이상"을 요구했다가 거뒀습니다.**
+     *
+     * 통과할 수 없는 검사였기 때문입니다. 🟢 을 빼고 **원래 넷만** 재도
+     * 청색맹에서 🟡 vs 🟣 가 ΔE 15.2 입니다 — 다섯 색은커녕 **넷으로도**
+     * 처음부터 불가능한 기준이었습니다. 색각 이상은 색 채널 자체를
+     * 접어 버리므로, 색을 아무리 잘 골라도 살 수 없습니다.
+     *
+     * 그래서 요구를 옮깁니다: **무너지는 쌍을 찍어 두고, 그 쌍이 도형으로
+     * 갈리는지**를 아래 5번이 요구합니다. 이게 접근성 실무가 말하는
+     * "중복 부호화"입니다 — 색이 접히면 **다른 채널이 같은 뜻을 져야** 합니다.
+     */
+    for (const kind of CVD_KINDS) {
+      const w = worstPair((c) => simulateCvd(c, kind))
+      const label = { protan: '적색맹', deutan: '녹색맹', tritan: '청색맹' }[kind] ?? kind
+      if (w.d < MIN_DELTA_E) cvdCollisions.push(`${label} ${w.a}vs${w.b} ΔE${w.d.toFixed(1)}`)
+      console.log(
+        `  📋 [관찰] ${label} 에서 가장 붙는 한 쌍 — ${w.a} vs ${w.b} ΔE ${w.d.toFixed(1)}` +
+          `${w.d < MIN_DELTA_E ? ' (색으로는 못 갈림 — 도형이 져야 합니다)' : ''}`,
+      )
+    }
+
+    /**
+     * ---- 4. **색이 아예 없으면 밝기로는 안 됩니다 (계산으로 압니다)** ----
+     *
+     * 처음엔 여기에 "밝기만으로도 다섯이 갈린다"를 요구했습니다. 그런데
+     * 그건 **통과할 수 없는 검사**였습니다. 밝기는 축이 하나뿐이라 다섯을
+     * 세우려면 네 칸이 필요하고, 칸마다 ΔE 25 면 L* 로 100 — 검정에서
+     * 흰색까지 **전 구간**입니다. 예고는 어두운 지면 위에서 다 보여야
+     * 하므로 그 범위를 쓸 수 없습니다.
+     *
+     * 통과 못 할 검사를 걸어 두면 둘 중 하나가 됩니다: 영원히 빨간 줄로
+     * 남아 무시되거나, 어느 날 조용히 지워지거나. **둘 다 나쁩니다.**
+     *
+     * 그래서 질문을 바꿉니다. 밝기로 가장 붙어 있는 한 쌍을 **찍어만 두고**,
+     * 그 둘이 **도형으로 갈리는지**를 아래 5번에서 요구합니다. 색이 통째로
+     * 사라지는 환경(어두운 화면·햇빛·채도 죽은 모니터)에서 남는 채널은
+     * 밝기가 아니라 **모양과 움직임**입니다.
+     */
+    const g = worstPair((c) => [luminance(c), luminance(c), luminance(c)])
+    console.log(
+      `  📋 [관찰] 밝기만 남기면 가장 붙는 한 쌍 — ${g.a} vs ${g.b} ΔE ${g.d.toFixed(1)}` +
+        ` (다섯 색을 밝기 하나로 세우는 것은 원리적으로 불가능합니다 — 아래 5번이 대신 지킵니다)`,
+    )
+  }
+
+  /**
+   * ---- 5. 그러면 **모양이 대신 갈라 주는가** ----
+   *
+   * enemyAttacks.ts 는 색이 무너져도 괜찮은 이유를 이렇게 적어 두었습니다:
+   *
+   *   > 도형의 두께도 다르게 그립니다 (visuals.ts) — 색이 안 보여도
+   *   > **굵기로 읽히게** 하는 것이 목적입니다.
+   *
+   * 이건 픽셀을 안 찍어도 **데이터만으로** 확인할 수 있습니다. 예고 도형은
+   * `makeSectorGeometry(0.35, reach, arcDeg)` 하나로 만들어지므로, **사거리와
+   * 각도가 같으면 도형이 글자 그대로 같습니다.** 서로 **다른 색**인데 그 둘이
+   * 같으면, 색을 지웠을 때 남는 것이 아무것도 없습니다.
+   */
+  {
+    const all = roster.flatMap((r) => r.attacks.map((a) => ({ ...a, from: r.name })))
+    const collide = []
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i]
+        const b = all[j]
+        if (a.intent === b.intent) continue
+        // 화면에서 1m ≈ 31px 이므로 0.3m·10° 안쪽이면 흘깃 봐서는 같은 도형입니다.
+        if (Math.abs(a.reach - b.reach) <= 0.3 && Math.abs(a.arcDeg - b.arcDeg) <= 10) {
+          collide.push(`${a.color}${a.id} vs ${b.color}${b.id} (${a.reach}m/${a.arcDeg}° · ${b.reach}m/${b.arcDeg}°)`)
+        }
+      }
+    }
+    check(
+      collide.length === 0,
+      '색이 다르면 **도형도 다르다** (색이 접혀도 남는 것이 있다)',
+      collide.length
+        ? collide.slice(0, 4).join(' · ')
+        : `패턴 ${all.length}개 중 겹치는 쌍 없음` +
+          (cvdCollisions.length ? ` · 색으로 못 갈리는 쌍 ${cvdCollisions.length}건을 도형이 받습니다` : ''),
     )
   }
 
