@@ -41,6 +41,15 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 30000 })
+  /**
+   * ⚠️ 아래 1~5번은 체력을 강제로 깎아 페이즈를 넘기며 **전환·연계·박자**를
+   *    잽니다. 새로 넣은 1단계 학습 잠금(enemyAI `taughtInPhase1`)이 켜져
+   *    있으면 그 전환이 막혀서, **상관없는 검사 열 개가 같이 빨개집니다.**
+   *    실제로 그렇게 만들어 놓고 한 번 당했습니다. 여기서는 끄고, 잠금
+   *    자체는 6번에서 켠 채로 잽니다 — 재는 자리를 나눈 것이지 안 재는
+   *    것이 아닙니다.
+   */
+  await page.evaluate(() => window.__game.setPhaseTeaching(false))
 
   // 페이지 안에서 쓸 공용 헬퍼를 심어 둡니다.
   await page.evaluate(() => {
@@ -48,7 +57,7 @@ try {
     window.__t = {
       runFor: async (seconds) => {
         const target = window.__game.state().elapsed + seconds
-        const deadline = Date.now() + 90000
+        const deadline = Date.now() + 200000
         while (window.__game.state().elapsed < target && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 8))
         }
@@ -288,6 +297,170 @@ try {
     '3단계에서도 예고가 잡몹 최단(0.55초) 이상',
     `가장 짧은 예고 ${shortest.toFixed(2)}초`,
   )
+
+  /**
+   * ---- 6. **한 판을 끝까지 싸워 페이즈의 모양을 잽니다** ----
+   *
+   * ── 왜 필요해졌는가 ──────────────────────────────────────────────
+   * 위 1~5번은 전부 **기계장치**를 봅니다 — 전환이 걸리는가, 연계가
+   * 이어지는가, 예고가 남아 있는가. 정작 *"싸워 보면 어떤 모양인가"* 는
+   * 한 번도 안 쟀습니다. 그건 `npm run bench` 가 존 전체를 도는 김에
+   * 곁다리로 냈는데, 그 숫자가 이랬습니다:
+   *
+   *     1단계 15.4초 · 2단계 14.4  (1.7~27.1) · 3단계 3.8초
+   *
+   * 2단계의 범위가 **16배**입니다. 이런 값으로는 아무것도 말할 수 없고,
+   * 실제로 저는 "1단계가 절반을 먹는다"를 두 번 적었다가 두 번 물렸습니다.
+   * 표본이 모자라서가 아니라 **재는 자리가 틀렸기** 때문입니다: 존을 도는
+   * 판은 무기 강화·성수병·불티·경로가 판마다 다르고, 보스전은 그 끝에
+   * 붙은 한 조각일 뿐입니다.
+   *
+   * ── 그래서 **일정한 압력**으로 바꿉니다 ──────────────────────────
+   * 봇 대신 **정해진 대로만 때리는 손**을 씁니다: 사거리 안에 붙어 서서,
+   * 쉬지 않고 평타만, 구르지 않고, 죽지 않게 체력만 채워 가며.
+   *
+   * 이건 실제 플레이가 아닙니다 — 그게 목적입니다. 플레이어 쪽 변수를
+   * 전부 없애면 남는 시간 차이는 **보스 자신의 구조**뿐입니다. 존 한 바퀴가
+   * 20분인데 이건 판당 1분이라, 여러 판을 돌려 중앙값을 낼 수도 있습니다.
+   *
+   * ⚠️ **인트로를 따로 셉니다.** 조우 연출(encounter 1) 동안 보스는
+   *    노려보기만 하는데, bench 는 그 시간을 1단계에 더하고 있었습니다.
+   */
+  /**
+   * 여기서 잠금을 **다시 켭니다.** 모양을 재는 것은 규칙이 다 걸려 있는
+   * 진짜 게임이어야 합니다 — 끄고 잰 모양은 우리가 안 만든 게임의 모양입니다.
+   */
+  await page.evaluate(() => window.__game.setPhaseTeaching(true))
+  console.log('\n  ⚔️  한 판을 끝까지 — 일정한 압력으로 재는 페이즈의 모양\n')
+  const RUNS = 3
+  const shapes = []
+  for (let run = 0; run < RUNS; run++) {
+    const r = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((res) => setTimeout(res, 6))
+      const now = () => G.state().simElapsed
+      G.reset()
+      const t0 = now()
+      while (now() - t0 < 0.6) await sleep()
+      G.clearEnemies()
+      while (now() - t0 < 1.0) await sleep()
+
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 3, p.z)
+      const intro = [0]
+      const trans = [0]
+      const phase = [0, 0, 0]
+      const breaks = [0, 0, 0]
+      const fins = [0, 0, 0]
+      let lastT = now()
+      /**
+       * ⚠️ **처음엔 0 에서 시작했다가 숫자를 통째로 날렸습니다.**
+       *    `runStats()` 의 무너짐·처형은 **누적 카운터**입니다. 0 에서
+       *    시작하면 앞 판의 총합이 첫 프레임에 **1단계 몫으로** 얹혀서,
+       *    세 판이 1 → 3 → 6 처럼 계단으로 늘었습니다. 실제 싸움이 아니라
+       *    **안 지운 장부**를 읽고 있었던 것입니다(강인도 105 에 평타 한 대가
+       *    3 남짓이라 2.1초에 여섯 번 무너지는 것은 애초에 불가능합니다).
+       *    지금 값을 **바닥으로 잡고** 거기서부터 셉니다.
+       */
+      const st0 = G.runStats?.() ?? {}
+      let lastBreak = st0.poiseBreaks ?? 0
+      let lastFin = st0.bossFinishers ?? 0
+      let done = false
+      const deadline = Date.now() + 200000
+      while (!done && Date.now() < deadline) {
+        const be = G.bossEncounter()
+        const dt = Math.max(0, now() - lastT)
+        lastT = now()
+        if (!be || be.hp <= 0) {
+          done = true
+          break
+        }
+        /**
+         * ⚠️ **전환 연출도 따로 셉니다.** 페이즈가 바뀌는 순간 보스는 무적 +
+         *    넉백 + 배너로 잠깐 멈춥니다. 그 시간을 그냥 두면 **다음 페이즈의
+         *    시간에 섞여** 뒤 구간이 길어 보입니다 — 인트로가 1단계에 섞여
+         *    있던 것과 정확히 같은 고장입니다. 전환은 두 번뿐이라 2·3단계만
+         *    손해를 봅니다.
+         */
+        if (be.encounter === 1) intro[0] += dt
+        else if (be.transitionT > 0) trans[0] += dt
+        else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
+
+        /**
+         * **일정한 압력** — 붙어 서서 쉬지 않고 평타만.
+         * 기력과 체력은 채워 둡니다. 재려는 것은 플레이어의 살림이 아니라
+         * 보스의 구간 길이입니다.
+         */
+        // 보스 좌표는 `enemyInfo` 가 줍니다 — bossEncounter 에는 자리 값이 없습니다.
+        const bi = G.enemyInfo(be.entity)
+        if (bi) {
+          G.teleportPlayer(bi.x, bi.z - 1.8)
+          G.aimAtWorld(bi.x, bi.z)
+        }
+        G.setStamina(100)
+        G.setHp(G.playerEntity(), 100)
+        G.press('Mouse0')
+        G.release('Mouse0')
+
+        // 무너짐·처형은 **일어난 자리에서** 셉니다(상태가 덮이기 전에).
+        const st = G.runStats?.() ?? {}
+        const i = Math.min(2, be.phase)
+        if ((st.poiseBreaks ?? 0) > lastBreak) {
+          breaks[i] += (st.poiseBreaks ?? 0) - lastBreak
+          lastBreak = st.poiseBreaks ?? 0
+        }
+        if ((st.bossFinishers ?? 0) > lastFin) {
+          fins[i] += (st.bossFinishers ?? 0) - lastFin
+          lastFin = st.bossFinishers ?? 0
+        }
+        await sleep()
+      }
+      return { intro: intro[0], trans: trans[0], phase, breaks, fins, killed: done }
+    })
+    shapes.push(r)
+    console.log(
+      `     ${run + 1}판 — 인트로 ${r.intro.toFixed(1)} · 전환 ${r.trans.toFixed(1)} · 1단계 ${r.phase[0].toFixed(1)} · 2단계 ${r.phase[1].toFixed(1)} · 3단계 ${r.phase[2].toFixed(1)}초` +
+        ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
+    )
+  }
+
+  const ok = shapes.filter((s) => s.killed)
+  check(ok.length === RUNS, `${RUNS}판 모두 보스를 잡았다 (못 잡은 판으로 평균을 내지 않게)`, `${ok.length}/${RUNS}판`)
+
+  if (ok.length) {
+    const mid = (xs) => {
+      const a = [...xs].sort((x, y) => x - y)
+      const h = a.length >> 1
+      return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2
+    }
+    const per = [0, 1, 2].map((i) => mid(ok.map((s) => s.phase[i])))
+    const bands = await page.evaluate(() => window.__game.bossTuning().map((p) => p.hpFrom ?? null))
+    console.log(
+      `\n     [가운데값] 인트로 ${mid(ok.map((s) => s.intro)).toFixed(1)}초 · 전환 ${mid(ok.map((s) => s.trans)).toFixed(1)}초 · ` +
+        per.map((v, i) => `${i + 1}단계 ${v.toFixed(1)}초`).join(' · '),
+    )
+    void bands
+
+    /**
+     * **구간마다 걸리는 시간이 체력 배분과 어긋나지 않는가.**
+     *
+     * 압력이 일정하므로, 체력을 같은 비율로 나눠 놨다면 시간도 비슷해야
+     * 합니다. 한 구간만 유독 길면 원인은 체력이 아니라 **구조**입니다
+     * (무적 전환·강인도 회복·연출 시간 따위). 어느 쪽인지는 위에 찍힌
+     * 무너짐/처형 분포가 갈라 줍니다.
+     *
+     * ⚠️ 문턱을 2배로 둔 이유: 3단계는 체력 배분 자체가 30%라 30% 짧고,
+     *    처형이 들어가면 더 짧아집니다. 그 정도는 설계대로입니다 —
+     *    **배 이상 벌어질 때만** 구조를 의심합니다.
+     */
+    const hi = Math.max(...per)
+    const lo = Math.min(...per.filter((v) => v > 0.05))
+    check(
+      hi <= lo * 2.5,
+      '한 구간만 유독 길지 않다 (가장 긴 구간 ≤ 가장 짧은 구간 × 2.5)',
+      `가장 김 ${hi.toFixed(1)}초 · 가장 짧음 ${lo.toFixed(1)}초 · 배수 ${(hi / lo).toFixed(1)}`,
+    )
+  }
 
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))

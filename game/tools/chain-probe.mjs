@@ -61,6 +61,13 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 30000 })
+  /**
+   * ⚠️ 이 프로브는 체력을 강제로 깎아 2·3단계로 넘겨 **연계**를 잽니다.
+   *    1단계 학습 잠금(enemyAI `taughtInPhase1`)이 켜져 있으면 그 전환이
+   *    막혀서 연계 검사 아홉 개가 통째로 빨개집니다 — 연계는 멀쩡한데요.
+   *    잠금 자체는 `npm run boss` 의 마지막 절이 켠 채로 잽니다.
+   */
+  await page.evaluate(() => window.__game.setPhaseTeaching(false))
 
   await page.evaluate(() => {
     window.__t = {

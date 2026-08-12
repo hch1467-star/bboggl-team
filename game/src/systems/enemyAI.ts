@@ -173,6 +173,77 @@ export function readChainsLost(): [number, number, number] {
  *     예약 = 발동 + 무너짐 + 페이즈전환 + 귀환 + 사망 + 판이 끝날 때 남은 것
  */
 const chainsDropped = { phase: 0, leash: 0, death: 0, overwrite: 0 }
+
+/**
+ * 🎓 **1단계가 아직 안 보여준 색** — 보스별로 기록합니다.
+ *
+ * ── 왜 필요해졌는가 ────────────────────────────────────────────────
+ * 바로 아래 페이즈 전환 코드에 이렇게 적혀 있었습니다:
+ *
+ *   > 화력이 높으면 페이즈를 통째로 **건너뛸 수 있고**(설계한 학습 순서가
+ *   > 무너짐) …
+ *
+ * 그래서 한 번에 두 단계를 뛰지 못하게 막아 뒀습니다. 그런데 그건 **번호를
+ * 건너뛰는 것**만 막습니다. `npm run boss` 로 일정한 압력을 넣어 재 보니
+ * 1단계가 **2.1초** 였습니다(2단계 5.5 · 3단계 6.2). 번호는 안 건너뛰었지만
+ * *1단계가 가르치기로 한 것*은 통째로 사라집니다 — 색 하나 못 보고 지나갑니다.
+ *
+ * DESIGN.md 는 1단계를 **"읽기 — 4색 훈련장"** 이라고 부릅니다. 훈련장이
+ * 2초라면 그 이름이 거짓말입니다.
+ *
+ * ── 왜 체력 배분으로 못 고치는가 ──────────────────────────────────
+ * 체력은 35/35/30 으로 나눠 놨는데 시간은 1 : 2.6 : 3.0 으로 나옵니다.
+ * 즉 구간 길이를 정하는 것은 체력이 아니라 **보스가 나를 얼마나 자주
+ * 끊는가**입니다(뒤 페이즈일수록 쿨다운이 짧아 더 자주 끊습니다).
+ * 1단계를 2.6배로 늘리려면 체력의 90% 를 거기 몰아야 하는데, 그건
+ * 3페이즈 보스가 아닙니다.
+ *
+ * ── 그래서 **시간이 아니라 사건**으로 잠급니다 ──────────────────────
+ * 세키로의 페이즈 관문이 쓰는 방식입니다: 체력이 임계값에 닿아도, **아직
+ * 안 보여준 색이 남아 있으면 전환을 미룹니다.** 그러면 1단계의 길이가
+ * 플레이어의 화력이 아니라 **가르칠 것이 남았는가**로 정해집니다.
+ *
+ * ⚠️ 무한정 미루지 않습니다. 패턴 선택은 확률이라 운이 나쁘면 한 색이
+ *    계속 안 나올 수 있고, 그러면 보스가 죽지도 않고 안 넘어갑니다.
+ *    상한을 두고, 넘으면 그냥 넘어갑니다.
+ */
+const taughtInPhase1 = new Map<number, Set<string>>()
+/**
+ * 1단계를 끝내기 전에 보여줘야 하는 **색 가짓수.**
+ *
+ * ⚠️ "가진 색 전부"로 두면 **잠깁니다.** 보스의 🟣 갈고리는 5m 밖에서만,
+ *    🟢 돌진도 거리를 두고 나옵니다. 붙어서 싸우는 플레이어에게는 그 둘이
+ *    영영 안 나오고, 그러면 1단계가 상한(아래)까지 늘어져 매번 똑같이
+ *    지루해집니다. 근접에서 확실히 나오는 셋(🔴 🟡 🔵)이 최소선입니다 —
+ *    *"어휘는 봤다"* 가 기준이지 *"전부 봤다"* 가 아닙니다.
+ */
+const PHASE1_TEACH_COLORS = 3
+/** 다 못 가르쳤어도 이만큼 지나면 넘어갑니다 — 확률이 나쁠 때의 탈출구. */
+const PHASE1_TEACH_CAP = 12
+const phase1HeldT = new Map<number, number>()
+
+/** 판 시작에만 지웁니다(장부 설계 노트와 같은 규칙). */
+export function resetPhaseTeaching(): void {
+  taughtInPhase1.clear()
+  phase1HeldT.clear()
+}
+
+/**
+ * 실험대 전용 — 이 잠금을 끕니다.
+ *
+ * ⚠️ **규칙을 끄는 스위치는 위험합니다.** 그래도 둔 이유가 있습니다:
+ *    `npm run boss` 의 앞부분은 전환·연계·박자 같은 **다른 규칙**을 재려고
+ *    체력을 강제로 깎아 페이즈를 넘깁니다. 이 잠금이 켜져 있으면 그
+ *    전환들이 막혀서, 아무 상관 없는 검사 열 개가 같이 빨개집니다.
+ *    (실제로 그렇게 만들어 놓고 한 번 당했습니다.)
+ *
+ *    끄는 것은 **잠금 하나**뿐이고, 그 잠금 자체는 같은 프로브의 뒷부분이
+ *    켠 채로 잽니다. 규칙을 안 재는 게 아니라 **재는 자리를 나눈 것**입니다.
+ */
+export function setPhaseTeaching(on: boolean): void {
+  phaseTeachingOn = on
+}
+let phaseTeachingOn = true
 export function readChainsDropped(): {
   phase: number
   leash: number
@@ -338,6 +409,19 @@ function commitAttack(
   Enemy.attackIndex[e] = index
   Actor.state[e] = ActorState.Attack
   Actor.phase[e] = AttackPhase.Windup
+  /**
+   * 🎓 **본 것은 예고가 뜬 순간 셉니다.** 판정까지 기다리면, 플레이어가
+   * 잘 피해서 판정이 안 난 색은 "안 가르친 것"이 되어 1단계가 끝나지
+   * 않습니다 — 잘할수록 벌받는 구조가 됩니다.
+   */
+  if (Enemy.phase[e] === 0) {
+    let seen = taughtInPhase1.get(e)
+    if (!seen) {
+      seen = new Set<string>()
+      taughtInPhase1.set(e, seen)
+    }
+    seen.add(String(atk.intent))
+  }
   Actor.timer[e] = atk.windup * windupScale
   Actor.hitsLeft[e] = 1
   Actor.nextHitT[e] = 0
@@ -539,7 +623,28 @@ export function enemyAiSystem(
         decayVelocity(e, dt, 10)
         continue
       }
-      const want = phaseForHp(Health.hp[e] / Health.max[e])
+      let want = phaseForHp(Health.hp[e] / Health.max[e])
+      /**
+       * 🎓 **1단계는 색을 몇 가지 보여주기 전에는 안 끝납니다.**
+       * (근거는 이 파일 위쪽 `taughtInPhase1` 주석.)
+       *
+       * ⚠️ **처음엔 체력만 붙잡아 두고 끝냈다가 아무 일도 안 일어났습니다.**
+       *    바로 아래 전환은 이미 계산해 둔 `want` 를 쓰는데, 체력을 되돌려도
+       *    그 값은 **옛날 체력으로 구한 것**이라 그대로 넘어갔습니다.
+       *    붙잡았으면 **판단도 다시 해야** 합니다.
+       */
+      if (phaseTeachingOn && want > 0 && Enemy.phase[e] === 0) {
+        const held = (phase1HeldT.get(e) ?? 0) + dt
+        phase1HeldT.set(e, held)
+        const seen = taughtInPhase1.get(e)?.size ?? 0
+        if (seen < PHASE1_TEACH_COLORS && held < PHASE1_TEACH_CAP) {
+          Health.hp[e] = Math.max(
+            Health.hp[e],
+            Health.max[e] * BOSS_PHASES[1].enterBelow + 0.5,
+          )
+          want = phaseForHp(Health.hp[e] / Health.max[e])
+        }
+      }
       if (want > Enemy.phase[e]) {
         Enemy.phase[e] = want
         Enemy.transitionT[e] = PHASE_TRANSITION_TIME
@@ -942,7 +1047,37 @@ export function enemyAiSystem(
        * 긴 패턴만 나오면 그게 또 하나의 단조로움이 됩니다.
        */
       const wantReach = impatient && dist > cfg.attackRange
-      let picked = pickAttack(list, dist, combatRng.next(), ph.weights, wantReach)
+      /**
+       * 🎓 **1단계에서는 아직 안 보여준 색을 먼저 고릅니다.**
+       *
+       * ── 왜 확률에 맡기면 안 되는가 ────────────────────────────────
+       * 처음엔 "색 셋을 볼 때까지 전환을 미룬다"만 걸었습니다. 그랬더니
+       * 세 판 중 두 판이 **12초 상한까지 붙잡혀** 있었습니다. 붙어서 싸우는
+       * 거리에서 고를 수 있는 색이 정확히 셋인데, 가중치 굴림이 같은 색을
+       * 계속 뽑았기 때문입니다. 가르치는 구간을 **주사위에 맡긴** 셈입니다.
+       *
+       * 소울류·몬헌의 보스가 첫 조우에서 대표 패턴을 차례로 보여 주는 것은
+       * 우연이 아닙니다. 가르칠 것이 남았으면 **그것부터** 냅니다.
+       *
+       * 새 경로를 만들지 않고 **가중치 덮어쓰기**로 합니다 — 이 파일이 이미
+       * 페이즈 성격을 그렇게 만들고 있고(패턴을 복제하지 않는 이유는
+       * enemyAttacks.ts `weights` 주석), 거리·광역 제한 같은 나머지 규칙이
+       * 그대로 살아 있습니다.
+       */
+      let weights = ph.weights
+      if (phaseTeachingOn && isBoss && Enemy.phase[e] === 0) {
+        const seen = taughtInPhase1.get(e)
+        const fresh = list.filter(
+          (a) => !seen?.has(String(a.intent)) && dist >= a.minRange && dist <= a.maxRange,
+        )
+        // 남은 색이 지금 거리에서 하나도 안 닿으면 평소대로 굴립니다.
+        if (fresh.length > 0) {
+          const only: Record<string, number> = {}
+          for (const a of list) only[a.id] = fresh.includes(a) ? (weights?.[a.id] ?? a.weight) : 0
+          weights = only
+        }
+      }
+      let picked = pickAttack(list, dist, combatRng.next(), weights, wantReach)
       // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
       // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
       if (picked && picked.arcDeg >= WIDE_ARC_DEG && wideSlotsLeft <= 0) {

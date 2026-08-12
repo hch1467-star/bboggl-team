@@ -93,6 +93,8 @@ import {
   enemyAiSystem,
   readChainsArmed,
   resetChainLedger,
+  resetPhaseTeaching,
+  setPhaseTeaching,
   readChainsDropped,
   countChainsPending,
   readGreenOutcome,
@@ -538,6 +540,7 @@ class Game {
     setBonfireReach(null)
     resetAttackTokens()
     resetChainLedger()  // 장부는 **판 시작에만** 지웁니다(enemyAI 설계 노트)
+    resetPhaseTeaching()
     // 눈금도 같이 비웁니다 — 안 그러면 앞 판의 초록이 이번 판에 섞입니다
     // (조합 프로브가 '앞 검사가 깨워 놓은 적'을 세던 것과 같은 실수).
     resetGreenOutcome()
@@ -3711,6 +3714,8 @@ declare global {
       setFocus: (n: number) => void
       setStamina: (n: number) => void
       grantPerfectDodge: () => void
+      /** 실험대 전용 — 1단계 학습 잠금을 켜고 끕니다(enemyAI 설계 노트). */
+      setPhaseTeaching: (on: boolean) => void
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -4251,6 +4256,7 @@ window.__game = {
    *    돕니다. setStamina·setFocus 와 정확히 같은 성격입니다 — "만들기
    *    어려운 상태를 만들어 주되, 규칙은 게임이 판단한다."
    */
+  setPhaseTeaching: (on) => setPhaseTeaching(on),
   grantPerfectDodge: () => {
     Player.perfectCritT[game.debugPlayerEntity()] = FOCUS.perfectDodgeCritWindow
   },
