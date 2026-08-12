@@ -108,10 +108,49 @@ export class Terrain {
   /** 이 레벨의 사다리들. 레벨 데이터의 'ladder' 엔티티에서 만들어집니다. */
   readonly shortcuts: Shortcut[] = []
 
+  /**
+   * 칸마다의 구역 색조. 매 칸 구역 목록을 훑으면 88×72×10 번을 돌게 되고,
+   * 지형은 레벨을 열 때 한 번 만들면 끝이라 **미리 펴 두는 쪽**이 맞습니다.
+   */
+  private readonly tintAt: Float32Array
+
   constructor(readonly level: LevelData) {
     let max = 0
     for (const v of level.heights) if (v > max) max = v
     this.maxLevel = max
+    this.tintAt = new Float32Array(level.w * level.h * 3).fill(1)
+    for (const r of level.regions ?? []) {
+      if (!r.tint) continue
+      /**
+       * ── 색조에서 **밝기를 빼고** 씁니다 ────────────────────────────
+       *
+       * 처음엔 색조를 곱하기 그대로 썼는데, 재 보니 붙어 있는 구역이 ΔE 2~6
+       * 밖에 안 벌어졌습니다. 원인은 **높이 램프와 채널이 겹치는 것**이었습니다:
+       * 윗면 색은 이미 높이에 따라 밝아지는데(직교 투영에서 높이를 읽는 단서),
+       * 구역 색조도 밝기를 건드리니 둘이 서로를 지웠습니다. 실측에서
+       * *색조 1.00 인 낮은 구역*과 *색조 0.72 인 높은 구역*의 빨강이
+       * 52 와 54 로 거의 같아졌습니다 — 정확히 상쇄된 것입니다.
+       *
+       * 그래서 **채널을 나눕니다: 밝기는 높이가, 색온도는 구역이 말합니다.**
+       * 색조의 밝기 성분을 1로 정규화하면 구역은 밝기를 못 건드리고,
+       * 남는 것은 **색의 기울기**뿐이라 높이와 섞이지 않습니다.
+       *
+       * ⚠️ 그래서 "보스 앞은 어둡게" 같은 것은 색조로 하면 안 됩니다. 그건
+       *    조명이나 안개가 할 일입니다 — 여기서 하면 다시 높이를 지웁니다.
+       */
+      const lum = 0.2126 * r.tint[0] + 0.7152 * r.tint[1] + 0.0722 * r.tint[2]
+      const tint: [number, number, number] =
+        lum > 0.0001 ? [r.tint[0] / lum, r.tint[1] / lum, r.tint[2] / lum] : [1, 1, 1]
+      for (let cz = r.z0; cz <= r.z1; cz++) {
+        for (let cx = r.x0; cx <= r.x1; cx++) {
+          if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) continue
+          const o = (cz * level.w + cx) * 3
+          this.tintAt[o] = tint[0]
+          this.tintAt[o + 1] = tint[1]
+          this.tintAt[o + 2] = tint[2]
+        }
+      }
+    }
     this.build()
     this.buildShortcuts()
   }
@@ -640,7 +679,13 @@ export class Terrain {
         // 윗면 — 격자 체크무늬를 살짝 넣습니다. 단색이면 직교 투영에서
         // 거리감이 전혀 안 잡혀서 "얼마나 걸었는지"를 알 수 없습니다.
         const checker = (cx + cz) % 2 === 0 ? 1.07 : 0.93
-        const top = this.topColor(lvl, checker)
+        const ti = (cz * w + cx) * 3
+        const tint: [number, number, number] = [
+          this.tintAt[ti],
+          this.tintAt[ti + 1],
+          this.tintAt[ti + 2],
+        ]
+        const top = this.topColor(lvl, checker, tint)
         quad(
           b,
           [x0, y, z0],
@@ -668,7 +713,7 @@ export class Terrain {
            * 이 면이 **넘어갈 수 있는 턱인지 벽인지**로 색을 나눕니다.
            * 낭떠러지(VOID)는 내려갈 수는 있어도 올라올 수는 없으므로 벽 쪽입니다.
            */
-          const side = this.sideColor(lvl, nLvl === VOID ? 99 : lvl - nLvl)
+          const side = this.sideColor(lvl, nLvl === VOID ? 99 : lvl - nLvl, tint)
 
           if (dir === 'nx') {
             quad(b, [x0, baseY, z0], [x0, baseY, z1], [x0, y, z1], [x0, y, z0], [-1, 0, 0], side)
@@ -718,11 +763,15 @@ export class Terrain {
    * 알베도를 0.4쯤 주면 화면에서는 거의 흰색으로 날아갑니다.
    * (첫 스크린샷에서 지형이 통째로 밝은 회색으로 떠서 게임의 어두운 톤과 따로 놀았습니다.)
    */
-  private topColor(lvl: number, checker: number): [number, number, number] {
+  private topColor(
+    lvl: number,
+    checker: number,
+    tint: [number, number, number] = [1, 1, 1],
+  ): [number, number, number] {
     const t = this.maxLevel > 0 ? lvl / this.maxLevel : 0
-    const r = (0.105 + t * 0.13) * checker
-    const g = (0.125 + t * 0.135) * checker
-    const b = (0.165 + t * 0.13) * checker
+    const r = (0.105 + t * 0.13) * checker * tint[0]
+    const g = (0.125 + t * 0.135) * checker * tint[1]
+    const b = (0.165 + t * 0.13) * checker * tint[2]
     return [r, g, b]
   }
 
@@ -751,8 +800,14 @@ export class Terrain {
    * ⚠️ 벽도 완전히 죽이지는 않습니다 — 새까맣게 되면 절벽의 **형태 자체**가
    *    안 보입니다(원래 주석에 있던 경고 그대로 지킵니다).
    */
-  private sideColor(lvl: number, dropSteps: number): [number, number, number] {
-    const [r, g, b] = this.topColor(lvl, 1)
+  private sideColor(
+    lvl: number,
+    dropSteps: number,
+    tint: [number, number, number] = [1, 1, 1],
+  ): [number, number, number] {
+    // 옆면도 **같은 색조**를 받습니다. 윗면만 물들이면 구역 경계에서 벽만
+    // 회색으로 남아, 지형이 두 겹으로 칠해진 것처럼 보입니다.
+    const [r, g, b] = this.topColor(lvl, 1, tint)
     // 옆면을 어둡게 = 값싼 앰비언트 오클루전. 단차가 훨씬 뚜렷해집니다.
     const k = dropSteps <= MAX_CLIMB ? STEP_FACE_MIX : WALL_FACE_MIX
     return [r * k + 0.012, g * k + 0.014, b * (k + 0.06) + 0.02]

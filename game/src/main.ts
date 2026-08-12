@@ -2105,6 +2105,80 @@ class Game {
    */
   private readonly faceRay = new THREE.Raycaster()
 
+  /**
+   * 이 NDC 자리로 광선을 쏘아 **처음 맞는 것이 그 점인지** 봅니다.
+   * 눈에 안 보이는 면·바닥은 가독성과 무관하므로 표본에서 뺍니다.
+   */
+  private faceVisible(ndcX: number, ndcY: number, wx: number, wy: number, wz: number): boolean {
+    const t = this.terrain
+    if (!t) return false
+    this.faceRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.cam.camera)
+    const hit = this.faceRay.intersectObject(t.group, true)[0]
+    if (!hit) return false
+    return hit.point.distanceTo(new THREE.Vector3(wx, wy, wz)) <= 0.35
+  }
+
+  /** 구역 목록 — 프로브가 레벨 JSON 을 따로 읽지 않도록. */
+  debugRegionList(): {
+    name: string
+    x0: number
+    x1: number
+    z0: number
+    z1: number
+    x: number
+    z: number
+    tint: [number, number, number] | null
+  }[] {
+    const t = this.terrain
+    if (!t) return []
+    const { w, h } = t.level
+    return this.regions.map((r) => {
+      const c = cellToWorld(Math.round((r.x0 + r.x1) / 2), Math.round((r.z0 + r.z1) / 2), w, h)
+      return { ...r, x: c.x, z: c.z, tint: r.tint ?? null }
+    })
+  }
+
+  /**
+   * 지금 화면에 보이는 **바닥 윗면**들을 구역 이름과 함께 돌려줍니다.
+   *
+   * `debugFaceSamples` 와 같은 이유로 게임이 투영합니다 — 구역 판정도
+   * 게임이 쓰는 그 사각형 그대로여야, 구역을 옮겼을 때 프로브만 옛
+   * 경계로 검사하는 일이 안 생깁니다.
+   */
+  debugGroundSamples(): { sx: number; sy: number; region: string }[] {
+    const t = this.terrain
+    if (!t) return []
+    const cam = this.cam.camera
+    const el = this.renderer.domElement
+    const { w, h } = t.level
+    const originX = (-w / 2) * CELL_SIZE
+    const originZ = (-h / 2) * CELL_SIZE
+    const out: { sx: number; sy: number; region: string }[] = []
+    const v = new THREE.Vector3()
+    for (let cz = 0; cz < h; cz++) {
+      for (let cx = 0; cx < w; cx++) {
+        const lvl = t.levelAtCell(cx, cz)
+        if (lvl === VOID) continue
+        const region = this.regions.find(
+          (r) => cx >= r.x0 && cx <= r.x1 && cz >= r.z0 && cz <= r.z1,
+        )
+        if (!region) continue
+        const wx = originX + (cx + 0.5) * CELL_SIZE
+        const wy = lvl * HEIGHT_STEP
+        const wz = originZ + (cz + 0.5) * CELL_SIZE
+        v.set(wx, wy, wz).project(cam)
+        if (v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) continue
+        if (!this.faceVisible(v.x, v.y, wx, wy, wz)) continue
+        out.push({
+          sx: Math.round(((v.x + 1) / 2) * el.clientWidth),
+          sy: Math.round(((1 - v.y) / 2) * el.clientHeight),
+          region: region.name,
+        })
+      }
+    }
+    return out
+  }
+
   debugFaceSamples(): { sx: number; sy: number; drop: number; climbable: boolean }[] {
     const t = this.terrain
     if (!t) return []
@@ -2155,10 +2229,7 @@ class Game {
            *    그래서 그 자리로 광선을 쏴서 **처음 맞는 것이 이 면인지**
            *    확인합니다. 눈에 안 보이는 면은 가독성과 무관합니다.
            */
-          this.faceRay.setFromCamera(new THREE.Vector2(v.x, v.y), cam)
-          const hit = this.faceRay.intersectObject(t.group, true)[0]
-          if (!hit) continue
-          if (hit.point.distanceTo(new THREE.Vector3(wx, wy, wz)) > 0.35) continue
+          if (!this.faceVisible(v.x, v.y, wx, wy, wz)) continue
           out.push({
             sx: Math.round(((v.x + 1) / 2) * el.clientWidth),
             sy: Math.round(((1 - v.y) / 2) * el.clientHeight),
@@ -3348,6 +3419,21 @@ declare global {
       teleportEnemy: (entity: number, x: number, z: number) => void
       /** 지형 세로면의 화면 좌표 + 낙차 — 레벨 문법이 눈에 읽히는지 검증용. */
       faceSamples: () => { sx: number; sy: number; drop: number; climbable: boolean }[]
+      /** 화면에 보이는 바닥 윗면 + 그 칸의 구역 이름 — 구역 색조 검증용. */
+      groundSamples: () => { sx: number; sy: number; region: string }[]
+      /** 구역 목록 — 이름·격자 범위·한가운데 월드 좌표·색조. */
+      regionList: () => {
+        name: string
+        x0: number
+        x1: number
+        z0: number
+        z1: number
+        x: number
+        z: number
+        tint: [number, number, number] | null
+      }[]
+      /** 예고 4색의 RGB. */
+      intentColors: () => { color: string; rgb: [number, number, number] }[]
       nearestBonfire: () => { x: number; z: number } | null
       /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
       spendPoints: () => { x: number; z: number; anvil: boolean }[]
@@ -3748,6 +3834,20 @@ window.__game = {
   teleportPlayer: (x, z) => game.debugTeleport(x, z),
   teleportEnemy: (entity, x, z) => game.debugTeleportEnemy(entity, x, z),
   faceSamples: () => game.debugFaceSamples(),
+  groundSamples: () => game.debugGroundSamples(),
+  regionList: () => game.debugRegionList(),
+  /**
+   * 예고 4색의 RGB — 프로브가 색을 베껴 적지 않도록 게임이 내보냅니다.
+   * (베껴 적으면 예고 색을 손보는 날 그 검사만 옛 색을 지킵니다.)
+   */
+  intentColors: () =>
+    (Object.keys(INTENT_COLOR).map(Number) as (keyof typeof INTENT_COLOR)[]).map((k) => {
+      const hex = INTENT_COLOR[k]
+      return {
+        color: INTENT_EMOJI[k],
+        rgb: [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255] as [number, number, number],
+      }
+    }),
   nearestBonfire: () => game.debugNearestBonfire(),
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),

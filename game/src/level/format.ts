@@ -125,6 +125,23 @@ export interface LevelRegion {
   z1: number
   /** 처음 들어왔을 때 한 줄 안내 (선택) */
   hint?: string
+  /**
+   * 이 구역의 **지면 색조** — 윗면·옆면 색에 채널별로 곱합니다. 없으면 1배.
+   *
+   * ── 왜 필요한가 ────────────────────────────────────────────────
+   * 이 존에는 이름 붙은 구역이 열 곳 있고 저마다 한 줄 설명까지 달려
+   * 있는데, **화면에서는 전부 같은 회색**이었습니다. 구역이 바뀐 것을
+   * 알려 주는 것은 HUD 글자뿐이라, 지도를 읽는 일이 **글을 읽는 일**이
+   * 되어 있었습니다. 쿼터뷰에서 지역을 구분하는 것은 원래 눈의 일입니다
+   * (할로우 나이트·하데스·디아블로가 전부 그렇게 합니다).
+   *
+   * ⚠️ **채도를 낮게 씁니다.** 예고 4색(빨강·노랑·파랑·보라)이 바탕과
+   *    ΔE 25 이상 떨어져야 한다는 약속이 이미 있고, 지면을 어느 한 색
+   *    쪽으로 진하게 물들이면 그 색 예고가 그 구역에서만 묻힙니다.
+   *    그래서 색상보다 **온도와 밝기**로 가릅니다. `npm run zones` 가
+   *    네 예고 색 전부에 대해 그 여유를 검사합니다.
+   */
+  tint?: [number, number, number]
 }
 
 export interface LevelData {
@@ -238,6 +255,12 @@ export function parseLevel(text: string): { level: LevelData } | { error: string
           z0: Number(r.z0) || 0,
           z1: Number(r.z1) || 0,
           hint: typeof r.hint === 'string' ? r.hint : undefined,
+          // 색조는 **셋 다 숫자일 때만** 받습니다. 반쪽만 온 값을 통과시키면
+          // 구역 하나가 조용히 새까매지고, 원인을 데이터에서 찾게 됩니다.
+          tint:
+            Array.isArray(r.tint) && r.tint.length === 3 && r.tint.every((v) => Number.isFinite(v))
+              ? [Number(r.tint[0]), Number(r.tint[1]), Number(r.tint[2])]
+              : undefined,
         }))
     : []
 
