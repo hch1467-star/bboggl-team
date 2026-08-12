@@ -53,6 +53,7 @@
     "zones": "node tools/zones-probe.mjs",
     "hints": "node tools/hints-probe.mjs",
     "shape": "node tools/shape-probe.mjs",
+    "flank": "node tools/flank-probe.mjs",
     "pace": "node tools/pace-probe.mjs"
   },
   "devDependencies": {
