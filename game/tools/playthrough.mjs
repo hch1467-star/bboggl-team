@@ -2066,6 +2066,8 @@ try {
         finishers: G.runStats().bossFinishers,
         chainsArmed: G.runStats().chainsArmed,
         chainsLost: G.runStats().chainsLost,
+        chainsDropped: G.runStats().chainsDropped,
+        chainsPending: G.runStats().chainsPending,
       },
       /** 전투 사이 빈 시간 — 지도 밀도의 답 */
       gapAvg: gaps.length ? Number((gaps.reduce((a, b) => a + b, 0) / gaps.length).toFixed(1)) : 0,

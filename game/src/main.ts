@@ -87,6 +87,9 @@ import {
   encounterEvents,
   enemyAiSystem,
   readChainsArmed,
+  resetChainLedger,
+  readChainsDropped,
+  countChainsPending,
   readGreenOutcome,
   resetGreenOutcome,
   readChainsLost,
@@ -485,6 +488,7 @@ class Game {
     setReachDistance(null)
     setBonfireReach(null)
     resetAttackTokens()
+    resetChainLedger()  // 장부는 **판 시작에만** 지웁니다(enemyAI 설계 노트)
     // 눈금도 같이 비웁니다 — 안 그러면 앞 판의 초록이 이번 판에 섞입니다
     // (조합 프로브가 '앞 검사가 깨워 놓은 적'을 세던 것과 같은 실수).
     resetGreenOutcome()
@@ -2577,6 +2581,10 @@ class Game {
     chainsArmed: number
     /** 예약된 연계가 무너짐으로 끊긴 횟수 — `[예고, 휘두름, 후딜]` 박자별 */
     chainsLost: [number, number, number]
+    /** 무너짐 말고 다른 이유로 사라진 예약 — 장부가 맞아떨어지게(enemyAI 설계 노트). */
+    chainsDropped: { phase: number; leash: number; death: number; overwrite: number }
+    /** 판이 끝나는 순간 아직 예약을 안고 있는 적 수. */
+    chainsPending: number
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
     /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
@@ -2605,6 +2613,8 @@ class Game {
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
       chainsArmed: readChainsArmed(),
+      chainsDropped: readChainsDropped(),
+      chainsPending: countChainsPending(),
       chainsLost: readChainsLost(),
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       staminaSpent: Number(readStaminaSpent().toFixed(1)),

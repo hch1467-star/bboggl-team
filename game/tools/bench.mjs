@@ -493,6 +493,59 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
 console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 0), 1)}회 / ` +
   `${fmt(boss.map((l) => (l.bossSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0)), 1)}회`)
+/**
+ * ── 예약된 연계의 **결말을 전부** 셉니다 ────────────────────────
+ *
+ * 벤치가 *"예약 8회 / 발동 0회"* 를 찍었습니다. 그 두 숫자만으로는 무엇을
+ * 고쳐야 할지 알 수 없습니다 — 8이 **어디로 갔는지** 모르니까요. 단일 판
+ * 출력에는 "무너져서 끊김"이 있었지만 **벤치에는 없었고**, 예약을 지우는
+ * 자리는 무너짐 말고도 넷(페이즈 전환 · 귀환 · 사망 · 덮어씀)이 더 있는데
+ * **아무도 세지 않았습니다.**
+ *
+ * ⚠️ **중앙값끼리 빼면 안 됩니다.** 처음에 그렇게 짜서 "설명 안 되는 5.5회"가
+ *    나왔는데, 그건 게임이 아니라 **산수**였습니다. 중앙값은 더하고 빼지지
+ *    않습니다 — 항목마다 다른 판이 중앙에 오니까요. 장부는 **판 안에서**
+ *    맞아야 합니다. 그래서 판마다 잔액을 구해 그대로 늘어놓습니다.
+ */
+{
+  const rests = boss.map((l) => {
+    const d = l.boss.chainsDropped ?? {}
+    /**
+     * ⚠️ **보스만 세면 안 됩니다.** 처음엔 `bossSwings` 로만 발동을 셌는데,
+     *    `chainsArmed` 는 **모든 적**의 예약을 셉니다 — 잡몹도 연계를 갖고
+     *    있습니다(grunt_jab → grunt_jab). 그래서 판마다 8회가 "설명 안 됨"
+     *    으로 남았는데, 그건 사라진 게 아니라 **잡몹이 실제로 발동시킨 것**을
+     *    보스 장부에서 찾고 있었던 것입니다. 같은 무리를 견주어야 합니다.
+     */
+    const fired = (l.foeSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0)
+    const st = (l.boss.chainsLost ?? []).reduce((a, b) => a + b, 0)
+    return (
+      (l.boss.chainsArmed ?? 0) -
+      (fired +
+        st +
+        (d.phase ?? 0) +
+        (d.leash ?? 0) +
+        (d.death ?? 0) +
+        (d.overwrite ?? 0) +
+        (l.boss.chainsPending ?? 0))
+    )
+  })
+  const m = (f) => median(boss.map(f))
+  const worst = rests.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0)
+  console.log(
+    `                 결말 — 발동(모든 적) ${m((l) => (l.foeSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0))}` +
+      ` · 무너짐 ${m((l) => (l.boss.chainsLost ?? []).reduce((a, b) => a + b, 0))}` +
+      ` · 페이즈전환 ${m((l) => l.boss.chainsDropped?.phase ?? 0)}` +
+      ` · 귀환 ${m((l) => l.boss.chainsDropped?.leash ?? 0)}` +
+      ` · 사망 ${m((l) => l.boss.chainsDropped?.death ?? 0)}` +
+      ` · 덮어씀 ${m((l) => l.boss.chainsDropped?.overwrite ?? 0)}` +
+      ` · 판 끝에 남음 ${m((l) => l.boss.chainsPending ?? 0)}`,
+  )
+  console.log(
+    `                 장부 잔액(판별) ${rests.join(', ')}` +
+      (worst === 0 ? '  → 맞음' : `  ⚠️ 최악 ${worst}회가 설명 안 됩니다`),
+  )
+}
 
 console.log('\n  ── 두 리듬 (기둥 1) ───────────────────')
 console.log(`  스킬 : 기본    ${fmt(pick((l) => (l.skillCasts ?? []).reduce((a, b) => a + b, 0)), 0)}회 : ` +

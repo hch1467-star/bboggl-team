@@ -153,12 +153,73 @@ export function readChainsLost(): [number, number, number] {
   return [chainsLost[0], chainsLost[1], chainsLost[2]]
 }
 
+/**
+ * 예약된 연계가 **무너짐 말고 다른 이유로** 사라진 횟수.
+ *
+ * ── 왜 필요해졌는가 ────────────────────────────────────────────
+ * 벤치가 *"연계 예약 8회 / 발동 0회"* 를 찍었습니다. 그런데 우리가 세고
+ * 있던 끊김은 **무너짐 하나뿐**이었습니다. 예약을 지우는 자리는 그 밖에도
+ * 셋이나 더 있습니다:
+ *
+ *   · 페이즈 전환 — 체력이 경계를 넘으면 하던 것을 끊고 자세를 바꿉니다
+ *   · 귀환      — 영역 밖으로 나가면 자리로 돌아가며 전부 되돌립니다
+ *   · 사망      — 예약을 안고 죽습니다
+ *
+ * 그래서 "예약 8 · 발동 0 · 무너짐 2" 같은 표가 나오면 **나머지 6이 어디로
+ * 갔는지 아무도 모릅니다.** 셈이 안 맞는 표는 읽는 사람을 속입니다.
+ *
+ * 이제 **장부가 맞아떨어지는지** 자체를 검사할 수 있습니다:
+ *
+ *     예약 = 발동 + 무너짐 + 페이즈전환 + 귀환 + 사망 + 판이 끝날 때 남은 것
+ */
+const chainsDropped = { phase: 0, leash: 0, death: 0, overwrite: 0 }
+export function readChainsDropped(): {
+  phase: number
+  leash: number
+  death: number
+  overwrite: number
+} {
+  return { ...chainsDropped }
+}
+
+/** 지금 예약을 안고 있는 적이 몇인지 — 판이 끝날 때 남은 몫을 세려고. */
+export function countChainsPending(): number {
+  const ids = enemies.run()
+  let n = 0
+  for (let i = 0; i < enemies.count; i++) {
+    if (Enemy.chainNext[ids[i]] !== NO_CHAIN) n++
+  }
+  return n
+}
+
+/**
+ * 공격 토큰의 **살아 있는 상태**만 되돌립니다 — 화톳불 휴식·부활에서 부릅니다.
+ *
+ * ⚠️ 여기서 **연계 장부를 지우면 안 됩니다.** 예전에는 지웠습니다. 그런데
+ *    발동 쪽(`foeSwingLog`)은 판 내내 쌓이므로, 예약은 중간에 0으로
+ *    돌아가고 발동은 안 돌아갔습니다. 즉 벤치가 여러 라운드 동안 찍어 온
+ *    **"연계 예약 8회 / 발동 0회"는 견줄 수 없는 두 숫자**였습니다.
+ *    (장부를 만들고 나서야 잔액이 **음수**로 나와서 들켰습니다 —
+ *     예약 1인데 발동 4.)
+ *
+ *    수명이 다른 두 값을 나란히 찍으면, 읽는 사람은 그것을 비율로 읽습니다.
+ *    그리고 저는 실제로 그 비율을 보고 "보스가 가르칠 시간을 잃었다"고
+ *    적었습니다. 그 결론은 **철회합니다.**
+ */
 export function resetAttackTokens(): void {
   commitGapT = 0
+}
+
+/** 연계 장부 — **판이 시작할 때만** 지웁니다(발동 쪽과 수명을 맞춥니다). */
+export function resetChainLedger(): void {
   chainsArmed = 0
   chainsLost[0] = 0
   chainsLost[1] = 0
   chainsLost[2] = 0
+  chainsDropped.phase = 0
+  chainsDropped.leash = 0
+  chainsDropped.death = 0
+  chainsDropped.overwrite = 0
 }
 
 /**
@@ -292,6 +353,19 @@ function commitAttack(
    *    적이 **끝없이 휘두릅니다.** 표만 보고는 안 보이는 종류의 고장이라
    *    규칙 자체를 여기 못 박습니다: 연계는 **두 번까지**.
    */
+  /**
+   * ⚠️ **살아 있는 예약을 덮어쓰는 것도 결말입니다.**
+   *
+   * 장부를 만들고 처음 돌리자마자 *"설명 안 되는 3회"* 가 나왔습니다.
+   * 무너짐·페이즈전환·귀환·사망 넷을 다 세도 예약의 행방이 안 맞았습니다.
+   * 남은 길이 여기였습니다 — 앞 공격이 **연계를 안고 있는 채로** 끝나지
+   * 못하고(반격에 끊기는 등) 다음 공격을 새로 걸면, 이 한 줄이 예약을
+   * 조용히 지웁니다.
+   *
+   * 세지 않으면 "예약은 됐는데 어디로 갔는지 모른다"가 남고, 그 표를 보고
+   * 페이즈 길이나 체력을 손대게 됩니다 — **엉뚱한 것을 고치는 길**입니다.
+   */
+  if (!chained && Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.overwrite++
   Enemy.chainNext[e] = chained ? NO_CHAIN : chainIndexFor(kind, Enemy.phase[e], index)
   /**
    * **예약된 연계의 수**를 셉니다.
@@ -428,7 +502,14 @@ export function enemyAiSystem(
   for (let i = 0; i < enemies.count; i++) {
     const e = ids[i]
     if (!isAlive(e)) continue
-    if (Actor.state[e] === ActorState.Dead) continue
+    if (Actor.state[e] === ActorState.Dead) {
+      // 예약을 안고 죽었으면 그것도 **결말**입니다 — 한 번만 세고 지웁니다.
+      if (Enemy.chainNext[e] !== NO_CHAIN) {
+        chainsDropped.death++
+        Enemy.chainNext[e] = NO_CHAIN
+      }
+      continue
+    }
 
     // 잡몹과 보스는 같은 코드를 쓰고 수치표만 갈아 끼웁니다.
     // 이렇게 해두면 새 적을 추가할 때 AI 코드를 건드릴 필요가 없습니다.
@@ -462,6 +543,7 @@ export function enemyAiSystem(
       if (want > Enemy.phase[e]) {
         Enemy.phase[e] = want
         Enemy.transitionT[e] = PHASE_TRANSITION_TIME
+        if (Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.phase++
         Enemy.chainNext[e] = NO_CHAIN
         Health.invulnT[e] = PHASE_TRANSITION_TIME
         Actor.state[e] = ActorState.Idle
@@ -631,6 +713,7 @@ export function enemyAiSystem(
         Enemy.encounter[e] = 3
         Enemy.aggro[e] = 0
         Actor.state[e] = ActorState.Idle
+        if (Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.leash++
         Enemy.chainNext[e] = NO_CHAIN
         encounterEvents.push({ entity: e, name: '', maxHp: 0, x: 0, z: 0 })
       }
