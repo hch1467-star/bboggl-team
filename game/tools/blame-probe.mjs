@@ -199,6 +199,74 @@ try {
     `${((lockedRate * 100) | 0)}% (${tFree.locked ?? 0}/${free.length})`,
   )
 
+  /**
+   * ---- 5. **장부를 플레이어에게 돌려줍니다** ----
+   *
+   * 위 검사들은 전부 *우리가* 공정함을 아는지를 봅니다. 그런데 기둥 2의
+   * 기준은 **플레이어가** *"내가 못 피했네"* 라고 말하는 것입니다. 말할
+   * 재료를 안 주면 그 대사는 나올 수 없습니다 — 지금까지 죽으면 화면에
+   * `웨이브 1 · 0마리 처치` 만 떴습니다.
+   *
+   * 그래서 죽여 보고 **화면에 실제로 뜬 글자**를 읽습니다. 게임 내부의
+   * 값을 다시 묻지 않습니다 — 내부가 맞아도 화면에 안 뜨면 없는 것입니다.
+   */
+  console.log('')
+  const die = async (starve) => {
+    await page.evaluate(
+      async ([kill]) => {
+        const G = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 8))
+        const now = () => G.state().simElapsed
+        G.reset()
+        const t0 = now()
+        while (now() - t0 < 0.6) await sleep()
+        G.clearEnemies()
+        while (now() - t0 < 1.0) await sleep()
+        const px = G.state().player.x
+        const pz = G.state().player.z
+        G.spawnEnemyKind('grunt', px + 2.2, pz)
+        G.spawnEnemyKind('grunt', px - 2.2, pz)
+        const t1 = now()
+        while (now() - t1 < 30) {
+          if (kill) G.setStamina(0)
+          // 죽을 때까지 체력을 아주 낮게 눌러 둡니다 — 한 대면 끝나게.
+          if (G.state().player.hp > 6) G.setHp(G.playerEntity(), 6)
+          if (G.state().player.hp <= 0) break
+          await sleep()
+        }
+        // 배너가 그려질 한 프레임을 줍니다.
+        const t2 = now()
+        while (now() - t2 < 0.4) await sleep()
+      },
+      [starve],
+    )
+    return page.evaluate(() => ({
+      title: document.getElementById('bannerTitle')?.textContent ?? '',
+      sub: document.getElementById('bannerSub')?.textContent ?? '',
+    }))
+  }
+
+  const deathFree = await die(false)
+  const deathStarved = await die(true)
+  console.log(`  [자유롭게 죽음] ${deathFree.title} · ${deathFree.sub}`)
+  console.log(`  [기력 0 로 죽음] ${deathStarved.title} · ${deathStarved.sub}\n`)
+
+  check(
+    /쓰러졌다|떨어졌다/.test(deathFree.sub),
+    '죽음 화면이 **무엇에 쓰러졌는지**를 말한다 (점수만 찍지 않는다)',
+    deathFree.sub || '(빈 화면)',
+  )
+  check(
+    deathFree.sub !== deathStarved.sub,
+    '죽은 **이유가 다르면 문장도 다르다** (돌려 쓰는 문구가 아니다)',
+    `"${deathFree.sub}" vs "${deathStarved.sub}"`,
+  )
+  check(
+    /기력/.test(deathStarved.sub),
+    '기력이 없어 죽으면 화면이 **기력을 지목한다** (다음 판에 바꿀 것을 짚어 준다)',
+    deathStarved.sub || '(빈 화면)',
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {

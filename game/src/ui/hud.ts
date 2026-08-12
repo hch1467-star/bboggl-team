@@ -399,9 +399,14 @@ export class Hud {
     this.bannerTimer = seconds
   }
 
-  showGameOver(kills: number, wave: number): void {
+  /**
+   * @param lesson **무엇에 쓰러졌고 왜 못 막았는가.** 성적(처치 수)보다 앞에
+   *   둡니다 — 죽음 화면에서 플레이어가 알고 싶은 것은 점수가 아니라
+   *   *"다음엔 뭘 다르게 해야 하나"* 입니다(main.ts `deathLesson`).
+   */
+  showGameOver(kills: number, wave: number, lesson = ''): void {
     this.bannerTitle.textContent = '패배'
-    this.bannerSub.textContent = `웨이브 ${wave} · ${kills}마리 처치`
+    this.bannerSub.textContent = `${lesson ? `${lesson} · ` : ''}웨이브 ${wave} · ${kills}마리 처치`
     this.banner.classList.add('show')
     this.restartButton.style.display = 'inline-block'
     this.bannerTimer = 0

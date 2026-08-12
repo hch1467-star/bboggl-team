@@ -118,12 +118,43 @@ export const INTENT_EMOJI: Record<AttackIntent, string> = {
   [AttackIntent.Counter]: '🟢',
 }
 
+/**
+ * 색의 **이름**과 **정답**을 따로 둡니다.
+ *
+ * ── 왜 쪼갰나 ──────────────────────────────────────────────────
+ * 예전에는 `'직격 — 구르기'` 한 덩어리였습니다. 화면 위 예고 안내에는
+ * 그게 딱 맞았지만, 죽음 화면에서 *"무엇에 쓰러졌는가"* 를 말하려니
+ * **`직격 — 구르기 에 쓰러졌다`** 가 되어 버렸습니다. 문장이 아니라
+ * 라벨을 이어 붙인 것이 그대로 보였습니다.
+ *
+ * 문자열을 `—` 로 잘라 쓰는 방법도 있었지만, 라벨 문구를 손보는 날
+ * 조용히 깨집니다. **쪼개서 갖고 있다가 붙이는 쪽**이 한 방향으로만
+ * 틀릴 수 있습니다.
+ */
+export const INTENT_NAME: Record<AttackIntent, string> = {
+  [AttackIntent.Strike]: '직격',
+  [AttackIntent.Sweep]: '광역',
+  [AttackIntent.Snare]: '속박',
+  [AttackIntent.Pull]: '끌어당김',
+  [AttackIntent.Counter]: '반격',
+}
+
+/** 그 색의 **정답** — 죽음 화면이 다음 판에 할 일을 짚어 줄 때 씁니다. */
+export const INTENT_ANSWER: Record<AttackIntent, string> = {
+  [AttackIntent.Strike]: '구르기',
+  [AttackIntent.Sweep]: '걸어서 이탈',
+  [AttackIntent.Snare]: '무적 프레임',
+  [AttackIntent.Pull]: '거리 두기',
+  [AttackIntent.Counter]: '정면에서 때려라',
+}
+
+/** 화면 위 예고 안내용 — 위 둘을 붙인 것입니다(두 곳에 적지 않게). */
 export const INTENT_LABEL: Record<AttackIntent, string> = {
-  [AttackIntent.Strike]: '직격 — 구르기',
-  [AttackIntent.Sweep]: '광역 — 걸어서 이탈',
-  [AttackIntent.Snare]: '속박 — 무적 프레임',
-  [AttackIntent.Pull]: '끌어당김 — 거리 두기',
-  [AttackIntent.Counter]: '반격 — 정면에서 때려라',
+  [AttackIntent.Strike]: `${INTENT_NAME[AttackIntent.Strike]} — ${INTENT_ANSWER[AttackIntent.Strike]}`,
+  [AttackIntent.Sweep]: `${INTENT_NAME[AttackIntent.Sweep]} — ${INTENT_ANSWER[AttackIntent.Sweep]}`,
+  [AttackIntent.Snare]: `${INTENT_NAME[AttackIntent.Snare]} — ${INTENT_ANSWER[AttackIntent.Snare]}`,
+  [AttackIntent.Pull]: `${INTENT_NAME[AttackIntent.Pull]} — ${INTENT_ANSWER[AttackIntent.Pull]}`,
+  [AttackIntent.Counter]: `${INTENT_NAME[AttackIntent.Counter]} — ${INTENT_ANSWER[AttackIntent.Counter]}`,
 }
 
 export interface EnemyAttackDef {

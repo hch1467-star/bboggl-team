@@ -25,9 +25,12 @@ import {
   WORLD,
 } from './config/balance'
 import {
+  type AttackIntent,
   INTENT_COLOR,
+  INTENT_ANSWER,
   INTENT_EMOJI,
   INTENT_LABEL,
+  INTENT_NAME,
   SNARE_MOVE_SCALE,
   attackAt,
   attacksFor,
@@ -1154,6 +1157,24 @@ class Game {
       }
       sfx.impact(true, false, f.x, f.z)
       if (f.entity === p) {
+        /**
+         * 🩸 **낙하도 장부에 적습니다.**
+         *
+         * 낙하 피해는 `hitEvents` 를 거치지 않습니다. 그래서 장부에 안 적으면,
+         * 떨어져 죽은 판에서 **직전에 때린 적이 범인으로 몰립니다.** 이
+         * 저장소가 반복해서 당한 "그럴듯한 오귀속"과 같은 모양입니다.
+         * 판정은 위 네 가지와 성격이 달라 따로 둡니다 — 예고도 시야도
+         * 없었고, 대신 **내 발이 한 일**입니다.
+         */
+        this.hurtLedger.push({
+          attackId: '낙하',
+          intent: -1,
+          telegraph: 0,
+          seen: 0,
+          free: 0,
+          damage: dmg,
+          verdict: 'fall',
+        })
         // 플레이어는 강인도가 없어 늘 비틀거립니다. 착지도 같은 규칙을 씁니다.
         Actor.state[p] = ActorState.Stagger
         Actor.timer[p] = PLAYER_CFG.hurtStagger
@@ -1351,7 +1372,7 @@ class Game {
         }
         this.dropEmbers(p)
         this.gameOver = true
-        this.hud.showGameOver(this.kills, this.wave)
+        this.hud.showGameOver(this.kills, this.wave, this.deathLesson())
       } else {
         this.kills++
         if (Enemy.kind[death.entity] === EnemyKind.Boss) {
@@ -2147,7 +2168,7 @@ class Game {
       revived = fresh.length
       resetAttackTokens()
     }
-    this.hud.showBanner('다시 일어섰다', `화톳불에서 부활 · 적 ${revived}마리 부활`, 2.2)
+    this.hud.showBanner('다시 일어섰다', `${this.deathLesson()} · 적 ${revived}마리 부활`, 3.6)
   }
 
   debugPlayerEntity(): number {
@@ -2344,6 +2365,64 @@ class Game {
       damage,
       verdict,
     })
+  }
+
+  /**
+   * 🩸 **무엇에 쓰러졌고, 왜 못 막았는가** — 죽은 순간 플레이어에게 줍니다.
+   *
+   * ── 왜 넣었나 ──────────────────────────────────────────────────
+   * 이 게임의 합격 기준은 *"죽었을 때 '내가 못 봤네'가 아니라 '내가 못
+   * 피했네'라고 말해야 한다"* 입니다. 그런데 지금까지 죽으면 화면에
+   * **`다시 일어섰다 · 적 12마리 부활`** 만 떴습니다. 무엇에 죽었는지도,
+   * 왜 못 피했는지도 안 알려 주면서 *"내가 못 피했네"* 라고 말하기를
+   * 기대한 셈입니다. **말할 재료를 안 주고 대사를 기대한 것**입니다.
+   *
+   * 하데스는 죽으면 무엇에게 죽었는지 보여 줍니다. 리터널은 사인을 적어
+   * 줍니다. 소울류는 안 보여 주는 대신 **적이 하나뿐이고 예고가 크다**는
+   * 것으로 대신합니다 — 우리는 다대일이라 그 방법을 쓸 수 없습니다.
+   *
+   * 그리고 우리는 한 걸음 더 갈 수 있습니다. 장부가 이미 **공정했는지까지**
+   * 판정해 두었으므로, "무엇에 죽었다"가 아니라 **"무엇을, 왜 못 막았다"**
+   * 를 말할 수 있습니다. 그게 다음 판에 바꿀 행동을 지목합니다.
+   *
+   * ⚠️ 장부가 비었으면 **지어내지 않습니다.** 원인을 모를 때 그럴듯한 문장을
+   *    만들면, 플레이어는 틀린 교훈을 배웁니다.
+   */
+  private deathLesson(): string {
+    const last = this.hurtLedger[this.hurtLedger.length - 1]
+    if (!last) return '화톳불에서 부활'
+    if (last.verdict === 'fall') return '발을 헛디뎠다 — 떨어졌다'
+
+    const i = last.intent as AttackIntent
+    const what = last.intent >= 0 ? `${INTENT_EMOJI[i]} ${INTENT_NAME[i]}` : '알 수 없는 공격'
+    /**
+     * **정답을 같이 적습니다.** "무엇에 죽었다"만으로는 다음 판이 안 바뀝니다.
+     * 이 게임이 파는 것은 *색을 읽고 그 색의 답을 내는 것*이므로, 죽음
+     * 화면은 그 답을 짚어 주는 자리이기도 합니다.
+     */
+    const answer = last.intent >= 0 ? ` · 정답은 ${INTENT_ANSWER[i]}` : ''
+    const tel = last.telegraph.toFixed(1)
+    /**
+     * 판정마다 **다음 판에 바꿀 행동**이 다릅니다. 그래서 문장도 다릅니다 —
+     * 같은 말을 돌려 쓰면 죽음이 가르치는 것이 없어집니다.
+     */
+    const why =
+      last.verdict === 'fair'
+        ? `예고 ${tel}초를 다 봤다`
+        : last.verdict === 'locked:stamina'
+          ? `예고는 봤지만 기력이 없어 구르지 못했다`
+          : last.verdict === 'locked:stagger'
+            ? `앞의 한 대에 굳어 있었다`
+            : last.verdict === 'locked:cooldown'
+              ? `방금 굴러서 아직 구를 수 없었다`
+              : last.verdict === 'locked:drink'
+                ? `성수병을 마시는 중이었다`
+                : last.verdict === 'unseen'
+                  ? `화면 밖에서 왔다`
+                  : last.verdict === 'tooFast'
+                    ? `예고가 ${tel}초뿐이었다`
+                    : '원인을 기록하지 못했다'
+    return `${what}에 쓰러졌다 — ${why}${answer}`
   }
 
   /** 🩸 장부를 그대로 내보냅니다 — 판정은 이미 게임이 내렸습니다. */
