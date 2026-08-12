@@ -3388,6 +3388,7 @@ declare global {
       }
       setFocus: (n: number) => void
       setStamina: (n: number) => void
+      grantPerfectDodge: () => void
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -3877,6 +3878,23 @@ window.__game = {
   setStamina: (n) => {
     const p = game.debugPlayerEntity()
     Stamina.value[p] = Math.max(0, Math.min(Stamina.max[p], n))
+  },
+  /**
+   * 실험대 전용 — 완벽 회피 직후 상태(확정 치명타 창)를 강제로 엽니다.
+   *
+   * ── 왜 필요한가 ──────────────────────────────────────────────
+   * `npm run feel` 은 "잘 읽을수록 화면이 더 오래 멎는가"를 **실제로 재야**
+   * 하는데, 완벽 회피는 적의 예고를 코앞에서 굴러 넘겨야 성립합니다. GPU가
+   * 없어 10~20fps 로 도는 이 컨테이너에서 그 타이밍을 맞추면, 재는 것이
+   * **게임이 아니라 운**이 됩니다.
+   *
+   * ⚠️ 이건 **결과를 조작하는 장치가 아닙니다.** 여는 것은 *조건*뿐이고,
+   *    등급을 매기고 정지 시간을 정하는 코드는 실제 전투 경로 그대로
+   *    돕니다. setStamina·setFocus 와 정확히 같은 성격입니다 — "만들기
+   *    어려운 상태를 만들어 주되, 규칙은 게임이 판단한다."
+   */
+  grantPerfectDodge: () => {
+    Player.perfectCritT[game.debugPlayerEntity()] = FOCUS.perfectDodgeCritWindow
   },
   threats: (range) => game.debugThreats(range),
   slotCooldowns: () => game.debugSlotCooldowns(),

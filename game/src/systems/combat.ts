@@ -855,6 +855,19 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       Player.focus[a] = Math.min(FOCUS.max, Player.focus[a] + 1 / Math.max(1, steps))
     }
 
+    /**
+     * 이 한 대가 **얼마나 읽어서 나온 것인가** — 0/1/2단.
+     *
+     * 겹치면 **가장 높은 것 하나만** 씁니다. 백어택이면서 치명타라고 해서
+     * 0.035초를 두 번 얹으면, 잘 싸울수록 화면이 오래 멎어 버립니다.
+     *
+     * ⚠️ 반격(`countered`)과 처형(`spec.finisher`)은 **일부러 여기 없습니다.**
+     *    둘은 COUNTER/FINISHER 라는 전용 연출값을 이미 따로 받고 있어서,
+     *    등급까지 얹으면 소용이 없거나(0.18 이 이미 이김) 너무 길어집니다
+     *    (0.23초). 근거는 balance.ts `feelStep` 주석에 재 놓았습니다.
+     */
+    const feelGrade = perfect ? 2 : back || crit ? 1 : 0
+
     hitEvents.push({
       x: Transform.x[t],
       y: Body.height[t] * 0.6,
@@ -862,9 +875,15 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       dirX: nx,
       dirZ: nz,
       damage,
-      // 제대로 꽂혔을 때 정지와 흔들림을 더 줍니다 — 손으로 느껴지는 보상.
-      hitstop: spec.hitstop + (back ? COMBAT.backHitstopBonus : 0),
-      trauma: spec.trauma + (back ? COMBAT.backTraumaBonus : 0),
+      /**
+       * ── 읽기의 등급만큼 정지·흔들림을 얹습니다 ────────────────────
+       *
+       * 근거와 등급표는 balance.ts `feelStep` 주석에 있습니다. 요약:
+       * 손맛은 **컨트롤의 영수증**이고, 영수증은 **잘 읽었을 때** 커져야
+       * 합니다. 예전에는 백어택 하나만 커졌습니다.
+       */
+      hitstop: spec.hitstop + COMBAT.feelStep * feelGrade,
+      trauma: spec.trauma + COMBAT.feelTraumaStep * feelGrade,
       heavy: spec.heavy || crit,
       back,
       crit,
