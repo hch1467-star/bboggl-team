@@ -227,6 +227,115 @@ try {
     poorCancel.delay > 0 ? `누르고 ${poorCancel.delay.toFixed(2)}초 뒤` : '끝내 안 나감',
   )
 
+  // ---- 2.5 **무기 전환도 입력입니다** ----
+  /**
+   * ── 왜 이걸 재게 됐는가 ────────────────────────────────────────────
+   * 이 저장소는 같은 버그를 이미 두 번 고쳤습니다 — 스킬 선입력이 없어서
+   * *"스킬이 한 번씩밖에 사용이 안 되네"* 였고, 구르는 중에 누른 공격이
+   * 통째로 사라졌습니다. 그때 내린 결론이 이것입니다:
+   *
+   * > **상태마다 다른 데서 입력을 기억하면 반드시 구멍이 생깁니다.**
+   *
+   * 그런데 무기 전환은 그 규칙 밖에 남아 있었습니다. `playerControl` 이
+   * 프레임 첫머리에서 `consumePress('Digit1')` 로 **키를 소비해 놓고**,
+   * 아래에서 `if (idle && ...)` 로 거릅니다. 즉 동작 중에 누른 전환은
+   * 소비만 되고 **그대로 증발합니다.**
+   *
+   * 이건 밸런스가 아니라 조작 문제입니다. 무기 셋을 준 게임에서 전환이
+   * *"완전히 멈출 때까지 기다렸다가 정확히 누르는 것"* 이면, 그건
+   * 그들 스스로 적어 둔 문장 그대로 **조작이 아니라 눈치싸움**입니다.
+   *
+   * ⚠️ 여기서 요구하는 것은 **취소가 아닙니다.** 후딜을 끊어 주면 휘두른
+   *    대가가 사라져서 템포 설계가 통째로 무너집니다(판정·후딜은 규칙).
+   *    요구하는 것은 *"눌러 둔 것이 살아남아 **끝난 뒤에** 적용된다"* —
+   *    공격·구르기·스킬 셋이 이미 그렇게 하고 있는 그것뿐입니다.
+   */
+  const swap = await lab(`
+    const before = G.state().loadout.weapon
+    tap('Mouse0')
+    await until(() => st() === St.attack, 1.0)
+    // **휘두르는 도중에** 다른 무기를 누릅니다.
+    tap('Digit2')
+    const pressedAt = now()
+    await until(() => st() === St.idle, 3.0)
+    await wait(0.3)
+    return { before, after: G.state().loadout.weapon, waited: now() - pressedAt }
+  `)
+  check(
+    swap.after !== swap.before,
+    '동작 중에 누른 **무기 전환이 살아남는다** (입력이 사라지지 않는다)',
+    `${swap.before} → ${swap.after}` + (swap.after !== swap.before ? ` · ${swap.waited.toFixed(2)}초 뒤` : ' (증발)'),
+  )
+
+  /**
+   * ⚠️ **그리고 끊지는 않아야 합니다.**
+   *
+   * 위 검사만 있으면 "전환이 후딜을 취소한다"로 고쳐 놓아도 통과합니다.
+   * 그런데 그건 훨씬 나쁜 변경입니다 — 후딜은 휘두른 **대가**이고, 그
+   * 대가가 무기 키 한 번으로 사라지면 대검을 공짜로 쓰게 됩니다. 이
+   * 저장소가 템포를 손볼 때 정한 규칙 그대로입니다: *"판정(active)을
+   * 건드리면 맞던 것이 안 맞습니다."* 후딜도 같은 급의 규칙입니다.
+   *
+   * 그래서 **한 동작이 끝나는 데 걸리는 시간**을 두 번 잽니다 — 전환을
+   * 눌렀을 때와 안 눌렀을 때. 같아야 합니다.
+   */
+  const swapCancel = await lab(`
+    const one = async (press) => {
+      await until(() => st() === St.idle, 3.0)
+      await wait(0.2)
+      tap('Mouse0')
+      const began = await until(() => st() === St.attack, 1.0)
+      if (press) tap('Digit2')
+      const ended = await until(() => st() === St.idle, 3.0)
+      return ended - began
+    }
+    const plain = await one(false)
+    // 무기를 되돌려 놓고 같은 조건에서 다시 잽니다.
+    tap('Digit1')
+    await until(() => st() === St.idle, 2.0)
+    await wait(0.4)
+    const swapped = await one(true)
+    return { plain, swapped }
+  `)
+  check(
+    swapCancel.plain > 0 &&
+      swapCancel.swapped > 0 &&
+      Math.abs(swapCancel.swapped - swapCancel.plain) < 0.08,
+    '…그래도 **후딜을 끊지는 않는다** (휘두른 대가는 그대로 낸다)',
+    `안 누름 ${swapCancel.plain.toFixed(2)}초 vs 누름 ${swapCancel.swapped.toFixed(2)}초`,
+  )
+
+  /**
+   * ⚠️ **그리고 기다리는 동안 화면이 말을 해야 합니다.**
+   *
+   * 이게 없으면 플레이어가 보는 것은 고치기 전과 **똑같습니다** —
+   * *"눌렀는데 안 바뀌네."* 지난 라운드에 인지 규칙을 셋 만들어 놓고
+   * 화면에 한 글자도 안 올려서 플레이어에게는 없는 기능이었던 것과
+   * 같은 실수입니다. 같은 실수를 두 번 하지 않기 위해 이 줄이 있습니다.
+   *
+   * 규칙이 아니라 **DOM 이 실제로 무엇을 쓰고 있는지**를 읽습니다.
+   */
+  const swapUi = await lab(`
+    const label = () => document.getElementById('weaponName')?.textContent ?? ''
+    await until(() => st() === St.idle, 3.0)
+    tap('Digit1')
+    await wait(0.4)
+    const before = label()
+    tap('Mouse0')
+    await until(() => st() === St.attack, 1.0)
+    tap('Digit3')
+    await wait(0.06)
+    const during = label()
+    await until(() => st() === St.idle, 3.0)
+    await wait(0.35)
+    return { before, during, after: label() }
+  `)
+  check(
+    swapUi.during !== swapUi.before && swapUi.during.includes('→'),
+    '기다리는 동안 **화면이 예약을 말한다** (눌린 줄 모르는 채로 안 둔다)',
+    `"${swapUi.before}" → 대기 중 "${swapUi.during}" → "${swapUi.after}"`,
+  )
+
   // ---- 3. 창이 지나면 버려지는가 ----
   //
   // 버퍼의 값어치는 "눌러 둔 것이 나온다"이지 "안 누른 것이 나온다"가

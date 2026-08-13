@@ -164,6 +164,20 @@
         background: rgba(13,16,23,0.72); border: 1px solid rgba(150,175,220,0.18);
         border-radius: 7px; padding: 3px 11px; backdrop-filter: blur(6px);
       }
+      /*
+        🗡 전환이 **예약된** 상태.
+
+        휘두르는 중에 누른 무기 전환은 사라지지 않고 기다립니다. 그런데
+        기다리는 동안 화면이 조용하면 플레이어가 보는 것은 고치기 전과
+        똑같습니다 — "눌렀는데 안 바뀌네". 그래서 테두리를 밝혀 둡니다.
+
+        깜빡이지 않습니다: 이 게임에서 맥동은 "시간이 간다"는 뜻인데,
+        예약은 재촉이 아니라 **곧 된다**는 약속입니다.
+      */
+      #weaponName.pending {
+        color: #eaf4ff; border-color: rgba(190,215,255,0.55);
+        background: rgba(36,46,64,0.86);
+      }
       #slots { display: flex; gap: 7px; }
       .slot {
         position: relative; width: 73px; height: 56px; overflow: hidden;

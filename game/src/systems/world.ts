@@ -65,6 +65,8 @@ export function spawnPlayer(x = 0, z = 0): number {
   Actor.comboWindowT[e] = 0
   Actor.bufferedAttack[e] = 0
   Actor.bufferedSkill[e] = 0
+  Actor.bufferedWeapon[e] = 0
+  Actor.bufferedWeaponT[e] = 0
   Actor.bufferedSkillT[e] = 0
   Actor.cooldownT[e] = 0
   Actor.hitsLeft[e] = 0

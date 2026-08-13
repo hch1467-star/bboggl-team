@@ -1620,6 +1620,20 @@ class Game {
     this.cdBuf[4] = Loadout.cd4[p]
     for (let i = 0; i < SLOT_COUNT; i++) this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
     this.skillBar.update(this.cdBuf, this.cdMaxBuf)
+    /**
+     * 🗡 예약된 무기 전환을 스킬바에 비춥니다.
+     *
+     * 규칙은 `playerControl` 이 갖고 있고 여기서는 **읽어서 그리기만**
+     * 합니다 — 지난 라운드에 발소리 링에서 정한 것과 같은 규약입니다.
+     * 화면이 자기 판단을 갖는 순간 "보이는 것과 실제가 다른" 버그가 시작됩니다.
+     */
+    {
+      const pe = this.debugPlayerEntity()
+      const want = Actor.bufferedWeapon[pe] - 1
+      const pending =
+        want >= 0 && want < WEAPONS.length && want !== Loadout.weapon[pe] ? WEAPONS[want].name : ''
+      this.skillBar.setPendingWeapon(pending)
+    }
     this.hud.tickPerf(time.realDt)
 
     endFrame()

@@ -131,14 +131,56 @@ try {
         return { ackFrames, ackT, hitT, backT }
       }
 
+      /**
+       * ⚠️ **여러 번 재서 중앙값을 씁니다.**
+       *
+       * 한 번만 재면 이 검사가 게임과 무관하게 빨강·초록을 오갑니다 —
+       * 이번 세션에만 세 번 그랬습니다(`2프레임`). 원인은 게임이 아니라
+       * **계측의 경주**입니다: `f0 = frame()` 을 읽은 뒤 `G.press` 가
+       * 실제로 접수되기까지 사이에 프레임이 한 번 넘어가면 그대로 +1 이
+       * 됩니다. 헤드리스 8~20fps 에서는 자주 있는 일입니다.
+       *
+       * 그래서 반복해서 재고 **중앙값**으로 판정합니다. (최솟값이 아닙니다 —
+       * 이 저장소는 `min` 이 프레임 빗나감을 골라내는 바람에 "평타
+       * 0.005초"라는 거짓말을 이미 한 번 냈습니다.) 폭은 옆에 찍어서
+       * 사람이 읽습니다 — **폭이 곧 이 계측기의 정직함**입니다.
+       */
+      const REPS = 5
+      const med = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+      const many = async (key, w) => {
+        const runs = []
+        for (let i = 0; i < REPS; i++) runs.push(await one(key, w))
+        /**
+         * ⚠️ **네 값을 전부 각자 중앙값으로 냅니다.**
+         *
+         * 처음엔 프레임만 중앙값으로 내고 시간(`ackT`)은 "첫 성공한 판"의
+         * 것을 그대로 썼습니다. 그러면 한 줄 안에서 **서로 다른 판의
+         * 숫자가 섞입니다** — 중앙값 1프레임 옆에 2프레임짜리 판의 0.100초가
+         * 붙는 식으로요. 이 저장소가 몇 번이나 물린 그 실수입니다:
+         * *"수명이 다른 숫자를 나란히 놓지 마라."*
+         */
+        const pick = (f) => {
+          const xs = runs.map(f).filter((v) => v >= 0)
+          return xs.length ? med(xs) : -1
+        }
+        const acks = runs.map((r) => r.ackFrames).filter((v) => v >= 0)
+        return {
+          ackFrames: pick((r) => r.ackFrames),
+          ackT: pick((r) => r.ackT),
+          hitT: pick((r) => r.hitT),
+          backT: pick((r) => r.backT),
+          ackSpan: acks.length ? `${Math.min(...acks)}~${Math.max(...acks)}` : '—',
+        }
+      }
+
       const out = []
       const weapons = G.weaponTable()
       for (let w = 0; w < weapons.length; w++) {
-        out.push({ name: `${weapons[w].name} 기본공격`, ...(await one('Mouse0', w)) })
+        out.push({ name: `${weapons[w].name} 기본공격`, ...(await many('Mouse0', w)) })
       }
-      out.push({ name: '구르기', ...(await one('Space', 0)) })
-      out.push({ name: '강타', ...(await one('Mouse2', 0)) })
-      out.push({ name: '스킬 Q', ...(await one('KeyQ', 0)) })
+      out.push({ name: '구르기', ...(await many('Space', 0)) })
+      out.push({ name: '강타', ...(await many('Mouse2', 0)) })
+      out.push({ name: '스킬 Q', ...(await many('KeyQ', 0)) })
       return out
     },
     [t.actorStates],
@@ -147,7 +189,7 @@ try {
   console.log('  [동작]            접수      판정      되찾기')
   for (const m of measure) {
     console.log(
-      `    ${m.name.padEnd(16)} ${m.ackFrames < 0 ? '  안 나감' : `${m.ackFrames}프레임`}` +
+      `    ${m.name.padEnd(16)} ${m.ackFrames < 0 ? '  안 나감' : `${m.ackFrames}프레임(${m.ackSpan})`}` +
         `  ${m.hitT < 0 ? '   —' : `${m.hitT.toFixed(2)}초`}` +
         `  ${m.backT < 0 ? '   —' : `${m.backT.toFixed(2)}초`}`,
     )

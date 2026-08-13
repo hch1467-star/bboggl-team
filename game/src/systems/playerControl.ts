@@ -587,6 +587,40 @@ export function playerControlSystem(ctx: ControlContext): void {
       }
     }
     /**
+     * 🗡 **무기 전환도 같은 자리에서 같은 방식으로** 기억합니다.
+     *
+     * 예전에는 이것만 규칙 밖이었습니다 — 프레임 첫머리에서 키를 소비해
+     * 놓고 `if (idle && ...)` 로 걸러서, **휘두르는 중에 누른 전환은
+     * 통째로 사라졌습니다.** 무기 셋을 준 게임에서 전환이 *"완전히 멈출
+     * 때까지 기다렸다가 정확히 누르는 것"* 이면, 그건 이 파일이 스킬
+     * 버퍼에 이미 적어 둔 문장 그대로 **조작이 아니라 눈치싸움**입니다.
+     *
+     * ⚠️ **취소가 아닙니다.** 후딜을 끊어 주는 것이 아니라, 눌러 둔 것이
+     *    살아남아 **동작이 끝난 뒤에** 적용될 뿐입니다. 후딜은 휘두른
+     *    대가이고 그건 규칙입니다 — 여기서 끊어 주면 템포 설계가 통째로
+     *    무너집니다(대검을 아무 대가 없이 쓰게 됩니다).
+     *
+     * 만료를 두는 이유도 같습니다: 2초 전에 누른 전환이 뒤늦게 적용되면
+     * **엉뚱한 무기를 든 채로** 다음 싸움이 시작됩니다.
+     */
+    if (weaponPressed >= 0) {
+      Actor.bufferedWeapon[p] = weaponPressed + 1
+      Actor.bufferedWeaponT[p] = BUFFER_TIME
+    } else if (Actor.bufferedWeaponT[p] > 0) {
+      Actor.bufferedWeaponT[p] = Math.max(0, Actor.bufferedWeaponT[p] - dt)
+      /**
+       * ⚠️ 만료를 `inputFlow.expired` 에 **안 더합니다.**
+       *
+       * 그 눈금은 *"내려던 공격이 버려졌다"* 를 세는 자리이고, 벤치가
+       * 그 숫자로 선입력 창을 판단합니다. 무기 전환 만료를 같이 넣으면
+       * 한 칸이 두 뜻을 갖게 되어, 창을 늘려야 하는지 전환을 덜 눌렀는지
+       * 구분이 안 됩니다. 이 저장소가 `locked` 한 칸에 원인 셋을 담았다가
+       * 뜻이 뒤집힌 적이 있습니다 — 같은 실수를 안 합니다.
+       */
+      if (Actor.bufferedWeaponT[p] === 0) Actor.bufferedWeapon[p] = 0
+    }
+
+    /**
      * 공격·구르기도 **같은 자리에서 같은 방식으로** 기억합니다.
      *
      * 예전에는 공격 버퍼를 `case ActorState.Attack:` 안에서 세웠습니다.
@@ -637,14 +671,17 @@ export function playerControlSystem(ctx: ControlContext): void {
 
     const idle = Actor.state[p] === ActorState.Idle
 
-    // ---- 장비 교체 (전투 중에는 불가) ----
-    if (idle && weaponPressed >= 0 && weaponPressed < WEAPONS.length) {
+    // ---- 장비 교체 — **눌러 둔 것을 동작이 끝난 뒤에** 적용합니다 ----
+    const wantWeapon = Actor.bufferedWeapon[p] - 1
+    if (idle && wantWeapon >= 0 && wantWeapon < WEAPONS.length) {
       // **실제로 바뀐 때만** 셉니다 — 들고 있는 무기 키를 다시 눌러도
       // 아무 일이 안 일어나고, 그건 배운 것이 아닙니다.
-      if (Loadout.weapon[p] !== weaponPressed) noteLearned('weapon')
-      Loadout.weapon[p] = weaponPressed
+      if (Loadout.weapon[p] !== wantWeapon) noteLearned('weapon')
+      Loadout.weapon[p] = wantWeapon
       Actor.comboIndex[p] = 0
       ctx.onLoadoutChange()
+      Actor.bufferedWeapon[p] = 0
+      Actor.bufferedWeaponT[p] = 0
     }
     if (idle && cycleRune0) {
       cycleRune(p, 3)
