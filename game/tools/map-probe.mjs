@@ -720,6 +720,86 @@ try {
   )
 
   console.log('')
+  /**
+   * ── 🎓 **새 적은 혼자 등장하는가** ────────────────────────────────
+   *
+   * ── 왜 이걸 재는가 ───────────────────────────────────────────────
+   * 이 저장소는 *"색만 다르고 대응이 같으면 색은 장식"* 을 몇 번이나 적어
+   * 뒀습니다. 같은 문장이 **구역**과 **적 배치**에도 그대로 걸립니다 —
+   * 새 적을 셋씩 한꺼번에 내보내면, 그 적들이 가르치려던 색이 **서로 섞여**
+   * 아무것도 안 가르칩니다.
+   *
+   * 이 게임은 적 종류마다 색 하나를 맡기고 있습니다(🔵 얽는 자에게 패턴을
+   * **하나만** 준 이유가 그것입니다 — enemyAttacks.ts BINDER_ATTACKS 주석).
+   * 그렇게 공들여 나눠 놓고 배치에서 뭉쳐 내보내면 설계가 사라집니다.
+   *
+   * 참고한 게임들이 예외 없이 지키는 규칙입니다:
+   *   · 다크 소울 — 새 적은 대개 **좁은 통로에서 혼자** 처음 만납니다
+   *   · 몬스터 헌터 — 새 몬스터는 **단독 퀘스트**로 먼저 배웁니다
+   *   · 로스트아크 — 새 기믹을 한 번 **단독으로** 보여 준 뒤에 섞습니다
+   *   · 마리오식 4단 구성 — 소개 → 발전 → 비틀기 → 마무리
+   *
+   * ── 순서를 짐작하지 않습니다 ─────────────────────────────────────
+   * "주 동선 순서"를 프로브에 적으면 레벨을 고치는 날 옛 순서로 검사합니다.
+   * **스폰에서 걸어야 하는 거리**로 정렬합니다 — 직선거리가 아닙니다
+   * (이 저장소가 이미 한 번 물린 자리입니다).
+   */
+  console.log('\n  🎓 새 적이 처음 나오는 자리 — 스폰에서 걸어야 하는 거리 순\n')
+  const intro = await page.evaluate(async () => {
+    const G = window.__game
+    G.reset()
+    await new Promise((r) => setTimeout(r, 300))
+    const foes = G.levelFoes()
+    const regions = G.regionList()
+    const named = regions.map((r) => ({ name: r.name, x: r.x, z: r.z }))
+    // 스폰 지점에서 각 구역 중심까지 **걸어야 하는** 거리.
+    const p = G.state().player
+    const d = G.distancesToward(p.x, p.z, named.map((r) => ({ x: r.x, z: r.z })))
+    return {
+      foes,
+      regions: named.map((r, i) => ({ ...r, walk: d?.points?.[i] ?? -1 })),
+    }
+  })
+
+  const ordered = intro.regions
+    .filter((r) => r.walk >= 0)
+    .sort((a2, b2) => a2.walk - b2.walk)
+  const seen = new Set()
+  let worstNew = 0
+  let worstWhere = ''
+  for (const r of ordered) {
+    const kinds = [...new Set(intro.foes.filter((f) => f.region === r.name).map((f) => f.kind))]
+    const fresh = kinds.filter((k) => !seen.has(k))
+    fresh.forEach((k) => seen.add(k))
+    if (fresh.length > worstNew) {
+      worstNew = fresh.length
+      worstWhere = `${r.name} — ${fresh.join(' · ')}`
+    }
+    if (kinds.length) {
+      console.log(
+        `    ${String(Math.round(r.walk)).padStart(3)}m  ${r.name.padEnd(10)} ` +
+          `${kinds.join(' · ')}${fresh.length ? `   ← 처음 ${fresh.length}종: ${fresh.join(' · ')}` : ''}`,
+      )
+    }
+  }
+  const orphan = intro.foes.filter((f) => !f.region).length
+  check(
+    ordered.length >= 3 && intro.foes.length >= 5,
+    '구역과 적을 실제로 읽었다 (측정이 성립했다)',
+    `구역 ${ordered.length}곳 · 적 ${intro.foes.length}마리 (구역 밖 ${orphan})`,
+  )
+  /**
+   * **한 구역이 새 적을 둘 이상 소개하면 안 됩니다.** 하나면 그 적의 색이
+   * 무엇인지 배울 수 있고, 둘이면 어느 예고가 누구 것인지부터 헷갈립니다.
+   * (이미 배운 적과 섞는 것은 얼마든 좋습니다 — 그게 "발전"입니다.)
+   */
+  check(
+    worstNew <= 1,
+    '**새 적은 한 번에 하나씩 나온다** (색을 배울 수 있게)',
+    worstNew <= 1 ? '모든 구역이 새 적을 최대 1종만 소개합니다' : `${worstWhere} 를 한꺼번에 소개합니다`,
+  )
+
+  console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**

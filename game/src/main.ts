@@ -2566,6 +2566,35 @@ class Game {
   }
 
   /**
+   * 지금 레벨에 서 있는 **적들을 구역과 묶어서** 돌려줍니다.
+   *
+   * ── 왜 게임이 묶어 주는가 ────────────────────────────────────────
+   * 프로브가 레벨 JSON 을 읽어 구역 사각형을 **다시 그리면**, 구역을 옮기는
+   * 날 프로브만 옛 경계로 검사합니다. 게다가 격자↔월드 변환(CELL_SIZE)을
+   * 프로브에 적어야 하는데, 그 값이 바뀌면 조용히 엉뚱한 구역을 셉니다.
+   * 실제로 이 숫자를 손으로 내다가 셀 크기를 1.5 로 잘못 잡아 **적의 44%가
+   * "구역 밖"** 으로 찍힌 적이 있습니다.
+   *
+   * 그래서 게임이 **자기가 쓰는 그 사각형으로** 판정해서 냅니다.
+   */
+  debugLevelFoes(): { kind: string; x: number; z: number; region: string }[] {
+    const t = this.terrain
+    if (!t) return []
+    const { w, h } = t.level
+    const out: { kind: string; x: number; z: number; region: string }[] = []
+    for (const e of t.level.entities) {
+      // 적인지 아닌지는 게임의 표로 가립니다(보물·모루·화톳불이 섞이지 않게).
+      if (kindFromId(e.kind) === null) continue
+      const cell = worldToCell(e.x, e.z, w, h)
+      const r = this.regions.find(
+        (g) => cell.cx >= g.x0 && cell.cx <= g.x1 && cell.cz >= g.z0 && cell.cz <= g.z1,
+      )
+      out.push({ kind: e.kind, x: e.x, z: e.z, region: r?.name ?? '' })
+    }
+    return out
+  }
+
+  /**
    * 지금 화면에 보이는 **바닥 윗면**들을 구역 이름과 함께 돌려줍니다.
    *
    * `debugFaceSamples` 와 같은 이유로 게임이 투영합니다 — 구역 판정도
@@ -4084,6 +4113,8 @@ declare global {
         string,
         { swings: number; hits: number; chained: number; byPhase: number[] }
       >
+      /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
+      levelFoes: () => { kind: string; x: number; z: number; region: string }[]
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -4650,6 +4681,7 @@ window.__game = {
     })),
   /** 보스가 어떤 색을 몇 번 휘두르고 몇 번 맞혔는가 — 절정이 위험한지 재는 값. */
   bossSwingLog: () => game.debugBossSwingLog(),
+  levelFoes: () => game.debugLevelFoes(),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
