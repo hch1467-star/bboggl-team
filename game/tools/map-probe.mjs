@@ -85,7 +85,12 @@ function ladderLinks() {
 }
 
 /** maxClimb 를 넘는 오르막은 열린 사다리로만 통과합니다. */
-function bfs(from, to, maxClimb, openLadders) {
+/**
+ * @param blocked 지나갈 수 없다고 **가정할** 칸들(키 집합). 기본은 없음.
+ *   *"첫 길을 막으면 두 번째 길이 있는가"* 를 물으려면 필요합니다 —
+ *   BFS 를 한 벌 더 만들면 두 구현이 언젠가 어긋납니다.
+ */
+function bfs(from, to, maxClimb, openLadders, blocked) {
   const links = openLadders ? ladderLinks() : []
   const linked = (ax, az, bx, bz) =>
     links.some(
@@ -112,6 +117,7 @@ function bfs(from, to, maxClimb, openLadders) {
         if (nh - h > maxClimb && !linked(cur.cx, cur.cz, nx, nz)) continue
         const k = key(nx, nz)
         if (dist.has(k)) continue
+        if (blocked?.has(k)) continue
         dist.set(k, dist.get(key(cur.cx, cur.cz)) + 1)
         next.push({ cx: nx, cz: nz })
       }
@@ -826,6 +832,64 @@ try {
       ? `${highSpots.length}자리 — ${highSpots.map((f) => `${f.kind} ${f.level}층`).join(' · ')}`
       : '층이 0~8인데 수직을 쓰는 배치가 하나도 없습니다 — 높이가 배경일 뿐입니다',
   )
+
+  /**
+   * ── 🔁 **되돌아오는 고리가 있는가** ───────────────────────────────
+   *
+   * 다크 소울 1 의 정체성은 지도가 **접힌다**는 것입니다 — 늦은 구역이 이른
+   * 구역으로 도로 이어지고, 그 순간 세계가 "길"에서 "장소"가 됩니다.
+   * 할로우 나이트·메트로배니아 전체가 같은 구조를 씁니다. 반대로 외길
+   * 지도는 죽을 때마다 **같은 길을 같은 순서로** 다시 걷게 만듭니다.
+   *
+   * 재는 법: 첫 길(주 동선)과 그 옆 한 칸을 **막고** 다시 걸어 봅니다.
+   * 갈 수 있으면 두 번째 길이 있는 것이고, 못 가면 외길입니다.
+   *
+   * ⚠️ **사다리를 걷은 채로만 재면 안 됩니다.** 처음에 그렇게 짜 놓고
+   *    *"지름길로만 생기는 고리는 고리가 아니다"* 라고 적었는데, 그건
+   *    다크 소울을 거꾸로 읽은 것입니다 — **그 지도의 고리는 전부 지름길로
+   *    접힙니다.** 열기 전에는 외길이고, 여는 순간 세계가 이어지는 그 사건이
+   *    설계의 핵심입니다. 그래서 **걷은 채 / 내린 뒤**를 나란히 냅니다.
+   */
+  {
+    const spawnC = cellOf(level.entities.find((e) => e.kind === 'spawn'))
+    const bossC = cellOf(level.entities.find((e) => e.kind === 'boss'))
+    const key = (x, z) => z * level.w + x
+    const blocked = new Set()
+    for (const c of routeCells) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) blocked.add(key(c.cx + dx, c.cz + dz))
+      }
+    }
+    blocked.delete(key(spawnC.cx, spawnC.cz))
+    blocked.delete(key(bossC.cx, bossC.cz))
+    const first = bfs(spawnC, bossC, maxClimb, false)
+    const shut = bfs(spawnC, bossC, maxClimb, false, blocked)
+    const open = bfs(spawnC, bossC, maxClimb, true, blocked)
+    const say = (v) => (Number.isFinite(v) ? `${Math.round(v * CELL)}m 짜리 **두 번째 길**` : '**갈 수 없음(외길)**')
+    console.log(
+      `\n  🔁 첫 길 ${Math.round(first * CELL)}m · 그 길을 막으면\n` +
+        `       사다리 걷은 채 — ${say(shut)}\n` +
+        `       사다리 내린 뒤 — ${say(open)}`,
+    )
+    /**
+     * ── 여기에 검사를 하나 **썼다가 관찰로 내렸습니다** ──────────────
+     * *"지름길을 내리면 두 번째 길이 생긴다(지도가 접힌다)"*. 빨갛게
+     * 나왔는데, 고쳐야 할 것은 지도가 아니라 **제 주장**이었습니다.
+     *
+     * 이 레벨은 처음부터 **와이드 리니어 존**으로 설계됐습니다(작업 #12).
+     * 넓지만 한 방향으로 흐르는 지도라, 지도를 가로지르는 3칸 띠를 막으면
+     * 우회로가 있을 수 없습니다 — **위상적 고리는 이 설계의 목표가 아닙니다.**
+     * 다크 소울 1 의 접힘을 그대로 요구하면 다른 게임을 만들라는 말이 됩니다.
+     *
+     * 그러면 지름길의 값어치는 무엇으로 재는가 — **되걷는 거리**입니다.
+     * 그건 이미 위에서 재고 있습니다(*"부활 화톳불에서 보스까지가 실제로
+     * 짧아진다"*, *"열러 가는 값이 아끼는 값보다 작다"*). 같은 것을 두 번
+     * 세는 검사는 안전망이 아니라 소음입니다.
+     *
+     * 그래서 이 줄은 **기록**입니다. 언젠가 열린 세계형 지도를 만들면
+     * 그때 이 숫자가 0 에서 벗어나야 합니다.
+     */
+  }
 
   const orphan = intro.foes.filter((f) => !f.region).length
   check(
