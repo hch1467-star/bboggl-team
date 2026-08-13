@@ -218,6 +218,204 @@ try {
   check(brk.poiseMax > 0, '적에게 강인도 수치가 있음', `${brk.poiseMax}`)
   check(brk.broke, '계속 때리면 결국 무너짐 (공격의 보상)', `무방비 ${brk.longest}프레임`)
 
+  /**
+   * ── 🥋 **강타 눈금이 거짓말을 하지 않는가** ────────────────────────
+   *
+   * ── 왜 이 검사를 넣는가 (재고 나서) ──────────────────────────────
+   * 실전 리듬으로 재 보니 평타만으로 잡몹을 무너뜨리려면 대검 11주기 ·
+   * 롱소드 26 · 쌍단검 72 였습니다. 사실상 **평타는 답이 아닙니다**(설계대로).
+   * 답인 강타는 잡몹을 현재 강인도와 무관하게 즉시 무너뜨리지만, **큰 적은
+   * 미리 깎아 둬야** 무너집니다. 그런데 *"이번 강타로 무너지는가"* 를
+   * 플레이어가 알 방법이 없었습니다 — 집중을 태우는 결정이 도박이었습니다.
+   *
+   * 그래서 강인도 바에 **한 방이 닿는 지점**을 눈금으로 새겼습니다.
+   * 세키로·P의 거짓·로스트아크가 전부 임계를 미리 보여 주는 이유입니다.
+   *
+   * ── 무엇을 검사해야 하는가 ───────────────────────────────────────
+   * 눈금 위치를 프로브가 다시 계산해서 견주면 **아무것도 검사하지 못합니다** —
+   * 그건 제 산수를 검사하는 것이고 눈금을 아예 안 그려도 통과합니다.
+   * 그래서 두 가지를 봅니다:
+   *   ① 눈금이 **무기에 따라 움직이는가** (메시 위치를 그대로 읽습니다)
+   *   ② 눈금이 밝아진 뒤 강타를 쓰면 **실제로 무너지는가** (예고가 참인가)
+   * ②가 핵심입니다. 틀린 예고는 없는 예고보다 나쁩니다.
+   */
+  console.log('')
+  const mark = await page.evaluate(async () => {
+    const G = window.__game
+    /**
+     * 강인도가 가장 높은 **잡몹**을 게임에서 골라옵니다. 여기에 이름을
+     * 적어 두면 적을 손보는 날 이 검사가 조용히 옛말이 됩니다.
+     * (보스는 뺍니다 — 조우 절차가 따로 있어 이 자리에서 세울 수 없습니다.)
+     */
+    const roster = G.enemyRoster().filter((r) => r.id !== 'boss')
+    const tough = roster.reduce((a, b) => (b.poiseMax > a.poiseMax ? b : a))
+
+    G.reset()
+    await window.__t.runFor(0.5)
+    G.clearEnemies()
+    await window.__t.runFor(0.2)
+    const p = G.state().player
+    const e = G.spawnEnemyKind(tough.id, p.x + 1.9, p.z)
+    G.setHp(e, 100000)
+    G.freezeEnemies(true)
+    G.aimAtWorld(p.x + 1.9, p.z)
+    await window.__t.runFor(0.3)
+
+    // ① 무기를 바꿔 가며 **눈금 메시의 자리**를 읽습니다.
+    const perWeapon = []
+    for (let slot = 1; slot <= 3; slot++) {
+      G.press(`Digit${slot}`)
+      G.release(`Digit${slot}`)
+      await window.__t.runFor(0.35)
+      const bar = G.poiseBars().find((b) => b.entity === e)
+      perWeapon.push({
+        name: G.state().loadout.weaponName,
+        ratio: bar?.markRatio ?? -1,
+        visible: !!bar?.markVisible,
+      })
+    }
+
+    /**
+     * ② 눈금이 **밝아질 때까지** 평타로 깎고, 그 순간 강타를 냅니다.
+     *
+     * 가장 약한 무기로 합니다 — 나머지는 가득 찬 상태에서도 한 방이라
+     * "깎아 두는 것이 의미가 있는가"를 못 봅니다.
+     *
+     * ⚠️ **무기를 눈금으로 고르면 안 됩니다.** 처음에 그렇게 짰다가 고장
+     *    테스트에서 들켰습니다 — 눈금을 1.9배 부풀리자 셋이 전부 100%로
+     *    뭉개졌고, 그러자 프로브가 롱소드(가득 차도 한 방)를 골라 **자동으로
+     *    통과**했습니다. 검사해야 할 것으로 검사 대상을 고르면 언제나
+     *    통과합니다. 그래서 무기 표의 `poiseScale` 로 고릅니다 — 눈금과
+     *    **다른 뿌리**입니다.
+     */
+    const table = G.weaponTable()
+    let weakest = 0
+    for (let i = 1; i < table.length; i++) {
+      if (table[i].poiseScale < table[weakest].poiseScale) weakest = i
+    }
+    G.press(`Digit${weakest + 1}`)
+    G.release(`Digit${weakest + 1}`)
+    await window.__t.runFor(0.35)
+
+    /** 밝아지기 **전에** 강타가 안 통하는지도 봐야 눈금이 뜻을 갖습니다. */
+    let brightAt = -1
+    let brokeEarly = false
+    const limit = G.state().simElapsed + 30
+    while (G.state().simElapsed < limit) {
+      const bar = G.poiseBars().find((b) => b.entity === e)
+      const info = G.enemyInfo(e)
+      if (!bar || !info) break
+      if (info.broken) {
+        brokeEarly = true
+        break
+      }
+      if (bar.markBright) {
+        brightAt = info.poise
+        break
+      }
+      // 스태미나는 계속 채워 줍니다 — 여기서 재는 것은 자원이 아니라 **표시**입니다.
+      G.setStamina(999)
+      G.setFocus(3)
+      G.press('Mouse0')
+      G.release('Mouse0')
+      await new Promise((r) => setTimeout(r, 8))
+    }
+
+    /**
+     * 밝아진 그 순간 강타 한 방 — 예고대로 무너지는가.
+     *
+     * ⚠️ **연타 직후에 바로 누르면 안 됩니다.** 강타는 손이 비어 있을 때만
+     *    나가는데(playerControl), 평타 연타의 후딜 중에 누르면 입력이
+     *    그대로 버려집니다. 그러면 *"예고가 틀렸다"* 가 아니라 *"강타를
+     *    안 냈다"* 인데, 결과만 보면 구분이 안 됩니다.
+     *    회복 지연이 2.2초라 1초쯤 쉬어도 강인도는 그대로입니다.
+     */
+    let brokeOnHeavy = false
+    let heavyLanded = false
+    let poiseBefore = -1
+    let poiseAfter = -1
+    if (brightAt >= 0) {
+      await window.__t.runFor(1)
+      G.setStamina(999)
+      G.setFocus(3)
+      poiseBefore = G.enemyInfo(e)?.poise ?? -1
+      const hp0 = G.entityState(e).hp
+      G.press('Mouse2')
+      G.release('Mouse2')
+      const until = G.state().simElapsed + 2.2
+      while (G.state().simElapsed < until) {
+        const info = G.enemyInfo(e)
+        if (!info) break
+        if (G.entityState(e).hp < hp0) heavyLanded = true
+        if (info.broken) {
+          brokeOnHeavy = true
+          break
+        }
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      poiseAfter = G.enemyInfo(e)?.poise ?? -1
+    }
+    G.freezeEnemies(false)
+    G.clearEnemies()
+    return {
+      kind: tough.id,
+      poiseMax: tough.poiseMax,
+      perWeapon,
+      brightAt,
+      brokeEarly,
+      brokeOnHeavy,
+      heavyLanded,
+      weakestName: table[weakest].name,
+      /** 그 무기의 눈금이 실제로 **가득보다 왼쪽**인가 — 아니면 이 단계는 무효입니다. */
+      weakestRatio: perWeapon[weakest]?.ratio ?? -1,
+      poiseBefore,
+      poiseAfter,
+    }
+  })
+
+  const ratios = mark.perWeapon.map((w) => w.ratio)
+  console.log(
+    `  [눈금] ${mark.kind}(강인도 ${mark.poiseMax}) 기준 강타 한 방이 닿는 지점 — ` +
+      mark.perWeapon.map((w) => `${w.name} ${(w.ratio * 100).toFixed(0)}%`).join(' · '),
+  )
+  check(
+    mark.perWeapon.every((w) => w.visible),
+    '강타 눈금이 실제로 그려진다 (규칙이 아니라 화면)',
+    mark.perWeapon.map((w) => `${w.name} ${w.visible ? '보임' : '**없음**'}`).join(' · '),
+  )
+  /**
+   * 무기마다 자리가 달라야 **무기 정체성이 눈에 보입니다.** 셋이 같은
+   * 자리면 눈금은 그냥 장식이고, 무기를 바꿀 이유를 화면이 못 말합니다.
+   */
+  check(
+    Math.max(...ratios) - Math.min(...ratios) > 0.15,
+    '**무기를 바꾸면 눈금이 움직인다** (강인도 정체성이 처음으로 눈에 보임)',
+    `가장 오른쪽 ${(Math.max(...ratios) * 100).toFixed(0)}% · 가장 왼쪽 ${(Math.min(...ratios) * 100).toFixed(0)}%`,
+  )
+  /**
+   * `weakestRatio < 0.95` 를 **함께** 요구합니다. 눈금이 오른쪽 끝에 붙어
+   * 있으면 그 무기는 가득 찬 강인도도 한 방에 깨므로, 무엇을 확인하든
+   * *"깎아 둔 것이 의미가 있었다"* 를 확인한 것이 아닙니다. 고장 테스트에서
+   * 정확히 그 상태로 통과했습니다 — 그때 조용히 통과하지 말고 **빨개져야**
+   * 합니다. 아무것도 못 잰 단계는 실패입니다.
+   */
+  check(
+    mark.weakestRatio < 0.95 && !mark.brokeEarly && mark.brightAt >= 0 && mark.brokeOnHeavy,
+    '**눈금이 밝아진 뒤 강타를 쓰면 진짜로 무너진다** (예고가 거짓말을 안 함)',
+    mark.weakestRatio >= 0.95
+      ? `${mark.weakestName} 눈금이 ${(mark.weakestRatio * 100).toFixed(0)}% — ` +
+          '가득 차도 한 방이라 **이 단계는 아무것도 검사하지 못했습니다**'
+      : mark.brokeEarly
+        ? '평타만으로 먼저 무너져서 예고를 확인 못 함'
+        : mark.brightAt < 0
+          ? '30초를 깎아도 눈금이 끝내 안 밝아짐'
+          : !mark.heavyLanded
+            ? '**강타가 아예 안 맞았습니다** — 예고가 아니라 계측기 문제입니다'
+            : `강인도 ${mark.brightAt.toFixed(1)} 에서 밝아짐 → 강타로 ` +
+              `${mark.poiseBefore.toFixed(1)} → ${mark.poiseAfter.toFixed(1)} · ` +
+              `${mark.brokeOnHeavy ? '무너짐' : '**안 무너짐**'}`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

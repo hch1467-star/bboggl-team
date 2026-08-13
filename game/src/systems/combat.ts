@@ -306,6 +306,35 @@ function enemySpec(e: number): AttackSpec {
  * 강인도 피해를 `trauma` 에서 뽑는 이유는 balance.ts POISE 주석 참고
  * (같은 뜻의 숫자를 두 벌 두지 않기 위해서입니다).
  */
+/**
+ * 한 타격이 깎는 **강인도 피해**. 판정과 표시가 반드시 같은 식을 쓰게
+ * 하려고 함수로 꺼냈습니다.
+ *
+ * ── 왜 꺼냈는가 ──────────────────────────────────────────────────
+ * 강인도 바에 *"여기까지 깎으면 강타 한 방에 무너진다"* 눈금을 새기는데,
+ * 그 눈금 위치를 화면 쪽에서 **다시 계산**하면 언젠가 반드시 어긋납니다.
+ * 그리고 어긋나는 방향이 최악입니다 — 게임은 안 무너뜨렸는데 화면은
+ * *"지금이다"* 라고 말하는 것. 예고가 틀리면 없느니만 못합니다.
+ *
+ * > 규칙은 한 곳에만. 화면은 판정과 **같은 함수**를 부릅니다.
+ *
+ * 보스는 **페이즈가 오를수록 덜 무너집니다**(bossPhases.ts poiseResist 설계 노트).
+ * 후반 화력의 상당 부분이 붕괴→처형에서 나오기 때문에, 여기가 페이즈
+ * 길이를 되찾는 가장 원인에 가까운 자리입니다.
+ */
+export function poiseDamage(
+  trauma: number,
+  poiseScale: number,
+  multiplier: number,
+  kind: number,
+  phase: number,
+): number {
+  // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
+  const dmg = trauma * POISE.fromTrauma * multiplier * poiseScale
+  if (kind !== EnemyKind.Boss) return dmg
+  return dmg / (BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, phase)].poiseResist ?? 1)
+}
+
 function applyPoise(t: number, spec: AttackSpec, behind = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
 
@@ -339,16 +368,7 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
       : behind
         ? POISE.backMultiplier
         : POISE.basicMultiplier
-  // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
-  let dmg = spec.trauma * POISE.fromTrauma * multiplier * (spec.poiseScale ?? 1)
-  /**
-   * 보스는 **페이즈가 오를수록 덜 무너집니다**(bossPhases.ts poiseResist 설계 노트).
-   * 후반 화력의 상당 부분이 붕괴→처형에서 나오기 때문에, 여기가 페이즈
-   * 길이를 되찾는 가장 원인에 가까운 자리입니다.
-   */
-  if (Enemy.kind[t] === EnemyKind.Boss) {
-    dmg /= BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, Enemy.phase[t])].poiseResist ?? 1
-  }
+  const dmg = poiseDamage(spec.trauma, spec.poiseScale ?? 1, multiplier, Enemy.kind[t], Enemy.phase[t])
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg

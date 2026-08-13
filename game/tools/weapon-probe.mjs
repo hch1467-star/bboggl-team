@@ -127,6 +127,30 @@ try {
         let minStam = 100
         let denied = 0
         let dealt = 0
+        /**
+         * 🪨 **몇 주기 만에 무너뜨리는가.**
+         *
+         * 두 라운드 전에 남긴 질문입니다: 대검은 표준 창에서 같은 피해에
+         * 강인도 1.4배인데, 그 우위를 스태미나 대가가 상쇄하는가.
+         * 상쇄되는지는 **붕괴까지 걸리는 주기 수**로만 갈립니다.
+         *
+         * ⚠️ 여기서 강인도 **회복**이 결정적입니다. 그런데 재 보니
+         *    **실전 리듬에서는 회복이 한 번도 켜지지 않았습니다.**
+         *    강인도 감소가 완벽히 선형이었기 때문에 알 수 있었습니다
+         *    (30 → 6주기 뒤 대검 13.3 · 롱소드 23 · 쌍단검 27.5).
+         *
+         *    이유는 산수입니다 — 회복은 **마지막 타격**부터 셉니다:
+         *        안전창 끝 0.72초 + 회복 지연 2.2초 = 2.92초
+         *        다음 공격은 2.47초에 옵니다 → 켜지기 전에 다시 맞음
+         *    즉 붙어 있는 동안엔 압박이 새지 않고, 떨어지면 그때 찹니다.
+         *    세키로의 체간과 같은 성질인데, **이 성질은 두 숫자의 관계로만
+         *    성립합니다.** 아래에서 그 관계 자체를 검사합니다.
+         */
+        let breakAtCycle = -1
+        let wasBroken = false
+        let minPoise = 9999
+        /** 깎인 **비율**을 내려면 가득 찬 값이 필요합니다 — 게임에서 읽습니다. */
+        const poiseFull = G.enemyInfo(e)?.poiseMax ?? -1
         const hp0 = G.entityState(e).hp
         for (let c = 0; c < cycles; c++) {
           // ① 적의 공격에 답합니다 — 구르기가 이 게임의 기본 대응이고
@@ -159,10 +183,24 @@ try {
             } else denied++
             await new Promise((r) => setTimeout(r, 8))
           }
+          {
+            const i = G.enemyInfo(e)
+            if (i && i.broken && !wasBroken && breakAtCycle < 0) breakAtCycle = c + 1
+            wasBroken = !!(i && i.broken)
+            // 무너지면 강인도가 가득 차므로 **무너지기 전 최저치**만 셉니다.
+            if (i && !i.broken && i.poise < minPoise) minPoise = i.poise
+          }
           // ③ 다음 공격이 올 때까지 기다립니다(회복이 도는 구간).
           await waitSim(Math.max(0.1, cycleSec - windowSec - 0.45))
         }
         dealt = hp0 - G.entityState(e).hp
+        /**
+         * ⚠️ **지우기 전에 읽습니다.** 지난번엔 `return` 안에서 강인도를
+         *    읽었는데 그 시점엔 이미 `clearEnemies()` 가 돈 뒤라 전부
+         *    `-1`(적 없음)로 찍혔고, "못 무너뜨림(-1 남음)"이라는 뜻 모를
+         *    줄이 나왔습니다.
+         */
+        const poiseMinSeen = minPoise === 9999 ? -1 : Number(minPoise.toFixed(1))
         G.freezeEnemies(false)
         G.clearEnemies()
         return {
@@ -170,6 +208,12 @@ try {
           minStamina: Number(minStam.toFixed(0)),
           /** 낼 수 없어서 참은 프레임 수 — 스태미나가 실제로 막은 양입니다. */
           denied,
+          /** 몇 번째 주기에 무너뜨렸나. -1 이면 끝내 못 무너뜨렸습니다. */
+          breakAtCycle,
+          /** 무너지기 전 **가장 낮았던** 강인도 — 얼마나 근접했는지. */
+          poiseMin: poiseMinSeen,
+          /** 가득 찬 강인도. 주기당 깎는 양을 내는 데 씁니다. */
+          poiseFull,
           dealt: Number(dealt.toFixed(0)),
         }
       },
@@ -1108,6 +1152,11 @@ try {
    */
   const gruntDef = roster.find((r) => r.id === 'grunt')
   const cycleSec = gruntDef?.attackCycle ?? 2.5
+  /**
+   * 반복 횟수를 **한 곳에서만** 정합니다. 지난번에 6을 10으로 바꾸면서
+   * 출력 문구의 "6번"을 안 고쳐, 10주기 결과를 6주기라고 읽을 뻔했습니다.
+   */
+  const RHYTHM_CYCLES = 6
   // 세 번씩 재고 중앙값 — 이 파일이 창 비교에서 이미 배운 것(운으로 통과 금지).
   const rhythm = []
   for (let slot = 1; slot <= table.length; slot++) {
@@ -1115,8 +1164,8 @@ try {
     for (let i = 0; i < 3; i++) {
       reps.push(
         await page.evaluate(
-          ([s, w, c]) => window.__t.rhythm(s, w, c, 6),
-          [slot, punishSec, cycleSec],
+          ([s, w, c, n]) => window.__t.rhythm(s, w, c, n),
+          [slot, punishSec, cycleSec, RHYTHM_CYCLES],
         ),
       )
     }
@@ -1125,18 +1174,24 @@ try {
       name: reps[0].name,
       minStamina: md((r) => r.minStamina),
       denied: md((r) => r.denied),
+      breakAtCycle: md((r) => r.breakAtCycle),
+      poiseMin: md((r) => r.poiseMin),
+      poiseFull: reps[0].poiseFull,
       dealt: md((r) => r.dealt),
       span: `${Math.min(...reps.map((r) => r.dealt))}~${Math.max(...reps.map((r) => r.dealt))}`,
     })
   }
   console.log(
     `\n  [리듬] 구르고 → 안전창 ${punishSec.toFixed(2)}초 치고 → ` +
-      `${cycleSec.toFixed(2)}초 주기로 6번 (실전에 가까운 반복)\n    ` +
+      `${cycleSec.toFixed(2)}초 주기로 ${RHYTHM_CYCLES}번 (실전에 가까운 반복)\n    ` +
       rhythm
         .map(
           (r) =>
             `${r.name.padEnd(6)} 최저 스태미나 ${String(r.minStamina).padStart(3)} · ` +
-            `누적 피해 ${String(r.dealt).padStart(4)}(${r.span}) · 스태미나에 막힌 프레임 ${r.denied}`,
+            `누적 피해 ${String(r.dealt).padStart(4)} · 막힘 ${String(r.denied).padStart(3)} · ` +
+            (r.breakAtCycle > 0
+              ? `**${r.breakAtCycle}주기에 무너뜨림**`
+              : `강인도 ${r.poiseFull} → ${r.poiseMin}`),
         )
         .join('\n    '),
   )
@@ -1196,6 +1251,93 @@ try {
   const dodgeCostSeen = tune?.dodgeStaminaCost ?? '?'
   const regenSeen = tune?.staminaRegen ?? '?'
   const regenDelaySeen = tune?.staminaRegenDelay ?? '?'
+  /**
+   * ── 🪨 **강인도 우위가 실전에서도 우위인가** ─────────────────────
+   *
+   * 두 라운드 전에 남긴 질문의 답이 여기 있습니다. 대검은 표준 창에서
+   * **같은 피해에 강인도 1.4배**인데, 그 우위를 스태미나 대가가 상쇄하는지는
+   * *"몇 주기 만에 무너뜨리는가"* 로만 갈립니다.
+   *
+   * 이 자리에는 벤치가 절대 못 보는 것이 있습니다 — **강인도 회복.**
+   * 한 주기에 깎는 양이 회복량보다 적으면 그 무기에게 붕괴는 존재하지
+   * 않습니다. 쉬지 않고 두들기면 셋 다 무너뜨리므로 안 보입니다.
+   */
+  /**
+   * ── 여기에 **틀린 검사를 하나 썼다가 지웠습니다** ─────────────────
+   * *"모든 무기가 실전 리듬 안에서 결국 무너뜨린다"*. 셋 다 빨갛게
+   * 나왔는데, 고쳐야 할 것은 밸런스가 아니라 **제 주장**이었습니다.
+   *
+   * 강인도가 남은 값이 30 → 13.3 / 23 / 27.5 로 **완벽히 선형**이었고,
+   * 6주기를 그 기울기로 늘리면 대검 11주기 · 롱소드 26 · 쌍단검 72 입니다.
+   * 즉 *"못 무너뜨린다"* 가 아니라 **6주기가 짧았을 뿐**입니다. 그리고
+   * `basicMultiplier: 0.35` 의 설계 주석이 원하는 바가 정확히 이것입니다 —
+   * 평타로는 실전 시간 안에 안 무너지고, 끊는 수단(강타·예고 중·등 뒤·반격)이
+   * 답이어야 한다. **검사가 설계와 반대되는 것을 요구하고 있었습니다.**
+   *
+   * > 빨간 검사를 보면 먼저 물어야 합니다 — 게임이 틀렸나, 내 주장이 틀렸나.
+   */
+  /**
+   * ── 🪨 **붙어 있는 동안 압박이 새지 않는가** ──────────────────────
+   *
+   * 위 선형성이 알려 준 진짜 사실은 따로 있었습니다. 강인도 회복이
+   * **한 번도 켜지지 않았습니다.** 회복은 마지막 타격부터 세는데,
+   *
+   *     안전창 끝 + 회복 지연  >  적의 공격 주기
+   *
+   * 이면 다음 공격이 먼저 와서 매번 리셋됩니다. 지금은 아슬아슬하게
+   * 성립합니다(0.72 + 2.2 = 2.92 vs 2.47 — 여유 0.45초).
+   *
+   * ── 왜 이걸 검사로 남기는가 ──────────────────────────────────────
+   * 이건 **따로 정한 두 숫자의 관계**입니다. 잡몹 공격 쿨다운을 0.5초만
+   * 늘리거나 회복 지연을 조금 줄이면, 아무 오류 없이 **강인도 압박이
+   * 절반으로 줄어듭니다.** 이 저장소가 반복해서 물린 자리가 정확히
+   * 여기입니다 — *수명이 다른 두 숫자가 조용히 어긋난다.*
+   *
+   * 참고한 게임들이 같은 규칙을 씁니다: 세키로의 체간은 붙어서 압박하는
+   * 동안에는 안 차고 **떨어지면** 찹니다. 로스트아크의 무력화도 파티가
+   * 붙어 있는 동안 유지됩니다. "떨어지면 리셋"이 붙어 싸울 이유를 만듭니다.
+   *
+   * ⚠️ 세 숫자 전부 게임에서 읽습니다 — 안전창은 이 파일이 **재서** 얻었고,
+   *    회복 지연은 `counterInfo`, 주기는 `enemyRoster` 입니다.
+   */
+  const poiseCfg = await page.evaluate(() => window.__game.counterInfo())
+  const regenGap = punishSec + poiseCfg.poiseRegenDelay - cycleSec
+  check(
+    regenGap > 0,
+    '**붙어서 싸우는 동안 강인도 회복이 켜지지 않는다** (떨어져야 찬다)',
+    `안전창 ${punishSec.toFixed(2)}초 + 회복 지연 ${poiseCfg.poiseRegenDelay}초 = ` +
+      `${(punishSec + poiseCfg.poiseRegenDelay).toFixed(2)}초 vs 잡몹 주기 ${cycleSec.toFixed(2)}초 ` +
+      `— 여유 ${regenGap.toFixed(2)}초`,
+  )
+
+  /**
+   * 📋 [관찰] **평타로 무너뜨리려면 몇 주기가 필요한가.**
+   *
+   * 검사가 아니라 기록입니다. 위 검사가 "회복이 안 샌다"를 지키고 있으므로
+   * 감소는 선형이고, 6주기 실측을 그대로 늘려서 읽을 수 있습니다.
+   *
+   * 명목 `poiseScale` 은 롱소드 1 · 대검 1.7 · 쌍단검 0.5 인데 **실측 격차는
+   * 더 벌어집니다** — trauma 와 휘두르는 속도가 함께 곱해지기 때문입니다.
+   * 두 라운드 전 질문(*"대검의 강인도 우위를 스태미나 대가가 상쇄하는가"*)의
+   * 답이 여기 있습니다: **상쇄하지 못합니다.**
+   */
+  const drains = rhythm.map((r) => {
+    const per = r.poiseFull > 0 ? (r.poiseFull - r.poiseMin) / RHYTHM_CYCLES : 0
+    return { name: r.name, per, cycles: per > 0 ? Math.ceil(r.poiseFull / per) : -1 }
+  })
+  const slowest = Math.min(...drains.map((d) => d.per))
+  console.log(
+    `  📋 [관찰] 평타만으로 잡몹(강인도 ${rhythm[0].poiseFull})을 무너뜨리기까지 — ` +
+      drains
+        .map(
+          (d) =>
+            `${d.name} 주기당 ${d.per.toFixed(2)}(${d.cycles < 0 ? '∞' : `${d.cycles}주기`}` +
+            `${slowest > 0 ? ` · ${(d.per / slowest).toFixed(1)}배` : ''})`,
+        )
+        .join(' · ') +
+      ` — **평타는 답이 아닙니다**(설계대로). 끊는 수단이 답입니다`,
+  )
+
   console.log(
     `  📋 [관찰] 한 주기 비용 구르기 ${dodgeCostSeen} + 반격 ${Math.min(...table.map((w) => w.comboStamina))}~${worstCombo} ` +
       `vs 회복(${regenSeen}/초 · 지연 ${regenDelaySeen}초) — **매번 구르며 매번 반격까지는 안 됩니다.** ` +

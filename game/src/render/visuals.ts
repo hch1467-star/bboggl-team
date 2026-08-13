@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
-import { AWARE, BOSS, COMBAT, GRUNT, PLAYER, TREASURE, hearDistance } from '../config/balance'
+import { AWARE, BOSS, COMBAT, FOCUS, GRUNT, PLAYER, TREASURE, hearDistance } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { ENEMY_DEFS, enemyDef } from '../config/enemies'
 import {
@@ -11,6 +11,8 @@ import {
   Enemy,
   EnemyKind,
   Health,
+  Player,
+  Stamina,
   Status,
   Loadout,
   Pickup,
@@ -19,6 +21,12 @@ import {
   Velocity,
 } from '../core/components'
 import { defineQuery, hasComponent } from '../core/ecs'
+/**
+ * 강인도 피해 식을 **빌려 옵니다**(다시 쓰지 않습니다). 화면이 판정과
+ * 다른 식을 쓰면, 어긋난 날 게임은 안 무너뜨리는데 바만 "지금이다"라고
+ * 말합니다 — 틀린 예고는 없는 예고보다 나쁩니다.
+ */
+import { poiseDamage } from '../systems/combat'
 import { time } from '../core/time'
 
 /**
@@ -78,6 +86,8 @@ interface Visual {
   hpFill?: THREE.Mesh
   /** 강인도 게이지 (적 전용) */
   poiseFill?: THREE.Mesh
+  /** 🥋 "여기까지 깎으면 강타 한 방" 눈금 — 무기를 바꾸면 자리가 움직입니다. */
+  poiseMark?: THREE.Mesh
   /** 등 뒤(백어택) 구역 표시 */
   backZone?: THREE.Mesh
   backZoneMat?: THREE.MeshBasicMaterial
@@ -655,8 +665,43 @@ export class Visuals {
       poiseFill.scale.set(barW, isBoss ? 0.075 : 0.05, 1)
       poiseFill.position.set(-barW / 2, isBoss ? -0.17 : -0.12, 0.001)
       poiseFill.renderOrder = 11
-      hpBar.add(poiseBg, poiseFill)
+      /**
+       * 🥋 **강타 눈금** — *"여기까지 깎으면 한 방에 무너진다"*.
+       *
+       * ── 왜 이게 필요한가 (재고 나서 넣었습니다) ────────────────────
+       * 실전 리듬으로 재 보니 평타만으로 잡몹(강인도 30)을 무너뜨리려면
+       * 대검 11주기 · 롱소드 26 · 쌍단검 72 였습니다. 반면 강타 한 방은
+       * 54.6 × 무기 배수라 잡몹은 **현재 강인도와 무관하게 즉시** 무너집니다.
+       * 즉 잡몹에게는 이 바가 눈금 없이도 아무 판단을 안 만듭니다.
+       *
+       * 판단이 생기는 곳은 큰 적입니다 — 강인도 45 짜리를 쌍단검 강타는
+       * 27.3 밖에 못 깎아서 **미리 깎아 둬야만** 무너집니다. 보스는 셋 다
+       * 두 번 이상 필요합니다. 그런데 지금 플레이어에게는 *"이번 강타로
+       * 무너지는가"* 를 알 방법이 **하나도 없습니다.** 그러면 집중을 태우는
+       * 결정이 판단이 아니라 도박이 됩니다.
+       *
+       * ── 참고한 게임들 ─────────────────────────────────────────────
+       *   · 세키로 — 체간이 꽉 차기 직전에 게이지가 번쩍입니다
+       *   · P의 거짓 — 스태거 가능해지면 체력바가 하얗게 깜빡입니다
+       *   · 로스트아크 — 무력화 게이지를 **따로** 그려서 "지금 몰아쳐"를 알립니다
+       *   · 몬스터 헌터 — 부위 파괴가 임박했음을 반응으로 알려 줍니다
+       * 공통점은 **임계를 미리 보여 준다**는 것입니다. 사후에만 알려 주면
+       * 그건 결과 통보이지 판단 재료가 아닙니다.
+       *
+       * 눈금이 오른쪽 끝에 붙어 있으면 = 가득 찼어도 한 방(잡몹).
+       * 왼쪽에 있으면 = 그만큼 깎아 놔야 한다(큰 적·보스).
+       * **무기를 바꾸면 눈금이 움직입니다** — 무기 정체성이 처음으로 눈에 보입니다.
+       */
+      const poiseMark = new THREE.Mesh(
+        this.hpBarGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffd479, depthTest: false, transparent: true }),
+      )
+      poiseMark.scale.set(0.045, isBoss ? 0.16 : 0.11, 1)
+      poiseMark.position.set(-barW / 2, isBoss ? -0.17 : -0.12, 0.002)
+      poiseMark.renderOrder = 12
+      hpBar.add(poiseBg, poiseFill, poiseMark)
       visual.poiseFill = poiseFill
+      visual.poiseMark = poiseMark
 
       hpBar.add(bg, fill)
 
@@ -764,8 +809,26 @@ export class Visuals {
    * 매 프레임 호출. ECS의 숫자를 읽어 화면에 반영합니다.
    * @param playerX,playerZ 등 뒤 표시·빛기둥 감쇠 판단에 쓰는 플레이어 위치
    */
-  sync(playerX: number, playerZ: number): void {
+  sync(playerX: number, playerZ: number, player: number): void {
     this.syncBonfires()
+    /**
+     * 🥋 이번 강타가 깎을 강인도를 **한 번만** 구합니다.
+     *
+     * `poiseScale` 만 넘기고 실제 곱은 `poiseDamage()` 에게 맡깁니다 —
+     * 판정과 표시가 같은 함수를 써야 눈금이 거짓말을 안 합니다.
+     * 집중 점수는 **피해만** 키우고 강인도는 안 키우므로(arsenal heavyStep),
+     * 눈금 위치는 무기와 적으로만 정해지는 안정된 값입니다.
+     */
+    const heavyScale = WEAPONS[Loadout.weapon[player]]?.poiseScale ?? 1
+    const heavyTrauma = FOCUS.heavy.trauma
+    /**
+     * **낼 수 없으면 "지금이다"라고 말하지 않습니다.**
+     * 집중이 없거나 스태미나가 모자라면 강타가 안 나가는데(playerControl
+     * 의 거절음 자리와 같은 조건), 그때 바가 반짝이면 예고가 아니라
+     * 거짓말입니다. 눈금은 늘 두되 **맥동은 낼 수 있을 때만** 합니다.
+     */
+    const heavyReady =
+      Player.focus[player] >= 1 && Stamina.value[player] >= FOCUS.heavy.staminaCost
     this.syncDrops()
     const ids = this.query.run()
     /**
@@ -922,11 +985,44 @@ export class Visuals {
       if (v.poiseFill && hasComponent(Enemy, e)) {
         const cfg = enemyDef(Enemy.kind[e])
         const t = cfg.poiseMax > 0 ? Math.max(0, Enemy.poise[e]) / cfg.poiseMax : 1
-        v.poiseFill.scale.x = (v.group.userData.barWidth as number) * t
-        // 무너진 동안에는 금빛으로 — "지금이 그 창이다"를 놓치면 안 됩니다.
+        const barW = v.group.userData.barWidth as number
+        v.poiseFill.scale.x = barW * t
+        /**
+         * 강타 한 방이 닿는 지점. **판정과 같은 함수**로 구합니다 —
+         * 보스의 페이즈별 저항까지 여기서 자동으로 반영됩니다.
+         */
+        const heavyHit = poiseDamage(
+          heavyTrauma,
+          heavyScale,
+          FOCUS.poiseMult,
+          Enemy.kind[e],
+          Enemy.phase[e],
+        )
+        const markT = cfg.poiseMax > 0 ? Math.min(1, heavyHit / cfg.poiseMax) : 1
+        // 이 선까지 내려왔는가 = 다음 강타가 무너뜨리는가.
+        const atThreshold = Enemy.brokenT[e] <= 0 && Enemy.poise[e] <= heavyHit
+        if (v.poiseMark) {
+          v.poiseMark.visible = Enemy.brokenT[e] <= 0
+          v.poiseMark.position.x = -barW / 2 + barW * markT
+          const mm = v.poiseMark.material as THREE.MeshBasicMaterial
+          mm.opacity = atThreshold && heavyReady ? 1 : 0.5
+        }
         const mat = v.poiseFill.material as THREE.MeshBasicMaterial
-        if (Enemy.brokenT[e] > 0) mat.color.setHex(0xffc966)
-        else mat.color.setHex(0xdfe7f2)
+        if (Enemy.brokenT[e] > 0) {
+          // 무너진 동안에는 금빛으로 — "지금이 그 창이다"를 놓치면 안 됩니다.
+          mat.color.setHex(0xffc966)
+        } else if (atThreshold && heavyReady) {
+          /**
+           * **맥동**으로 알립니다. 색만 바꾸면 전투 화면에서 묻힙니다 —
+           * 움직임은 주변시로도 잡히기 때문에 4색 예고와 겹쳐도 보입니다.
+           * (색은 붕괴 금빛과 **다르게** 둡니다. 같으면 "이미 무너졌다"와
+           *  "지금 무너뜨릴 수 있다"가 구분되지 않습니다.)
+           */
+          const k = 0.5 + 0.5 * Math.sin(time.elapsed * 11)
+          mat.color.setRGB(0.87 + 0.13 * k, 0.9, 0.95 - 0.35 * k)
+        } else {
+          mat.color.setHex(0xdfe7f2)
+        }
       }
 
       if (v.hpBar && v.hpFill) {
@@ -946,6 +1042,51 @@ export class Visuals {
    *    그것입니다 — **계기는 결론이 아니라 화면을 읽어야 합니다.**
    *    그래서 실제 메시의 `visible` 과 `scale` 을 그대로 돌려줍니다.
    */
+  /**
+   * 실험대 전용 — **강타 눈금이 지금 화면에서 어디에 있는가.**
+   *
+   * ⚠️ `poiseDamage()` 를 프로브가 다시 계산해서 견주면 아무것도 검사하지
+   *    못합니다. 그건 화면이 아니라 제 산수를 검사하는 것이고, 눈금 메시를
+   *    통째로 안 그려도 통과합니다. 그래서 **메시의 실제 위치·투명도**를
+   *    그대로 돌려줍니다.
+   */
+  debugPoiseBars(): {
+    entity: number
+    /** 눈금이 바의 몇 % 지점에 있는가(0=왼쪽 끝, 1=오른쪽 끝) */
+    markRatio: number
+    markVisible: boolean
+    /** 밝게 켜졌는가 = "지금 강타를 쓰면 무너진다" */
+    markBright: boolean
+    /** 강인도 채움의 현재 색 — 붕괴 금빛과 임계 맥동을 구분하려고 그대로 냅니다. */
+    fill: [number, number, number]
+  }[] {
+    const out: {
+      entity: number
+      markRatio: number
+      markVisible: boolean
+      markBright: boolean
+      fill: [number, number, number]
+    }[] = []
+    for (const [entity, v] of this.items.entries()) {
+      if (!v.poiseMark || !v.poiseFill) continue
+      const barW = (v.group.userData.barWidth as number) || 1
+      const mm = v.poiseMark.material as THREE.MeshBasicMaterial
+      const fm = v.poiseFill.material as THREE.MeshBasicMaterial
+      out.push({
+        entity,
+        markRatio: Number(((v.poiseMark.position.x + barW / 2) / barW).toFixed(3)),
+        markVisible: v.poiseMark.visible,
+        markBright: mm.opacity > 0.9,
+        fill: [
+          Number(fm.color.r.toFixed(3)),
+          Number(fm.color.g.toFixed(3)),
+          Number(fm.color.b.toFixed(3)),
+        ],
+      })
+    }
+    return out
+  }
+
   debugAwareMarks(): { marks: number; noiseVisible: boolean; noiseRadius: number } {
     let marks = 0
     let noiseVisible = false

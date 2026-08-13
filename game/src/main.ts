@@ -1573,7 +1573,7 @@ class Game {
       this.terrain.applyOcclusionFade(safeLvl, px, pz, -this.cam.forward.x, -this.cam.forward.z)
     }
 
-    this.visuals.sync(px, pz)
+    this.visuals.sync(px, pz, p)
     this.vfx.update(this.cam.camera)
     this.renderer.render(this.scene, this.cam.camera)
     if (this.sampleRequested) {
@@ -2255,6 +2255,11 @@ class Game {
   /** 실험대 전용 — 화면이 지금 그리고 있는 인지 신호(visuals.ts 설계 노트). */
   debugAwareMarks(): { marks: number; noiseVisible: boolean; noiseRadius: number } {
     return this.visuals.debugAwareMarks()
+  }
+
+  /** 실험대 전용 — 강타 눈금이 실제로 그려진 자리(visuals.ts 설계 노트). */
+  debugPoiseBars(): ReturnType<Visuals['debugPoiseBars']> {
+    return this.visuals.debugPoiseBars()
   }
 
   debugPlayerEntity(): number {
@@ -3722,6 +3727,8 @@ declare global {
         attackRange: number
         keepDistance?: number
         attackCycle: number
+        /** 강인도 최대치 — "무너뜨리려면 얼마나 깎아야 하는가"의 기준입니다. */
+        poiseMax: number
         attacks: {
           id: string
           intent: number
@@ -3802,6 +3809,8 @@ declare global {
         normalBrokenTime: number
         bossBrokenTime: number
         damageMultiplier: number
+        poiseRegenDelay: number
+        poiseRegenPerSec: number
       }
       /**
        * 사람이 반응하는 데 걸리는 시간 예산 — 프로브가 **읽습니다**(balance.ts REACTION).
@@ -3860,6 +3869,17 @@ declare global {
         noiseVisible: boolean
         noiseRadius: number
       }
+      /**
+       * 🥋 강타 눈금이 **화면에** 그려진 자리. 규칙이 아니라 픽셀 쪽 진실입니다.
+       * (프로브가 강인도 식을 다시 계산하면 눈금을 안 그려도 통과합니다.)
+       */
+      poiseBars: () => {
+        entity: number
+        markRatio: number
+        markVisible: boolean
+        markBright: boolean
+        fill: [number, number, number]
+      }[]
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -4236,6 +4256,7 @@ window.__game = {
          * 따로 받아 더하다가 하나를 빠뜨리는 일이 없도록 여기서 냅니다.
          */
         attackCycle: d.attackCooldown + d.windup + d.active + d.recovery,
+        poiseMax: d.poiseMax,
         attacks: attacksFor(k).map((a) => ({
           id: a.id,
           intent: a.intent as number,
@@ -4339,6 +4360,17 @@ window.__game = {
     /** 보스가 무너져 있는 시간(초) — 잡몹보다 깁니다. 창 길이가 무기 선택을 가릅니다. */
     bossBrokenTime: POISE.brokenTimeBoss,
     damageMultiplier: COUNTER.damageMultiplier,
+    /**
+     * 강인도 **회복**의 두 값입니다.
+     *
+     * ⚠️ 이 둘을 프로브에 적어 두면 안 되는 이유가 이번에 드러났습니다 —
+     *    실전 리듬에서 회복이 켜지는지 아닌지는 `regenDelay` 하나가 아니라
+     *    **적의 공격 주기와의 관계**로 정해집니다. 관계를 재려면 양쪽 다
+     *    게임에서 읽어야 하고, 한쪽이라도 복사해 두면 그 관계가 바뀐 날
+     *    검사가 조용히 옛말이 됩니다.
+     */
+    poiseRegenDelay: POISE.regenDelay,
+    poiseRegenPerSec: POISE.regenPerSec,
   }),
   /**
    * 예산을 프로브가 스스로 정하지 않게 여기서 넘겨줍니다.
@@ -4447,6 +4479,7 @@ window.__game = {
   grantPerfectDodge: () => {
     Player.perfectCritT[game.debugPlayerEntity()] = FOCUS.perfectDodgeCritWindow
   },
+  poiseBars: () => game.debugPoiseBars(),
   threats: (range) => game.debugThreats(range),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
