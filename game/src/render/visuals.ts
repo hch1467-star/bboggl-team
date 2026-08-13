@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
-import { BOSS, COMBAT, GRUNT, PLAYER, TREASURE } from '../config/balance'
+import { AWARE, BOSS, COMBAT, GRUNT, PLAYER, TREASURE, hearDistance } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { ENEMY_DEFS, enemyDef } from '../config/enemies'
 import {
@@ -16,6 +16,7 @@ import {
   Pickup,
   Renderable,
   Transform,
+  Velocity,
 } from '../core/components'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { time } from '../core/time'
@@ -80,9 +81,15 @@ interface Visual {
   /** 등 뒤(백어택) 구역 표시 */
   backZone?: THREE.Mesh
   backZoneMat?: THREE.MeshBasicMaterial
+  /** 👀 아직 나를 못 본 적의 발밑 표시 (적 전용) */
+  unawareMark?: THREE.Mesh
+  unawareMat?: THREE.MeshBasicMaterial
   /** 🔵 속박 표시 (플레이어 전용) */
   snareRing?: THREE.Mesh
   snareMat?: THREE.MeshBasicMaterial
+  /** 🔊 발소리가 닿는 거리 (플레이어 전용) */
+  noiseRing?: THREE.Mesh
+  noiseMat?: THREE.MeshBasicMaterial
   /** 기본 공격 사거리 예고 (플레이어 전용) */
   rangeArc?: THREE.Mesh
   rangeMat?: THREE.MeshBasicMaterial
@@ -470,6 +477,39 @@ export class Visuals {
       visual.snareRing = snareRing
       visual.snareMat = snareMat
 
+      /**
+       * 🔊 **발소리가 닿는 거리** — 반지름이 곧 규칙입니다.
+       *
+       * 메탈기어의 소리 원, 쓰시마의 감지 링이 하는 일입니다. 이 게임의
+       * 새 선택(걷기 ↔ 질주)은 **눈에 보이지 않으면 존재하지 않습니다.**
+       * 아무도 *"뛰면 더 멀리 들린다"* 를 스스로 알아내지 못합니다.
+       *
+       * ⚠️ 반지름을 여기서 **계산하지 않습니다.** `balance.ts hearDistance()`
+       *    가 낸 값을 그대로 받아 그립니다. 여기서 한 번 더 계산하면
+       *    화면과 규칙이 언젠가 갈라지고, 그때 플레이어는 **보이는 대로
+       *    했는데 들키는** 경험을 하게 됩니다. 그건 버그보다 나쁩니다.
+       *
+       * 지오메트리는 반지름 1로 만들고 `scale` 로 키웁니다 — 매 프레임
+       * 도형을 새로 만들면 이 게임이 8~20fps 인 환경에서 값이 비쌉니다.
+       */
+      const noiseMat = new THREE.MeshBasicMaterial({
+        color: 0xcfe0f5,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+      const noiseRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.93, 1, 48).rotateX(-Math.PI / 2),
+        noiseMat,
+      )
+      noiseRing.position.y = 0.03
+      noiseRing.renderOrder = 1
+      noiseRing.visible = false
+      group.add(noiseRing)
+      visual.noiseRing = noiseRing
+      visual.noiseMat = noiseMat
+
       // 기본 공격 사거리 예고. 도형은 콤보 단계마다 갈아 끼웁니다(syncPlayerRange).
       const rangeMat = new THREE.MeshBasicMaterial({
         color: 0xeaf4ff,
@@ -528,6 +568,52 @@ export class Visuals {
       group.add(backZone)
       visual.backZone = backZone
       visual.backZoneMat = backZoneMat
+
+      /**
+       * 👀 **아직 나를 못 본 적** — 발밑에 얇은 무채색 링.
+       *
+       * ── 왜 이 모양인가 ────────────────────────────────────────────
+       * ① **색이 아니라 무채색.** 이 게임에서 색은 *"어떻게 답하라"* 는
+       *    뜻입니다(4색 표). 다섯 번째 색을 만들면 그 표가 무너집니다.
+       *    "아직 못 봤다"는 답을 요구하는 정보가 아니라 **기회**의 정보라,
+       *    색 체계 **밖**에 있어야 맞습니다.
+       * ② **깜빡이지 않습니다.** 이 저장소에서 맥동은 전부 *"시간이 간다"*
+       *    는 뜻입니다(예고, 속박). 자고 있는 것은 재촉이 아니므로 조용히
+       *    켜 둡니다.
+       * ③ **발밑입니다.** 쿼터뷰에서 머리 위 아이콘은 적이 겹치면 서로
+       *    가립니다. 이 게임은 이미 모든 정보를 바닥에 그리고 있으므로
+       *    같은 자리를 씁니다 — 새 어휘를 안 늘리는 것이 읽기 비용을
+       *    안 늘리는 길입니다.
+       */
+      const unawareMat = new THREE.MeshBasicMaterial({
+        color: 0xdfe6f0,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        /**
+         * ⚠️ **가산 혼합**입니다. 처음엔 보통 혼합에 얇은 띠로 그렸다가
+         *    픽셀 검사에 걸렸습니다 — ΔE 1.3. 그건 *"나란히 놓고 봐야
+         *    구분되는"* 차이라 정보라고 부를 수 없습니다.
+         *
+         *    이 저장소가 예고 부채꼴에서 이미 배운 것과 같은 답입니다:
+         *    **바닥이 어두우면 색조를 만지는 것보다 밝기를 얹는 쪽이 이깁니다.**
+         *    가산은 어두운 바닥 위에서 그대로 더해지므로 같은 진하기로도
+         *    훨씬 잘 읽힙니다.
+         */
+        blending: THREE.AdditiveBlending,
+      })
+      const unawareMark = new THREE.Mesh(
+        // 띠를 넓힙니다 — 5m 밖에서는 0.14m 띠가 한두 픽셀밖에 안 됩니다.
+        new THREE.RingGeometry(cfg.radius + 0.12, cfg.radius + 0.42, 32).rotateX(-Math.PI / 2),
+        unawareMat,
+      )
+      unawareMark.position.y = 0.045
+      unawareMark.renderOrder = 2
+      unawareMark.visible = false
+      group.add(unawareMark)
+      visual.unawareMark = unawareMark
+      visual.unawareMat = unawareMat
 
       const hpBar = new THREE.Group()
       hpBar.position.y = cfg.height + 0.42
@@ -682,6 +768,21 @@ export class Visuals {
     this.syncBonfires()
     this.syncDrops()
     const ids = this.query.run()
+    /**
+     * 🔊 발소리 링을 **켤 이유가 있는가** — 근처에 아직 못 본 적이 있는가.
+     *
+     * 싸움이 붙은 뒤에도 계속 깔려 있으면 그건 정보가 아니라 방해입니다.
+     * 이 게임은 바닥을 예고 부채꼴에 쓰고 있어서 특히 그렇습니다.
+     * 한 번만 세어서 아래 루프가 같은 답을 씁니다.
+     */
+    let unawareNear = false
+    for (let i = 0; i < this.query.count && !unawareNear; i++) {
+      const e = ids[i]
+      if (!hasComponent(Enemy, e) || Enemy.aggro[e] !== 0) continue
+      if (Actor.state[e] === ActorState.Dead) continue
+      if (Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ) < AWARE.noiseRingRange)
+        unawareNear = true
+    }
     for (let i = 0; i < this.query.count; i++) {
       const e = ids[i]
       const v = this.items.get(e)
@@ -717,6 +818,7 @@ export class Visuals {
       }
 
       this.syncSnare(e, v)
+      this.syncNoise(e, v, unawareNear)
       this.syncPlayerRange(e, v)
 
       // ---- 4색 예고 (DESIGN.md 기둥 2) ----
@@ -791,6 +893,24 @@ export class Visuals {
         }
       }
 
+      /**
+       * 👀 못 본 적 표시 — `aggro === 0` 인 동안만, 가까울 때만.
+       *
+       * 깨어나는 순간 **바로 꺼집니다.** 이 껐다/켰다가 규칙 자체를
+       * 가르칩니다: 표시가 있는 동안은 기습이 되고, 사라지면 안 됩니다.
+       * 조건을 여기서 새로 판단하지 않고 게임이 세운 `aggro` 를 그대로
+       * 읽는 것이 요점입니다 — 화면이 자기만의 기준을 갖는 순간
+       * "보이는 것과 실제가 다른" 버그가 시작됩니다.
+       */
+      if (v.unawareMark && v.unawareMat && hasComponent(Enemy, e)) {
+        const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
+        const show =
+          Enemy.aggro[e] === 0 && Actor.state[e] !== ActorState.Dead && d < AWARE.markRange
+        v.unawareMark.visible = show
+        // 멀수록 옅게 — 가까운 기회가 먼저 눈에 들어와야 합니다.
+        if (show) v.unawareMat.opacity = 0.85 * (1 - (d / AWARE.markRange) * 0.45)
+      }
+
       // 등 뒤 구역: 가까이 갈수록 진해집니다. 멀면 아예 안 보입니다.
       if (v.backZone && v.backZoneMat) {
         const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
@@ -816,6 +936,58 @@ export class Visuals {
         v.hpBar.quaternion.copy(this.camera.quaternion)
       }
     }
+  }
+
+  /**
+   * 실험대 전용 — **화면이 지금 무엇을 말하고 있는가.**
+   *
+   * ⚠️ 프로브가 `Enemy.aggro` 를 읽어서 *"표시가 떠 있겠지"* 라고 믿으면
+   *    아무것도 검사하지 못합니다. 이 저장소가 가장 비싸게 배운 것이
+   *    그것입니다 — **계기는 결론이 아니라 화면을 읽어야 합니다.**
+   *    그래서 실제 메시의 `visible` 과 `scale` 을 그대로 돌려줍니다.
+   */
+  debugAwareMarks(): { marks: number; noiseVisible: boolean; noiseRadius: number } {
+    let marks = 0
+    let noiseVisible = false
+    let noiseRadius = 0
+    for (const v of this.items.values()) {
+      if (v.unawareMark?.visible) marks++
+      if (v.noiseRing) {
+        if (v.noiseRing.visible) {
+          noiseVisible = true
+          noiseRadius = v.noiseRing.scale.x
+        }
+      }
+    }
+    return { marks, noiseVisible, noiseRadius: Number(noiseRadius.toFixed(2)) }
+  }
+
+  /**
+   * 🔊 발소리 링 — 반지름이 **지금 내 발소리가 닿는 거리**입니다.
+   *
+   * 규칙은 `balance.ts hearDistance()` 한 곳에만 있습니다. 여기서는
+   * 그 값을 받아 **그리기만** 합니다 — 화면이 자기 식을 갖는 순간
+   * "보이는 대로 했는데 들키는" 경험이 시작되고, 그건 버그보다 나쁩니다.
+   */
+  private syncNoise(e: number, v: Visual, unawareNear: boolean): void {
+    if (!v.noiseRing || !v.noiseMat) return
+    if (!unawareNear) {
+      if (v.noiseRing.visible) v.noiseRing.visible = false
+      return
+    }
+    const speed = Math.hypot(Velocity.x[e], Velocity.z[e])
+    const r = hearDistance(speed)
+    v.noiseRing.visible = true
+    v.noiseRing.scale.set(r, 1, r)
+    /**
+     * 조용할수록 흐리게, 시끄러울수록 진하게.
+     *
+     * 크기만으로도 말은 되지만, 서 있을 때의 작은 원이 또렷하면 **가만히
+     * 있는 것도 시끄러워 보입니다.** 크기와 진하기가 같은 방향으로 움직여야
+     * "지금 조용하다"가 한눈에 읽힙니다.
+     */
+    const loud = Math.min(1, Math.max(0, (r - AWARE.hearQuiet) / (AWARE.hearLoud - AWARE.hearQuiet)))
+    v.noiseMat.opacity = 0.12 + 0.3 * loud
   }
 
   /** 🔵 속박 링 — 남은 시간에 따라 맥동합니다. */

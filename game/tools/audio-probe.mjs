@@ -256,6 +256,18 @@ try {
       window.__game.clearEnemies()
       await new Promise((r) => setTimeout(r, 600))
       const e = window.__game.spawnTestEnemy(st.x + 3, st.z)
+      /**
+       * ⚠️ **깨워 놓고 잽니다.** 적은 이제 방향으로 알아채기 때문에
+       *    (balance.ts `AWARE`), 등을 보인 채 3m 앞에 낳으면 가만히 선
+       *    플레이어를 영영 못 봅니다 — 이 검사가 실제로 *"진폭 0.0000 ·
+       *    시뮬레이션 29.1초"* 로 죽었습니다. 시간이 다 갈 때까지 적이
+       *    아무것도 안 한 것입니다.
+       *
+       *    여기서 묻는 것은 *"예고에 소리가 붙어 있는가"* 이지
+       *    *"적이 나를 알아채는가"* 가 아닙니다. 재려는 것 앞의 조건은
+       *    무대가 만들어 줘야 합니다.
+       */
+      window.__game.wakeEnemy(e)
       window.__game.freezeEnemies(false)
       let telegraph = 0
       const deadline = Date.now() + 30000

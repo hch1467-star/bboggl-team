@@ -54,6 +54,7 @@
     "hints": "node tools/hints-probe.mjs",
     "shape": "node tools/shape-probe.mjs",
     "flank": "node tools/flank-probe.mjs",
+    "notice": "node tools/notice-probe.mjs",
     "guard": "node tools/guard.mjs",
     "feel": "node tools/feel-probe.mjs",
     "pace": "node tools/pace-probe.mjs",

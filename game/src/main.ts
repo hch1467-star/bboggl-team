@@ -106,6 +106,7 @@ import {
   resetGreenOutcome,
   readChainsLost,
   setAggroRangeOverride,
+  spotEvents,
   setReachDistance,
   phaseEvents,
   resetAttackTokens,
@@ -509,6 +510,7 @@ class Game {
     this.bossEntity = -1
     sfx.stopMusic()
     encounterEvents.length = 0
+    spotEvents.length = 0
     this.defeatedBosses = new Set()
     this.bonfires = []
     this.anvils = []
@@ -1326,6 +1328,55 @@ class Game {
     }
     breakEvents.length = 0
 
+    /**
+     * 👀 **들킨 순간** — 화면과 귀에 한 번씩.
+     *
+     * ── 왜 필요한가 ────────────────────────────────────────────────
+     * 인지 규칙(시야·청각·고함)을 다 만들어 놓고 **화면에는 아무것도
+     * 올리지 않았습니다.** 그러면 플레이어가 겪는 것은 규칙이 아니라
+     * *"가끔 갑자기 다 달려든다"* 입니다. 원인이 안 보이면 배울 것이 없고,
+     * 배울 것이 없으면 그건 난이도가 아니라 운입니다.
+     *
+     * 파문은 **고함 거리(`AWARE.alertRadius`)와 같은 크기**로 그립니다.
+     * 눈에 보이는 크기가 곧 규칙의 크기여야, 보고 배운 것이 맞는 것이
+     * 됩니다 — 이 저장소가 예고 부채꼴에서 이미 지키고 있는 원칙입니다
+     * (*"모양과 색이 같은 데이터에서 나온다"*).
+     *
+     * ⚠️ 소리는 `sfx.spotted` 안에서 한 번으로 묶입니다(gate). 무리가
+     *    통째로 깨어나면 사건이 6개 들어오는데, 6번 울리면 경보가 아니라
+     *    소음입니다. **"들켰다"는 마릿수가 아니라 사건입니다.**
+     */
+    const pv = this.debugPlayerEntity()
+    for (const sp of spotEvents) {
+      /**
+       * ⚠️ **가까운 것만 그립니다.** 소리는 `gate` 로 한 번에 묶었는데
+       *    그림은 안 묶어 뒀다가 뒤늦게 알아챘습니다: 존을 달려 지나가면
+       *    19마리가 깨어나고, 무리로 깨면 7m 짜리 흰 원이 **한 프레임에
+       *    대여섯 장** 겹칩니다. 가산 혼합이라 그대로 더해져서 화면이
+       *    하얗게 뜹니다 — 소리에서 막은 것과 **똑같은 실패**입니다.
+       *
+       * 거리 기준은 못 본 적 표시와 **같은 값**을 씁니다(`markRange`).
+       * 그래야 화면이 한 문장을 말합니다 — *표시가 꺼진 그 자리에서
+       * 파문이 터진다.* 화면 밖에서 깨어난 적은 그릴 이유가 없습니다.
+       */
+      const d = Math.hypot(sp.x - Transform.x[pv], sp.z - Transform.z[pv])
+      if (d > AWARE.markRange) continue
+      this.vfx.spawnGroundShape(
+        sp.x,
+        0,
+        sp.z,
+        0,
+        AWARE.alertRadius,
+        360,
+        // 무채색 — 4색 표(어떻게 답하라)를 침범하지 않습니다.
+        0xe8eef8,
+        AWARE.spotFlash,
+        'fade',
+      )
+      sfx.spotted(sp.x, sp.z)
+    }
+    spotEvents.length = 0
+
     // ---- 4. 사망 처리 ----
     healthSystem()
     for (const death of deathEvents) {
@@ -1832,10 +1883,12 @@ class Game {
    * "가장 가까운 적"이 계속 바뀌어서 무엇의 등 뒤인지 알 수가 없기 때문입니다.
    * 밸런스를 손으로 만져볼 때도 1:1 시험장이 필요해서 남겨 둡니다.
    */
-  debugSpawnTestEnemy(x: number, z: number, rotY?: number): number {
+  debugSpawnTestEnemy(x: number, z: number, rotY?: number, asleep = false): number {
     const e = spawnGrunt(x, z)
     // 바라보는 방향을 지정할 수 있어야 백어택 같은 방향 판정을 검증할 수 있습니다.
     if (rotY !== undefined) Transform.rotY[e] = rotY
+    // 위 debugSpawnKind 와 같은 계약입니다 — 기본은 **깨어 있는 적**.
+    if (!asleep) Enemy.aggro[e] = 1
     if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
     this.visuals.attach(e, Renderable.kind[e])
     return e
@@ -2183,6 +2236,11 @@ class Game {
       resetAttackTokens()
     }
     this.hud.showBanner('다시 일어섰다', `${this.deathLesson()} · 적 ${revived}마리 부활`, 3.6)
+  }
+
+  /** 실험대 전용 — 화면이 지금 그리고 있는 인지 신호(visuals.ts 설계 노트). */
+  debugAwareMarks(): { marks: number; noiseVisible: boolean; noiseRadius: number } {
+    return this.visuals.debugAwareMarks()
   }
 
   debugPlayerEntity(): number {
@@ -3190,11 +3248,35 @@ class Game {
     }
   }
 
-  debugSpawnKind(id: string, x: number, z: number): number {
+  /**
+   * 실험대 전용 스폰은 **깨어 있는 적**을 냅니다 (`asleep: true` 로만 재웁니다).
+   *
+   * ── 왜 기본값이 "깨어 있음"인가 ──────────────────────────────────
+   * 인지를 방향으로 나눈 뒤, 이 훅으로 적을 낳는 프로브 **스무 개**가
+   * 조용히 뜻을 잃었습니다. 적은 낳을 때 원점을 보므로 무대에 따라
+   * 등을 보이고, 그러면 가만히 선 계측기를 **영영 못 봅니다.** 증상은
+   * 프로브마다 다르게 나타납니다 —
+   *   · `audio`  → *"진폭 0.0000 · 시뮬레이션 29.1초"*
+   *   · `poise`  → *"가만히 두면 잡몹이 공격 0회"*
+   *   · `cover`  → *"궁수가 안 쏨"* (+ 그 아래 검사 넷이 전부 −0)
+   *   · `rules`  → *"20초 안에 갈고리를 걸지 않았습니다"*
+   * 전부 같은 원인인데 **한 번도 같은 말로 나오지 않습니다.** 그래서
+   * 하나씩 만날 때마다 매번 게임을 의심하게 됩니다.
+   *
+   * 이 훅의 원래 계약은 *"나와 싸울 적을 세워 달라"* 였습니다. 계약이
+   * 그랬으면 계약대로 두는 것이 맞습니다 — 스무 파일에 같은 줄을
+   * 붙여 넣는 것은 **다음에 프로브를 쓰는 사람이 그 줄을 모른다**는
+   * 문제를 하나도 안 풉니다.
+   *
+   * 못 본 적이 필요한 쪽(`flank`·`notice`)은 **그렇게 적어서** 부릅니다.
+   * 드문 쪽이 말하게 하는 것이 규칙입니다.
+   */
+  debugSpawnKind(id: string, x: number, z: number, asleep = false): number {
     const kind = kindFromId(id)
     if (kind === null) return -1
     const e = spawnEnemy(kind, x, z)
     if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    if (!asleep) Enemy.aggro[e] = 1
     this.visuals.attach(e, Renderable.kind[e])
     return e
   }
@@ -3579,7 +3661,8 @@ declare global {
       setPaused: (paused: boolean) => void
       /** 지금 검격 궤적이 떠 있는가 — 캡처 타이밍을 페이지 안에서 잡기 위한 것. */
       swingVisible: () => boolean
-      spawnTestEnemy: (x: number, z: number, rotY?: number) => number
+      /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
+      spawnTestEnemy: (x: number, z: number, rotY?: number, asleep?: boolean) => number
       freezeEnemies: (frozen: boolean) => void
       spawnVfx: (kind: 'spark' | 'damage' | 'swing') => void
       /** 적을 특정 공격 패턴의 예고 상태로 세워 둡니다(4색 확인용). */
@@ -3650,7 +3733,8 @@ declare global {
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
       /** 종류를 id 문자열로 지정해 소환합니다. */
-      spawnEnemyKind: (id: string, x: number, z: number) => number
+      /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
+      spawnEnemyKind: (id: string, x: number, z: number, asleep?: boolean) => number
       /** 보스 페이즈 검증용 — 체력을 직접 깎고 상태를 읽습니다. */
       damageEntity: (entity: number, amount: number) => void
       enemyInfo: (entity: number) => {
@@ -3742,9 +3826,15 @@ declare global {
         hearLoud: number
         ambushGrace: number
         alertRadius: number
+        markRange: number
+        noiseRingRange: number
         /** 지금 이 순간 내 발소리가 닿는 거리(m) — 속도에 따라 변합니다. */
         hearNow: number
         playerSpeed: number
+        /** 화면이 실제로 그리고 있는 것 — 규칙이 아니라 **픽셀 쪽** 진실입니다. */
+        marks: number
+        noiseVisible: boolean
+        noiseRadius: number
       }
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
@@ -4056,7 +4146,7 @@ window.__game = {
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
   swingVisible: () => game.debugSwingVisible(),
-  spawnTestEnemy: (x, z, rotY) => game.debugSpawnTestEnemy(x, z, rotY),
+  spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),
   forceAttack: (entity, index) => game.debugForceAttack(entity, index),
@@ -4139,7 +4229,7 @@ window.__game = {
       }
     }),
   levelRoster: () => game.debugLevelRoster(),
-  spawnEnemyKind: (id, x, z) => game.debugSpawnKind(id, x, z),
+  spawnEnemyKind: (id, x, z, asleep) => game.debugSpawnKind(id, x, z, asleep),
   bossTuning: () =>
     BOSS_PHASES.map((ph) => ({
       name: ph.name,
@@ -4318,9 +4408,12 @@ window.__game = {
       hearLoud: AWARE.hearLoud,
       ambushGrace: AWARE.ambushGrace,
       alertRadius: AWARE.alertRadius,
+      markRange: AWARE.markRange,
+      noiseRingRange: AWARE.noiseRingRange,
       // 식이 아니라 **게임이 쓰는 그 함수**를 부릅니다(balance.ts 주석 참고).
       hearNow: hearDistance(speed),
       playerSpeed: speed,
+      ...game.debugAwareMarks(),
     }
   },
   grantPerfectDodge: () => {

@@ -318,7 +318,9 @@ try {
         while (now() - t0 < 1.0) await sleep()
 
         const p = G.state().player
-        const e = G.spawnEnemyKind('grunt', p.x + 18, p.z)
+        // 이 무대는 **못 본 적**이 있어야 성립합니다 — 그래서 재워서 낳습니다.
+        // (실험대 스폰의 기본은 깨어 있는 적입니다 — main.ts 설계 노트)
+        const e = G.spawnEnemyKind('grunt', p.x + 18, p.z, true)
         if (e == null || e < 0) return null
         while (now() - t0 < 1.6) await sleep()
 

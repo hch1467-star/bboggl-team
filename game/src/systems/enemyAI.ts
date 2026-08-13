@@ -111,6 +111,19 @@ export interface EnemyAiContext {
 
 const enemies = defineQuery(Enemy, Actor, Transform, Velocity, Health)
 
+/**
+ * 👀 **들킨 순간** — 이번 프레임에 `aggro` 가 0 → 1 로 넘어간 적들.
+ *
+ * 왜 배열로 내보내는가: 인지가 바뀌는 것은 **사건**인데, 지금까지는
+ * 상태(`aggro`)만 있고 사건이 없었습니다. 상태만 있으면 화면은
+ * *"어느새 깨어 있더라"* 밖에 못 그립니다 — 원인과 결과가 끊깁니다.
+ * 세키로의 `!` 도, 쓰시마의 경계 표시도 전부 **그 한 순간**을 그립니다.
+ *
+ * `hitEvents`·`breakEvents` 와 같은 규약입니다: 시스템이 밀어 넣고,
+ * 게임 루프가 읽고 비웁니다. 사건은 사건이 일어난 자리에서 기록합니다.
+ */
+export const spotEvents: { entity: number; x: number; z: number; heard: boolean }[] = []
+
 const DEG = Math.PI / 180
 /** 이 각도 안에 플레이어가 들어와야 공격을 시작합니다(뒤통수에 대고 휘두르지 않도록). */
 const ATTACK_FACING_TOLERANCE = 45 * DEG
@@ -1058,7 +1071,11 @@ export function enemyAiSystem(
       const len = Math.hypot(dx, dz) || 1
       const inFront =
         (dx * fx + dz * fz) / len >= Math.cos(((AWARE.frontArcDeg / 2) * Math.PI) / 180)
-      if (effectiveDist <= (inFront ? range : hearDistance(playerSpeed))) Enemy.aggro[e] = 1
+      if (effectiveDist <= (inFront ? range : hearDistance(playerSpeed))) {
+        Enemy.aggro[e] = 1
+        // 사건을 남깁니다 — 눈으로 봤는지 소리로 들었는지까지 같이.
+        spotEvents.push({ entity: e, x: Transform.x[e], z: Transform.z[e], heard: !inFront })
+      }
       // 아직 못 봤으면 유예를 채워 둡니다 — 깨어난 뒤에도 잠깐 남습니다.
       Enemy.unawareT[e] = AWARE.ambushGrace
     } else if (Enemy.unawareT[e] > 0) {
@@ -1370,6 +1387,8 @@ export function enemyAiSystem(
       const ddz = Transform.z[o] - Transform.z[e]
       if (ddx * ddx + ddz * ddz > AWARE.alertRadius * AWARE.alertRadius) continue
       Enemy.aggro[o] = 1
+      // 고함도 **들킨 것**입니다 — 화면에 같은 신호로 나가야 원인이 읽힙니다.
+      spotEvents.push({ entity: o, x: Transform.x[o], z: Transform.z[o], heard: true })
       // 고함을 들은 적은 **완전히 깨어 있습니다** — 기습도, 재고함도 없습니다.
       Enemy.unawareT[o] = 0
     }
