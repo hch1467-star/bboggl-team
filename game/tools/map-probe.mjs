@@ -891,6 +891,80 @@ try {
      */
   }
 
+  /**
+   * ── 🎁 **막다른 곁길에는 보상이 있는가** ──────────────────────────
+   *
+   * ── 왜 이걸 재는가 ───────────────────────────────────────────────
+   * 보상 7개의 **왕복 비용**을 재 봤더니 다섯이 0~12m 였습니다. 즉 가는 길에
+   * 그냥 지나칩니다. 그러면 빛기둥(작업 #15)은 *"갈까 말까"* 가 아니라
+   * **이정표**이고, 탐험이라는 결정이 없어집니다.
+   *
+   * 반대쪽 실패가 더 나빴습니다 — **북쪽 단상**은 왕복 20~60m 를 치러야 하는
+   * 막다른 곁길인데 **아무것도 없었습니다.** 소울류가 절대 하지 않는
+   * 것입니다: 다크 소울의 막다른 방에는 늘 무언가 있고, 할로우 나이트도,
+   * 로스트아크의 숨은 구역도 그렇습니다. **값을 치르게 했으면 갚아야
+   * 합니다.** 안 그러면 다음부터 곁길을 안 봅니다.
+   *
+   * ── 문턱을 안 적습니다 ───────────────────────────────────────────
+   * *"곁길"* 을 거리로 정의하지 않습니다. **지나갈 수 없는 구역**,
+   * 즉 그 구역의 어느 칸으로도 보스로 가는 길이 짧아지지 않는 곳
+   * (최소 추가 비용 > 0)이 막다른 곁길입니다. 지형을 고쳐도 정의가
+   * 따라옵니다.
+   *
+   * 보상에는 **사다리도 넣습니다.** 성벽마루는 왕복 84m 짜리 곁길인데,
+   * 거기서 얻는 것은 물건이 아니라 **지름길을 여는 일**입니다 —
+   * 다크 소울 1 의 곁길이 정확히 그 모양입니다.
+   */
+  {
+    const spawnC = cellOf(level.entities.find((e) => e.kind === 'spawn'))
+    const bossC = cellOf(level.entities.find((e) => e.kind === 'boss'))
+    const straight = bfs(spawnC, bossC, maxClimb, false)
+    const REWARD = ['treasure', 'anvil', 'bonfire']
+    /**
+     * ⚠️ 사다리 **엔티티는 아래 칸**에 있습니다. 그래서 그것만 세면
+     *    성벽마루처럼 *"위에서 여는"* 구역이 빈 곳으로 찍힙니다 —
+     *    실제로 한 번 그렇게 나왔습니다(왕복 84m · 보상 없음).
+     *    그 구역이 갚는 것은 물건이 아니라 **지름길을 여는 일**이므로,
+     *    게임이 아는 **위쪽 끝**을 읽어 보상으로 셉니다.
+     */
+    const tops = (await page.evaluate(() => window.__game.shortcutInfo())).map((sc) =>
+      cellOf({ x: sc.hiWorldX, z: sc.hiWorldZ }),
+    )
+    const dead = []
+    for (const g of await page.evaluate(() => window.__game.regionList())) {
+      let lo = Infinity
+      for (let cx = g.x0; cx <= g.x1; cx++) {
+        for (let cz = g.z0; cz <= g.z1; cz++) {
+          if (heightAt(cx, cz) === VOID) continue
+          const a2 = bfs(spawnC, { cx, cz }, maxClimb, false)
+          const b2 = bfs({ cx, cz }, bossC, maxClimb, false)
+          if (!Number.isFinite(a2) || !Number.isFinite(b2)) continue
+          const det = (a2 + b2 - straight) * CELL
+          if (det < lo) lo = det
+        }
+      }
+      if (!Number.isFinite(lo) || lo <= 0) continue
+      const inside = (c) => c.cx >= g.x0 && c.cx <= g.x1 && c.cz >= g.z0 && c.cz <= g.z1
+      const has =
+        level.entities.some((e) => REWARD.includes(e.kind) && inside(cellOf(e))) ||
+        tops.some(inside)
+      dead.push({ name: g.name, cost: lo, has })
+    }
+    console.log(
+      `\n  🎁 막다른 곁길 — ` +
+        dead.map((r) => `${r.name} 왕복 ${r.cost}m ${r.has ? '보상 있음' : '**없음**'}`).join(' · '),
+    )
+    check(
+      dead.length > 0 && dead.every((r) => r.has),
+      '**막다른 곁길에는 보상이 있다** (값을 치르게 했으면 갚는다)',
+      dead.length === 0
+        ? '막다른 곁길이 하나도 없습니다 — 곁길이 없는 지도입니다'
+        : dead.every((r) => r.has)
+          ? `${dead.length}곳 전부`
+          : dead.filter((r) => !r.has).map((r) => `${r.name}(왕복 ${r.cost}m)`).join(' · '),
+    )
+  }
+
   const orphan = intro.foes.filter((f) => !f.region).length
   check(
     ordered.length >= 3 && intro.foes.length >= 5,
