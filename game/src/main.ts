@@ -2846,6 +2846,12 @@ class Game {
      * 합니다. 구르기 거리만으로는 그 색을 검사할 수 없습니다.
      */
     walkSpeed: number
+    /**
+     * 스태미나 최대치. *"한 판 쉬면 얼마나 회복되는가"* 를 재려면
+     * 회복 속도·지연과 **함께** 필요합니다 — 지도의 이완 구간이 충분한지는
+     * 결국 "빈손으로 다음 싸움에 들어가지 않는가"이기 때문입니다.
+     */
+    maxStamina: number
     dodgeStaminaCost: number
     staminaRegen: number
     staminaRegenDelay: number
@@ -2885,6 +2891,7 @@ class Game {
       dodgeCooldown: PLAYER_CFG.dodge.cooldown,
       dodgeDistance: PLAYER_CFG.dodge.distance,
       walkSpeed: PLAYER_CFG.moveSpeed,
+      maxStamina: PLAYER_CFG.maxStamina,
       dodgeStaminaCost: PLAYER_CFG.dodge.staminaCost,
       /** 스태미나 회복 — 실전 리듬이 성립하는지 재려면 프로브가 알아야 합니다. */
       staminaRegen: PLAYER_CFG.staminaRegen,
@@ -4157,6 +4164,8 @@ declare global {
         dodgeDistance: number
         /** 걷는 속도(m/s) — 🟡 의 정답("걸어서 이탈")을 재려면 필요합니다. */
         walkSpeed: number
+        /** 스태미나 최대치 — 이완 구간이 충분한지 재는 데 씁니다. */
+        maxStamina: number
         dodgeStaminaCost: number
         staminaRegen: number
         staminaRegenDelay: number

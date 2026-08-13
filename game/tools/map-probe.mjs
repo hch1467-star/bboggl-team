@@ -707,6 +707,114 @@ try {
   if (runStart && runLen * CELL >= 16) {
     quiet.push({ from: runStart, to: routeCells[routeCells.length - 1], metres: runLen * CELL })
   }
+  /**
+   * ── 🫁 **쉴 틈 없이 이어지는 구간이 있는가** ──────────────────────
+   *
+   * 위 [빈 구간]은 *"위협 없이 걷는 시간이 너무 길지 않은가"* 를 봅니다 —
+   * 심심함을 막는 검사입니다. 그런데 그 **반대쪽은 아무도 안 보고
+   * 있었습니다**: 위협이 끊이지 않고 이어지는 구간.
+   *
+   * 참고한 게임들이 전부 긴장과 이완을 **번갈아** 둡니다 —
+   * 헤일로의 *"30초의 재미"*, 소울류의 조우 사이 빈 복도(물러설 문턱이
+   * 늘 있습니다), 로스트아크의 몹 무리 사이 이동 구간. 이완이 없으면
+   * 난이도가 아니라 **소모전**이 되고, 잘 싸운 사람과 운 좋은 사람이
+   * 구분되지 않습니다.
+   *
+   * ── 얼마나 쉬어야 충분한가 — 숫자를 안 적습니다 ──────────────────
+   * 이 게임에서 "쉬었다"의 뜻은 분명합니다: **빈손으로 다음 싸움에 들어가지
+   * 않는 것.** 그래서 기준을 **스태미나를 0에서 가득 채우는 데 걸리는
+   * 거리**로 잡습니다 — 전부 게임에서 읽습니다:
+   *
+   *     (최대치 ÷ 초당 회복 + 회복 지연) × 걷는 속도
+   *
+   * 스태미나를 손보면 이 기준도 따라 움직입니다.
+   */
+  const tune2 = await page.evaluate(() => window.__game.terrainInfo())
+  const breather =
+    (tune2.maxStamina / tune2.staminaRegen + tune2.staminaRegenDelay) * tune2.walkSpeed
+  const runs = []
+  {
+    let start = null
+    let len = 0
+    let gap = 0
+    for (const c of routeCells) {
+      const near = foes.some(
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+      )
+      if (near) {
+        if (start === null) {
+          start = c
+          len = 0
+          // 직전 이완 길이를 이 긴장 구간의 "들어가기 전 쉼"으로 기록합니다.
+          runs.push({ from: c, metres: 0, rest: gap * CELL })
+        }
+        len++
+        runs[runs.length - 1].metres = len * CELL
+        gap = 0
+      } else {
+        start = null
+        gap++
+      }
+    }
+  }
+  const longest = runs.reduce((a, b) => (a && a.metres >= b.metres ? a : b), null)
+  console.log(
+    `  [긴장 구간] ${runs.length}개 — ` +
+      runs
+        .slice()
+        .sort((a, b) => b.metres - a.metres)
+        .slice(0, 4)
+        .map((r) => `${r.metres}m(들어가기 전 쉼 ${r.rest}m)`)
+        .join(' · ') +
+      `  ※ 한 번 쉬면 스태미나가 차는 거리 ${breather.toFixed(0)}m`,
+  )
+  /**
+   * ── 여기에 검사를 하나 **썼다가 좁혔습니다** ─────────────────────
+   * 처음엔 *"모든 긴장 구간 앞에 스태미나가 찰 만큼의 쉼이 있다"* 로 걸었고
+   * 빨갛게 나왔습니다(구간 사이 쉼 2m). 그런데 중간에 쉼을 내려면 적을
+   * **5~7마리** 물려야 했습니다 — 존의 알맹이를 들어내는 셈입니다.
+   *
+   * 이 레벨은 **와이드 리니어 존**이고(작업 #12), 그 설계에서 동선이 대체로
+   * 위협 안에 있는 것은 결함이 아니라 성격입니다. 실제로 옆 검사가 정반대를
+   * 지키고 있습니다 — *"위협 없이 30m 넘게 걷는 구간이 없다"*(심심함 방지).
+   * 둘 다 최대로 요구하면 서로 모순입니다.
+   *
+   * 참고한 게임들이 **예외 없이** 지키는 것은 훨씬 좁은 약속입니다:
+   * **보스 앞 복도는 비어 있다.** 소울류의 안개문 앞, 몬헌의 둥지 입구,
+   * 로스트아크의 관문 앞이 전부 그렇습니다. 마지막 한 번은 숨을 고르고
+   * 들어가야 그 싸움이 **시작**으로 느껴집니다.
+   *
+   * 그래서 요구를 거기로 좁혔습니다. 나머지 리듬은 위 [긴장 구간] 기록으로
+   * 남깁니다 — 재되 걸지는 않습니다.
+   */
+  /**
+   * ⚠️ **보스는 빼고 셉니다.** `FOE_KINDS` 에는 보스도 들어 있어서, 그대로
+   *    쓰면 보스 앞 복도는 **정의상 절대 비지 않습니다**(보스 자신이 그
+   *    복도를 덮습니다). 실제로 그렇게 재서 *"빈 구간 0m"* 가 나왔고,
+   *    하마터면 잡몹을 넷이나 옮길 뻔했습니다. 이 검사가 묻는 것은
+   *    *"보스 말고 다른 것이 거기 있는가"* 입니다.
+   */
+  const mobs = level.entities
+    .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
+    .map(cellOf)
+  const tailRest = (() => {
+    let n = 0
+    for (let i = routeCells.length - 1; i >= 0; i--) {
+      const c = routeCells[i]
+      const near = mobs.some(
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+      )
+      if (near) break
+      n++
+    }
+    return n * CELL
+  })()
+  check(
+    tailRest >= breather,
+    '**보스 앞 복도는 비어 있다** (숨 고르고 들어가게)',
+    `보스 직전 빈 구간 ${tailRest}m · 스태미나가 차는 거리 ${breather.toFixed(0)}m`,
+  )
+
   const worst = quiet.reduce((a, b) => (a && a.metres >= b.metres ? a : b), null)
   console.log(
     `  [빈 구간] 주 동선 ${routeCells.length * CELL}m 중 위협 없이 걷는 구간 ${quiet.length}개 — ` +
