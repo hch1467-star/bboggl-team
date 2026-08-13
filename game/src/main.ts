@@ -2577,11 +2577,11 @@ class Game {
    *
    * 그래서 게임이 **자기가 쓰는 그 사각형으로** 판정해서 냅니다.
    */
-  debugLevelFoes(): { kind: string; x: number; z: number; region: string }[] {
+  debugLevelFoes(): { kind: string; x: number; z: number; region: string; level: number }[] {
     const t = this.terrain
     if (!t) return []
     const { w, h } = t.level
-    const out: { kind: string; x: number; z: number; region: string }[] = []
+    const out: { kind: string; x: number; z: number; region: string; level: number }[] = []
     for (const e of t.level.entities) {
       // 적인지 아닌지는 게임의 표로 가립니다(보물·모루·화톳불이 섞이지 않게).
       if (kindFromId(e.kind) === null) continue
@@ -2589,7 +2589,12 @@ class Game {
       const r = this.regions.find(
         (g) => cell.cx >= g.x0 && cell.cx <= g.x1 && cell.cz >= g.z0 && cell.cz <= g.z1,
       )
-      out.push({ kind: e.kind, x: e.x, z: e.z, region: r?.name ?? '' })
+      /**
+       * 서 있는 **지형 층**. 소울류·NRFTW 가 쓰는 수직 배치(위에서 아래를
+       * 쏘는 궁수)가 실제로 성립하는지 재려면 이 값이 필요합니다 —
+       * 좌표만으로는 "높은 곳"인지 알 수 없습니다.
+       */
+      out.push({ kind: e.kind, x: e.x, z: e.z, region: r?.name ?? '', level: t.levelAtWorld(e.x, e.z) })
     }
     return out
   }
@@ -4114,7 +4119,7 @@ declare global {
         { swings: number; hits: number; chained: number; byPhase: number[] }
       >
       /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
-      levelFoes: () => { kind: string; x: number; z: number; region: string }[]
+      levelFoes: () => { kind: string; x: number; z: number; region: string; level: number }[]
       shortcutInfo: () => {
         key: string
         open: boolean
