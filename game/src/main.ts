@@ -3735,6 +3735,8 @@ declare global {
           intent: number
           color: string
           reach: number
+          /** 기본 가중치 — 페이즈 덮어쓰기(bossPhaseWeights)와 짝입니다. */
+          weight: number
           lungeSpeed: number
           /** 예고 길이와 부채꼴 — 색끼리의 **관계**를 검사하려면 필요합니다 */
           windup: number
@@ -3806,6 +3808,8 @@ declare global {
        */
       /** 보스 페이즈의 체력 경계(enterBelow) — 프로브가 페이즈 한가운데를 잡는 데 씁니다. */
       bossPhaseBounds: () => number[]
+      /** 페이즈별 가중치 덮어쓰기 — "적어 둔 성격이 실제로 나오는가"의 기대치입니다. */
+      bossPhaseWeights: () => Record<string, number>[]
       /** 🧪 실험대 전용 무적 (combat.ts 설계 노트). 게임 코드는 켜지 않습니다. */
       setPlayerInvulnerable: (on: boolean) => void
       /** 🟢 반격 검증용 */
@@ -4268,6 +4272,14 @@ window.__game = {
           color: INTENT_EMOJI[a.intent],
           /** 실제로 때리는 거리. 어그로 여유를 이 값으로 잽니다(attackRange 아님). */
           reach: a.reach,
+          /**
+           * **기본 가중치.** 페이즈 덮어쓰기가 없을 때 이 값이 쓰입니다
+           * (bossPhaseWeights 와 짝입니다). 프로브가 *"가중치대로 고르는가"*
+           * 의 기대치를 만들려면 둘 다 필요한데, 한쪽만 있으면 덮어쓰기가
+           * 없는 패턴의 기대치가 **조용히 0** 이 됩니다 — 실제로 그렇게
+           * 만들어 놓고 한 번 당했습니다(기대 0% · 실제 63%).
+           */
+          weight: a.weight,
           /** 예고 중 돌진 속도(m/s). 0이면 제자리에서 휘두릅니다. */
           lungeSpeed: a.lungeSpeed ?? 0,
           windup: a.windup,
@@ -4365,6 +4377,12 @@ window.__game = {
    * 옮기는 날 그 프로브가 **조용히 엉뚱한 페이즈**를 재게 됩니다.
    */
   bossPhaseBounds: () => BOSS_PHASES.map((p) => p.enterBelow),
+  /**
+   * 페이즈별 **가중치 덮어쓰기** 표. 프로브가 *"적어 둔 성격이 실제로
+   * 나오는가"* 를 물으려면 기대치가 필요한데, 그 기대치를 프로브가 따로
+   * 적어 두면 가중치를 바꾸는 날 검사가 조용히 옛말이 됩니다.
+   */
+  bossPhaseWeights: () => BOSS_PHASES.map((p) => ({ ...(p.weights ?? {}) })),
   /**
    * 🧪 실험대 전용 무적 — 근거는 combat.ts `setPlayerInvulnerable` 설계 노트.
    * (보스가 내주는 창을 재려면 그 앞에 오래 서 있어야 하는데, 한 번 죽으면

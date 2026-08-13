@@ -682,6 +682,145 @@ try {
       : `가장 좁은 창 ${tightest.toFixed(2)}초 vs 가장 느린 1타 ${fastest.toFixed(2)}초(대검) — 여유 ${(tightest - fastest).toFixed(2)}초`,
   )
 
+  /**
+   * ── 🎲 **거리마다 무엇을 고르는가** ───────────────────────────────
+   *
+   * ── 왜 이 측정이 필요해졌는가 (세 번 실패하고 나서) ────────────────
+   * 보스의 🟢 돌진(3~10m)과 🟣 갈고리(5~11m)가 실전 측정에서 **0회**였습니다.
+   * 3단계는 가중치 13 중 9를 그 둘에 걸어 뒀는데도요. 그래서 보스의
+   * **위치 행동**을 세 번 고쳤고 세 번 다 0회여서 세 번 다 되돌렸습니다:
+   *   ① 막히면 한 발 물러선다(쿨다운 3.2초) ② 같은 것을 조여서(1.2초)
+   *   ③ 그 페이즈 주인공 패턴의 사거리를 지킨다
+   *
+   * 그리고 마지막 판에서 더 이상한 것이 보였습니다 — 3단계에서 실제로
+   * 나온 분포가 **가중치와 맞지 않습니다**:
+   *
+   *     기대: cleave 4 · quake 2 · bind 2   (붙어 있는 거리에서 후보인 셋)
+   *     실제: quake 44 · cleave 41 · bind **0**
+   *
+   * cleave 는 quake 의 두 배여야 하는데 1:1 이고 bind 는 아예 0 입니다.
+   * 이건 위치 문제가 **아닙니다.** 위치를 아무리 고쳐도 안 풀립니다.
+   *
+   * > **행동을 고치기 전에, 고르는 것부터 재라.**
+   *
+   * ── 어떻게 재는가 ────────────────────────────────────────────────
+   * 거리를 **통제**합니다. 플레이어를 매 프레임 정확한 거리에 세워 두고
+   * (때리지 않으므로 무기 돌진이 거리를 흐트러뜨리지 않습니다), 페이즈를
+   * 체력 구간 한가운데에 고정하고, 무적으로 죽지 않게 한 뒤, 보스가 무엇을
+   * 고르는지 셉니다. 거리가 고정이면 후보 집합도 고정이라 **가중치대로
+   * 나오는가**를 한 번에 가를 수 있습니다.
+   *
+   * ⚠️ 거리 목록도 **게임에서** 만듭니다 — 패턴들의 `minRange` 경계를 읽어
+   *    그 바로 안쪽·바깥쪽을 고릅니다. 여기 숫자를 적으면 사거리를 손보는
+   *    날 이 측정이 조용히 엉뚱한 자리를 재게 됩니다.
+   */
+  console.log('\n  🎲 거리를 고정해 놓고 — 보스가 무엇을 고르는가 (3단계)\n')
+  const picks = await page.evaluate(async () => {
+    const G = window.__game
+    const roster = G.enemyRoster().find((r) => r.id === 'boss')
+    const atks = roster?.attacks ?? []
+    /** 경계 바로 바깥쪽에 서 봅니다 — 경계마다 후보 집합이 한 칸씩 늘어납니다. */
+    const edges = [...new Set(atks.map((a) => a.minRange))].sort((x, y) => x - y)
+    /**
+     * ⚠️ **몸통 안쪽에는 못 섭니다.** 처음엔 경계 0 에서 0.6m 를 잡았는데,
+     *    보스 반지름이 0.95m 라 물리가 서로를 밀어내고 26초에 **1회**밖에
+     *    안 휘둘렀습니다. 표본 1회로는 분포를 말할 수 없습니다.
+     *    가장 가까운 자리도 **몸이 닿지 않는 거리**부터 잡습니다.
+     */
+    const floor = (roster?.radius ?? 1) + 1.2
+    const spots = [...new Set(edges.map((v) => Number(Math.max(v + 0.6, floor).toFixed(1))))]
+    const bounds = G.bossPhaseBounds()
+    const out = []
+    for (const d of spots) {
+      G.reset()
+      await window.__t.runFor(0.6)
+      G.clearEnemies()
+      await window.__t.runFor(0.3)
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 4, p.z)
+      G.wakeEnemy(b)
+      G.setPlayerInvulnerable(true)
+      await window.__t.runFor(0.4)
+      const max = G.enemyInfo(b).max
+      // 3단계 체력 구간 한가운데 — 경계는 게임에서 읽습니다.
+      const target = max * (bounds[2] / 2)
+      G.setHp(b, target)
+      await window.__t.until(
+        () => G.enemyInfo(b)?.phase === 2 && G.enemyInfo(b)?.transitionT === 0,
+        8,
+      )
+      /** 지금까지의 누적을 **바닥으로** 잡습니다(장부는 누적입니다). */
+      const base = {}
+      for (const [id, v] of Object.entries(G.bossSwingLog())) base[id] = v.swings
+      const t0 = G.state().simElapsed
+      while (G.state().simElapsed - t0 < 26) {
+        const i = G.enemyInfo(b)
+        if (!i) break
+        // 거리를 **정확히** 유지합니다 — 이 측정의 통제 변수입니다.
+        G.teleportPlayer(i.x - d, i.z)
+        G.aimAtWorld(i.x, i.z)
+        if (Math.abs((G.enemyInfo(b)?.hp ?? target) - target) > 1) G.setHp(b, target)
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      const got = {}
+      for (const [id, v] of Object.entries(G.bossSwingLog())) {
+        const n = v.swings - (base[id] ?? 0)
+        if (n > 0) got[id] = n
+      }
+      G.setPlayerInvulnerable(false)
+      G.clearEnemies()
+      out.push({ d, got })
+    }
+    return { spots, out, atks }
+  })
+
+  /**
+   * 기대치도 **게임에서** 만듭니다 — 그 거리에서 후보인 패턴들의 가중치
+   * 비율입니다. 프로브가 따로 계산한 "정답"을 들고 있으면, 가중치를 바꾸는
+   * 날 이 검사가 조용히 옛말이 됩니다.
+   */
+  const phaseW = await page.evaluate(() => window.__game.bossPhaseWeights())
+  const w3 = phaseW[2] ?? {}
+  const expectAt = (d) => {
+    const live = picks.atks.filter((a) => d >= a.minRange && d <= a.maxRange)
+    const total = live.reduce((n, a) => n + (w3[a.id] ?? a.weight), 0)
+    return live.map((a) => ({ id: a.id, p: total > 0 ? (w3[a.id] ?? a.weight) / total : 0 }))
+  }
+  let worstGap = 0
+  let worstLine = ''
+  for (const row of picks.out) {
+    const n = Object.values(row.got).reduce((a2, b2) => a2 + b2, 0)
+    const exp = expectAt(row.d)
+    const parts = exp.map((e) => {
+      const got = row.got[e.id] ?? 0
+      const p = n > 0 ? got / n : 0
+      const gap = Math.abs(p - e.p)
+      if (gap > worstGap) {
+        worstGap = gap
+        worstLine = `${row.d}m 의 ${e.id} — 기대 ${(e.p * 100).toFixed(0)}% 실제 ${(p * 100).toFixed(0)}%`
+      }
+      return `${e.id} ${(p * 100).toFixed(0)}%(기대 ${(e.p * 100).toFixed(0)}%)`
+    })
+    console.log(`    ${String(row.d).padStart(4)}m  휘두름 ${String(n).padStart(3)}회 — ${parts.join(' · ')}`)
+  }
+  check(
+    picks.out.every((r) => Object.values(r.got).reduce((a2, b2) => a2 + b2, 0) >= 3),
+    '거리마다 실제로 휘둘렀다 (측정이 성립했다)',
+    picks.out
+      .map((r) => `${r.d}m ${Object.values(r.got).reduce((a2, b2) => a2 + b2, 0)}회`)
+      .join(' · '),
+  )
+  /**
+   * **가중치대로 고르는가.** 문턱 0.25 는 관대한 편입니다 — 굴림이라
+   * 표본 20~40 회에서 ±10%p 는 흔들립니다. 그보다 크게 벌어지면 그건
+   * 운이 아니라 **규칙이 다른 것**입니다.
+   */
+  check(
+    worstGap <= 0.25,
+    '**가중치대로 고른다** (적어 둔 성격이 실제로 나온다)',
+    worstGap > 0.25 ? `가장 크게 어긋난 곳 — ${worstLine}` : `가장 큰 어긋남 ${(worstGap * 100).toFixed(0)}%p`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
