@@ -2801,6 +2801,8 @@ class Game {
     /** 구르기 이동 거리(m) — 🟡 반경이 이보다 커야 "굴러선 못 빠져나온다"가 성립합니다 */
     dodgeDistance: number
     dodgeStaminaCost: number
+    staminaRegen: number
+    staminaRegenDelay: number
     dodgeCancelExtraCost: number
     /** 기본 공격 한 대가 채우는 집중 — 3타 콤보 = 1점이라는 약속을 검사하려면 필요합니다 */
     focusPerLightHit: number
@@ -2837,6 +2839,9 @@ class Game {
       dodgeCooldown: PLAYER_CFG.dodge.cooldown,
       dodgeDistance: PLAYER_CFG.dodge.distance,
       dodgeStaminaCost: PLAYER_CFG.dodge.staminaCost,
+      /** 스태미나 회복 — 실전 리듬이 성립하는지 재려면 프로브가 알아야 합니다. */
+      staminaRegen: PLAYER_CFG.staminaRegen,
+      staminaRegenDelay: PLAYER_CFG.staminaRegenDelay,
       dodgeCancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
       focusPerLightHit: FOCUS.perLightHit,
       actorStates: {
@@ -4079,6 +4084,8 @@ declare global {
         dodgeCooldown: number
         dodgeDistance: number
         dodgeStaminaCost: number
+        staminaRegen: number
+        staminaRegenDelay: number
         dodgeCancelExtraCost: number
         focusPerLightHit: number
         /** ActorState 값 — 프로브가 1/2/5 같은 숫자를 외우지 않게 */

@@ -76,6 +76,104 @@ try {
         }
       },
       /**
+       * 🫁 **게임의 실제 리듬에서 스태미나가 무는가.**
+       *
+       * ── 왜 재게 됐는가 ──────────────────────────────────────────
+       * 안전창(0.70초) 안에서 세 무기가 낸 값을 뜯어 보면 이렇습니다:
+       *
+       *     롱소드  2타 — 피해 26 · 강인도 0.48 · 스태미나 21
+       *     대검    1타 — 피해 26 · 강인도 **0.68** · 스태미나 26
+       *     쌍단검  3타 — 피해 24 · 강인도 0.235 · 스태미나 15
+       *
+       * **대검이 같은 피해에 강인도 1.4배**입니다. 유일한 대가는 스태미나
+       * 5인데, 그 대가는 *"스태미나가 실제로 모자라질 때"* 만 대가입니다.
+       * 반격은 2~3초에 한 번 오고 그 사이 스태미나는 회복합니다.
+       *
+       * 이 저장소는 이미 같은 의심을 적어 뒀습니다 — *"스태미나가 콤보의
+       * 1/3 아래로 떨어진 시간이 1%였습니다. 관리할 것이 없었다는 뜻입니다."*
+       * 그 말이 맞다면 **효율 축(쌍단검의 정체성)은 실전에 존재하지 않고**,
+       * 가장 자주 오는 상황에서 대검이 그냥 우세합니다.
+       *
+       * 그래서 **게임의 리듬 그대로** 돌려 봅니다: 구르고 → 창 안에서 치고
+       * → 다음 공격을 기다리고. 위 벤치처럼 계속 두들기는 것이 아니라요.
+       * 계속 두들기면 어떤 무기든 바닥나는 게 당연하고, 그건 실전이 아닙니다.
+       */
+      rhythm: async (slot, windowSec, cycleSec, cycles) => {
+        const G = window.__game
+        G.reset()
+        await window.__t.runFor(0.5)
+        G.clearEnemies()
+        await window.__t.runFor(0.3)
+        G.press(`Digit${slot}`)
+        G.release(`Digit${slot}`)
+        await window.__t.runFor(0.5)
+        const p = G.state().player
+        const e = G.spawnEnemyKind('grunt', p.x + 1.4, p.z)
+        G.setHp(e, 1000000)
+        G.freezeEnemies(true)
+        const es = G.entityState(e)
+        G.aimAtWorld(es.x, es.z)
+        G.setStamina(100)
+
+        const waitSim = async (sec) => {
+          const t0 = G.state().simElapsed
+          const dl = Date.now() + 30000
+          while (G.state().simElapsed - t0 < sec && Date.now() < dl) {
+            const st = G.state().player.stamina
+            if (st < minStam) minStam = st
+            await new Promise((r) => setTimeout(r, 8))
+          }
+        }
+        let minStam = 100
+        let denied = 0
+        let dealt = 0
+        const hp0 = G.entityState(e).hp
+        for (let c = 0; c < cycles; c++) {
+          // ① 적의 공격에 답합니다 — 구르기가 이 게임의 기본 대응이고
+          //    스태미나의 가장 큰 소비처입니다. 빼고 재면 후하게 나옵니다.
+          G.press('Space')
+          G.release('Space')
+          await waitSim(0.45)
+          /**
+           * ② 창 안에서 칩니다 — **낼 수 있을 때만** 냅니다.
+           *
+           * ⚠️ 처음엔 창 동안 8ms마다 무작정 눌렀습니다. 그랬더니 셋 다
+           *    최저 0에 6주기 누적 피해가 27뿐이었습니다 — 스태미나가
+           *    없는데 계속 눌러서 **거의 못 때린 것**입니다. 그건 게임의
+           *    리듬이 아니라 계측기가 만든 곤경이고, 셋이 다 0이면
+           *    무기를 가를 수도 없습니다.
+           *
+           *    사람은 못 낼 것을 알면 안 냅니다. 그래서 **한 타 값**만큼
+           *    남아 있을 때만 누릅니다. 기준값은 게임 데이터에서 끌어옵니다
+           *    (콤보 총 소모 ÷ 타수) — 여기 숫자를 적지 않습니다.
+           */
+          const perStep = G.weaponTable()[slot - 1].comboStamina / G.weaponTable()[slot - 1].comboLength
+          const t1 = G.state().simElapsed
+          while (G.state().simElapsed - t1 < windowSec) {
+            const st = G.state().player.stamina
+            if (st < minStam) minStam = st
+            if (st >= perStep) {
+              G.aimAtWorld(es.x, es.z)
+              G.press('Mouse0')
+              G.release('Mouse0')
+            } else denied++
+            await new Promise((r) => setTimeout(r, 8))
+          }
+          // ③ 다음 공격이 올 때까지 기다립니다(회복이 도는 구간).
+          await waitSim(Math.max(0.1, cycleSec - windowSec - 0.45))
+        }
+        dealt = hp0 - G.entityState(e).hp
+        G.freezeEnemies(false)
+        G.clearEnemies()
+        return {
+          name: G.state().loadout.weaponName,
+          minStamina: Number(minStam.toFixed(0)),
+          /** 낼 수 없어서 참은 프레임 수 — 스태미나가 실제로 막은 양입니다. */
+          denied,
+          dealt: Number(dealt.toFixed(0)),
+        }
+      },
+      /**
        * 🪟 **진짜 반격 창을 잽니다** — 유도하지 않고 관측합니다.
        *
        * ⚠️ 처음엔 창을 `recovery` 하나로 잡았습니다. 그게 틀렸습니다.
@@ -944,9 +1042,29 @@ try {
    * 그래서 창 끝에서 가장 가까운 타의 **여유**를 잽니다. 여유가 사람이
    * 느끼기에 유의미한 폭보다 좁으면 그 자리는 동전 던지기입니다.
    */
+  /**
+   * ⚠️ **시간표도 세 번 재서 중앙값을 씁니다.**
+   *
+   * 아래 경계 검사는 **두 관측값을 견줍니다** — 창 길이와 착탄 시각.
+   * 둘 다 흔들리는데 기준(0.08초)이 그 흔들림과 비슷한 크기라, 한 번씩만
+   * 재면 검사가 게임과 무관하게 빨강·초록을 오갑니다. 실제로 이번
+   * 라운드에 통과 → 실패 → 통과를 겪었고, 쌍단검 3타가 판에 따라
+   * `0.53초` 와 `0.67초` 로 찍혔습니다.
+   *
+   * 8~20fps 에서 8ms 폴링으로 재면 한 프레임(0.05초)이 통째로 오차가
+   * 됩니다. **계측기의 눈금보다 가는 것을 물으면 안 됩니다** — 눈금을
+   * 굵게 하든지(중앙값), 질문을 굵게 하든지 둘 중 하나입니다.
+   */
   const lines = []
   for (let slot = 1; slot <= table.length; slot++) {
-    lines.push(await page.evaluate((s) => window.__t.timeline(s), slot))
+    const reps = []
+    for (let i = 0; i < 3; i++) reps.push(await page.evaluate((s) => window.__t.timeline(s), slot))
+    const steps = Math.min(...reps.map((r) => r.at.length))
+    const at = []
+    for (let i = 0; i < steps; i++) {
+      at.push([...reps.map((r) => r.at[i])].sort((a, b) => a - b)[1])
+    }
+    lines.push({ name: reps[0].name, at })
   }
   console.log('\n  [시간표] 누른 뒤 **몇 초에** 꽂히는가 (콤보 타별)')
   for (const l of lines) {
@@ -976,6 +1094,112 @@ try {
     edges.length === 0,
     '창 경계에 **종이 한 장 차이로 걸친 타**가 없다 (판단이 동전 던지기가 되지 않게)',
     edges.length ? edges.join(' · ') : `모든 타가 창 끝에서 ${EDGE}초 넘게 떨어져 있습니다`,
+  )
+
+  /**
+   * ── 🫁 **효율 축이 실전에 존재하는가** ──────────────────────────
+   *
+   * 위 표에서 대검은 안전창에 **같은 피해 + 강인도 1.4배**를 넣습니다.
+   * 대가는 스태미나뿐인데, 그 대가는 스태미나가 **실제로 모자라질 때만**
+   * 대가입니다. 게임의 리듬 그대로 돌려서 바닥을 봅니다.
+   *
+   * ⚠️ 한 주기 길이는 **적에게 물어서** 씁니다(`attackCycle`). 여기 숫자를
+   *    적으면 적을 손볼 때마다 이 검사가 조용히 옛말이 됩니다.
+   */
+  const gruntDef = roster.find((r) => r.id === 'grunt')
+  const cycleSec = gruntDef?.attackCycle ?? 2.5
+  // 세 번씩 재고 중앙값 — 이 파일이 창 비교에서 이미 배운 것(운으로 통과 금지).
+  const rhythm = []
+  for (let slot = 1; slot <= table.length; slot++) {
+    const reps = []
+    for (let i = 0; i < 3; i++) {
+      reps.push(
+        await page.evaluate(
+          ([s, w, c]) => window.__t.rhythm(s, w, c, 6),
+          [slot, punishSec, cycleSec],
+        ),
+      )
+    }
+    const md = (f) => [...reps.map(f)].sort((a, b) => a - b)[1]
+    rhythm.push({
+      name: reps[0].name,
+      minStamina: md((r) => r.minStamina),
+      denied: md((r) => r.denied),
+      dealt: md((r) => r.dealt),
+      span: `${Math.min(...reps.map((r) => r.dealt))}~${Math.max(...reps.map((r) => r.dealt))}`,
+    })
+  }
+  console.log(
+    `\n  [리듬] 구르고 → 안전창 ${punishSec.toFixed(2)}초 치고 → ` +
+      `${cycleSec.toFixed(2)}초 주기로 6번 (실전에 가까운 반복)\n    ` +
+      rhythm
+        .map(
+          (r) =>
+            `${r.name.padEnd(6)} 최저 스태미나 ${String(r.minStamina).padStart(3)} · ` +
+            `누적 피해 ${String(r.dealt).padStart(4)}(${r.span}) · 스태미나에 막힌 프레임 ${r.denied}`,
+        )
+        .join('\n    '),
+  )
+  /**
+   * 기준: **콤보 한 바퀴를 못 낼 만큼** 내려가 본 적이 있는가.
+   * 그보다 위에서만 논다면 "관리"라고 부를 것이 없습니다 — 자원은
+   * 모자랄 때만 자원이고, 늘 남으면 그냥 배경입니다.
+   *
+   * 그리고 이 축이 죽으면 **쌍단검의 정체성이 통째로 사라집니다.**
+   * 강인도는 대검, 폭발도 대검, 남는 것이 효율뿐인데 그 효율이 실전에서
+   * 아무 일도 안 하면 쌍단검을 들 이유가 없습니다.
+   */
+  const worstCombo = Math.max(...table.map((w) => w.comboStamina))
+  /**
+   * 두 가지를 **함께** 요구합니다. 최저치만 보면 "잠깐 스쳤다"도 통과하는데,
+   * 자원이 문다는 것은 *"내려던 것을 못 냈다"* 는 뜻입니다. 그래서
+   * **막힌 프레임**을 같이 봅니다 — 이게 실제로 손이 묶인 증거입니다.
+   */
+  /**
+   * ── 여기에 검사를 하나 **썼다가 지웠습니다** ──────────────────────
+   * *"아끼는 무기가 실제로 덜 막힌다"*. 세 번 고장 내 봤고 **세 번 다
+   * 통과했습니다.**
+   *
+   *   ① 회복 34 → 400 : 롱소드·쌍단검은 전혀 안 막혔는데(0), 대검이
+   *      회복 지연(0.55초) 때문에 여전히 막혀서 통과.
+   *   ② 쌍단검 소모를 대검과 같게 : 그러자 **효율 1등이 롱소드로 바뀌고**,
+   *      롱소드가 쌍단검보다 덜 막혀서 또 통과.
+   *
+   * ②가 결정적이었습니다. 이 검사는 *"효율 순위"* 를 **막힘과 같은
+   * 뿌리에서 다시 뽑아** 견주고 있었습니다. 무엇을 망가뜨리든 순위가
+   * 같이 따라 움직이니 **원리적으로 빨개질 수 없습니다.**
+   *
+   * > 자기 자신을 기준으로 삼는 검사는 언제나 통과합니다.
+   *
+   * 게다가 지울 이유가 하나 더 있었습니다 — ②를 넣자 **옆의 검사 셋이
+   * 실제로 빨개졌습니다**(초당 피해 · 축이 다른가 · 효율 격차 1.7배).
+   * 축이 죽으면 이미 세 곳에서 웁니다. 같은 것을 네 번째로 세는 검사는
+   * 안전망이 아니라 **소음**입니다.
+   *
+   * 그래서 **관측만 남깁니다.** 아래 두 줄은 검사가 아니라 기록입니다.
+   */
+  /**
+   * 📋 [관찰] **이 압박이 4색과 맞물립니다.**
+   *
+   * 한 주기에 드는 값은 구르기 25 + 반격 15~26 = 40~51 인데, 주기 안에서
+   * 회복되는 양은 그보다 적습니다(회복 34/초 · 지연 0.55초). 즉 **매번
+   * 구르면서 매번 반격까지 채우는 리듬은 성립하지 않습니다.**
+   *
+   * 그런데 이 게임에는 **공짜 대응**이 하나 있습니다 — 🟡 노랑의 정답인
+   * *"걸어서 이탈"* 은 스태미나를 한 방울도 안 씁니다. 즉 스태미나 경제가
+   * 4색 설계를 뒤에서 밀고 있습니다: 구를 필요가 없을 때 구르면, 정작
+   * 반격할 힘이 없습니다. 소울류가 스태미나로 파는 긴장이 정확히 이것입니다.
+   *
+   * 이건 지금 확인된 **관계**이지 새로 만든 규칙이 아닙니다. 적어 둡니다.
+   */
+  const tune = await page.evaluate(() => window.__game.terrainInfo())
+  const dodgeCostSeen = tune?.dodgeStaminaCost ?? '?'
+  const regenSeen = tune?.staminaRegen ?? '?'
+  const regenDelaySeen = tune?.staminaRegenDelay ?? '?'
+  console.log(
+    `  📋 [관찰] 한 주기 비용 구르기 ${dodgeCostSeen} + 반격 ${Math.min(...table.map((w) => w.comboStamina))}~${worstCombo} ` +
+      `vs 회복(${regenSeen}/초 · 지연 ${regenDelaySeen}초) — **매번 구르며 매번 반격까지는 안 됩니다.** ` +
+      `🟡 의 정답(걸어서 이탈)이 스태미나를 안 쓰는 이유가 여기에 있습니다`,
   )
 
   console.log('')
