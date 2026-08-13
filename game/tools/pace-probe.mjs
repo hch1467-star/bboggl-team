@@ -122,6 +122,12 @@ try {
       G.setWeaponLevel(0, wLv)
       G.setEmbers(0)
 
+      /**
+       * 한 타에 드는 스태미나 — **게임 데이터에서** 끌어옵니다.
+       * 여기 숫자를 적으면 무기를 손보는 날 이 실험대가 조용히 옛말이 됩니다.
+       */
+      const wt = G.weaponTable()[0]
+      const perStep = wt.comboStamina / wt.comboLength
       const be0 = G.bossEncounter()
       if (!be0) return null
       const bi = G.enemyInfo(be0.entity)
@@ -132,6 +138,38 @@ try {
 
       const phaseTime = [0, 0, 0]
       const phaseDmg = [0, 0, 0]
+      /**
+       * 🔬 **화력이 왜 떨어졌는지 가르는 진단값**입니다.
+       *
+       * 3단계 화력이 1단계의 1/7(31.4 → 4.5)로 나왔는데, 원인 후보가
+       * 최소 셋입니다: ① 보스가 창을 안 준다 ② 사거리 밖으로 밀려난다
+       * ③ **이 실험대의 손이 놀고 있다.**
+       *
+       * ①은 이미 지웠습니다 — `npm run boss` 로 잰 페이즈별 안전창은
+       * 1.85 / 0.80 / 1.65초라 3단계가 좁지 않습니다. 남은 둘을 가르려면
+       * *"페이즈마다 손이 실제로 무엇을 했는가"* 를 세야 합니다.
+       *
+       * 특히 이 정책에는 **아무것도 안 하는 가지**가 있습니다 —
+       * 예고에 한 번 구른 뒤에는 그 예고가 끝날 때까지 손을 놓습니다.
+       * 예고 비율이 높은 페이즈에서는 그 가지가 시간을 통째로 먹습니다.
+       */
+      const phaseWind = [0, 0, 0]
+      const phaseFar = [0, 0, 0]
+      const phaseIdle = [0, 0, 0]
+      const phaseSwing = [0, 0, 0]
+      const phaseDodge = [0, 0, 0]
+      /**
+       * 두 번째 진단 묶음 — 첫 묶음이 후보를 **전부** 지웠기 때문에 넣습니다.
+       * 3단계는 손을 놓지도(0%), 사거리 밖으로 밀려나지도(0%) 않았고
+       * 오히려 1단계의 2.7배를 휘둘렀는데 화력은 1/14였습니다. 그리고
+       * **예고 중이 3%뿐**이었습니다(1단계 29.9%) — 보스가 거의 안 때립니다.
+       * 그러면 남는 것은 *"때려도 안 들어가는 상태"* 입니다:
+       * 무방비(붕괴)·전환 무적·스태미나 고갈 셋을 직접 셉니다.
+       */
+      const phaseWait = [0, 0, 0]
+      const phaseBroken = [0, 0, 0]
+      const phaseInvuln = [0, 0, 0]
+      const phaseNoStam = [0, 0, 0]
       let lastHp = -1
       let lastSample = now()
       const t0 = now()
@@ -183,6 +221,13 @@ try {
          * 붙는 것은 순간이동으로 유지합니다 — 이동 실력이 섞이지 않게.
          */
         const dist = Math.hypot(info.x - p.x, info.z - p.z)
+        if (be.encounter > 0 && be.encounter < 3) {
+          if (info.winding) phaseWind[ph] += dt
+          if (dist > 3.2) phaseFar[ph] += dt
+          if (info.broken) phaseBroken[ph] += dt
+          if (info.transitionT > 0) phaseInvuln[ph] += dt
+          if (p.stamina < 10) phaseNoStam[ph] += dt
+        }
         if (dist > 3.2) G.teleportPlayer(info.x - 2.6, info.z)
         G.aimAtWorld(info.x, info.z)
 
@@ -206,11 +251,31 @@ try {
         wasWinding = info.winding
         if (newTelegraph && stam >= 25) {
           tap('Space')
+          phaseDodge[ph] += 1
         } else if (info.winding && stam < 25) {
           tap('Mouse0')
+          phaseSwing[ph] += 1
         } else if (info.winding) {
           // 이미 이 예고에 대응했습니다 — 겹쳐 구르지 않습니다.
-        } else {
+          phaseIdle[ph] += dt
+        } else if (stam >= perStep) {
+          /**
+           * ⚠️ **낼 수 있을 때만 냅니다.**
+           *
+           * 예전엔 여기서 매 프레임 무조건 눌렀습니다. 그 결과가 이랬습니다:
+           *
+           *     1단계 — 초당 33   · 스태미나 바닥 43%
+           *     3단계 — 초당 4.7  · 스태미나 바닥 97% · 휘두름 6289회
+           *
+           * 3단계는 예고가 2.8%뿐이라(1단계 28.7%) **손이 쉴 틈이 없고**,
+           * 쉬지 않고 누르면 스태미나가 바닥에 붙어 대부분 거절됩니다.
+           * 즉 화력 붕괴는 보스가 아니라 **누르는 방식**이 만든 것이었습니다.
+           *
+           * 무기 프로브가 똑같은 실수를 이미 한 번 했고 같은 규칙으로
+           * 고쳤습니다 — *"사람은 못 낼 것을 알면 안 냅니다."* 기준값은
+           * 게임 데이터에서 끌어옵니다(콤보 총 소모 ÷ 타수).
+           */
+          phaseSwing[ph] += 1
           const ready = G.slotCooldowns().filter((s) => !s.empty && s.cd <= 0)
           if (ready.length > 0) {
             tap(ready[slot % ready.length].key)
@@ -218,15 +283,37 @@ try {
           } else {
             tap('Mouse0')
           }
+        } else {
+          // 낼 수 없어 참는 시간 — 스태미나가 실제로 손을 묶은 양입니다.
+          phaseWait[ph] += dt
         }
         await sleep()
       }
 
+      /**
+       * 🧾 **보스가 페이즈마다 실제로 무엇을 냈는가.**
+       *
+       * 3단계 "예고 중 3.3%"(1단계 28.7%)의 원인을 가르려면 가중치가 아니라
+       * **나온 것**을 세야 합니다. 가중치는 의도이고, 이건 결과입니다.
+       */
+      const swings = G.bossSwingLog?.() ?? {}
       return {
+        swingLog: Object.fromEntries(
+          Object.entries(swings).map(([id, v]) => [id, v.byPhase ?? []]),
+        ),
         killed,
         total: Number((phaseTime[0] + phaseTime[1] + phaseTime[2]).toFixed(1)),
         phaseTime: phaseTime.map((v) => Number(v.toFixed(1))),
         phaseDmg: phaseDmg.map((v) => Math.round(v)),
+        phaseWind: phaseWind.map((v) => Number(v.toFixed(1))),
+        phaseFar: phaseFar.map((v) => Number(v.toFixed(1))),
+        phaseIdle: phaseIdle.map((v) => Number(v.toFixed(1))),
+        phaseSwing,
+        phaseDodge,
+        phaseBroken: phaseBroken.map((v) => Number(v.toFixed(1))),
+        phaseInvuln: phaseInvuln.map((v) => Number(v.toFixed(1))),
+        phaseNoStam: phaseNoStam.map((v) => Number(v.toFixed(1))),
+        phaseWait: phaseWait.map((v) => Number(v.toFixed(1))),
       }
     }, level)
     if (!r) {
@@ -264,10 +351,43 @@ try {
   } else {
     console.log('')
     const dps = (i) => runs.map((r) => r.phaseDmg[i] / Math.max(0.1, r.phaseTime[i]))
+    /**
+     * 🔬 **화력 옆에 "그 시간에 무엇을 했는가"를 나란히 놓습니다.**
+     *
+     * 화력만 보면 *"3단계가 어렵다"* 로 읽히지만, 손이 놀고 있었다면 그건
+     * 게임이 아니라 **정책**을 잰 것입니다. 이 저장소가 두 번 물린 자리라
+     * 이제는 숫자 옆에 원인을 같이 찍습니다.
+     */
+    const ratio = (i, f) => runs.map((r) => (100 * f(r)[i]) / Math.max(0.1, r.phaseTime[i]))
     for (let i = 0; i < 3; i++) {
       console.log(
         `  ${i + 1}단계         ${fmt(runs.map((r) => r.phaseTime[i]))}초 · ` +
           `화력 ${fmt(dps(i))}/초`,
+      )
+      console.log(
+        `                 예고 중 ${fmt(ratio(i, (r) => r.phaseWind))}% · ` +
+          `**손 놓음 ${fmt(ratio(i, (r) => r.phaseIdle))}%** · ` +
+          `사거리 밖 ${fmt(ratio(i, (r) => r.phaseFar))}% · ` +
+          `휘두름 ${fmt(runs.map((r) => r.phaseSwing[i]))}회 · ` +
+          `구르기 ${fmt(runs.map((r) => r.phaseDodge[i]))}회`,
+      )
+      console.log(
+        `                 무방비 ${fmt(ratio(i, (r) => r.phaseBroken))}% · ` +
+          `전환 무적 ${fmt(ratio(i, (r) => r.phaseInvuln))}% · ` +
+          `**스태미나 바닥 ${fmt(ratio(i, (r) => r.phaseNoStam))}%** · ` +
+          `못 내서 참음 ${fmt(ratio(i, (r) => r.phaseWait))}%`,
+      )
+      const ids = [...new Set(runs.flatMap((r) => Object.keys(r.swingLog ?? {})))]
+      const counts = ids
+        .map((id) => ({
+          id,
+          n: runs.reduce((acc, r) => acc + (r.swingLog?.[id]?.[i] ?? 0), 0),
+        }))
+        .filter((c) => c.n > 0)
+        .sort((a2, b2) => b2.n - a2.n)
+      console.log(
+        `                 보스가 낸 것 ${runs.length}판 합계 — ` +
+          (counts.length ? counts.map((c) => `${c.id} ${c.n}`).join(' · ') : '**한 번도 없음**'),
       )
     }
     console.log(`  전체           ${fmt(runs.map((r) => r.total))}초\n`)
