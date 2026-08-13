@@ -89,13 +89,16 @@ try {
    * 한 변수만 움직이는 것이 요점입니다. 오늘 되돌린 셋 중 둘이 "여러 개가
    * 같이 움직이는 자리에서 하나를 지목한" 것이었습니다.
    */
-  const LEVELS = [0, 2, 5]
-  const byLevel = new Map()
-  const runs = []
-  for (const level of LEVELS) {
-  for (let i = 0; i < RUNS; i++) {
-    process.stdout.write(`  +${level} ${i + 1}/${RUNS}판… `)
-    const r = await page.evaluate(async (wLv) => {
+  /**
+   * 한 판을 도는 몸통을 **페이지 안에 한 번만** 심습니다.
+   *
+   * ⚠️ 원래는 스윕 안에 인라인으로 있었습니다. 그러면 아래 A/B 절이
+   *    같은 몸통을 쓸 수 없어서 **복사본**을 만들어야 하는데, 복사한
+   *    순간 두 정책이 미묘하게 다른 손이 되어 버립니다 — 비교가
+   *    성립하지 않습니다. 한 변수만 다르게 하려면 몸통은 하나여야 합니다.
+   */
+  await page.evaluate(() => {
+    window.__pace = async (wLv, colorBlind) => {
       const G = window.__game
       const sleep = () => new Promise((r) => setTimeout(r, 8))
       const now = () => G.state().simElapsed
@@ -159,6 +162,24 @@ try {
        * 보스가 근접 공격을 내는 자리, 즉 `attackRange` 에 섭니다. 그 값은
        * 적을 손보면 같이 따라옵니다. 여유(0.8m)는 붙었다 떨어지는 폭입니다.
        */
+      /**
+       * 🎨 **색을 읽는 손**이 쓰는 값 — 전부 게임에서 읽습니다.
+       *
+       * 이 실험대의 손은 지금까지 **색을 안 가리고** 예고마다 구르기만
+       * 했습니다(봇 지능이 결과에 섞이지 않게). 그런데 이 게임의 기둥은
+       * *"색마다 다른 대응"* 입니다 — 색맹인 손으로만 재면 그 기둥은
+       * **한 번도 시험되지 않습니다.**
+       *
+       * 그래서 딱 한 가지만 다른 손을 하나 더 둡니다: 🟡 처럼 **구르기로는
+       * 못 빠져나오는 넓은 예고**에는 구르지 않고 **걸어서 나갑니다.**
+       * 색 이름을 적어 두지 않고 **도형에서** 정합니다 —
+       * `reach > dodgeDistance` 면 굴러도 안쪽에 남는다는 뜻이니까요
+       * (`npm run rules` 가 지키는 바로 그 약속입니다).
+       *
+       * 색이 값어치가 있다면 이 손이 **덜 맞아야** 합니다. 아니라면 4색은
+       * 장식입니다 — 그건 재서 알아야 할 일이지 믿을 일이 아닙니다.
+       */
+      const tune0 = G.terrainInfo()
       const bossDef = G.enemyRoster().find((r) => r.id === 'boss')
       const stand = bossDef?.attackRange ?? 3.4
       const leash = stand + 0.8
@@ -167,6 +188,11 @@ try {
        * 어느 패턴이 왜 안 나오는지 물으려면 가중치가 아니라 이 구간을 봐야
        * 합니다 — 가중치는 의도이고, 굴려지는지는 사거리가 정합니다.
        */
+      /** 구르기로 못 벗어나는 패턴들의 사거리 — 색이 아니라 **도형**으로 가릅니다. */
+      const wideReach = {}
+      for (const a of bossDef?.attacks ?? []) {
+        if (a.reach > tune0.dodgeDistance) wideReach[a.intent] = Math.max(wideReach[a.intent] ?? 0, a.reach)
+      }
       const gated = (bossDef?.attacks ?? []).filter((a) => a.minRange > 0)
       const gateAt = gated.length ? Math.min(...gated.map((a) => a.minRange)) : 0
       const be0 = G.bossEncounter()
@@ -210,6 +236,11 @@ try {
       const phaseWait = [0, 0, 0]
       /** 문턱 안쪽(= 원거리 패턴이 후보에서 빠지는 거리)에 있던 시간 */
       const phaseInside = [0, 0, 0]
+      /** 🎨 넓은 예고를 걸어서 빠져나간 시간 */
+      const phaseWalk = [0, 0, 0]
+      /** 이 판에서 플레이어가 받은 피해 합계 — 정책의 값어치는 여기서 갈립니다. */
+      let taken = 0
+      let lastPlayerHp = -1
       const phaseBroken = [0, 0, 0]
       const phaseInvuln = [0, 0, 0]
       const phaseNoStam = [0, 0, 0]
@@ -263,6 +294,27 @@ try {
          * 3) 아니면 기본 공격
          * 붙는 것은 순간이동으로 유지합니다 — 이동 실력이 섞이지 않게.
          */
+        /**
+         * 🩹 **살려 두고 잽니다** — 그리고 그게 이 실험대의 오래된 구멍이었습니다.
+         *
+         * 받은 피해를 세 봤더니 8판이 **전부 정확히 100.0** 이었습니다.
+         * 측정이 아니라 **포화**입니다 — 최대 체력이 100 이고, 죽으면 그 뒤
+         * 45초가 통째로 죽은 판입니다. 그동안 페이즈 시간·화력이 판마다
+         * 300배씩 흔들린 것도 이것으로 설명됩니다: *"보스가 오래 버텼다"* 가
+         * 아니라 **때릴 사람이 없었던** 것입니다.
+         *
+         * 이 실험대가 재려는 것은 생존이 아니라 **보스의 박자**입니다.
+         * 그래서 체력을 채워 두고, 대신 **받은 피해를 누적**합니다 —
+         * 정책의 값어치는 "얼마나 버티나"가 아니라 "얼마나 먹나"에서 갈립니다.
+         */
+        if (lastPlayerHp >= 0 && p.hp < lastPlayerHp) taken += lastPlayerHp - p.hp
+        if (p.hp < 55) {
+          G.setHp(G.playerEntity(), 100)
+          lastPlayerHp = 100
+        } else lastPlayerHp = p.hp
+        const threatIntent = G.threats(40).find((t2) => t2.entity === be.entity)?.intent ?? -1
+        /** 지금 예고가 "굴러선 못 벗어나는" 것인가 — 그렇다면 나가야 할 거리. */
+        const needOut = !colorBlind && info.winding ? (wideReach[threatIntent] ?? 0) : 0
         const dist = Math.hypot(info.x - p.x, info.z - p.z)
         if (be.encounter > 0 && be.encounter < 3) {
           if (info.winding) phaseWind[ph] += dt
@@ -272,7 +324,17 @@ try {
           if (info.transitionT > 0) phaseInvuln[ph] += dt
           if (p.stamina < 10) phaseNoStam[ph] += dt
         }
-        if (dist > leash) G.teleportPlayer(info.x - stand, info.z)
+        /**
+         * ⚠️ **빠져나가는 중에는 끌어당기지 않습니다.**
+         *
+         * 처음엔 이 줄이 무조건 돌았습니다. 그러면 🟡 을 피해 걸어 나가자마자
+         * 리시가 도로 안쪽으로 끌어당겨서, **색을 읽는 손이 구르지도 못하고
+         * 그대로 맞았습니다**(받은 피해 색맹 128 vs 색 읽기 198).
+         * 정책이 정책을 방해하고 있었던 것입니다 — 이 저장소가 이번 세션에만
+         * 다섯 번째로 밟은 함정입니다: **계측기의 한 규칙이 다른 규칙의 답을
+         * 지웁니다.**
+         */
+        if (dist > leash && needOut <= 0) G.teleportPlayer(info.x - stand, info.z)
         G.aimAtWorld(info.x, info.z)
 
         /**
@@ -293,6 +355,20 @@ try {
         const stam = G.state().player.stamina
         const newTelegraph = info.winding && !wasWinding
         wasWinding = info.winding
+        /**
+         * 🎨 넓은 예고면 **걸어서** 나갑니다. 순간이동을 쓰되 **걷는 속도로만**
+         * 옮깁니다 — 이동 실력은 빼되 이동의 **대가**(시간)는 남기려는 것입니다.
+         */
+
+        if (needOut > 0 && dist < needOut + 0.4) {
+          const step = tune0.walkSpeed * dt
+          const nx = dist > 0.0001 ? (p.x - info.x) / dist : 1
+          const nz = dist > 0.0001 ? (p.z - info.z) / dist : 0
+          G.teleportPlayer(p.x + nx * step, p.z + nz * step)
+          phaseWalk[ph] += dt
+          await sleep()
+          continue
+        }
         if (newTelegraph && stam >= 25) {
           tap('Space')
           phaseDodge[ph] += 1
@@ -361,9 +437,20 @@ try {
         phaseNoStam: phaseNoStam.map((v) => Number(v.toFixed(1))),
         phaseWait: phaseWait.map((v) => Number(v.toFixed(1))),
         phaseInside: phaseInside.map((v) => Number(v.toFixed(1))),
+        phaseWalk: phaseWalk.map((v) => Number(v.toFixed(1))),
+        taken: Math.round(taken),
         gateAt,
       }
-    }, level)
+    }
+  })
+
+  const LEVELS = [0, 2, 5]
+  const byLevel = new Map()
+  const runs = []
+  for (const level of LEVELS) {
+  for (let i = 0; i < RUNS; i++) {
+    process.stdout.write(`  +${level} ${i + 1}/${RUNS}판… `)
+    const r = await page.evaluate(async ([wLv, cb]) => window.__pace(wLv, cb), [level, true])
     if (!r) {
       console.log('보스를 못 찾음')
       continue
@@ -488,6 +575,81 @@ try {
       `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초`,
     )
   }
+
+  /**
+   * ── 🎨 **색을 읽는 것이 값어치가 있는가** ─────────────────────────
+   *
+   * 이 저장소는 *"색만 다르고 대응이 같으면 색은 장식"* 을 몇 번이나 적어
+   * 뒀습니다. 그런데 그 문장을 **한 번도 재지 않았습니다** — 이 실험대의
+   * 손이 색을 안 가리기 때문입니다(예고마다 구르기 하나).
+   *
+   * 한 변수만 바꿔 나란히 돌립니다:
+   *   색맹    — 예고마다 구른다 (지금까지의 손)
+   *   색 읽기 — **구르기로 못 벗어나는 넓은 예고**에는 굴지 않고 걸어 나간다
+   *
+   * 색 이름을 프로브에 적지 않았습니다. `reach > dodgeDistance` 라는
+   * **도형**으로 가릅니다 — `npm run rules` 가 지키는 바로 그 약속입니다.
+   * 그래서 색을 새로 추가해도 이 손은 저절로 따라옵니다.
+   *
+   * ⚠️ 걸어 나가는 것도 **걷는 속도로만** 옮깁니다. 순간이동으로 한 번에
+   *    빼면 "걸어서 이탈"의 대가(시간)가 사라져서, 색 읽기가 공짜가 됩니다.
+   *    공짜인 답과 비교하면 무엇을 재든 색 읽기가 이깁니다.
+   */
+  console.log('\n  🎨 색을 읽는 것이 값어치가 있는가 — 한 변수만 다른 두 손\n')
+  const AB_RUNS = 4
+  const AB_LEVEL = 2
+  const ab = []
+  for (const blind of [true, false]) {
+    const rs = []
+    for (let i = 0; i < AB_RUNS; i++) {
+      process.stdout.write(`  ${blind ? '색맹' : '색 읽기'} ${i + 1}/${AB_RUNS}판… `)
+      const r = await page.evaluate(async ([wLv, colorBlind]) => window.__pace(wLv, colorBlind), [
+        AB_LEVEL,
+        blind,
+      ])
+      if (r) {
+        rs.push(r)
+        console.log(`${r.killed ? '처치' : '시간초과'} ${r.total}초 · 받은 피해 ${r.taken}`)
+      } else console.log('보스를 못 찾음')
+    }
+    ab.push({ blind, rs })
+  }
+  for (const row of ab) {
+    if (!row.rs.length) continue
+    console.log(
+      `    ${row.blind ? '색맹   ' : '색 읽기'}  처치 ${row.rs.filter((r) => r.killed).length}/${row.rs.length}판 · ` +
+        `받은 피해 ${fmt(row.rs.map((r) => r.taken))} · 전체 ${fmt(row.rs.map((r) => r.total))}초 · ` +
+        `걸어 나간 시간 ${fmt(row.rs.map((r) => r.phaseWalk.reduce((a2, b2) => a2 + b2, 0)))}초`,
+    )
+  }
+  const blindHurt = ab[0]?.rs.length ? med(ab[0].rs.map((r) => r.taken)) : -1
+  const seeingHurt = ab[1]?.rs.length ? med(ab[1].rs.map((r) => r.taken)) : -1
+  check(
+    blindHurt >= 0 && seeingHurt >= 0,
+    '두 손 다 실제로 싸웠다 (비교가 성립했다)',
+    `색맹 ${ab[0]?.rs.length ?? 0}판 · 색 읽기 ${ab[1]?.rs.length ?? 0}판`,
+  )
+  /**
+   * ── 여기에 검사를 하나 **썼다가 관찰로 내렸습니다** ────────────────
+   * *"색을 읽으면 덜 맞는다"*. 4판으로는 **갈리지 않습니다**:
+   *
+   *     색맹    140 (96~233)
+   *     색 읽기 164 (134~164)
+   *
+   * 가운데값은 색 읽기가 더 맞는다고 하는데, 색맹의 폭이 96~233 으로
+   * 넓어서 **범위가 통째로 겹칩니다.** 이 저장소의 규칙 그대로입니다 —
+   * **부호가 갈리면 증명되지 않은 것.** 한 판에 30초씩 드는 측정이라
+   * 표본을 키우는 것이 값싸지 않으므로, 결론은 다음 라운드로 미룹니다.
+   *
+   * 미리 적어 둘 것: 색 읽기가 더 맞는 것이 **사실일 수도** 있습니다.
+   * 🟡 을 피해 나가면 그만큼 멀어지고, 돌아오는 동안 다른 색을 먹습니다.
+   * 소울류가 광역기를 "피할 수는 있지만 대가가 있는" 것으로 두는 이유가
+   * 이것입니다. 그렇다면 고칠 곳은 색이 아니라 **돌아오는 길**입니다.
+   */
+  console.log(
+    `  📋 [관찰] 받은 피해 — 색맹 ${blindHurt} · 색 읽기 ${seeingHurt} ` +
+      `(4판으로는 범위가 겹쳐 **갈리지 않습니다** — 다음 라운드에 표본을 키웁니다)`,
+  )
 
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))

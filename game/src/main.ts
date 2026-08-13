@@ -2806,6 +2806,12 @@ class Game {
     dodgeCooldown: number
     /** 구르기 이동 거리(m) — 🟡 반경이 이보다 커야 "굴러선 못 빠져나온다"가 성립합니다 */
     dodgeDistance: number
+    /**
+     * 걷는 속도(m/s). 🟡 의 정답이 *"걸어서 이탈"* 이므로, 그 답이 실제로
+     * 성립하는지 재려면 **예고 시간 동안 걸어서 갈 수 있는 거리**를 알아야
+     * 합니다. 구르기 거리만으로는 그 색을 검사할 수 없습니다.
+     */
+    walkSpeed: number
     dodgeStaminaCost: number
     staminaRegen: number
     staminaRegenDelay: number
@@ -2844,6 +2850,7 @@ class Game {
       dodgeDuration: PLAYER_CFG.dodge.duration,
       dodgeCooldown: PLAYER_CFG.dodge.cooldown,
       dodgeDistance: PLAYER_CFG.dodge.distance,
+      walkSpeed: PLAYER_CFG.moveSpeed,
       dodgeStaminaCost: PLAYER_CFG.dodge.staminaCost,
       /** 스태미나 회복 — 실전 리듬이 성립하는지 재려면 프로브가 알아야 합니다. */
       staminaRegen: PLAYER_CFG.staminaRegen,
@@ -4112,6 +4119,8 @@ declare global {
         dodgeDuration: number
         dodgeCooldown: number
         dodgeDistance: number
+        /** 걷는 속도(m/s) — 🟡 의 정답("걸어서 이탈")을 재려면 필요합니다. */
+        walkSpeed: number
         dodgeStaminaCost: number
         staminaRegen: number
         staminaRegenDelay: number
