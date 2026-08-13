@@ -128,6 +128,29 @@ try {
        */
       const wt = G.weaponTable()[0]
       const perStep = wt.comboStamina / wt.comboLength
+      /**
+       * 🧭 **서는 거리를 게임에서 읽습니다.**
+       *
+       * ⚠️ 여기 `2.6m` 이 박혀 있었습니다. 그 한 줄이 결론을 하나 만들어
+       *    냈습니다 — 보스의 다섯 패턴 중 둘(🟢 돌진 3~10m · 🟣 갈고리
+       *    5~11m)이 **세 페이즈 통틀어 0회**로 찍혔는데, 2.6m 에 붙여 놓으면
+       *    그 둘은 `pickAttack` 굴림에서 아예 빠지기 때문입니다.
+       *    게다가 매 프레임 순간이동으로 붙이므로 **보스가 물러나도 소용이
+       *    없습니다** — 실험대가 자기 손으로 관측을 막고 있었습니다.
+       *
+       * 보스가 근접 공격을 내는 자리, 즉 `attackRange` 에 섭니다. 그 값은
+       * 적을 손보면 같이 따라옵니다. 여유(0.8m)는 붙었다 떨어지는 폭입니다.
+       */
+      const bossDef = G.enemyRoster().find((r) => r.id === 'boss')
+      const stand = bossDef?.attackRange ?? 3.4
+      const leash = stand + 0.8
+      /**
+       * 🧭 **"쓰려면 떨어져 있어야 하는 패턴"의 문턱**을 게임에서 읽습니다.
+       * 어느 패턴이 왜 안 나오는지 물으려면 가중치가 아니라 이 구간을 봐야
+       * 합니다 — 가중치는 의도이고, 굴려지는지는 사거리가 정합니다.
+       */
+      const gated = (bossDef?.attacks ?? []).filter((a) => a.minRange > 0)
+      const gateAt = gated.length ? Math.min(...gated.map((a) => a.minRange)) : 0
       const be0 = G.bossEncounter()
       if (!be0) return null
       const bi = G.enemyInfo(be0.entity)
@@ -167,6 +190,8 @@ try {
        * 무방비(붕괴)·전환 무적·스태미나 고갈 셋을 직접 셉니다.
        */
       const phaseWait = [0, 0, 0]
+      /** 문턱 안쪽(= 원거리 패턴이 후보에서 빠지는 거리)에 있던 시간 */
+      const phaseInside = [0, 0, 0]
       const phaseBroken = [0, 0, 0]
       const phaseInvuln = [0, 0, 0]
       const phaseNoStam = [0, 0, 0]
@@ -223,12 +248,13 @@ try {
         const dist = Math.hypot(info.x - p.x, info.z - p.z)
         if (be.encounter > 0 && be.encounter < 3) {
           if (info.winding) phaseWind[ph] += dt
-          if (dist > 3.2) phaseFar[ph] += dt
+          if (dist > leash) phaseFar[ph] += dt
+          if (gateAt > 0 && dist < gateAt) phaseInside[ph] += dt
           if (info.broken) phaseBroken[ph] += dt
           if (info.transitionT > 0) phaseInvuln[ph] += dt
           if (p.stamina < 10) phaseNoStam[ph] += dt
         }
-        if (dist > 3.2) G.teleportPlayer(info.x - 2.6, info.z)
+        if (dist > leash) G.teleportPlayer(info.x - stand, info.z)
         G.aimAtWorld(info.x, info.z)
 
         /**
@@ -314,6 +340,8 @@ try {
         phaseInvuln: phaseInvuln.map((v) => Number(v.toFixed(1))),
         phaseNoStam: phaseNoStam.map((v) => Number(v.toFixed(1))),
         phaseWait: phaseWait.map((v) => Number(v.toFixed(1))),
+        phaseInside: phaseInside.map((v) => Number(v.toFixed(1))),
+        gateAt,
       }
     }, level)
     if (!r) {
@@ -375,7 +403,8 @@ try {
         `                 무방비 ${fmt(ratio(i, (r) => r.phaseBroken))}% · ` +
           `전환 무적 ${fmt(ratio(i, (r) => r.phaseInvuln))}% · ` +
           `**스태미나 바닥 ${fmt(ratio(i, (r) => r.phaseNoStam))}%** · ` +
-          `못 내서 참음 ${fmt(ratio(i, (r) => r.phaseWait))}%`,
+          `못 내서 참음 ${fmt(ratio(i, (r) => r.phaseWait))}%` +
+          ` · **${(runs[0].gateAt ?? 0).toFixed(1)}m 안쪽 ${fmt(ratio(i, (r) => r.phaseInside))}%**`,
       )
       const ids = [...new Set(runs.flatMap((r) => Object.keys(r.swingLog ?? {})))]
       const counts = ids
