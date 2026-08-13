@@ -76,6 +76,126 @@ try {
         }
       },
       /**
+       * 🪟 **진짜 반격 창을 잽니다** — 유도하지 않고 관측합니다.
+       *
+       * ⚠️ 처음엔 창을 `recovery` 하나로 잡았습니다. 그게 틀렸습니다.
+       *    잡몹은 후딜이 끝나도 **`attackCooldown` 만큼 더** 못 때리고,
+       *    그 뒤에도 예고(windup)가 붙습니다. 즉 후딜만 세면 창을
+       *    실제보다 훨씬 짧게 잡게 되고, 그 짧은 창 끝에 무기의 마지막
+       *    타가 걸리는 것처럼 보입니다.
+       *
+       *    설정값을 더해서 구할 수도 있지만(`recovery + attackCooldown`),
+       *    그러면 프로브가 **또 하나의 진실**이 됩니다. AI가 실제로
+       *    언제 다시 예고를 켜는지를 **보고** 잽니다.
+       *
+       * 재는 구간: 판정이 끝난 순간 → 다음 예고가 켜지는 순간.
+       * (예고가 켜지는 것까지가 창입니다 — 예고는 보고 대응할 수 있으니까요.)
+       */
+      punishWindow: async () => {
+        const G = window.__game
+        G.reset()
+        await window.__t.runFor(0.5)
+        G.clearEnemies()
+        await window.__t.runFor(0.3)
+        const p = G.state().player
+        const e = G.spawnEnemyKind('grunt', p.x + 1.6, p.z)
+        G.wakeEnemy(e)
+        // 죽지도 죽이지도 않게 — 우리는 **적의 리듬**만 봅니다.
+        G.setHp(e, 1000000)
+        await window.__t.runFor(0.3)
+        const gaps = []
+        /**
+         * ⚠️ **판정 단계(Active)를 직접 봅니다.**
+         *
+         * 처음엔 `attacking && !winding` 을 "판정 중"으로 삼았는데, 그건
+         * **후딜까지 포함**합니다. 그래서 다음 예고가 켜지는 바로 그
+         * 순간에 "판정이 끝났다"고 기록해 버려서 간격이 `0` 으로 찍혔습니다
+         * (5회 중 3회가 0). 눈금이 아니라 **눈금의 정의**가 틀린 것입니다.
+         */
+        let wasActive = false
+        let activeEndedAt = -1
+        const t0 = G.state().simElapsed
+        const dl = Date.now() + 90000
+        while (gaps.length < 5 && Date.now() < dl && G.state().simElapsed - t0 < 45) {
+          const i = G.enemyInfo(e)
+          if (!i) break
+          // AttackPhase.Active === 1 (core/components.ts)
+          const active = i.attacking && i.attackPhase === 1
+          if (wasActive && !active) activeEndedAt = G.state().simElapsed
+          if (activeEndedAt > 0 && i.winding) {
+            gaps.push(Number((G.state().simElapsed - activeEndedAt).toFixed(3)))
+            activeEndedAt = -1
+          }
+          wasActive = active
+          // 플레이어가 죽지 않게 계속 채워 둡니다(창을 재는 중입니다).
+          if (G.state().player.hp < 60) G.setHp(G.playerEntity(), 100)
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        G.clearEnemies()
+        return gaps
+      },
+      /**
+       * 🕐 **한 대 한 대가 언제 꽂히는가** — 누른 시점부터의 시간표.
+       *
+       * ── 왜 이게 필요해졌는가 ────────────────────────────────────
+       * 창 비교에서 대검이 잡몹 후딜(0.85초)에 `26~92.8` 을 오갔습니다.
+       * 같은 상황에서 결과가 **3.5배** 갈린다는 뜻입니다 — 2타가 창
+       * 경계에 딱 걸려 있어서요.
+       *
+       * 그런데 그게 **긴장인지 운인지**는 시간표를 봐야 압니다.
+       * 소울류·니오가 무거운 무기로 파는 긴장은 *"한 대만 넣고 빠질까,
+       * 두 대를 노릴까"* 인데, 그 긴장이 성립하려면 플레이어가 **어느
+       * 쪽인지 알 수 있어야** 합니다. 경계가 종이 한 장이면 그건 판단이
+       * 아니라 **동전 던지기**이고, 동전 던지기는 선택이 아닙니다.
+       *
+       * 그래서 타별 착탄 시각을 재서 창과 견줍니다.
+       */
+      timeline: async (slot) => {
+        const G = window.__game
+        G.reset()
+        await window.__t.runFor(0.4)
+        G.clearEnemies()
+        await window.__t.runFor(0.3)
+        const p = G.state().player
+        const e = G.spawnEnemyKind('grunt', p.x + 1.2, p.z)
+        await window.__t.runFor(0.2)
+        G.setHp(e, 1000000)
+        G.freezeEnemies(true)
+        G.press(`Digit${slot}`)
+        G.release(`Digit${slot}`)
+        await window.__t.runFor(0.6)
+        G.setStamina(100)
+        const es = G.entityState(e)
+        G.aimAtWorld(es.x, es.z)
+
+        const steps = G.weaponTable()[slot - 1].comboLength
+        const at = []
+        let seen = G.state().hitsDealt
+        const t0 = G.state().simElapsed
+        G.press('Mouse0')
+        G.release('Mouse0')
+        const dl = Date.now() + 30000
+        while (at.length < steps && Date.now() < dl) {
+          const h = G.state().hitsDealt
+          if (h > seen) {
+            seen = h
+            at.push(Number((G.state().simElapsed - t0).toFixed(3)))
+            // 다음 타를 이어 칩니다 — 콤보가 끊기면 시간표가 아니라
+            // "1타를 몇 번 쳤나"가 됩니다.
+            if (at.length < steps) {
+              G.aimAtWorld(es.x, es.z)
+              G.press('Mouse0')
+              G.release('Mouse0')
+            }
+          }
+          if (G.state().simElapsed - t0 > 6) break
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        G.freezeEnemies(false)
+        G.clearEnemies()
+        return { name: G.state().loadout.weaponName, at }
+      },
+      /**
        * 무기 하나를 들고 **불사신 허수아비**를 정해진 시뮬레이션 시간만큼
        * 두들깁니다. 스태미나는 자연 회복만 받습니다 — 무기별 소모가
        * 다른 것이 지속력의 정체이기 때문입니다.
@@ -622,9 +742,45 @@ try {
   const cw = await page.evaluate(() => window.__game.counterInfo())
   const roster = await page.evaluate(() => window.__game.enemyRoster())
   const gruntAtks = roster.find((r) => r.id === 'grunt')?.attacks ?? []
+  /**
+   * ⚠️ **잡몹 창은 설정값이 아니라 관측값을 씁니다.**
+   *
+   * 처음엔 `recovery`(0.85초) 하나로 잡았다가 틀렸습니다 — 잡몹은 후딜이
+   * 끝나도 `attackCooldown`(1.1초) 만큼 더 못 때립니다. 그 짧은 창으로
+   * 재니 **세 무기의 마지막 타가 전부 창 끝에 걸린** 것처럼 보였고,
+   * 하마터면 "모든 무기의 마무리가 동전 던지기"라는 결론을 낼 뻔했습니다.
+   * 게임이 아니라 **제가 창을 잘못 그린 것**이었습니다.
+   */
+  const punishGaps = await page.evaluate(() => window.__t.punishWindow())
+  /**
+   * ⚠️ **중앙값을 쓰면 안 되는 자리였습니다.**
+   *
+   * 관측값이 두 무리로 갈립니다 — `0.70, 0.72` 와 `1.83, 1.85, 2.02`.
+   * 잡몹이 짧게 이어치는 경우와 한 박자 쉬는 경우가 따로 있는 것입니다.
+   * **봉우리가 둘인 분포에 중앙값을 쓰면 아무 뜻도 없습니다.** 실제로
+   * 판마다 `0.75` 와 `1.85` 를 오갔습니다. 어느 쪽도 "평균적인 창"이
+   * 아니고, 그 사이 값은 **한 번도 일어나지 않습니다.**
+   *
+   * 그래서 **가장 짧은 쪽**을 씁니다. 근거는 통계가 아니라 설계입니다:
+   * 플레이어는 이번이 어느 쪽인지 **미리 알 수 없습니다.** 소울류에서
+   * 반격을 정할 때 기준이 되는 것은 언제나 **최악의 경우**입니다 —
+   * 긴 쪽에 맞춰 욕심내면 짧은 쪽이 왔을 때 맞습니다.
+   * 즉 이 값은 *"안전하게 넣을 수 있는 창"* 입니다.
+   */
+  const punishSec = punishGaps.length
+    ? Math.min(...punishGaps)
+    : Math.max(...gruntAtks.map((a) => a.recovery))
+  const slow = punishGaps.filter((g) => g > punishSec * 1.5)
+  console.log(
+    `\n  [관측] 잡몹의 진짜 반격 창 — 판정 끝 → 다음 예고까지 ` +
+      `**안전창 ${punishSec.toFixed(2)}초**` +
+      (slow.length ? ` (길게 쉴 때는 ${Math.max(...slow).toFixed(2)}초 — 봉우리가 둘입니다)` : '') +
+      `\n         관측 ${punishGaps.length}회: ${punishGaps.join(', ')}` +
+      `  ※ 설정상 후딜만 보면 ${Math.max(...gruntAtks.map((a) => a.recovery)).toFixed(2)}초`,
+  )
   const windows = [
-    // 잡몹이 한 대 휘두른 뒤 묶여 있는 시간 — 가장 흔하게 주어지는 창.
-    { name: '잡몹 후딜', sec: Math.max(...gruntAtks.map((a) => a.recovery)) },
+    // 잡몹이 한 대 휘두른 뒤 **실제로** 못 때리는 시간 — 위에서 관측한 값.
+    { name: '잡몹 반격창', sec: punishSec },
     { name: '잡몹 무너짐', sec: cw.normalBrokenTime },
     { name: '보스 무너짐', sec: cw.bossBrokenTime },
   ].filter((w) => Number.isFinite(w.sec) && w.sec > 0)
@@ -732,12 +888,94 @@ try {
    * *짧게 끊어 칠 때 최선과, 오래 붙어 있을 때 최선이 다른가.*
    * 다르면 전환은 뜻이 있고, 같으면 무기 셋은 사실상 하나입니다.
    */
-  const burstBest = byWindow[0] ? winnerOf(byWindow[0]) : '동률'
+  /**
+   * ⚠️ **어느 창을 쓰느냐가 이 검사의 전부였습니다.**
+   *
+   * 처음엔 무조건 첫 번째 창(표준 반격 창)으로 물었습니다. 그런데 창을
+   * 제대로 재고 나니 그 창에서는 셋이 **거의 같습니다** — 롱소드 26 ·
+   * 대검 26 · 쌍단검 24. 그래서 "동률"이 나왔고, 검사는 빨갛지만
+   * 게임이 틀린 것은 아닙니다: 가장 흔한 상황에서 어느 무기도 압도하지
+   * 않는 것은 **나쁜 밸런스가 아니라 평평한 밸런스**입니다.
+   *
+   * 물어야 하는 것은 *"첫 창에서 갈리는가"* 가 아니라
+   * *"갈리는 자리가 **어딘가에** 있는가"* 입니다. 하나라도 있으면
+   * 전환에 뜻이 있습니다.
+   */
+  const decidedWins = winByWindow.filter((n) => n !== '동률')
   const thriftBest = axes.reduce((a, b) => (a.thrift >= b.thrift ? a : b)).name
   check(
-    burstBest !== '동률' && burstBest !== thriftBest,
-    '**짧게 칠 때와 오래 붙을 때의 최선이 다르다** (무기를 바꿀 이유가 실제로 있다)',
-    `한 창(${byWindow[0]?.sec.toFixed(2)}초) → ${burstBest} · 오래 붙기(스태미나 효율) → ${thriftBest}`,
+    decidedWins.some((n) => n !== thriftBest),
+    '**끊어 칠 때와 오래 붙을 때의 최선이 다르다** (무기를 바꿀 이유가 실제로 있다)',
+    windows.map((w, i) => `${w.name} → ${winByWindow[i]}`).join(' · ') +
+      ` · 오래 붙기(스태미나 효율) → ${thriftBest}`,
+  )
+  /**
+   * 📋 [관찰] **표준 반격 창은 평평합니다.**
+   *
+   * 무기 셋이 26 · 26 · 24 — 동사는 다른데(롱소드 2타, 대검 1타, 쌍단검
+   * 3타) 결과가 같습니다. 이게 의도된 평평함인지(어느 무기를 들어도
+   * 기본 대응은 손해가 없다), 아니면 무기 정체성이 **가장 자주 오는
+   * 상황에서만 사라지는** 것인지는 아직 결론 낼 근거가 없습니다.
+   * 니오·오공은 여기서도 갈리게 만듭니다(빠른 무기는 여러 대, 무거운
+   * 무기는 한 대 크게). 숫자를 적어 두고 다음 라운드로 넘깁니다.
+   */
+  if (byWindow[0] && winnerOf(byWindow[0]) === '동률') {
+    console.log(
+      `  📋 [관찰] 표준 반격 창(${byWindow[0].sec.toFixed(2)}초)은 **평평합니다** — ` +
+        byWindow[0].dealt.map((d) => `${d.name} ${d.dealt}`).join(' · ') +
+        ' (동사는 다른데 결과가 같습니다)',
+    )
+  }
+
+  /**
+   * ── 🕐 **경계가 종이 한 장인가** ────────────────────────────────
+   *
+   * 위 창 표에서 대검이 잡몹 후딜 0.85초에 `26~92.8` 을 오갔습니다.
+   * 그게 **긴장인지 운인지**를 여기서 가릅니다.
+   *
+   * 소울류·니오가 무거운 무기로 파는 긴장은 *"한 대만 넣고 빠질까,
+   * 두 대를 노릴까"* 입니다. 그런데 그 긴장이 성립하려면 플레이어가
+   * **어느 쪽인지 알 수 있어야** 합니다. 착탄 시각이 창 끝과 종이 한 장
+   * 차이면, 같은 판단을 해도 결과가 판마다 달라집니다.
+   *
+   * > **결정할 수 없는 선택은 선택이 아닙니다.**
+   * > 그건 긴장이 아니라 그냥 운입니다.
+   *
+   * 그래서 창 끝에서 가장 가까운 타의 **여유**를 잽니다. 여유가 사람이
+   * 느끼기에 유의미한 폭보다 좁으면 그 자리는 동전 던지기입니다.
+   */
+  const lines = []
+  for (let slot = 1; slot <= table.length; slot++) {
+    lines.push(await page.evaluate((s) => window.__t.timeline(s), slot))
+  }
+  console.log('\n  [시간표] 누른 뒤 **몇 초에** 꽂히는가 (콤보 타별)')
+  for (const l of lines) {
+    console.log(`    ${l.name.padEnd(12)} ${l.at.map((t, i) => `${i + 1}타 ${t.toFixed(2)}초`).join(' · ')}`)
+  }
+
+  /**
+   * 기준 0.08초의 근거: 이 게임의 한 프레임이 60fps 에서 0.017초이고,
+   * `npm run feel` 이 재는 접수 지연도 그 한 프레임입니다. 사람이 "언제
+   * 끝나는지 보고 판단"하려면 **여러 프레임**의 여유가 필요합니다.
+   * 0.08초면 약 5프레임 — 눈으로 보고 손이 따라갈 수 있는 최소치입니다.
+   * 그보다 좁으면 같은 판단이 판마다 다른 결과를 냅니다.
+   */
+  const EDGE = 0.08
+  const edges = []
+  for (const win of windows) {
+    for (const l of lines) {
+      for (let i = 0; i < l.at.length; i++) {
+        const gap = win.sec - l.at[i]
+        if (Math.abs(gap) < EDGE) {
+          edges.push(`${l.name} ${i + 1}타가 ${win.name}(${win.sec.toFixed(2)}초) 끝과 ${Math.abs(gap).toFixed(3)}초`)
+        }
+      }
+    }
+  }
+  check(
+    edges.length === 0,
+    '창 경계에 **종이 한 장 차이로 걸친 타**가 없다 (판단이 동전 던지기가 되지 않게)',
+    edges.length ? edges.join(' · ') : `모든 타가 창 끝에서 ${EDGE}초 넘게 떨어져 있습니다`,
   )
 
   console.log('')
