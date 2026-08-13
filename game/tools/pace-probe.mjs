@@ -129,6 +129,24 @@ try {
       const wt = G.weaponTable()[0]
       const perStep = wt.comboStamina / wt.comboLength
       /**
+       * ⏱ **사람 박자로 누릅니다** — 한 타에 걸리는 시간만큼 쉽니다.
+       *
+       * ⚠️ 이 실험대는 매 폴링(8ms)마다 눌렀습니다. 초당 ~250번입니다.
+       *    그런데 이 게임의 평타는 **휘두르며 앞으로 나갑니다**(롱소드 1타
+       *    lunge 1.5m). 즉 누르는 것만으로 플레이어가 보스에게 **계속
+       *    끌려 들어갑니다.**
+       *
+       *    그 결과가 이랬습니다 — 3단계에서 **3m 안쪽에 있던 시간 96%**.
+       *    보스의 🟢 돌진(3~10m)과 🟣 갈고리(5~11m)는 그 안에서 후보에도
+       *    못 듭니다. *"보스가 패턴 둘을 안 쓴다"* 는 결론을 **계측기가
+       *    자기 손으로 만들고 있었습니다.** 보스 쪽을 세 번 고쳐 봤고
+       *    세 번 다 0회였던 이유가 여기 있었습니다.
+       *
+       * 박자는 게임 데이터에서 끌어옵니다(콤보 전체 시간 ÷ 타수).
+       */
+      const swingGap = wt.comboSeconds / wt.comboLength
+      let lastSwingAt = -99
+      /**
        * 🧭 **서는 거리를 게임에서 읽습니다.**
        *
        * ⚠️ 여기 `2.6m` 이 박혀 있었습니다. 그 한 줄이 결론을 하나 만들어
@@ -278,13 +296,15 @@ try {
         if (newTelegraph && stam >= 25) {
           tap('Space')
           phaseDodge[ph] += 1
-        } else if (info.winding && stam < 25) {
+        } else if (info.winding && stam < 25 && now() - lastSwingAt >= swingGap) {
+          lastSwingAt = now()
           tap('Mouse0')
           phaseSwing[ph] += 1
         } else if (info.winding) {
           // 이미 이 예고에 대응했습니다 — 겹쳐 구르지 않습니다.
           phaseIdle[ph] += dt
-        } else if (stam >= perStep) {
+        } else if (stam >= perStep && now() - lastSwingAt >= swingGap) {
+          lastSwingAt = now()
           /**
            * ⚠️ **낼 수 있을 때만 냅니다.**
            *
