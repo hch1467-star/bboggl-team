@@ -88,6 +88,7 @@ import {
   isBackAttack,
   isBehindPoint,
   resolveAttacks,
+  setPlayerInvulnerable,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -3803,6 +3804,10 @@ declare global {
        * (쿼터뷰 45°에서 월드 +X로 가려면 화면상 오른쪽 아래로 가야 합니다).
        * 봇이 축을 직접 계산하면 카메라 각도를 바꿀 때 봇이 조용히 틀립니다.
        */
+      /** 보스 페이즈의 체력 경계(enterBelow) — 프로브가 페이즈 한가운데를 잡는 데 씁니다. */
+      bossPhaseBounds: () => number[]
+      /** 🧪 실험대 전용 무적 (combat.ts 설계 노트). 게임 코드는 켜지 않습니다. */
+      setPlayerInvulnerable: (on: boolean) => void
       /** 🟢 반격 검증용 */
       counterInfo: () => {
         brokenTime: number
@@ -4354,6 +4359,18 @@ window.__game = {
       unawareT: Number(Enemy.unawareT[entity].toFixed(3)),
     }
   },
+  /**
+   * 보스 페이즈의 **체력 경계**(enterBelow) 배열. 프로브가 "2단계 한가운데"
+   * 같은 자리를 잡으려면 필요한데, 여기 숫자를 프로브에 적어 두면 경계를
+   * 옮기는 날 그 프로브가 **조용히 엉뚱한 페이즈**를 재게 됩니다.
+   */
+  bossPhaseBounds: () => BOSS_PHASES.map((p) => p.enterBelow),
+  /**
+   * 🧪 실험대 전용 무적 — 근거는 combat.ts `setPlayerInvulnerable` 설계 노트.
+   * (보스가 내주는 창을 재려면 그 앞에 오래 서 있어야 하는데, 한 번 죽으면
+   *  조우가 통째로 끝나 그 뒤 관측이 전부 빈 값이 됩니다.)
+   */
+  setPlayerInvulnerable: (on) => setPlayerInvulnerable(on),
   counterInfo: () => ({
     brokenTime: COUNTER.brokenTime,
     normalBrokenTime: POISE.brokenTime,

@@ -493,6 +493,195 @@ try {
     )
   }
 
+  /**
+   * ── 🪟 **페이즈마다 보스가 내주는 창을 잰다** ─────────────────────
+   *
+   * ── 왜 이걸 재게 됐는가 (숫자가 먼저 있었습니다) ──────────────────
+   * `npm run pace` 5판×3강화에서 페이즈별 **플레이어 화력**이 이렇게 나왔습니다:
+   *
+   *     1단계  8.2초 · 31.4/초
+   *     2단계  7.7초 · 26.6/초
+   *     3단계 26.5초 · **4.5/초**   ← 1/7 로 폭락
+   *
+   * 3단계가 짧아서 문제였던 예전과 정반대입니다. 지금은 **길어졌는데 그
+   * 안에서 아무것도 못 합니다.** 15판 중 13판이 45초 시간초과였습니다.
+   *
+   * 가설: `cooldownScale` 이 1 → 0.75 → 0.55 로 내려가 3단계의 공격 빈도가
+   * 1.8배가 되는데, 그러면 **압박이 아니라 봉쇄**가 됩니다. 참고한 게임들이
+   * 전부 피하는 자리입니다 —
+   *   · 세키로·엘든 링 — 가장 사나운 페이즈에도 반격 창은 남습니다.
+   *     창이 사라진 패턴(예: 엘든 링의 특정 연속기)은 예외 없이 욕을 먹었습니다
+   *   · 몬스터 헌터 — 분노하면 빨라지지만 큰 기술의 **후딜은 길어집니다**
+   *   · 로스트아크 — 빨라지는 대신 무력화 체크로 **강제 공격 구간**을 엽니다
+   * 공통 원리: **속도를 올릴 때 창까지 같이 좁히면 안 됩니다.**
+   *
+   * ── 무엇을 재는가 ────────────────────────────────────────────────
+   * 무기 프로브가 잡몹에게 쓰는 것과 **같은 정의**입니다:
+   *   판정(Active)이 끝난 순간 → 다음 예고(windup)가 켜지는 순간.
+   * 예고는 보고 대응할 수 있으므로 예고 시작까지가 창입니다.
+   *
+   * ⚠️ 설정값을 더해서 구하지 않습니다(`recovery + attackCooldown × scale`).
+   *    그러면 프로브가 **또 하나의 진실**이 되고, AI가 실제로 언제 다시
+   *    예고를 켜는지와 어긋나도 아무도 모릅니다. **보고** 잽니다.
+   */
+  console.log('\n  🪟 페이즈마다 보스가 내주는 창 — 판정 끝 → 다음 예고\n')
+  const windows = await page.evaluate(async () => {
+    const G = window.__game
+    const out = []
+    for (let want = 0; want < 3; want++) {
+      /**
+       * ⚠️ **판을 새로 엽니다.** 앞 절차를 거친 뒤라 플레이어가 죽어 있을
+       *    수 있는데, 보스 조우는 `playerAlive` 가 거짓이면 아예 시작되지
+       *    않습니다(enemyAI 보스 조우 블록). 그래서 `wakeEnemy` 를 불러도
+       *    다음 프레임에 어그로가 0 으로 되돌아갑니다 — 세 페이즈 모두
+       *    관측 0회로 나온 진짜 이유가 이것이었습니다.
+       */
+      G.reset()
+      await window.__t.runFor(0.6)
+      G.clearEnemies()
+      await window.__t.runFor(0.3)
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 4, p.z)
+      /**
+       * ⚠️ **깨워야 합니다.** 처음엔 이 줄이 없어서 세 페이즈 모두 관측
+       *    0회였습니다 — 진단값을 같이 찍어 두지 않았다면 *"보스가 창을
+       *    안 준다"* 는 **정반대 결론**을 낼 뻔했습니다(어그로 0 · 7m 그대로).
+       *    잡몹 창을 재는 무기 프로브에는 있던 줄입니다.
+       */
+      G.wakeEnemy(b)
+      /**
+       * 🧪 무적을 켭니다 — **재는 동안만.** 근거는 combat.ts 설계 노트:
+       * 한 번 죽으면 조우가 끝나(귀환) 그 뒤 40초가 통째로 빈 관측이 됩니다.
+       * 실제로 2단계에서 딱 한 프레임 죽어서 *"2단계는 창을 안 준다"* 는
+       * 정반대 결론을 낼 뻔했습니다.
+       */
+      G.setPlayerInvulnerable(true)
+      await window.__t.runFor(0.4)
+      const max = G.enemyInfo(b).max
+      /**
+       * 원하는 페이즈의 **체력 구간 한가운데**에 세웁니다.
+       *
+       * ⚠️ 처음엔 페이즈를 넘긴 뒤 `setHp(b, max * 1000)` 으로 체력을 크게
+       *    채워 뒀습니다. 그러자 비율이 1000 이 되어 **페이즈가 1단계로
+       *    되돌아갔고**, "3단계 안전창 1.85초"라고 찍힌 값이 사실은 1단계
+       *    값이었습니다. 페이즈는 체력 비율에서 **매 프레임 다시 계산**되지
+       *    한 번 오르면 걸리는 것이 아닙니다(bossPhases `phaseForHp`).
+       *    죽지 않게 하려다 **재려던 것을 지웠습니다.**
+       *
+       *    비율은 게임의 경계에서 끌어옵니다 — 여기 숫자를 적지 않습니다.
+       */
+      const bounds = G.bossPhaseBounds()
+      const hi = want === 0 ? 1 : bounds[want]
+      const lo = want + 1 < bounds.length ? bounds[want + 1] : 0
+      const target = max * ((hi + lo) / 2)
+      G.setHp(b, target)
+      await window.__t.until(
+        () => G.enemyInfo(b)?.phase === want && G.enemyInfo(b)?.transitionT === 0,
+        8,
+      )
+      let wasActive = false
+      let endedAt = -1
+      const gaps = []
+      /** 창이 0회로 나올 때 **왜인지** 말해 주는 값들 — 없으면 눈이 먼 채로 고칩니다. */
+      const diag = { frames: 0, attacking: 0, winding: 0, aggro: 0, minDist: 99, hpNow: 0, dead: 0 }
+      const t0 = G.state().simElapsed
+      while (gaps.length < 6 && G.state().simElapsed - t0 < 40) {
+        const i = G.enemyInfo(b)
+        if (!i) break
+        diag.frames++
+        if (i.attacking) diag.attacking++
+        if (i.winding) diag.winding++
+        if (i.aggro) diag.aggro++
+        const pl = G.state().player
+        const d = Math.hypot(i.x - pl.x, i.z - pl.z)
+        if (d < diag.minDist) diag.minDist = d
+        // AttackPhase.Active === 1 (core/components.ts)
+        const active = i.attacking && i.attackPhase === 1
+        if (wasActive && !active) endedAt = G.state().simElapsed
+        if (endedAt > 0 && i.winding) {
+          gaps.push(Number((G.state().simElapsed - endedAt).toFixed(3)))
+          endedAt = -1
+        }
+        wasActive = active
+        // 체력이 구간 밖으로 새면 페이즈가 바뀝니다 — 매 프레임 제자리에 둡니다.
+        if (Math.abs((G.enemyInfo(b)?.hp ?? target) - target) > 1) G.setHp(b, target)
+        /**
+         * ⚠️ **플레이어를 매 프레임 채웁니다.** 처음엔 `hp < 60` 일 때만
+         *    채웠는데, 2단계(속박)에서 한 번에 그보다 크게 맞아 **죽었고**,
+         *    죽으면 보스 조우가 통째로 멈춥니다(`playerAlive` 거짓 → 어그로 0).
+         *    그래서 2단계만 관측 0회였습니다 — 보스가 창을 안 준 것이
+         *    아니라 **잴 사람이 없어진 것**입니다.
+         */
+        if (pl.hp <= 0) diag.dead++
+        G.setHp(G.playerEntity(), 100000)
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      const last = G.enemyInfo(b)
+      const phaseNow = last?.phase ?? -1
+      diag.hpNow = Math.round(last?.hp ?? -1)
+      diag.minDist = Number(diag.minDist.toFixed(2))
+      G.setPlayerInvulnerable(false)
+      G.clearEnemies()
+      out.push({ want, phaseNow, gaps, diag })
+    }
+    return out
+  })
+
+  /**
+   * ⚠️ **최솟값을 씁니다** — 무기 프로브가 잡몹 창에서 배운 그대로입니다.
+   *    플레이어는 이번이 긴 쪽인지 짧은 쪽인지 **미리 알 수 없으므로**,
+   *    안전하게 넣을 수 있는 창은 언제나 가장 짧은 쪽입니다.
+   */
+  const safeOf = (g) => (g.length ? Math.min(...g) : -1)
+  for (const w of windows) {
+    console.log(
+      `    ${w.want + 1}단계  안전창 ${safeOf(w.gaps) < 0 ? '측정불가' : `**${safeOf(w.gaps).toFixed(2)}초**`}` +
+        `  (관측 ${w.gaps.length}회: ${w.gaps.join(', ') || '없음'})` +
+        (w.gaps.length === 0
+          ? `\n            ↳ 프레임 ${w.diag.frames} · 공격중 ${w.diag.attacking} · 예고중 ${w.diag.winding} · ` +
+            `어그로 ${w.diag.aggro} · 최소거리 ${w.diag.minDist}m · 체력 ${w.diag.hpNow} · 플레이어 사망 ${w.diag.dead}프레임`
+          : '') +
+        (w.phaseNow !== w.want ? `  ⚠️ 재는 동안 ${w.phaseNow + 1}단계로 넘어감` : ''),
+    )
+  }
+  check(
+    windows.every((w) => w.phaseNow === w.want && w.gaps.length >= 3),
+    '세 페이즈 모두에서 창을 실제로 관측했다 (측정이 성립했다)',
+    windows.map((w) => `${w.want + 1}단계 ${w.gaps.length}회`).join(' · '),
+  )
+  /**
+   * **창은 무엇보다 길어야 하는가** — 여기에 숫자를 적으면 안 됩니다.
+   *
+   * ⚠️ 처음엔 **가장 빠른** 무기의 1타(0.07초)를 기준으로 삼았습니다.
+   *    그 선은 아무것도 못 막습니다 — 창이 0.1초여도 통과합니다.
+   *    기준은 *"누구든 한 대는 넣을 수 있는가"* 여야 하므로 **가장 느린**
+   *    무기의 1타(대검 0.27초)를 씁니다. 그보다 짧은 창이 있으면
+   *    그 페이즈에서는 **대검을 든 사람에게 반격이라는 선택지가 없습니다.**
+   *    무기 선택이 페이즈 때문에 막히면 무기 셋을 만든 뜻이 없습니다.
+   *
+   * 참고한 게임들이 지키는 선이기도 합니다 — 몬스터 헌터는 분노해도 큰
+   * 기술의 후딜을 남기고, 세키로·엘든 링에서 창이 사라진 패턴은 예외 없이
+   * 문제로 지목됐습니다. **속도를 올릴 때 창까지 좁히면 안 됩니다.**
+   */
+  const slowestFirst = await page.evaluate(() =>
+    Math.max(...window.__game.weaponTable().map((w) => w.firstHitAt)),
+  )
+  const fastest = slowestFirst
+  const measured = windows.map((w) => safeOf(w.gaps)).filter((v) => v > 0)
+  /**
+   * ⚠️ `Math.min()` 은 빈 배열에 **Infinity** 를 돌려줍니다. 그대로 두었더니
+   *    창을 한 번도 못 쟀는데 *"가장 좁은 창 Infinity초"* 로 **통과**했습니다.
+   *    지난 라운드와 똑같은 자리입니다 — **아무것도 못 잰 단계는 실패입니다.**
+   */
+  const tightest = measured.length === 3 ? Math.min(...measured) : -1
+  check(
+    tightest > fastest,
+    '**어느 페이즈에서도 세 무기 다 한 대는 넣을 수 있다** (속도를 올려도 창은 남는다)',
+    tightest < 0
+      ? `세 페이즈 중 ${3 - measured.length}곳에서 창을 못 쟀습니다 — **검사가 성립하지 않았습니다**`
+      : `가장 좁은 창 ${tightest.toFixed(2)}초 vs 가장 느린 1타 ${fastest.toFixed(2)}초(대검) — 여유 ${(tightest - fastest).toFixed(2)}초`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

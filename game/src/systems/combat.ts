@@ -335,6 +335,12 @@ export function poiseDamage(
   return dmg / (BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, phase)].poiseResist ?? 1)
 }
 
+/** 🧪 실험대 전용 — 위 applyDamage 설계 노트 참고. 게임 코드는 켜지 않습니다. */
+let debugPlayerInvulnerable = false
+export function setPlayerInvulnerable(on: boolean): void {
+  debugPlayerInvulnerable = on
+}
+
 function applyPoise(t: number, spec: AttackSpec, behind = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
 
@@ -673,6 +679,22 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      * 바로 그 구분이기 때문입니다. 아무 때나 구르면 쌓이는 자원은
      * 자원이 아니라 그냥 시간입니다.
      */
+    /**
+     * 🧪 **실험대 전용 무적** — `setHp`·`setStamina`·`setFocus` 와 같은 성격의
+     * "만들기" 장치입니다. 게임 규칙이 아니라 **재기 위한 받침대**입니다.
+     *
+     * 왜 필요했는가: 보스가 페이즈마다 내주는 창을 재려면 플레이어가 그
+     * 앞에 40초를 서 있어야 하는데, **한 번 죽으면 조우가 통째로 끝납니다**
+     * (enemyAI 귀환 → 어그로 0). 실제로 2단계(속박)에서 딱 한 프레임 죽었고,
+     * 그 뒤 40초가 전부 빈 관측이 되어 *"2단계는 창을 안 준다"* 는
+     * **정반대 결론**을 낼 뻔했습니다. 프로브에서 매 프레임 체력을 채우는
+     * 것으로는 한 프레임 안에 들어오는 큰 한 방을 못 막습니다.
+     *
+     * ⚠️ 기본값은 꺼짐이고, 켜는 곳은 실험대뿐입니다. 피해만 막고 넉백·
+     *    경직·집중은 그대로 둡니다 — 보스의 **리듬**을 재는 것이지
+     *    플레이어를 유령으로 만드는 것이 아닙니다.
+     */
+    if (targetIsPlayer && debugPlayerInvulnerable) continue
     if (targetIsPlayer && isInIFrames(t)) {
       perfectDodgeEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
       continue
