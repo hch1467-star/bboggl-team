@@ -69,6 +69,14 @@ try {
         // 사거리 안쪽에 붙여 놓습니다 — 접근하는 시간을 관측에서 빼기 위해서.
         const e = window.__game.spawnEnemyKind(kindId, p.x + 1.9, p.z)
         window.__game.aimAtWorld(p.x + 1.9, p.z)
+        /**
+         * ⚠️ **깨워 놓고 잽니다.** 적은 이제 방향으로 알아채기 때문에
+         *    (balance.ts `AWARE`), 등을 보인 채 낳으면 가만히 선 플레이어를
+         *    영영 못 봅니다 — "가만히 두면 잡몹이 공격을 성사시킴(기준선)"이
+         *    실제로 **0회**로 죽었습니다. 이 프로브가 묻는 것은 *"강인도가
+         *    적을 봉쇄하는가"* 이지 *"적이 나를 알아채는가"* 가 아닙니다.
+         */
+        window.__game.wakeEnemy(e)
         // 적이 죽지 않아야 관측이 끝까지 갑니다. 체력을 크게 올려 둡니다.
         window.__game.setHp(e, 100000)
         await window.__t.runFor(0.3)

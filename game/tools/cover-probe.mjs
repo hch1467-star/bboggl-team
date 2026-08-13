@@ -94,6 +94,16 @@ try {
       const bx = p0.x + range * 0.375
       const blocker = offZ === null ? -1 : G.spawnEnemyKind('grunt', bx, p0.z + offZ)
       if (blocker >= 0) G.setHp(blocker, 100000) // 죽어서 사라지면 막던 것도 사라집니다.
+      /**
+       * ⚠️ **깨워 놓고 잽니다.** 적은 이제 방향으로 알아채기 때문에
+       *    (balance.ts `AWARE`), 등을 보인 궁수는 가만히 선 플레이어를
+       *    영영 못 봅니다 — *"궁수가 실제로 쐈다(기준선)"* 가 **안 쏨**으로
+       *    죽었고, 그 아래 네 검사가 전부 "체력 −0"이 됐습니다.
+       *    이 프로브가 묻는 것은 *"화살이 몸에 막히는가"* 이지
+       *    *"궁수가 나를 알아채는가"* 가 아닙니다.
+       */
+      G.wakeEnemy(archer)
+      if (blocker >= 0) G.wakeEnemy(blocker)
       await wait(0.2)
 
       const hp0 = G.state().player.hp

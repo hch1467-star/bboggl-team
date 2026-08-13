@@ -288,6 +288,123 @@ try {
     )
   }
 
+  /**
+   * ---- 🗡 **기습** — 못 본 적을 먼저 치면 다른 결과가 나오는가 ----
+   *
+   * ⚠️ **무대를 먼저 세워야 합니다.** 잡몹의 `aggroRange` 는 55m 인데 아레나
+   *    반지름은 26m 입니다. 즉 **아레나에서는 모든 적이 항상 나를 봅니다** —
+   *    아무리 멀리 낳아도(물리가 반지름 안으로 끌어당기기까지 합니다).
+   *    존은 `LEVEL_AGGRO_RANGE`(14m)로 덮어써서 방 단위로 깨우는데 아레나엔
+   *    그 덮어쓰기가 없습니다.
+   *
+   *    이걸 모르고 "기습이 안 된다"는 결론을 낼 뻔했습니다. 게임이 아니라
+   *    **무대가 불가능**했습니다. 그래서 존과 같은 값으로 덮어쓰고 잽니다.
+   *
+   * 검사는 **같은 싸움을 두 번** 돌려서 합니다 — 차이는 하나뿐입니다:
+   * 적이 나를 봤는가. 두 판이 같은 결과면 기습은 이름만 있는 것입니다.
+   */
+  console.log('')
+  const strike = async (awake) =>
+    page.evaluate(
+      async ([wake]) => {
+        const G = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 8))
+        const now = () => G.state().simElapsed
+        G.reset()
+        G.setAggroRange(14) // 존과 같은 무대로 (위 설계 노트)
+        const t0 = now()
+        while (now() - t0 < 0.6) await sleep()
+        G.clearEnemies()
+        while (now() - t0 < 1.0) await sleep()
+
+        const p = G.state().player
+        const e = G.spawnEnemyKind('grunt', p.x + 18, p.z)
+        if (e == null || e < 0) return null
+        while (now() - t0 < 1.6) await sleep()
+
+        /**
+         * 적이 보는 방향의 **반대쪽**, 조용히 서 있을 때의 청각 거리 **바로
+         * 밖**에 섭니다 — 들리지는 않고 칼은 닿는 자리.
+         *
+         * ⚠️ 거리를 여기 적어 두지 **않습니다.** `awareInfo()` 로 게임에게
+         *    묻습니다. 베껴 적으면 `hearQuiet` 을 고치는 순간 무대가 조용히
+         *    무너지고(적이 미리 깨어남) 검사는 "기습이 안 된다"고 **엉뚱한
+         *    결론**을 냅니다. 규칙은 한 곳에만 — 게임이 판단하고 프로브는 읽습니다.
+         */
+        const back = G.awareInfo().hearQuiet + 0.3
+        const at = G.enemyInfo(e)
+        if (!at) return null
+        if (at.aggro) return { broke: false, staged: false, why: '멀리서 이미 깨어 있었습니다' }
+        G.teleportPlayer(at.x - Math.sin(at.rotY) * back, at.z - Math.cos(at.rotY) * back)
+        if (wake) G.wakeEnemy(e)
+        while (now() - t0 < 2.2) await sleep()
+
+        const before = G.enemyInfo(e)
+        if (!wake && before.aggro) return { broke: false, staged: false, why: '붙는 동안 깨어났습니다' }
+
+        G.aimAtWorld(before.x, before.z)
+        G.setStamina(100)
+        while (now() - t0 < 2.7) await sleep()
+        G.press('Mouse0')
+        G.release('Mouse0')
+        const hp0 = before.hp
+        const t1 = now()
+        let broke = false
+        let minPoise = 999
+        let hpNow = hp0
+        while (now() - t1 < 1.6) {
+          const i = G.enemyInfo(e)
+          if (!i) break
+          if (i.broken) broke = true
+          if (i.poise != null && i.poise < minPoise) minPoise = i.poise
+          hpNow = i.hp
+          await sleep()
+        }
+        return { broke, staged: true, hit: hpNow < hp0 - 0.01, minPoise }
+      },
+      [awake],
+    )
+
+  const sneak = await strike(false)
+  const seen = await strike(true)
+  console.log(
+    `  [못 본 적을 침] 맞음 ${sneak?.hit ? 'O' : 'X'} · 무너짐 ${sneak?.broke ? 'O' : 'X'} · 최저 강인도 ${sneak?.minPoise}` +
+      ` · [이미 본 적을 침] 맞음 ${seen?.hit ? 'O' : 'X'} · 무너짐 ${seen?.broke ? 'O' : 'X'} · 최저 강인도 ${seen?.minPoise}`,
+  )
+  check(
+    sneak != null && seen != null && sneak.staged !== false,
+    '무대가 실제로 섰다 (못 본 적이 정말 못 본 상태였는가)',
+    sneak?.staged === false ? sneak.why : '',
+  )
+  check(sneak?.broke === true, '못 본 적을 치면 **즉시 무너진다** (기습이 실제로 일한다)')
+  /**
+   * ── 여기에 검사를 하나 **썼다가 지웠습니다** ──────────────────────
+   * *"기습하면 근처 동료가 함께 깨어난다"*. 통과했고, 뜻이 맞았고,
+   * **아무것도 재고 있지 않았습니다.**
+   *
+   * 규칙대로 일부러 고장 내 봤습니다 — 고함 거리를 7m → **0m** 로 놓아
+   * 고함을 통째로 껐습니다. 검사는 그대로 **초록**이었습니다. 이유는
+   * 무대에 있었습니다: 동료를 적 옆 5m 에 세웠는데, 적은 스폰할 때
+   * 원점을 바라보므로 **동료의 시야가 마침 플레이어 쪽**이었습니다.
+   * 동료는 고함이 아니라 **눈으로** 깨어나고 있었습니다.
+   *
+   * 삼각부등식 때문에 이 무대에서는 고칠 수도 없습니다: 동료가 고함
+   * 거리(7m) 안에 있으려면 플레이어에게서 9.1m 를 넘길 수 없고, 그건
+   * 시야 거리(14m) 안입니다. **무대 자체가 두 원인을 못 가릅니다.**
+   *
+   * 그래서 지웠습니다. 고함이 사는지는 `npm run encounter` 가 이미
+   * 가릅니다 — 고함 거리를 0으로 놓으면 거기서는 7개 중 6개가
+   * **7개 중 2개**로 떨어집니다. 같은 것을 두 번 재느니, **재는 쪽 하나만**
+   * 남깁니다.
+   *
+   * > 통과하는 검사보다 나쁜 것은 **아무 말도 안 하는 검사**입니다.
+   */
+  check(
+    seen?.broke === false,
+    '이미 본 적은 한 대로 안 무너진다 (기습이 평타와 구분된다)',
+    seen?.broke ? '깨어 있는 적도 무너졌습니다 — 기습이 아니라 그냥 센 한 대입니다' : '',
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } finally {

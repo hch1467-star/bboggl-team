@@ -676,6 +676,31 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      * 못합니다. 보상은 원인과 **매번** 붙어 있어야 배워집니다.
      * (창이 끝나는 것은 아래 playerControl 의 타이머가 처리합니다.)
      */
+    /**
+     * 🗡 **기습 — 아직 나를 못 본 적을 먼저 치는 것.**
+     *
+     * 보상은 이 파일이 백어택에서 이미 내린 결론 그대로입니다 —
+     * *"조금 더 아프다"가 아니라 **다른 결과가 나온다**".* 그래서 피해
+     * 배수를 얹지 않고 **강인도를 즉시 부숩니다.** 이미 있는 문(붕괴 →
+     * 처형)으로 보내는 것이지 새 장치를 만드는 것이 아닙니다.
+     *
+     * ⚠️ 보스는 뺍니다. 보스는 조우 연출로 시작하는 것이 설계이고,
+     *    기습으로 그 연출을 건너뛰면 페이즈 학습이 무너집니다.
+     */
+    const ambush =
+      attackerIsPlayer &&
+      !targetIsPlayer &&
+      hasComponent(Enemy, t) &&
+      // "지금 못 보는가"가 아니라 **"조금 전까지 못 봤는가"** — components.ts `unawareT`.
+      Enemy.unawareT[t] > 0 &&
+      Enemy.kind[t] !== EnemyKind.Boss
+    /**
+     * ⚠️ **맞으면 반드시 깨어납니다.** 이 한 줄이 없으면 못 본 적을 계속
+     *    때리는 동안 **모든 타격이 기습**이 되어, 한 번의 보상이 무한
+     *    반복이 됩니다.
+     */
+    if (attackerIsPlayer && !targetIsPlayer && hasComponent(Enemy, t)) Enemy.aggro[t] = 1
+
     const perfect = !targetIsPlayer && hasComponent(Player, a) && Player.perfectCritT[a] > 0
     const crit =
       !spec.noCrit && spec.damage > 0 && (perfect || combatRng.chance(critChance))
@@ -816,6 +841,11 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Enemy.brokenT[t] = COUNTER.brokenTime
         Actor.timer[t] = COUNTER.brokenTime
         counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+      } else if (ambush) {
+        // 기습은 **강인도를 깎지 않고 즉시 부숩니다** — 위 설계 노트 참고.
+        breakPoise(t)
+        // 유예를 비웁니다 — 한 번 놀란 적을 계속 기습할 수는 없습니다.
+        Enemy.unawareT[t] = 0
       } else if (spec.finisher && hasComponent(Enemy, t)) {
         /**
          * **처형은 무방비를 소모합니다.** 넣는 순간 적이 일어납니다.

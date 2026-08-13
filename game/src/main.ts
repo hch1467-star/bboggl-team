@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
 import { RUNE_ORDER, SKILLS, WEAPONS } from './config/arsenal'
 import {
+  AWARE,
+  hearDistance,
   BOSS_ARENA,
   COMBAT,
   COUNTER,
@@ -3682,6 +3684,7 @@ declare global {
         cooldownT: number
         reactT: number
         aggro: boolean
+        unawareT: number
       } | null
       /**
        * 자동 플레이 봇용 훅.
@@ -3726,8 +3729,23 @@ declare global {
       setFocus: (n: number) => void
       setStamina: (n: number) => void
       grantPerfectDodge: () => void
+      /** 실험대 전용 — 적을 깨웁니다. */
+      wakeEnemy: (entity: number) => void
+      /** 실험대 전용 — 어그로 거리를 존과 같게 덮어씁니다(아레나는 55m 라 항상 깨어 있습니다). */
+      setAggroRange: (range: number) => void
       /** 실험대 전용 — 1단계 학습 잠금을 켜고 끕니다(enemyAI 설계 노트). */
       setPhaseTeaching: (on: boolean) => void
+      /** 인지 규칙 — 프로브가 식을 베끼지 않도록 **게임이 답합니다**. */
+      awareInfo: () => {
+        frontArcDeg: number
+        hearQuiet: number
+        hearLoud: number
+        ambushGrace: number
+        alertRadius: number
+        /** 지금 이 순간 내 발소리가 닿는 거리(m) — 속도에 따라 변합니다. */
+        hearNow: number
+        playerSpeed: number
+      }
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       threats: (range?: number) => {
         entity: number
@@ -4195,6 +4213,8 @@ window.__game = {
       /** 등 뒤를 잡혔을 때 "아직 못 알아챈" 남은 시간(초). 백어택 여유의 실체입니다. */
       reactT: Number(Enemy.reactT[entity].toFixed(3)),
       aggro: Enemy.aggro[entity] === 1,
+      /** 기습 유예 남은 시간(초) — "조금 전까지 나를 못 봤다"의 실체입니다. */
+      unawareT: Number(Enemy.unawareT[entity].toFixed(3)),
     }
   },
   counterInfo: () => ({
@@ -4270,6 +4290,39 @@ window.__game = {
    *    어려운 상태를 만들어 주되, 규칙은 게임이 판단한다."
    */
   setPhaseTeaching: (on) => setPhaseTeaching(on),
+  wakeEnemy: (entity) => {
+    Enemy.aggro[entity] = 1
+    // "깨운다"는 곧 **나를 봤다**는 뜻입니다 — 유예도 같이 지워야
+    // 실험대가 "이미 싸우고 있는 적"이라는 뜻대로 섭니다.
+    Enemy.unawareT[entity] = 0
+  },
+  /**
+   * 실험대 전용 — 어그로 거리 덮어쓰기.
+   *
+   * ⚠️ **아레나는 접근을 잴 수 없는 무대입니다.** 잡몹의 `aggroRange` 는
+   *    55m 인데 아레나 반지름은 26m 라, 아무리 멀리 낳아도 **항상 깨어
+   *    있습니다**(게다가 물리가 반지름 안으로 끌어당깁니다). 존은
+   *    `LEVEL_AGGRO_RANGE`(14m)로 덮어써서 방 단위로 깨우는데, 아레나에는
+   *    그 덮어쓰기가 없습니다.
+   *
+   *    이걸 모르고 "기습이 안 된다"는 결론을 낼 뻔했습니다 — 게임이 아니라
+   *    **무대가 불가능했던 것**입니다.
+   */
+  setAggroRange: (range) => setAggroRangeOverride(range),
+  awareInfo: () => {
+    const p = game.debugPlayerEntity()
+    const speed = Math.hypot(Velocity.x[p], Velocity.z[p])
+    return {
+      frontArcDeg: AWARE.frontArcDeg,
+      hearQuiet: AWARE.hearQuiet,
+      hearLoud: AWARE.hearLoud,
+      ambushGrace: AWARE.ambushGrace,
+      alertRadius: AWARE.alertRadius,
+      // 식이 아니라 **게임이 쓰는 그 함수**를 부릅니다(balance.ts 주석 참고).
+      hearNow: hearDistance(speed),
+      playerSpeed: speed,
+    }
+  },
   grantPerfectDodge: () => {
     Player.perfectCritT[game.debugPlayerEntity()] = FOCUS.perfectDodgeCritWindow
   },

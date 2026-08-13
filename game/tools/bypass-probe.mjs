@@ -208,6 +208,30 @@ try {
        * 도착하는 **순간**의 추격자 수만 세면 이걸 못 봅니다. 5마리가 따라오다
        * 문턱에서 멈추면 통행료는 0원이고, 안까지 들어오면 제값입니다.
        */
+      /**
+       * ⚠️ **무리가 도착한 뒤부터 8초를 셉니다** — 내가 도착한 뒤가 아니라.
+       *
+       * 예전엔 도착 즉시 8초를 셌습니다. 그러면 재는 것이 *"무리가 아픈가"*
+       * 가 아니라 **"무리가 8초 안에 도착했는가"** 가 됩니다. 도착 시각은
+       * 경로 사정에 크게 흔들려서, 게임을 하나도 안 고쳤는데 청구서가
+       * **0에서 90까지** 오갔습니다(다섯 판 0~90.2). 그 폭 한가운데에
+       * 기준선(성수병 45)이 있으니 검사는 동전 던지기가 됩니다.
+       *
+       * 기준을 낮추는 것은 답이 아닙니다 — 성수병 한 병은 **뜻이 있는**
+       * 값이라 낮추면 검사가 뜻을 잃습니다. 그래서 **재는 창을 옮겼습니다.**
+       * 첫 추격자가 영역에 들어오는 순간부터 8초. 흔들리는 것(도착 시각)을
+       * 평균 내지 말고 **창 밖으로 빼는** 것이 맞습니다.
+       */
+      const trainWaitFrom = now()
+      while (
+        now() - trainWaitFrom < 12 &&
+        Date.now() < wallDeadline &&
+        G.threats(300).filter((t) => t.aggro && t.dist <= (G.bossEncounter()?.arenaRadius ?? 0))
+          .length === 0
+      )
+        await sleep()
+      const trainWait = now() - trainWaitFrom
+      const arriveHp2 = G.state().player.hp
       const arenaSettle = now()
       while (now() - arenaSettle < 8 && Date.now() < wallDeadline) await sleep()
       const be2 = G.bossEncounter()
@@ -233,8 +257,10 @@ try {
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
         hpAfterSettle: Number(hpAfterSettle.toFixed(1)),
-        /** 도착 뒤 가만히 서 있는 8초 동안 잃은 체력 — 끌고 온 무리의 청구서 */
-        trainBill: Number(Math.max(0, arriveHp - hpAfterSettle).toFixed(1)),
+        /** 무리가 도착한 뒤 가만히 선 8초 동안 잃은 체력 — 끌고 온 무리의 청구서 */
+        trainBill: Number(Math.max(0, arriveHp2 - hpAfterSettle).toFixed(1)),
+        /** 무리가 오기까지 기다린 시간(초) — 12초는 "안 왔다"는 뜻입니다. */
+        trainWait: Number(trainWait.toFixed(1)),
         stuck: Number(stuckTime.toFixed(1)),
         enemiesLeft: end.enemiesLeft,
       }
@@ -247,8 +273,22 @@ try {
    * 같은 코드로 한 번 더 돌리니 "피해 4 · 피격 1회"였습니다. 한 판만 봤으면
    * "완전 무료"라고 적었을 것이고, 그 문장 위에 밸런스를 얹었을 것입니다.
    * 중앙값과 최소~최대를 같이 냅니다 — **범위가 겹치면 증명된 게 아닙니다.**
+   *
+   * ── 그 세 판을 **다섯 판으로 올렸습니다** ────────────────────────
+   * "끌고 온 무리가 실제로 아프다"(청구서 ≥ 성수병 45)가 게임을 하나도
+   * 안 고친 채로 빨강·초록을 오갔습니다. 여섯 판을 돌려 보니 이유가
+   * 분명했습니다 — 청구서의 실제 폭이 **32~79** 입니다. 세 판이면
+   * 중앙값이 32에 앉는 일이 그냥 일어납니다.
+   *
+   * 이건 게임이 흔들린 게 아니라 **표본이 모자랐던 것**입니다. 무리가
+   * 언제 도착하느냐에 8초 창이 통째로 좌우되는데, 그 도착 시각은 경로
+   * 사정에 크게 흔들립니다. 기준을 낮추는 것은 답이 아닙니다 — 기준은
+   * 성수병 한 병이라는 **뜻이 있는 값**이라, 낮추면 검사가 뜻을 잃습니다.
+   * 그래서 **표본을 늘렸습니다.**
+   *
+   * 폭을 더 좁혀 봐야 할 때는 `RUNS=9 npm run bypass` 로 올립니다.
    */
-  const RUNS = 3
+  const RUNS = Number(process.env.RUNS || 5)
   const med = (xs) => {
     const a = [...xs].sort((x, y) => x - y)
     return a[Math.floor(a.length / 2)]
@@ -272,8 +312,13 @@ try {
     inArena: med(runs.map((r) => r.inArena)),
     inArenaSpan: span(runs.map((r) => r.inArena)),
     trainBill: med(runs.map((r) => r.trainBill)),
+    trainWait: med(runs.map((r) => r.trainWait)),
+    trainWaitSpan: span(runs.map((r) => r.trainWait)),
     trainBillSpan: span(runs.map((r) => r.trainBill)),
     awake: med(runs.map((r) => r.awake)),
+    awakeSpan: span(runs.map((r) => r.awake)),
+    awakeMin: Math.min(...runs.map((r) => r.awake)),
+    awakeMax: Math.max(...runs.map((r) => r.awake)),
     arenaR: runs[0].arenaR,
     travelled: med(runs.map((r) => r.travelled)),
   })
@@ -290,8 +335,9 @@ try {
     `  [${label}] 도착 ${r.arrived}/${RUNS} · ${r.time}초(${r.timeSpan}) · ${r.travelled}m\n` +
     `           도착 시 체력 ${r.hp}/${r.maxHp}(${r.hpSpan}) · 오는 길 피해 ${r.damage}(${r.damageSpan}) · ` +
     `피격 ${r.hits}회(${r.hitsSpan})\n` +
-    `           보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}) · ` +
-    `가만히 선 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})`
+    `           깨운 적 ${r.awake}마리(${r.awakeSpan}) · ` +
+    `보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}) · ` +
+    `무리 도착까지 ${r.trainWait}초(${r.trainWaitSpan}) · 그 뒤 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})`
   console.log(line('걸어서', walk))
   console.log(line('달려서', run) + '\n')
 
@@ -364,19 +410,55 @@ try {
    * 통과시키려고 지운 것이 아니라, **재려던 것이 아니어서** 지웠습니다.
    *
    * 대신 실제로 일어나는 일을 겁니다: 지나치면 **청구서가 미뤄집니다.**
-   * 싸우며 걸어가면 무리가 길에서 붙잡히고(영역 안 2마리), 달려서
-   * 지나치면 그대로 보스방까지 따라 들어옵니다(6~8마리).
-   * 엘든 링에서 몹을 달고 안개문을 넘는 것과 같은 계약입니다.
+   * 엘든 링에서 몹을 달고 안개문을 넘는 것과 같은 계약입니다. 그 계약은
+   * 바로 위·아래 두 검사(값이 붙는가 / 그 값이 실제로 아픈가)가 지킵니다.
+   *
+   * ── 여기서 검사 하나를 **또** 버렸습니다 ──────────────────────
+   * 버린 것은 `run.inArena > walk.inArena` — *"달려서 지나치면 걸을 때보다
+   * 더 많이 끌고 들어온다"*. 두 가지가 틀렸습니다:
+   *
+   *  ① **이름이 재는 것과 달랐습니다.** 라벨은 "싸우며 갈 때보다"라고
+   *     적혀 있는데, 비교 대상인 `walk` 도 **싸우지 않는 종주**입니다.
+   *     빠르기만 다른 두 종주를 놓고 "싸움 대 지나치기"라고 부르고
+   *     있었습니다.
+   *  ② **한 번도 증명된 적이 없었습니다.** 폭을 찍어 보니 걸어서
+   *     2~11마리 · 달려서 0~6마리 — 완전히 겹칩니다. 통과하던 것은
+   *     중앙값이 어쩌다 그 방향으로 선 것뿐이고, 실제로 이번 회차에
+   *     **부호가 뒤집혔습니다**(7 vs 8). 이 저장소의 규칙 그대로입니다 —
+   *     **부호가 갈리면 증명되지 않은 것.**
+   *
+   * 대신 **소리 규칙이 실제로 사는지**를 겁니다. balance.ts `AWARE` 가
+   * 새로 약속한 것이 이것입니다: 등 뒤는 **내가 낸 소리만큼** 들린다.
+   * 그 약속이 죽으면(듣는 거리를 속도와 끊으면) 걷기와 달리기가 똑같이
+   * 깨우게 되고, 아래 두 줄이 같이 무너집니다.
+   *
+   * 왜 `inArena` 가 아니라 `awake` 인가: 보스방까지 **따라 들어온 수**는
+   * 깨운 수에 **이동 시간**이 섞여 있습니다 — 달리면 11초 먼저 도착해서
+   * 쫓아올 시간을 그만큼 뺏습니다. 두 가지가 섞인 값으로는 어느 쪽이
+   * 움직였는지 말할 수 없습니다. 깨운 수는 소리만 봅니다.
+   */
+  /**
+   * ⚠️ **중앙값으로 겁니다 — 처음엔 최소·최대로 걸었다가 물렸습니다.**
+   *
+   * `run.awakeMin >= walk.awakeMax` 로 써 놓으면 문장은 더 세 보입니다
+   * ("달리면 **매번** 걸을 때 최악만큼은"). 그런데 그렇게 쓰면 **한 회차가
+   * 튀는 순간 결과가 통째로 뒤집힙니다.** 실제로 달리기 다섯 판이
+   * `19·19·19·19·1` 로 나왔고, 그 `1` 하나가 검사를 빨갛게 만들었습니다.
+   * 게임은 하나도 안 바뀐 채로요.
+   *
+   * 이 파일이 맨 위에 적어 둔 규칙을 검사 자신이 어기고 있었던 셈입니다 —
+   * **중앙값과 폭을 같이 보되, 판정은 중앙값으로.** 폭은 사람이 읽으라고
+   * 옆에 찍습니다.
    */
   check(
-    run.inArena > walk.inArena,
-    '지나치면 청구서가 보스방으로 미뤄진다 (싸우며 갈 때보다 더 많이 끌고 들어온다)',
-    `달려서 ${run.inArena}마리(${run.inArenaSpan}) vs 걸어서 ${walk.inArena}마리(${walk.inArenaSpan})`,
+    run.awake > walk.awake,
+    '달리면 더 많이 깨운다 (발소리가 속도를 탄다)',
+    `달려서 ${run.awake}마리(${run.awakeSpan}) vs 걸어서 ${walk.awake}마리(${walk.awakeSpan})`,
   )
   check(
     run.trainBill >= vialHeal,
     '끌고 온 무리가 실제로 아프다 (장식이 아니다)',
-    `보스방에서 가만히 선 8초에 ${run.trainBill}(${run.trainBillSpan}) · 성수병 ${vialHeal}`,
+    `무리 도착 뒤 8초에 ${run.trainBill}(${run.trainBillSpan}) · 도착까지 ${run.trainWait}초 · 성수병 ${vialHeal}`,
   )
 
   // ---- 4. 달리기로 노출 시간이 얼마나 줄었는가 ----

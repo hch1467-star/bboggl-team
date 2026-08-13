@@ -29,7 +29,14 @@ import {
   bossPhase,
   phaseForHp,
 } from '../config/bossPhases'
-import { BOSS_ARENA, LEVEL_AGGRO_LEAD, LEVEL_AGGRO_MAX, POISE } from '../config/balance'
+import {
+  AWARE,
+  BOSS_ARENA,
+  LEVEL_AGGRO_LEAD,
+  LEVEL_AGGRO_MAX,
+  POISE,
+  hearDistance,
+} from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
 
@@ -714,6 +721,13 @@ export function enemyAiSystem(
 
   const px = Transform.x[playerEntity]
   const pz = Transform.z[playerEntity]
+  /**
+   * 🔊 지금 플레이어가 내는 **소리의 크기 = 속도**.
+   *
+   * 한 프레임에 한 번만 재서 모든 적이 같은 값을 씁니다. 적마다 따로
+   * 재면 언젠가 한쪽만 고쳐져서 "어떤 적은 뛰는 걸 못 듣는" 상태가 됩니다.
+   */
+  const playerSpeed = Math.hypot(Velocity.x[playerEntity], Velocity.z[playerEntity])
   const ids = enemies.run()
 
   if (commitGapT > 0) commitGapT = Math.max(0, commitGapT - dt)
@@ -1025,7 +1039,31 @@ export function enemyAiSystem(
     const effectiveDist = reachDistance
       ? (reachDistance(Transform.x[e], Transform.z[e]) ?? Infinity)
       : dist
-    if (Enemy.aggro[e] === 0 && effectiveDist <= range) Enemy.aggro[e] = 1
+    /**
+     * 👁 **보는 거리와 듣는 거리를 나눕니다** (balance.ts `AWARE`).
+     *
+     * 앞쪽 부채꼴 안이면 원래 거리에서 보고, 등 뒤면 **내가 낸 소리만큼**
+     * 듣습니다. 이것이 있어야 *"못 본 적의 등에 먼저 꽂는다"* 가 존재하고,
+     * 동시에 *"뛰어서 지나가면 들킨다"* 도 같이 성립합니다.
+     *
+     * ⚠️ 거리는 위에서 구한 **걸어야 하는 거리**를 그대로 씁니다. 방향만
+     *    새로 봅니다 — 직선거리로 되돌아가면 이 파일이 이미 겪은 "벽 건너
+     *    적이 깨어난다"가 다시 살아납니다.
+     */
+    if (Enemy.aggro[e] === 0) {
+      const fx = Math.sin(Transform.rotY[e])
+      const fz = Math.cos(Transform.rotY[e])
+      const dx = px - Transform.x[e]
+      const dz = pz - Transform.z[e]
+      const len = Math.hypot(dx, dz) || 1
+      const inFront =
+        (dx * fx + dz * fz) / len >= Math.cos(((AWARE.frontArcDeg / 2) * Math.PI) / 180)
+      if (effectiveDist <= (inFront ? range : hearDistance(playerSpeed))) Enemy.aggro[e] = 1
+      // 아직 못 봤으면 유예를 채워 둡니다 — 깨어난 뒤에도 잠깐 남습니다.
+      Enemy.unawareT[e] = AWARE.ambushGrace
+    } else if (Enemy.unawareT[e] > 0) {
+      Enemy.unawareT[e] = Math.max(0, Enemy.unawareT[e] - dt)
+    }
 
     if (Enemy.aggro[e] === 0) {
       decayVelocity(e, dt, 5)
@@ -1281,6 +1319,59 @@ export function enemyAiSystem(
           : (cfg.approachSpeedScale ?? 1)
       Velocity.x[e] += clampMag(nx * cfg.moveSpeed * chase * snareScale - Velocity.x[e], accel)
       Velocity.z[e] += clampMag(nz * cfg.moveSpeed * chase * snareScale - Velocity.z[e], accel)
+    }
+  }
+
+  /**
+   * 📣 **방금 깨어난 적은 소리를 지릅니다 — 무리가 함께 옵니다.**
+   *
+   * ── 왜 필요해졌는가 ──────────────────────────────────────────────
+   * 인지를 방향으로 나누자마자 **무리가 무리가 아니게 됐습니다.**
+   * `npm run encounter` 가 그 자리에서 잡았습니다: 무리 한가운데에
+   * 서 있어도 함께 깨어난 무리가 **7개 중 2개**뿐이었습니다
+   * (깨어난 수 [2,2,1,0,1,1,1]). 등을 보이고 선 동료는 옆에서 싸움이
+   * 나도 끝까지 모릅니다 — 그러면 무리는 **1대1이 줄줄이 이어지는 것**이
+   * 되고, 이 게임이 다대일에 들인 것(공격 토큰·군중 프로브)이 다 놀게 됩니다.
+   *
+   * 세키로·엘든 링·고스트 오브 쓰시마가 전부 같은 답을 씁니다:
+   * **한 명이 눈치채면 소리를 질러 주변을 깨웁니다.** 그래서 잠입은
+   * "안 들키기"가 아니라 **"들키기 전에 한 명씩 지우기"** 가 됩니다.
+   *
+   * ── 두 가지를 일부러 이렇게 두었습니다 ──────────────────────────
+   * ① **한 다리만 건너갑니다(연쇄 금지).** 깨워진 동료의 유예를 0으로
+   *    지워서 그 동료는 다시 지르지 않습니다. 안 그러면 A→B→C 로 존
+   *    전체가 한 번에 깨어나 `bypass` 가 지키는 "걸으면 덜 깨운다"가
+   *    죽습니다.
+   * ② **직선거리로 봅니다** — 이 파일의 다른 판정과 반대입니다. 시야는
+   *    벽을 못 넘지만 **고함은 넘습니다.** 여기서 "걸어야 하는 거리"를
+   *    쓰면 벽 하나 사이에 둔 같은 방 동료가 안 듣습니다.
+   *
+   * 소리의 출처를 `unawareT > 0` 으로 잡습니다 — *"깨어난 지 얼마 안 됐다"*.
+   * 원인을 안 가리는 것이 요점입니다: 눈으로 봤든, 발소리를 들었든,
+   * **맞아서 깨어났든** 전부 여기로 들어옵니다(`combat.ts` 가 aggro 만
+   * 세워도 잡힙니다). 그래서 기습에도 값이 붙습니다 — 하나를 몰래
+   * 무너뜨리면 그 소리에 무리가 옵니다.
+   *
+   * ⚠️ 전용 칸(`alertT`)을 따로 만들어 봤다가 **되돌렸습니다.** 근거는
+   *    DESIGN.md 에 적어 두었습니다 — 요약하면 *"어떤 계측으로도 차이가
+   *    안 났습니다."* 재지 못하는 구분은 코드에 두지 않습니다.
+   */
+  for (let i = 0; i < enemies.count; i++) {
+    const e = ids[i]
+    if (!isAlive(e) || Actor.state[e] === ActorState.Dead) continue
+    if (Enemy.aggro[e] !== 1 || Enemy.unawareT[e] <= 0) continue
+    // 보스는 조우 연출이 깨우는 것이라 이 그물에서 뺍니다(양쪽 다).
+    if (Enemy.kind[e] === EnemyKind.Boss) continue
+    for (let j = 0; j < enemies.count; j++) {
+      const o = ids[j]
+      if (o === e || !isAlive(o) || Enemy.aggro[o] !== 0) continue
+      if (Enemy.kind[o] === EnemyKind.Boss) continue
+      const ddx = Transform.x[o] - Transform.x[e]
+      const ddz = Transform.z[o] - Transform.z[e]
+      if (ddx * ddx + ddz * ddz > AWARE.alertRadius * AWARE.alertRadius) continue
+      Enemy.aggro[o] = 1
+      // 고함을 들은 적은 **완전히 깨어 있습니다** — 기습도, 재고함도 없습니다.
+      Enemy.unawareT[o] = 0
     }
   }
 

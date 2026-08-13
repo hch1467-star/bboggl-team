@@ -160,6 +160,21 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
    * 그 상황이 가장 불리하면 안 됩니다.
    */
   Enemy.reactT[e] = cfg.backReactionDelay
+  /**
+   * **기습 유예는 0으로 시작합니다** — 위 `reactT` 와 정반대인 이유가 있습니다.
+   *
+   * ⚠️ 이 줄이 없어서 실제로 물렸습니다. ECS 는 죽은 적의 번호를 **재사용**
+   *    하기 때문에, 지우지 않으면 새로 낳은 적이 **앞선 적이 남긴 유예를
+   *    물려받습니다.** 그래서 이미 나를 보고 있는 적을 쳤는데 첫 대가
+   *    기습으로 판정되어 강인도가 통째로 부서졌습니다 —
+   *    `npm run rules` 의 "콤보 한 바퀴 = 집중 1점"이 그걸로 깨졌습니다
+   *    (롱소드 3타인데 2타에서 처형으로 넘어가 0.67점).
+   *
+   * 방향도 이쪽이 맞습니다: 유예는 *"조금 전까지 못 봤다"* 는 **기록**이고,
+   * 방금 태어난 적에게는 그런 기록이 없습니다. 못 봤다는 사실은 아래
+   * `enemyAI` 가 실제로 못 본 프레임마다 채워 줍니다.
+   */
+  Enemy.unawareT[e] = 0
   Enemy.attackIndex[e] = 0
   Enemy.phase[e] = 0
   Enemy.transitionT[e] = 0
