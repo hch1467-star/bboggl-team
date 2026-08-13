@@ -115,6 +115,8 @@ try {
          * 가르지 못하면 엉뚱한 곳을 고치게 됩니다.
          */
         let burstDealt = 0
+        let burstFin = 0
+        let burstBrk = 0
         let poiseDealt = 0
         let lastPoise = G.enemyInfo(e).poise
         // ⚠️ 스태미나는 **게임이 센 누적값**을 씁니다.
@@ -152,6 +154,10 @@ try {
           // 완전히 다른 능력입니다. 하나로 뭉치면 둘 다 안 보입니다.
           if (burstDealt === 0 && G.state().simElapsed - t0 >= burstSeconds) {
             burstDealt = startHp - G.entityState(e).hp
+            // 창 안에서 벌어진 붕괴·처형도 그 순간에 함께 잡아 둡니다
+            // (위 `burstFinishers` 설계 노트 참고).
+            burstFin = G.runStats().finishers - finStart
+            burstBrk = breaks
           }
           const info = G.enemyInfo(e)
           if (!info) break
@@ -204,6 +210,21 @@ try {
           seconds: Number(elapsed.toFixed(2)),
           /** 스태미나가 가득인 첫 구간의 초당 피해 = 폭발력 */
           burstDps: Number((burstDealt / burstSeconds).toFixed(1)),
+          /** 그 구간에 **실제로 넣은 피해 총량** — 창 길이별 비교에 씁니다. */
+          burstDealt: Number(burstDealt.toFixed(1)),
+          /**
+           * 그 구간에 들어간 **처형 횟수·붕괴 횟수**.
+           *
+           * ⚠️ 이 파일은 이미 같은 것에 한 번 속았습니다 — 정면 초당 피해가
+           *    데이터의 두 배로 나온 원인이 처형이었습니다. 창 비교에서도
+           *    똑같은 함정이 있습니다: 강인도를 잘 깎는 무기는 짧은 창
+           *    안에서도 허수아비를 **무너뜨려 버리고**, 그 순간 처형이
+           *    선입력으로 나가면서 "창에 넣은 피해"에 얹힙니다.
+           *    그런데 진짜 후딜 창에서는 적이 무너져 있지 않습니다.
+           *    그러니 갈라서 볼 수 있어야 합니다.
+           */
+          burstFinishers: burstFin,
+          burstBreaks: burstBrk,
           /** 그 뒤 구간의 초당 피해 = 스태미나 회복에 묶인 지속력 */
           sustainDps: Number(
             ((dealt - burstDealt) / Math.max(0.1, elapsed - burstSeconds)).toFixed(1),
@@ -577,6 +598,146 @@ try {
     new Set(table.map((w) => w.poiseScale)).size === table.length,
     '무기마다 강인도 성격이 데이터에 따로 적혀 있다',
     table.map((w) => `${w.name} ×${w.poiseScale}`).join(' · '),
+  )
+
+  /**
+   * ── 🪟 **창 길이별로 누가 1등인가** ──────────────────────────────
+   *
+   * ── 왜 이걸 재게 됐는가 ──────────────────────────────────────────
+   * 무기 전환이 이제 전투 중에도 **입력으로 살아남습니다**(선입력 버퍼).
+   * 길은 뚫었는데 그 길이 어딘가로 이어지는지는 안 봤습니다. 위 검사들은
+   * 전부 *"제원의 축이 다른가"* 를 봅니다 — 폭발·효율·강인도. 그런데
+   * **축이 다른 것과 각자 쓸 데가 있는 것은 다른 얘기**입니다.
+   * (이 저장소가 4색에서 이미 배운 구분입니다: 오답을 막는 것과 정답이
+   * 성립하는 것은 따로 확인해야 합니다.)
+   *
+   * 니오·오공·세키로가 자세/무기를 바꾸게 만드는 이유는 하나입니다 —
+   * **주어지는 창의 길이가 상황마다 다르고, 창마다 최선이 다르기 때문**입니다.
+   * 짧은 후딜에는 빠른 무기가, 긴 붕괴 창에는 느리고 센 무기가 들어갑니다.
+   *
+   * ⚠️ 창 길이를 **여기 적지 않습니다.** 위 벤치는 폭발 구간을 `3` 초로
+   *    박아 두고 있었는데, 그 3초는 게임 어디에도 없는 숫자입니다.
+   *    게임이 실제로 주는 창을 게임에게 물어서 씁니다.
+   */
+  const cw = await page.evaluate(() => window.__game.counterInfo())
+  const roster = await page.evaluate(() => window.__game.enemyRoster())
+  const gruntAtks = roster.find((r) => r.id === 'grunt')?.attacks ?? []
+  const windows = [
+    // 잡몹이 한 대 휘두른 뒤 묶여 있는 시간 — 가장 흔하게 주어지는 창.
+    { name: '잡몹 후딜', sec: Math.max(...gruntAtks.map((a) => a.recovery)) },
+    { name: '잡몹 무너짐', sec: cw.normalBrokenTime },
+    { name: '보스 무너짐', sec: cw.bossBrokenTime },
+  ].filter((w) => Number.isFinite(w.sec) && w.sec > 0)
+
+  /**
+   * ⚠️ **세 번씩 재서 중앙값을 씁니다.**
+   *
+   * 한 번만 재면 이 검사가 **운으로 통과합니다.** 치명타가 확률이라
+   * 같은 조건에서 잡몹 후딜의 대검이 `92.8 → 108.8` 로 움직였고,
+   * 잡몹 무너짐은 롱소드 74.6 vs 대검 72 — **3.5% 차이**였습니다.
+   * 그 폭이면 다음 판에 부호가 뒤집힙니다.
+   *
+   * 이 저장소의 규칙 그대로입니다: **부호가 갈리면 증명되지 않은 것.**
+   * 중앙값으로 판정하고, 1등은 **뚜렷한 차이**일 때만 1등으로 셉니다.
+   */
+  const WIN_REPS = 3
+  const medOf = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
+  const byWindow = []
+  for (const win of windows) {
+    const row = { name: win.name, sec: win.sec, dealt: [] }
+    for (let slot = 1; slot <= table.length; slot++) {
+      // 창 하나를 재는 것이므로 총 시간은 창보다 조금만 길게 잡습니다.
+      const reps = []
+      for (let i = 0; i < WIN_REPS; i++) {
+        reps.push(
+          await page.evaluate(
+            ([s, sec]) => window.__t.bench(s, sec, sec + 0.6, false),
+            [slot, win.sec],
+          ),
+        )
+      }
+      const r = {
+        burstFinishers: medOf(reps.map((x) => x.burstFinishers)),
+        burstDealt: medOf(reps.map((x) => x.burstDealt)),
+        span: `${Math.min(...reps.map((x) => x.burstDealt))}~${Math.max(...reps.map((x) => x.burstDealt))}`,
+      }
+      /**
+       * ⚠️ **처형을 뺀 값으로 견줍니다.**
+       *
+       * 진짜 후딜 창에서 적은 무너져 있지 않습니다. 그런데 허수아비는
+       * 짧은 창 안에서도 무너지고, 무너지면 처형이 선입력으로 나가면서
+       * "창에 넣은 피해"에 얹힙니다 — 강인도를 잘 깎는 무기일수록 더요.
+       * 그러면 재는 것이 *"창에 무엇이 들어가는가"* 가 아니라
+       * *"누가 허수아비를 빨리 무너뜨리는가"* 가 됩니다. 그건 바로 위
+       * `강인도` 축이 이미 재고 있는 것이고, **같은 것을 두 번 세면
+       * 그 무기가 두 배로 이깁니다.**
+       */
+      const finDmg = Math.round(finSpec.damageMultiplier * lastStepDamage(table[slot - 1]))
+      row.dealt.push({
+        name: table[slot - 1].name,
+        raw: r.burstDealt,
+        fin: r.burstFinishers,
+        span: r.span,
+        dealt: Number(Math.max(0, r.burstDealt - r.burstFinishers * finDmg).toFixed(1)),
+      })
+    }
+    byWindow.push(row)
+  }
+  console.log('\n  [창] 게임이 실제로 주는 창에 **무엇을 넣을 수 있는가**')
+  /**
+   * **뚜렷한 차이일 때만 1등입니다.** 2등보다 15% 넘게 앞서야 합니다 —
+   * 그보다 좁으면 치명타 운으로 갈리는 폭이라 "누가 낫다"고 말할 수 없습니다.
+   * 좁으면 `동률` 로 적습니다. 모르는 것을 모른다고 적는 것이
+   * 아는 척하는 것보다 언제나 낫습니다.
+   */
+  const MARGIN = 1.15
+  const winnerOf = (row) => {
+    const sorted = [...row.dealt].sort((a, b) => b.dealt - a.dealt)
+    return sorted[0].dealt >= sorted[1].dealt * MARGIN ? sorted[0].name : '동률'
+  }
+  for (const row of byWindow) {
+    const best = winnerOf(row)
+    console.log(
+      `    ${row.name.padEnd(12)} ${row.sec.toFixed(2)}초 — ` +
+        row.dealt
+          .map((d) => `${d.name} ${d.dealt}(${d.span})${d.fin ? `[처형 ${d.fin} 뺌]` : ''}`)
+          .join(' · ') +
+        `   → ${best === '동률' ? '**동률**' : `1등 **${best}**`}`,
+    )
+  }
+  const winByWindow = byWindow.map(winnerOf)
+  /**
+   * 이 줄이 *"무기를 바꿀 이유가 있는가"* 입니다. 창마다 1등이 같으면
+   * 전환은 조작만 있고 뜻이 없습니다 — 무기 셋이 사실상 하나입니다.
+   */
+  /**
+   * ── 여기서 검사 하나를 **버리고 다른 것으로 바꿨습니다** ──────────
+   *
+   * 처음 쓴 것은 *"창 길이가 달라지면 1등도 달라진다"* 였습니다. 한 번
+   * 돌렸을 때는 통과했습니다(잡몹 무너짐 → 롱소드). 그런데 세 번씩 재
+   * 보니 그 1등은 **치명타 운**이었고, 중앙값으로는 셋 다 대검이었습니다.
+   *
+   * 그리고 더 중요한 것을 알았습니다 — **그 검사는 설계가 한 적 없는
+   * 약속을 요구하고 있었습니다.** 이 게임이 무기를 가르는 축은 위에
+   * 적힌 셋입니다: **폭발 · 효율 · 강인도.** 그런데 창 하나만 재면 그건
+   * **폭발만** 재는 것이고, 폭발 1등이 모든 창에서 이기는 것은 결함이
+   * 아니라 **정의**입니다. 대검이 셋 다 이긴 것은 게임이 틀린 게 아니라
+   * 제가 틀린 질문을 한 것입니다.
+   *
+   * ⚠️ 창 하나에는 **효율이 아예 안 들어갑니다.** 스태미나가 가득인
+   *    채로 시작하니까요. 그러니 창 비교로 "무기를 바꿀 이유"를 물으면
+   *    영원히 폭발 무기만 나옵니다.
+   *
+   * 그래서 **바꿀 이유가 실제로 있는지**를 설계의 언어로 다시 묻습니다:
+   * *짧게 끊어 칠 때 최선과, 오래 붙어 있을 때 최선이 다른가.*
+   * 다르면 전환은 뜻이 있고, 같으면 무기 셋은 사실상 하나입니다.
+   */
+  const burstBest = byWindow[0] ? winnerOf(byWindow[0]) : '동률'
+  const thriftBest = axes.reduce((a, b) => (a.thrift >= b.thrift ? a : b)).name
+  check(
+    burstBest !== '동률' && burstBest !== thriftBest,
+    '**짧게 칠 때와 오래 붙을 때의 최선이 다르다** (무기를 바꿀 이유가 실제로 있다)',
+    `한 창(${byWindow[0]?.sec.toFixed(2)}초) → ${burstBest} · 오래 붙기(스태미나 효율) → ${thriftBest}`,
   )
 
   console.log('')

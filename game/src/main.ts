@@ -3792,7 +3792,12 @@ declare global {
        * 봇이 축을 직접 계산하면 카메라 각도를 바꿀 때 봇이 조용히 틀립니다.
        */
       /** 🟢 반격 검증용 */
-      counterInfo: () => { brokenTime: number; normalBrokenTime: number; damageMultiplier: number }
+      counterInfo: () => {
+        brokenTime: number
+        normalBrokenTime: number
+        bossBrokenTime: number
+        damageMultiplier: number
+      }
       /**
        * 사람이 반응하는 데 걸리는 시간 예산 — 프로브가 **읽습니다**(balance.ts REACTION).
        * 색 가짓수는 게임이 **자기 데이터에서 세어** 넘깁니다.
@@ -4324,6 +4329,8 @@ window.__game = {
   counterInfo: () => ({
     brokenTime: COUNTER.brokenTime,
     normalBrokenTime: POISE.brokenTime,
+    /** 보스가 무너져 있는 시간(초) — 잡몹보다 깁니다. 창 길이가 무기 선택을 가릅니다. */
+    bossBrokenTime: POISE.brokenTimeBoss,
     damageMultiplier: COUNTER.damageMultiplier,
   }),
   /**
