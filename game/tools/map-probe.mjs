@@ -815,6 +815,53 @@ try {
     `보스 직전 빈 구간 ${tailRest}m · 스태미나가 차는 거리 ${breather.toFixed(0)}m`,
   )
 
+  /**
+   * ── 🔵 **풀 수 없는 기믹은 겹치면 안 된다** ────────────────────────
+   *
+   * 이 게임의 색에는 각각 답이 있습니다 — 🔴 구르기 · 🟡 걸어서 이탈 ·
+   * 🔵 무적 프레임 · 🟣 사거리 밖 · 🟢 반격. 그런데 **🔵 속박에 걸린 뒤에는
+   * 그 답들이 전부 사라집니다.** 묶여 있으면 구를 수도, 걸어 나갈 수도
+   * 없으니까요. 그래서 속박 중에 들어오는 두 번째 속박은 **원리적으로
+   * 대응할 수 없습니다** — 이 게임에는 속박을 푸는 수단이 없습니다.
+   *
+   * 로스트아크가 *"해제 불가 기믹은 중첩하지 않는다"* 를 지키는 이유이고,
+   * 소울류가 강한 CC 를 가진 적을 같은 방에 둘씩 놓지 않는 이유입니다.
+   * 겹치면 난이도가 아니라 **입력이 사라진 시간**이 됩니다.
+   *
+   * ⚠️ "속박"을 이름으로 고르지 않습니다. 로스터에서 **snare 시간이 있는
+   *    공격을 가진 적**을 뽑습니다 — 새 적에게 속박을 주면 이 검사가
+   *    저절로 따라옵니다.
+   */
+  {
+    const rosterCC = await page.evaluate(() => window.__game.enemyRoster())
+    const ccIds = rosterCC
+      .filter((r) => r.attacks.some((a2) => (a2.snare ?? 0) > 0))
+      .map((r) => r.id)
+    const ccFoes = level.entities.filter((e) => ccIds.includes(e.kind)).map((e) => ({
+      ...cellOf(e),
+      x: e.x,
+      z: e.z,
+    }))
+    let overlap = 0
+    let sample = null
+    for (const c of routeCells) {
+      const near = ccFoes.filter(
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+      )
+      if (near.length >= 2) {
+        overlap++
+        if (!sample) sample = near.map((f) => `(${f.x},${f.z})`).join(' · ')
+      }
+    }
+    check(
+      overlap === 0,
+      '**속박은 한 자리에서 하나만 깨어난다** (묶인 채로 또 묶이지 않게)',
+      overlap === 0
+        ? `속박을 가진 적 ${ccFoes.length}마리 · 겹치는 동선 0m`
+        : `겹치는 동선 ${overlap * CELL}m — ${sample}`,
+    )
+  }
+
   const worst = quiet.reduce((a, b) => (a && a.metres >= b.metres ? a : b), null)
   console.log(
     `  [빈 구간] 주 동선 ${routeCells.length * CELL}m 중 위협 없이 걷는 구간 ${quiet.length}개 — ` +
