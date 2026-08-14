@@ -37,7 +37,12 @@ const server = await createServer({ root: ROOT, server: { port: PORT }, logLevel
 await server.listen()
 const browser = await chromium.launch({
   executablePath: execPath,
-  args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  args: [
+    '--no-sandbox',
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+    '--enable-unsafe-swiftshader',
+  ],
 })
 
 try {
@@ -125,14 +130,26 @@ try {
     }
   })
 
-  check(after.vials === before.vials, '모루 위에서 6초 — 성수병이 차지 않는다', `${before.vials} → ${after.vials}`)
-  check(after.hp <= before.hp + 0.5, '모루 위에서 6초 — 체력이 회복되지 않는다', `${before.hp} → ${after.hp}`)
+  check(
+    after.vials === before.vials,
+    '모루 위에서 6초 — 성수병이 차지 않는다',
+    `${before.vials} → ${after.vials}`,
+  )
+  check(
+    after.hp <= before.hp + 0.5,
+    '모루 위에서 6초 — 체력이 회복되지 않는다',
+    `${before.hp} → ${after.hp}`,
+  )
   check(
     after.enemies <= before.enemies,
     '모루 위에서 6초 — 적이 되살아나지 않는다',
     `${before.enemies} → ${after.enemies}`,
   )
-  check(!after.hasRespawn, '모루는 부활 지점이 되지 않는다 (지름길의 값어치를 지킨다)', `hasRespawn=${after.hasRespawn}`)
+  check(
+    !after.hasRespawn,
+    '모루는 부활 지점이 되지 않는다 (지름길의 값어치를 지킨다)',
+    `hasRespawn=${after.hasRespawn}`,
+  )
 
   /**
    * ---- 3. 되어야 하는 것 하나 ----
@@ -152,7 +169,13 @@ try {
     G.release('KeyB')
     await window.__t.runFor(0.3)
     const w = G.weaponUpgradeInfo()
-    return { beforeLv, afterLv: w.level, cost: wu.nextCost, stoneCost: wu.nextStoneCost, embers: G.emberInfo().embers }
+    return {
+      beforeLv,
+      afterLv: w.level,
+      cost: wu.nextCost,
+      stoneCost: wu.nextStoneCost,
+      embers: G.emberInfo().embers,
+    }
   })
   check(
     spend.afterLv === spend.beforeLv + 1,
@@ -178,7 +201,11 @@ try {
     await window.__t.runFor(0.3)
     return { before, after: G.vialInfo().max }
   })
-  check(vialUp.after === vialUp.before + 1, '모루에서 성수병도 강화할 수 있다', `${vialUp.before} → ${vialUp.after}`)
+  check(
+    vialUp.after === vialUp.before + 1,
+    '모루에서 성수병도 강화할 수 있다',
+    `${vialUp.before} → ${vialUp.after}`,
+  )
 
   /**
    * ---- 5. 멀어지면 안 된다 ----
@@ -198,9 +225,71 @@ try {
     await window.__t.runFor(0.3)
     G.release('KeyB')
     await window.__t.runFor(0.3)
-    return { before, after: G.weaponUpgradeInfo().level }
+    return {
+      before,
+      after: G.weaponUpgradeInfo().level,
+      blockedBy: G.weaponUpgradeInfo().blockedBy,
+    }
   })
-  check(far.after === far.before, '모루에서 12m 떨어지면 강화되지 않는다', `${far.before} → ${far.after}`)
+  check(
+    far.after === far.before,
+    '모루에서 12m 떨어지면 강화되지 않는다',
+    `${far.before} → ${far.after}`,
+  )
+
+  /**
+   * ---- 6. **왜** 안 되는지 이름을 댄다 ----
+   *
+   * ── 왜 이 절이 필요한가 ────────────────────────────────────────
+   * 자동 플레이에 `강화 시도 — B 눌림 4회 · **자리아님 4회** · 성공 0` 이
+   * 나왔습니다. 그 넷이 *"안 닿았다"* 인지 *"닿았는데 적이 막았다"* 인지
+   * 알 수 없었고, **처방이 정반대**였습니다:
+   *
+   *   away — 봇의 이동을 고칩니다
+   *   foe  — 아무것도 아닙니다. 화톳불이 적 앞에서 막히는 것은 **설계**입니다
+   *          (`BONFIRE.safeRadius` — 소울류의 핵심 긴장)
+   *
+   * 그래서 게임이 갈림길에 이름을 붙이게 했습니다(main.ts `spendBlock`).
+   * 그런데 **다음 판에서는 한 번도 막히지 않아 라벨이 안 찍혔습니다.**
+   * 한 번도 불이 안 켜진 계측기는 아직 증명되지 않은 것이라, 여기서
+   * **두 갈래를 다 만들어** 실제로 그 이름이 나오는지 확인합니다.
+   *
+   * ⚠️ 이름을 프로브가 정하지 않습니다 — 게임이 준 값을 그대로 비교합니다.
+   */
+  check(
+    far.blockedBy === 'away',
+    '   그리고 이유를 **`away`** 라고 말한다',
+    `blockedBy=${far.blockedBy}`,
+  )
+
+  const foeCase = await page.evaluate(async () => {
+    const G = window.__game
+    const fire = G.nearestBonfire()
+    if (!fire) return { skipped: true }
+    G.clearEnemies()
+    G.teleportPlayer(fire.x, fire.z)
+    await window.__t.runFor(0.6)
+    const alone = G.weaponUpgradeInfo().blockedBy
+    // 화톳불 곁에 적을 하나 세웁니다 — 이게 `foe` 를 만드는 유일한 조건입니다.
+    const e = G.spawnTestEnemy(fire.x + 4, fire.z)
+    G.wakeEnemy(e)
+    await window.__t.runFor(0.6)
+    return { skipped: false, alone, withFoe: G.weaponUpgradeInfo().blockedBy }
+  })
+  if (foeCase.skipped) {
+    check(false, '   화톳불을 찾지 못했습니다 (측정이 성립하지 않음)')
+  } else {
+    check(
+      foeCase.alone === '',
+      '   화톳불에 혼자 서면 막히지 않는다 (측정이 성립했다)',
+      `blockedBy="${foeCase.alone}"`,
+    )
+    check(
+      foeCase.withFoe === 'foe',
+      '   적이 곁에 오면 이유를 **`foe`** 라고 말한다 (설계대로 막힙니다)',
+      `blockedBy=${foeCase.withFoe}`,
+    )
+  }
 
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
@@ -223,7 +312,9 @@ try {
    * 통과하는 검사보다 나쁜 것은 아무 말도 안 하는 검사이고,
    * 그보다 더 나쁜 것은 **죽으면서 성공했다고 말하는 검사**입니다.
    */
-  console.error(`\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`)
+  console.error(
+    `\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`,
+  )
   fail++
 } finally {
   await browser.close()
