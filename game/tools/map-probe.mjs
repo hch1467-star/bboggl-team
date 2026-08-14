@@ -1096,6 +1096,10 @@ try {
     const dead = []
     for (const g of await page.evaluate(() => window.__game.regionList())) {
       let lo = Infinity
+      /** 🔎 가장 싼 칸이 **어디이고 얼마인지** 같이 남깁니다 — 숫자만 있으면
+       *  "76m 가 어디서 나왔나"를 밖에서 다시 계산해야 하고, 그 재계산이
+       *  프로브와 어긋나면 어느 쪽이 맞는지 알 수 없습니다. */
+      let loAt = null
       for (let cx = g.x0; cx <= g.x1; cx++) {
         for (let cz = g.z0; cz <= g.z1; cz++) {
           if (heightAt(cx, cz) === VOID) continue
@@ -1103,7 +1107,10 @@ try {
           const b2 = bfs({ cx, cz }, bossC, maxClimb, false)
           if (!Number.isFinite(a2) || !Number.isFinite(b2)) continue
           const det = (a2 + b2 - straight) * CELL
-          if (det < lo) lo = det
+          if (det < lo) {
+            lo = det
+            loAt = { cx, cz, a: a2 * CELL, b: b2 * CELL }
+          }
         }
       }
       if (!Number.isFinite(lo) || lo <= 0) continue
@@ -1111,11 +1118,17 @@ try {
       const has =
         level.entities.some((e) => REWARD.includes(e.kind) && inside(cellOf(e))) ||
         tops.some(inside)
-      dead.push({ name: g.name, cost: lo, has, opensShortcut: tops.some(inside) })
+      dead.push({ name: g.name, cost: lo, has, opensShortcut: tops.some(inside), at: loAt })
     }
     console.log(
-      `\n  🎁 막다른 곁길 — ` +
-        dead.map((r) => `${r.name} 왕복 ${r.cost}m ${r.has ? '보상 있음' : '**없음**'}`).join(' · '),
+      `\n  🎁 막다른 곁길 (직선 경로 ${straight * CELL}m) — ` +
+        dead
+          .map(
+            (r) =>
+              `${r.name} 왕복 ${r.cost}m@(${r.at?.cx},${r.at?.cz} 시작${r.at?.a}+보스${r.at?.b})` +
+              ` ${r.has ? '보상 있음' : '**없음**'}`,
+          )
+          .join(' · '),
     )
     /**
      * ── 🚶 **그 곁길이 갈 만한 거리인가** ──────────────────────────

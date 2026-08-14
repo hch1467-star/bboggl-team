@@ -46,7 +46,12 @@ const server = await createServer({ root: ROOT, server: { port: PORT }, logLevel
 await server.listen()
 const browser = await chromium.launch({
   executablePath: execPath,
-  args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  args: [
+    '--no-sandbox',
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
+    '--enable-unsafe-swiftshader',
+  ],
 })
 
 /** 지금 화면에 실제로 보이는 조작 안내 줄들. */
@@ -134,8 +139,8 @@ try {
    * (실제로 첫 판에서 74px → 74px 로 하나도 안 줄었습니다. 줄바꿈 때문에
    *  한 줄 사라져도 높이는 그대로였습니다).
    */
-  const boxAll = await page.evaluate(
-    () => Math.round(document.getElementById('controls').getBoundingClientRect().height),
+  const boxAll = await page.evaluate(() =>
+    Math.round(document.getElementById('controls').getBoundingClientRect().height),
   )
   await page.evaluate(async () => {
     const G = window.__game
@@ -144,7 +149,10 @@ try {
     await new Promise((r) => setTimeout(r, 60))
   })
 
-  // ---- 5. 여덟 가지를 **다 해내면** 조작표가 사라진다 ----
+  // ---- 5. 조작표에 적힌 것을 **다 해내면** 조작표가 사라진다 ----
+  //
+  // ⚠️ 제목에서 **"여덟 가지"라는 숫자를 뺐습니다.** 동사를 하나 늘릴 때마다
+  //    제목이 거짓이 되는데, 거짓이 된 제목은 아무도 안 고칩니다.
   await page.evaluate(async () => {
     const G = window.__game
     const sleep = (n = 8) => new Promise((r) => setTimeout(r, n))
@@ -163,7 +171,12 @@ try {
     await hold('KeyW', 40) // 달리기 (붙는 데 0.3초)
     G.release('ShiftLeft')
     const p = G.state().player
-    for (const [x, z] of [[p.x + 9, p.z], [p.x - 9, p.z], [p.x, p.z + 9], [p.x, p.z - 9]]) {
+    for (const [x, z] of [
+      [p.x + 9, p.z],
+      [p.x - 9, p.z],
+      [p.x, p.z + 9],
+      [p.x, p.z - 9],
+    ]) {
       G.aimAtWorld(x, z) // 조준 — 누적 회전으로 셉니다
       await sleep(40)
     }
@@ -208,16 +221,27 @@ try {
     await act('Digit2') // 무기 교체 — 상태를 안 바꾸므로 위 대기가 그냥 지나갑니다
     G.setVials(3)
     await act('KeyX') // 성수병
+    /**
+     * 🛡 저스트 가드 — **조작표에 줄이 하나 늘면 여기도 늘어야 합니다.**
+     *
+     * 가드를 넣으면서 `index.html` 에 줄만 추가하고 이 절차를 안 고쳤습니다.
+     * 그래서 조작표가 영영 한 줄 남았고, *"다 해내면 통째로 사라진다"* 가
+     * 그때부터 빨갰습니다. **줄을 추가한 라운드에 이 프로브를 안 돌렸습니다.**
+     *
+     * 키는 게임에게 묻습니다(`guardInfo().key`) — 키를 옮기는 날 이 절차만
+     * 옛 키를 누르는 일이 이미 한 번 있었습니다.
+     */
+    await act(G.guardInfo().key)
     await sleep(600)
   })
   const third = await shown(page)
   check(
     third.length === 0,
-    '여덟 가지를 다 해내면 조작표가 **통째로** 사라진다',
+    '조작표에 적힌 것을 다 해내면 **통째로** 사라진다',
     third.length ? `아직 남음: ${third.join(' ')}` : '전부 사라짐',
   )
-  const boxDone = await page.evaluate(
-    () => Math.round(document.getElementById('controls').getBoundingClientRect().height),
+  const boxDone = await page.evaluate(() =>
+    Math.round(document.getElementById('controls').getBoundingClientRect().height),
   )
   console.log(
     `\n     ↳ [관측] 조작표 높이 ${boxAll}px(전부 펼침 = 예전 상태) → ${boxDone}px(다 배운 뒤)` +
@@ -246,7 +270,9 @@ try {
    * 통과하는 검사보다 나쁜 것은 아무 말도 안 하는 검사이고,
    * 그보다 더 나쁜 것은 **죽으면서 성공했다고 말하는 검사**입니다.
    */
-  console.error(`\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`)
+  console.error(
+    `\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`,
+  )
   fail++
 } finally {
   await browser.close()
