@@ -1,6 +1,16 @@
 import * as THREE from 'three'
 import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
-import { RUNE_ORDER, SKILLS, WEAPONS } from './config/arsenal'
+import {
+  RUNE_ORDER,
+  SKILLS,
+  WEAPONS,
+  runningStep,
+  rollingStep,
+  RUN_COMBO,
+  ROLL_COMBO,
+  HEAVY_COMBO,
+  FINISH_COMBO,
+} from './config/arsenal'
 import {
   AWARE,
   hearDistance,
@@ -154,6 +164,8 @@ import {
   readStaminaSpent,
   resetStaminaSpent,
   dodgeBlock,
+  contextComboIndex,
+  isSprinting,
   type ControlContext,
 } from './systems/playerControl'
 import {
@@ -3854,6 +3866,47 @@ class Game {
     }
   }
 
+  /**
+   * ⚔️ **지금 기본 공격을 누르면 무엇이 나가는가.**
+   *
+   * 규칙은 playerControl `contextComboIndex` 한 곳에 있고 여기서는 **이름만**
+   * 붙입니다. 프로브가 `sprintT >= rampUp` 같은 조건을 베끼면, 상황을 하나
+   * 더 넣는 날 프로브만 옛 규칙을 씁니다.
+   */
+  debugMoveInfo(): {
+    /** 지금 누르면 나갈 기술의 이름 */
+    pending: string
+    /** 지금 휘두르고 있는 기술의 이름('' 이면 안 휘두르는 중) */
+    current: string
+    /** 🤸 구르기 공격 창의 남은 시간(초) */
+    rollWindowT: number
+    /** 🏃 달리는 중인가 */
+    sprinting: boolean
+    /** 규칙값 — 프로브가 베끼지 않게 */
+    rollWindow: number
+  } {
+    const p = this.playerEntity
+    const w = weaponOf(p)
+    const nameOf = (idx: number): string =>
+      idx === RUN_COMBO
+        ? runningStep(w).name
+        : idx === ROLL_COMBO
+          ? rollingStep(w).name
+          : idx === HEAVY_COMBO
+            ? '강타'
+            : idx === FINISH_COMBO
+              ? '처형'
+              : w.combo[Math.min(idx, w.combo.length - 1)].name
+    const st = Actor.state[p] as ActorState
+    return {
+      pending: nameOf(contextComboIndex(p, isSprinting(p))),
+      current: st === ActorState.Attack ? nameOf(Actor.comboIndex[p]) : '',
+      rollWindowT: Number(Player.rollAttackT[p].toFixed(3)),
+      sprinting: isSprinting(p),
+      rollWindow: PLAYER_CFG.contextAttack.rollWindow,
+    }
+  }
+
   /** 헤드리스 검증용 스냅샷 */
   debugState() {
     const p = this.playerEntity
@@ -4162,6 +4215,14 @@ declare global {
         refund: number
         poise: number
       }
+      /** ⚔️ 지금 좌클릭이 무엇이 되는가 — 상황 모션 검증용 */
+      moveInfo: () => {
+        pending: string
+        current: string
+        rollWindowT: number
+        sprinting: boolean
+        rollWindow: number
+      }
       /** 🤸 구르기 규칙 — 프로브·봇이 문턱과 키를 베끼지 않게 */
       dodgeInfo: () => {
         block: string
@@ -4406,6 +4467,18 @@ declare global {
         comboStamina: number
         comboSeconds: number
         comboTrauma: number
+        /** ⚔️ 상황 모션(달리기·구르기 공격)의 실제 제원 — 1타에서 파생된 값 */
+        moves: {
+          name: string
+          damage: number
+          range: number
+          lunge: number
+          windup: number
+          recovery: number
+          staminaCost: number
+        }[]
+        firstWindup: number
+        firstLunge: number
         poiseScale: number
         lastStepDamage: number
         maxRange: number
@@ -4809,6 +4882,7 @@ window.__game = {
   counterCount: () => game.debugCounterCount(),
   guardInfo: () => game.debugGuardInfo(),
   dodgeInfo: () => game.debugDodgeInfo(),
+  moveInfo: () => game.debugMoveInfo(),
   focusInfo: () => ({
     focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
     max: FOCUS.max,
@@ -5024,6 +5098,22 @@ window.__game = {
        *    프로브만 옛 식을 씁니다.
        */
       firstTwoStamina: w.combo.slice(0, 2).reduce((a, c) => a + c.staminaCost, 0),
+      /**
+       * ⚔️ **상황 모션**의 제원 — 무기마다 따로 적지 않고 1타에서 파생된 값입니다
+       * (arsenal.ts `runningStep`·`rollingStep`). 프로브가 배율을 다시 곱하지
+       * 않게 **계산된 결과**를 그대로 내보냅니다.
+       */
+      moves: [runningStep(w), rollingStep(w)].map((c) => ({
+        name: c.name,
+        damage: Number(c.damage.toFixed(1)),
+        range: Number(c.range.toFixed(2)),
+        lunge: Number(c.lunge.toFixed(2)),
+        windup: Number(c.windup.toFixed(3)),
+        recovery: Number(c.recovery.toFixed(3)),
+        staminaCost: c.staminaCost,
+      })),
+      firstWindup: w.combo[0].windup,
+      firstLunge: w.combo[0].lunge,
       dodgeCost: PLAYER_CFG.dodge.staminaCost * (w.dodgeCostScale ?? 1),
       comboSeconds: Number(
         w.combo.reduce((a, c) => a + c.windup + c.active + c.recovery, 0).toFixed(3),

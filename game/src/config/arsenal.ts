@@ -1,4 +1,4 @@
-import { FINISHER, FOCUS } from './balance'
+import { FINISHER, FOCUS, PLAYER } from './balance'
 
 /**
  * 무기와 스킬 데이터.
@@ -504,6 +504,64 @@ export function finisherStep(weapon: WeaponDef): ComboStep {
 
 /** Actor.comboIndex 에 넣는 처형 표식. */
 export const FINISH_COMBO = 251
+
+/**
+ * ⚔️ **상황 모션** — 같은 버튼이 상태에 따라 다른 기술이 됩니다.
+ *
+ * 강타·처형과 **같은 방식**으로 그 무기의 1타에서 파생시킵니다. 무기가
+ * 셋인데 상황 모션을 따로 적으면 여섯 벌을 관리하게 되고, 대검만 고치고
+ * 단검을 빠뜨리는 날이 옵니다. 파생시키면 무기의 성격(대검은 넓고 느리게,
+ * 단검은 좁고 빠르게)이 새 기술에도 저절로 따라옵니다.
+ *
+ * 근거와 배율은 balance.ts `PLAYER.contextAttack` 주석에 있습니다.
+ *
+ * ⚠️ **1타에서 파생시킵니다**(마무리가 아니라). 이 둘은 콤보를 **여는**
+ *    기술이므로, 마무리 타의 무게를 물려받으면 "달려들면 마무리 한 방"이
+ *    되어 콤보를 쌓을 이유가 사라집니다.
+ */
+function contextStep(
+  weapon: WeaponDef,
+  name: string,
+  m: {
+    damageMult: number
+    rangeMult: number
+    lungeMult: number
+    windupMult: number
+    recoveryMult: number
+    staminaMult: number
+    arcAdd: number
+  },
+): ComboStep {
+  const first = weapon.combo[0]
+  return {
+    name,
+    windup: first.windup * m.windupMult,
+    active: first.active,
+    recovery: first.recovery * m.recoveryMult,
+    damage: first.damage * m.damageMult,
+    range: first.range * m.rangeMult,
+    arcDeg: Math.max(20, first.arcDeg + m.arcAdd),
+    staminaCost: Math.round(first.staminaCost * m.staminaMult),
+    hitstop: first.hitstop,
+    trauma: first.trauma,
+    lunge: first.lunge * m.lungeMult,
+    knockback: first.knockback,
+  }
+}
+
+/** 🏃 달리며 치는 한 방 — 거리를 좁히고, 빗나가면 크게 뭅니다. */
+export function runningStep(weapon: WeaponDef): ComboStep {
+  return contextStep(weapon, '달리기 공격', PLAYER.contextAttack.running)
+}
+
+/** 🤸 굴러 넘긴 직후에만 나가는 빠른 한 방 — 갚는 손입니다. */
+export function rollingStep(weapon: WeaponDef): ComboStep {
+  return contextStep(weapon, '구르기 공격', PLAYER.contextAttack.rolling)
+}
+
+/** Actor.comboIndex 에 넣는 표식. 콤보 길이(최대 4)·강타·처형과 안 겹칩니다. */
+export const RUN_COMBO = 252
+export const ROLL_COMBO = 253
 
 export interface WeaponDef {
   id: string

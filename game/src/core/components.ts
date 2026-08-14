@@ -211,6 +211,11 @@ export const Player = defineComponent({
    */
   guardLockT: 'f32',
   /**
+   * 🤸 구르기가 끝난 뒤 **구르기 공격이 열려 있는** 남은 시간(초).
+   * 근거는 balance.ts `PLAYER.contextAttack.rollWindow`.
+   */
+  rollAttackT: 'f32',
+  /**
    * 이번 시전에서 반격 쿨다운 환급을 **이미 받았는가**(0/1).
    *
    * 광역 스킬 하나가 초록 예고 중인 적 둘을 동시에 때리면 반격이 두 번

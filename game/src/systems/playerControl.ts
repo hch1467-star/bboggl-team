@@ -4,6 +4,10 @@ import {
   SKILL_KEY_CODES,
   finisherStep,
   heavyStep,
+  runningStep,
+  rollingStep,
+  RUN_COMBO,
+  ROLL_COMBO,
   type SkillDef,
 } from '../config/arsenal'
 import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
@@ -305,7 +309,11 @@ function beginAttack(p: number, index: number, aimRot: number): void {
       ? heavyStep(weaponOf(p), Player.focusSpent[p])
       : index === FINISH_COMBO
         ? finisherStep(weaponOf(p))
-        : weaponOf(p).combo[index]
+        : index === RUN_COMBO
+          ? runningStep(weaponOf(p))
+          : index === ROLL_COMBO
+            ? rollingStep(weaponOf(p))
+            : weaponOf(p).combo[index]
   // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
   // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
   const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
@@ -331,6 +339,11 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   Actor.phase[p] = AttackPhase.Windup
   Actor.timer[p] = c.windup * TEMPO
   Actor.comboIndex[p] = index
+  /**
+   * 🤸 **쓰면 창을 닫습니다.** 안 닫으면 구르기 공격 뒤 0.35초 안의
+   * 2타까지 구르기 공격이 되어, 한 번 구른 것으로 두 번 갚게 됩니다.
+   */
+  if (index === ROLL_COMBO) Player.rollAttackT[p] = 0
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
   // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
@@ -570,6 +583,30 @@ export function dodgeBlock(p: number): DodgeBlock {
   return Stamina.value[p] >= cost ? '' : 'stamina'
 }
 
+/**
+ * ⚔️ **지금 기본 공격을 누르면 무엇이 나가는가.**
+ *
+ * ── 왜 함수로 빼는가 ────────────────────────────────────────────────
+ * 이 판단이 필요한 곳이 셋입니다 — 실제로 공격을 시작하는 자리 둘(Idle ·
+ * 후딜 탈출)과, **HUD·프로브가 읽는 자리**. 세 곳에 조건을 베끼면 상황을
+ * 하나 더 넣는 날 두 곳만 따라옵니다. 이 저장소가 이번 세션에만 세 번
+ * 데인 자리입니다(구르기 비용 · 연계 장부 · 가드 키).
+ *
+ * ⚠️ **순서가 곧 규칙입니다.** 구르기 직후가 달리기보다 앞섭니다 —
+ *    구르며 이동 입력을 유지한 채 달리는 중일 수 있고, 그때 사람이
+ *    기대하는 것은 *"방금 굴러 넘겼으니 갚는다"* 이지 돌진이 아닙니다.
+ */
+export function contextComboIndex(p: number, sprinting: boolean): number {
+  if (Player.rollAttackT[p] > 0) return ROLL_COMBO
+  if (sprinting) return RUN_COMBO
+  return 0
+}
+
+/** 지금 달리는 중인가 — 규칙을 프로브·HUD가 베끼지 않게 게임이 압니다. */
+export function isSprinting(p: number): boolean {
+  return Player.sprintT[p] >= PLAYER.sprint.rampUp
+}
+
 function beginDodge(p: number, dirX: number, dirZ: number): void {
   noteLearned('dodge')
   Actor.state[p] = ActorState.Dodge
@@ -793,6 +830,10 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
       }
       Player.guardLockT[p] = Math.max(0, Player.guardLockT[p] - dt)
+      // 🤸 구르기 공격 창. 구르는 **동안**은 안 깎습니다 — 창은 끝난 뒤에 엽니다.
+      if (Actor.state[p] !== ActorState.Dodge) {
+        Player.rollAttackT[p] = Math.max(0, Player.rollAttackT[p] - dt)
+      }
       if (Stamina.regenDelayT[p] > 0) {
         Stamina.regenDelayT[p] = Math.max(0, Stamina.regenDelayT[p] - dt)
       } else if (Stamina.value[p] < Stamina.max[p]) {
@@ -1071,7 +1112,8 @@ export function playerControlSystem(ctx: ControlContext): void {
           }
           if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
             takeBufferedAttack()
-            beginAttack(p, 0, aimRot)
+            // ⚔️ 상황이 모션을 고릅니다 — 판단은 `contextComboIndex` 한 곳에만.
+            beginAttack(p, contextComboIndex(p, isSprinting(p)), aimRot)
             break
           }
         }
@@ -1273,7 +1315,8 @@ export function playerControlSystem(ctx: ControlContext): void {
             break
           }
           if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
-            beginAttack(p, 0, aimRot)
+            // 후딜에서 빠져나오며 치는 자리 — 여기서도 같은 규칙을 씁니다.
+            beginAttack(p, contextComboIndex(p, isSprinting(p)), aimRot)
             break
           }
         }
@@ -1401,6 +1444,12 @@ export function playerControlSystem(ctx: ControlContext): void {
           Actor.state[p] = ActorState.Idle
           Player.dodgeCooldownT[p] = d.cooldown
           /**
+           * 🤸 **구르기 공격의 창을 엽니다.**
+           * 근거는 balance.ts `PLAYER.contextAttack.rollWindow` — 선입력
+           * 창(0.55초)보다 짧게 두어야 *"굴러 넘기고 갚는다"* 가 선택이 됩니다.
+           */
+          Player.rollAttackT[p] = PLAYER.contextAttack.rollWindow
+          /**
            * ── 구르기 → 다음 동작이 이어지는 자리 ─────────────────────
            *
            * 여기서 **다음 동작을 직접 시작하지 않습니다.** 버퍼를 그대로 두고
@@ -1518,6 +1567,20 @@ export function playerControlSystem(ctx: ControlContext): void {
 
 function endAttack(p: number, aimRot: number): void {
   const weapon = weaponOf(p)
+  /**
+   * ⚔️ **상황 모션은 콤보를 엽니다.** 강타·처형과 반대입니다.
+   *
+   * 달리기·구르기 공격은 그 무기의 **1타에서 파생**된 여는 기술이므로,
+   * 뒤로 2타가 이어져야 *"달려들어 붙고 이어 친다"* 가 성립합니다.
+   * 여기서 Idle 로 끊으면 두 기술 다 **한 방 치고 굳는** 손해 보는 선택이
+   * 되고, 그러면 아무도 안 씁니다.
+   *
+   * ⚠️ `comboIndex` 를 0 으로 되돌립니다 — 252/253 에 1을 더하면 콤보 표
+   *    밖으로 나가서 다음 타가 통째로 사라집니다.
+   */
+  if (Actor.comboIndex[p] === RUN_COMBO || Actor.comboIndex[p] === ROLL_COMBO) {
+    Actor.comboIndex[p] = 0
+  }
   // 강타와 처형은 **마무리**입니다. 뒤로 콤보가 이어지면 그 한 방의 무게가 사라집니다.
   if (Actor.comboIndex[p] === HEAVY_COMBO || Actor.comboIndex[p] === FINISH_COMBO) {
     Actor.state[p] = ActorState.Idle

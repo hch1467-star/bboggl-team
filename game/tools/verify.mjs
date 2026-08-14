@@ -248,6 +248,108 @@ async function main() {
      *    회피 값을 25 → 18 로 옮기는 날 이 줄만 옛 값을 들고 빨개집니다 —
      *    게임은 멀쩡한데 검사가 틀리는, 이 저장소가 제일 싫어하는 모양입니다.
      */
+    /**
+     * ── ⚔️ **상황이 모션을 바꾸는가** ────────────────────────────────
+     *
+     * 무기 하나가 가진 것이 콤보 2~4타 + 강타 + 처형뿐이라, 서 있든 달리든
+     * 막 굴렀든 좌클릭은 늘 같은 1타였습니다. 소울류의 깊이는 대부분
+     * **상태가 기술을 고르는** 데서 나옵니다(다크 소울·엘든 링의 달리기·
+     * 구르기 공격, 몬헌의 회피 파생기, 오공의 달리며 치기).
+     *
+     * ⚠️ 이름을 프로브가 정하지 않습니다 — `moveInfo().pending` 은 게임이
+     *    `contextComboIndex` 로 판단한 결과입니다. 조건을 베끼면 상황을
+     *    하나 더 넣는 날 프로브만 옛 규칙을 씁니다.
+     */
+    {
+      const mv = await page.evaluate(() => window.__game.moveInfo())
+      // ① 아무것도 안 하면 평범한 1타 — **실패할 수 있는 짝**입니다.
+      check('가만히 서서 치면 평소 1타', mv.pending === '1타', `"${mv.pending}"`)
+
+      // ② 굴러 넘긴 **직후** — 갚는 손이 열립니다.
+      const rolled = await page.evaluate(async () => {
+        const G = window.__game
+        G.press('Space')
+        G.release('Space')
+        // 구르기가 끝날 때까지 기다렸다가 **창이 살아 있는 동안** 읽습니다.
+        const deadline = G.state().elapsed + 2
+        while (G.state().elapsed < deadline) {
+          const m = G.moveInfo()
+          if (m.rollWindowT > 0) return m
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        return G.moveInfo()
+      })
+      check(
+        '구른 직후엔 **구르기 공격**이 열린다',
+        rolled.pending === '구르기 공격' && rolled.rollWindowT > 0,
+        `"${rolled.pending}" · 창 ${rolled.rollWindowT}초`,
+      )
+      // ③ 창이 지나면 도로 1타 — 창이 실제로 닫히는가.
+      const closed = await page.evaluate(async () => {
+        const G = window.__game
+        const deadline = G.state().elapsed + 2
+        while (G.state().elapsed < deadline) {
+          const m = G.moveInfo()
+          if (m.rollWindowT === 0) return m
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        return G.moveInfo()
+      })
+      check('창이 지나면 도로 1타 (상시 기술이 아니다)', closed.pending === '1타', `"${closed.pending}"`)
+
+      // ④ 달리는 중 — 거리를 좁히는 기술로 바뀝니다.
+      const running = await page.evaluate(async () => {
+        const G = window.__game
+        G.press('KeyW')
+        G.press('ShiftLeft')
+        const deadline = G.state().elapsed + 2
+        let m = G.moveInfo()
+        while (G.state().elapsed < deadline) {
+          m = G.moveInfo()
+          if (m.sprinting) break
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        const out = { ...m }
+        G.release('KeyW')
+        G.release('ShiftLeft')
+        return out
+      })
+      check(
+        '달리는 중엔 **달리기 공격**이 나간다',
+        running.sprinting && running.pending === '달리기 공격',
+        `달리는 중 ${running.sprinting} · "${running.pending}"`,
+      )
+
+      /**
+       * ⑤ **세 무기 모두** 새 기술이 자기 성격을 물려받는가.
+       *
+       * 한 무기만 통과시키면 나머지 둘을 든 사람에게는 없는 기술이 됩니다
+       * (punish.ts 가 같은 문장을 이미 적어 뒀습니다). 값을 프로브가 다시
+       * 곱하지 않고, 게임이 **계산해 준 결과**를 견줍니다.
+       */
+      const tbl = await page.evaluate(() => window.__game.weaponTable())
+      const badLunge = tbl.filter((w) => !(w.moves[0].lunge > w.firstLunge))
+      check(
+        tbl.length >= 3 && badLunge.length === 0,
+        '달리기 공격은 세 무기 모두 **1타보다 더 파고든다** (거리를 좁히는 기술)',
+        tbl.map((w) => `${w.id} ${w.moves[0].lunge}>${w.firstLunge}`).join(' · '),
+      )
+      const badFast = tbl.filter((w) => !(w.moves[1].windup < w.firstWindup))
+      check(
+        tbl.length >= 3 && badFast.length === 0,
+        '구르기 공격은 세 무기 모두 **1타보다 빠르다** (갚는 손이니까)',
+        tbl.map((w) => `${w.id} ${w.moves[1].windup}<${w.firstWindup}`).join(' · '),
+      )
+      /** 무기 성격이 살아 있는가 — 대검의 새 기술이 단검보다 느려야 합니다. */
+      const gs = tbl.find((w) => w.id === 'greatsword')
+      const dg = tbl.find((w) => w.id === 'daggers')
+      check(
+        !!gs && !!dg && gs.moves[0].windup > dg.moves[0].windup,
+        '새 기술에도 무기 성격이 따라온다 (대검이 단검보다 느리게 달려든다)',
+        `대검 ${gs?.moves[0].windup} vs 단검 ${dg?.moves[0].windup}`,
+      )
+    }
+
     const dodgeCost = await page.evaluate(() => window.__game.dodgeInfo().cost)
     check(
       `회피가 스태미나 ${dodgeCost} 소모`,
