@@ -702,6 +702,17 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
     `                 그중 누른 순간엔 못 냈던 것 ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 (겹침) · ` +
       `평균 대기 ${fmt(pick((l) => l.inputWaitAvg ?? 0), 2)}초`,
   )
+  /**
+   * ⚔️ 상황 모션이 **실제로 나간** 횟수.
+   *
+   * ⚠️ playthrough 에만 넣어 두고 벤치를 돌렸다가 40분을 태우고도 이 줄을
+   *    못 찾은 적이 있습니다(이어짐 눈금이 그랬습니다). 벤치는 자기 집계를
+   *    따로 찍으므로, 양쪽에 다 넣어야 합니다.
+   */
+  console.log(
+    `                 ⚔️ 상황 모션 — 달리기 공격 ${fmt(pick((l) => l.runAttacks ?? 0), 0)}회 · ` +
+      `구르기 공격 ${fmt(pick((l) => l.rollAttacks ?? 0), 0)}회`,
+  )
 }
 
 console.log('\n  ── 배움과 성장 ────────────────────────')

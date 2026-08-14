@@ -627,6 +627,18 @@ export const BOSS_ATTACKS: EnemyAttackDef[] = [
  * 지금 거리에서 쓸 수 있는 패턴 중 하나를 가중치로 고릅니다.
  * rand는 0~1. 시드 RNG를 넘겨 받아 **재현 가능한** 전투를 만듭니다.
  */
+/**
+ * 🎯 **지금 이 거리에서 낼 수 있는 패턴이 하나라도 있는가.**
+ *
+ * `pickAttack` 의 밴드 판정(`dist < minRange || dist > maxRange`)과 **같은 식**을
+ * 씁니다. 공격 토큰을 나눠 줄 때 이걸 안 보면 **못 쓸 적에게 자리를 주고**
+ * 그 프레임을 통째로 버립니다 — 토큰이 둘뿐이라 그 낭비가 곧 "아무도 안
+ * 때리는 시간"이 됩니다.
+ */
+export function hasAttackInBand(attacks: EnemyAttackDef[], dist: number): boolean {
+  return attacks.some((a) => a.weight > 0 && dist >= a.minRange && dist <= a.maxRange)
+}
+
 export function pickAttack(
   attacks: EnemyAttackDef[],
   dist: number,

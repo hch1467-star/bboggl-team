@@ -19,6 +19,7 @@ import {
   WIDE_ARC_DEG,
   attackAt,
   attacksFor,
+  hasAttackInBand,
   openingOf,
   pickAttack,
   type EnemyAttackDef,
@@ -456,18 +457,53 @@ export function resetChainLedger(): void {
  *
  * @returns 공격을 걸어도 되는 엔티티 집합
  */
+/**
+ * ── 🎟 **공격 허가를 나눠 줍니다** — 거리 하나로 줄을 세우지 않습니다 ──────
+ *
+ * 예전에는 `waiting.sort((a, b) => a.d - b.d)` 한 줄이었습니다. 가장 가까운
+ * 적부터 토큰을 줍니다. 그런데 `npm run encounter` 가 이렇게 찍었습니다:
+ *
+ *   [띠] 네 반지름(2·3·4.5·7m) **전부** — dragger **0회** · archer **0회**
+ *   자리한 거리 — grunt 2.1m · binder 5.8m · dragger 8.1m · archer 8.6m
+ *
+ * 끄는 자와 쏘는 자는 **자기 띠(3~12m) 한가운데**에 서고도 24초 동안 한 번도
+ * 못 휘둘렀습니다. 잡몹은 수가 많고 빨리 붙으니 늘 앞줄이고, **멀리서
+ * 싸우는 것이 정체성인** 둘은 영영 셋째·넷째였기 때문입니다.
+ *
+ * 기둥 2("색마다 다른 정답")는 색이 **나와야** 성립합니다. 안 나오는 색은
+ * 배치의 문제가 아니라 **규칙상 없는 색**입니다.
+ *
+ * ── 다른 게임은 이 자리를 어떻게 두는가 ───────────────────────────
+ * · **배트맨: 아캄 / 섀도우 오브 모르도르** — 둘러싼 적에게 공격 허가를
+ *   **돌아가며** 줍니다. 특수 적을 일부러 앞세워 플레이어가 **다른 대응**을
+ *   보게 만듭니다. 같은 잡기만 스무 번 오면 배울 것이 없으니까요.
+ * · **헤일로**(전투 지휘자) — 공격 슬롯을 배분하고 **회전**시킵니다.
+ *   한 부류의 독점을 막는 것이 명시적 목표입니다.
+ * · **소울류** — 적마다 망설임 타이머가 따로 돌아, 가장 가까운 놈이 무한히
+ *   우선권을 갖지 않습니다.
+ *
+ * 공통점은 하나입니다 — **거리는 우선순위의 전부가 아닙니다.**
+ *
+ * 그래서 둘을 바꿉니다:
+ *   ① **지금 낼 수 있는 적만** 줄에 세웁니다(`hasAttackInBand`). 못 쓸 적에게
+ *      자리를 주면 그 프레임이 통째로 버려집니다 — 토큰이 둘뿐이라 그
+ *      낭비가 곧 "아무도 안 때리는 시간"이 됩니다.
+ *   ② **오래 기다린 순서**로 줍니다(`Enemy.waitT`). 거리는 **동점일 때만**
+ *      봅니다. 이게 아캄·헤일로의 회전이고, 잡몹이 늘 앞줄인 구조를 끊습니다.
+ */
 function grantAttackTokens(
   ids: Int32Array | Uint32Array | number[],
   count: number,
   px: number,
   pz: number,
+  dt: number,
 ): Set<number> {
   const granted = new Set<number>()
 
   // 이미 공격 중인 적이 토큰을 쥐고 있는 것으로 칩니다.
   let busy = 0
   let wideBusy = 0
-  const waiting: { e: number; d: number }[] = []
+  const waiting: { e: number; d: number; w: number }[] = []
   for (let i = 0; i < count; i++) {
     const e = ids[i]
     if (!isAlive(e) || Actor.state[e] === ActorState.Dead) continue
@@ -479,7 +515,19 @@ function grantAttackTokens(
     }
     if (Enemy.aggro[e] === 0) continue
     if (Actor.state[e] === ActorState.Stagger) continue
-    waiting.push({ e, d: Math.hypot(Transform.x[e] - px, Transform.z[e] - pz) })
+    const d = Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
+    /**
+     * ⏳ **기다린 시간은 줄에 서 있는 동안만 흐릅니다.**
+     * 자고 있거나 굳어 있는 적까지 세면, 깨어나자마자 맨 앞으로 오게 됩니다.
+     */
+    Enemy.waitT[e] += dt
+    /**
+     * ① **지금 낼 수 있는 적만** 줄에 세웁니다. 밴드 판정은 `pickAttack` 과
+     *    같은 식을 씁니다(`hasAttackInBand`) — 두 곳이 다른 식을 쓰면
+     *    "토큰은 받았는데 못 쓰는" 적이 조용히 생깁니다.
+     */
+    if (!hasAttackInBand(attacksFor(Enemy.kind[e]), d)) continue
+    waiting.push({ e, d, w: Enemy.waitT[e] })
   }
 
   // 광역 여유분은 **항상 먼저** 갱신합니다.
@@ -491,7 +539,12 @@ function grantAttackTokens(
   let free = MAX_CONCURRENT_ATTACKERS - busy
   if (free <= 0) return granted
 
-  waiting.sort((a, b) => a.d - b.d)
+  /**
+   * ② **오래 기다린 순서.** 거리는 **동점일 때만** 봅니다(0.25초 안이면
+   *    같은 차례로 칩니다 — 부동소수 차이로 순서가 매 프레임 흔들리면
+   *    아무도 못 내는 상태가 됩니다).
+   */
+  waiting.sort((a, b) => (Math.abs(b.w - a.w) > 0.25 ? b.w - a.w : a.d - b.d))
   for (const w of waiting) {
     if (free <= 0) break
     granted.add(w.e)
@@ -560,6 +613,14 @@ function commitAttack(
 ): void {
   const list = attacksFor(kind)
   const atk = list[index]
+  /**
+   * ⏳ **차례를 썼으면 대기 시간을 비웁니다.**
+   *
+   * 안 비우면 한 번 밀린 적의 `waitT` 가 계속 자라서 **영원히 앞줄**을
+   * 차지하고, 회전이 아니라 새로운 독점이 됩니다 — 고치려던 것과 같은
+   * 모양이 반대편에 생기는 셈입니다.
+   */
+  Enemy.waitT[e] = 0
   Enemy.attackIndex[e] = index
   Actor.state[e] = ActorState.Attack
   Actor.phase[e] = AttackPhase.Windup
@@ -852,7 +913,7 @@ export function enemyAiSystem(
   const ids = enemies.run()
 
   if (commitGapT > 0) commitGapT = Math.max(0, commitGapT - dt)
-  const tokens = grantAttackTokens(ids, enemies.count, px, pz)
+  const tokens = grantAttackTokens(ids, enemies.count, px, pz, dt)
 
   for (let i = 0; i < enemies.count; i++) {
     const e = ids[i]
