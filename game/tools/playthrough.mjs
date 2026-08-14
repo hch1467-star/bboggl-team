@@ -446,6 +446,8 @@ try {
      * 막다른 길입니다. 세면 갈립니다.
      */
     const greenSeen = new Set()
+    /** 🛡 저스트 가드를 **시도한** 횟수. 성공 수는 게임이 셉니다(guardInfo().count). */
+    let guardTries = 0
     let greenEvents = 0
     let greenAnswerable = 0
     /** 예고 순간 **정면**에 있었던 횟수 / 정면 + 스킬까지 갖췄던 횟수. */
@@ -1236,6 +1238,49 @@ try {
           continue
         }
 
+        /**
+         * 🛡 **저스트 가드 — 🔴 직격에만, 그리고 구르기보다 먼저.**
+         *
+         * ── 왜 봇에게 가르치는가 ────────────────────────────────────
+         * 이 저장소가 기둥 3 에서 한 번 크게 데었습니다: 봇에 **돌아가는
+         * 가지가 없어서** 백어택이 6~7%에 머물렀고, 여러 라운드 동안
+         * *"기둥 3 이 왜 안 돌지"* 를 게임 쪽에서 찾았습니다. 없는 행동은
+         * 아무리 보상을 붙여도 안 일어나고, 그러면 그 기둥은 **영영
+         * 측정되지 않습니다.**
+         *
+         * 저스트 가드도 똑같은 자리에 있었습니다 — 프로브(`npm run parry`)는
+         * 되는 것을 확인했지만, 봇이 모르면 **앞으로의 모든 밸런스 숫자가
+         * 플레이어의 답 하나를 빼놓고** 나옵니다.
+         *
+         * ── 커밋이 필요합니다 ──────────────────────────────────────
+         * 창은 0.18초인데 예고는 0.55초입니다. 예고를 보자마자 구르면
+         * 창이 오기 전에 이미 굴러 있습니다 — 그래서 가드는 **영영 안
+         * 나옵니다.** 사람도 같습니다: 막기로 마음먹으면 그때까지 **기다려야**
+         * 합니다. 그 기다림이 곧 위험이고, 그게 이 기술의 값입니다.
+         *
+         * 다만 **아무 때나 커밋하지는 않습니다.** 남은 예고가 창의 2.5배
+         * 안으로 들어왔을 때만 붙잡습니다. 그보다 이르면 평소대로 구릅니다 —
+         * 초보자가 "빨간 게 보이자마자 막기 자세"를 잡지는 않습니다.
+         */
+        const gi = G.guardInfo()
+        const strike = threats.find(
+          (t) => t.winding && t.intent === 0 && t.dist < 4.5 && t.timer <= gi.window * 2.5,
+        )
+        if (strike && gi.lockT <= 0) {
+          guardTries++
+          // 등지고는 못 막습니다(combat.ts) — 조준을 맞춥니다.
+          G.aimAtWorld(strike.x, strike.z)
+          if (strike.timer <= gi.window && gi.windowT <= 0) {
+            markAct('가드')
+            tap('KeyV')
+          } else {
+            // 창이 올 때까지 **기다립니다.** 이 기다림이 이 기술의 값입니다.
+            markAct('가드대기')
+          }
+          await sleep()
+          continue
+        }
+
         // 그 밖의 예고는 구릅니다. 4색을 구분하지 못하는 봇이라
         // **가장 단순한 대응**만 합니다 — 이게 초보자의 하한선입니다.
         const danger = threats.some((t) => t.winding && t.intent !== 4 && t.dist < 6)
@@ -1990,6 +2035,13 @@ try {
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,
       bossWeaponLevel,
+      /**
+       * 🛡 시도와 성공을 **나눠** 적습니다. 하나로 합치면 "안 나온다"가
+       * 시도를 안 한 것인지 못 맞춘 것인지 구분이 안 되고, 처방이 정반대입니다
+       * (전자는 봇/안내, 후자는 창 길이).
+       */
+      guardTries,
+      guards: G.guardInfo().count,
       greenSwung: G.runStats().greenSwung,
       greenDied: G.runStats().greenDied,
       greenCountered: G.runStats().greenCountered,
@@ -2400,7 +2452,9 @@ try {
       ` · 답할 스킬이 있던 때 ${log.greenAnswerable}회` +
       ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회\n` +
       `             예고가 끝난 방식 — 휘두름까지 ${log.greenSwung ?? 0}회 · 적이 죽음 ${log.greenDied ?? 0}회` +
-      ` · **반격으로 끊김 ${log.greenCountered ?? 0}회** · 그 밖의 끊김 ${log.greenBroken ?? 0}회`,
+      ` · **반격으로 끊김 ${log.greenCountered ?? 0}회** · 그 밖의 끊김 ${log.greenBroken ?? 0}회\n` +
+      `             🛡 저스트 가드 — 붙잡은 🔴 ${log.guardTries ?? 0}회 · **성공 ${log.guards ?? 0}회**` +
+      ` (${Math.round(((log.guards ?? 0) / Math.max(1, log.guardTries ?? 0)) * 100)}%)`,
   )
   /**
    * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ────────────────────────

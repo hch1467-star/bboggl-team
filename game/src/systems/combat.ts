@@ -719,7 +719,23 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       Player.guardT[t] > 0 &&
       !attackerIsPlayer &&
       hasComponent(Enemy, a) &&
-      attackAt(Enemy.kind[a], Enemy.attackIndex[a]).intent === AttackIntent.Strike
+      attackAt(Enemy.kind[a], Enemy.attackIndex[a]).intent === AttackIntent.Strike &&
+      /**
+       * 🛡 **등지고는 못 막습니다.**
+       *
+       * 처음엔 방향을 안 봤습니다. 봇에게 이 동사를 가르치려고 코드를 다시
+       * 읽다가 구멍이 보였습니다 — 방향이 없으면 **도망치면서 아무 쪽으로나
+       * 눌러도 되는 답**이 되고, 그러면 "정면에서 받아낸다"는 가드의 정체성이
+       * 사라집니다. 반격(🟢)은 이미 정면만 인정하는데 가드만 안 그랬습니다.
+       *
+       * 세키로·Lies of P·Wo Long 의 가드는 전부 **방향이 있습니다.** 그게
+       * 가드를 회피와 다른 기술로 만드는 절반입니다 — 회피는 몸을 빼는 것이고
+       * 가드는 **맞서는 것**입니다.
+       *
+       * 판정은 반격과 **같은 함수**를 씁니다. 둘이 다른 식을 쓰면 "정면"의
+       * 뜻이 두 개가 되어, 한쪽을 고치는 날 조용히 갈라집니다.
+       */
+      !isBehindPoint(Transform.x[a], Transform.z[a], Transform.x[t], Transform.z[t], Transform.rotY[t])
     ) {
       /**
        * 창을 **닫습니다.** 안 닫으면 남은 창 동안 두 번째·세 번째 공격까지

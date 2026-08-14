@@ -294,6 +294,41 @@ try {
   check(whiff.spent > 0, '   헛치면 기력을 낸다', `-${whiff.spent.toFixed(0)}`)
 
   /**
+   * ── ③-2 등지고는 못 막는다 ──────────────────────────────────────
+   *
+   * ①과 **같은 상황에서 방향만 뒤집습니다.** 그래서 이 검사가 빨개지면
+   * 원인이 방향 하나로 좁혀집니다(다른 조건은 전부 같으므로).
+   *
+   * 왜 필요한가: 방향이 없으면 도망치면서 아무 쪽으로나 눌러도 되는 답이
+   * 되고, "정면에서 받아낸다"는 가드의 정체성이 사라집니다. 세키로·
+   * Lies of P·Wo Long 의 가드는 전부 방향이 있습니다.
+   */
+  const backTurned = await page.evaluate(async () => {
+    const G = window.__game
+    const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 1.8)
+    const hp0 = G.state().player.hp
+    const c0 = G.guardInfo().count
+    G.forceAttack(e, idx)
+    // 적을 **등지게** 조준을 반대로 돌립니다. 나머지는 ①과 같습니다.
+    const es = G.enemyInfo(e)
+    const ps = G.state().player
+    G.aimAtWorld(ps.x - (es.x - ps.x) * 4, ps.z - (es.z - ps.z) * 4)
+    await window.__t.until(() => {
+      const i = G.enemyInfo(e)
+      return !!i && i.winding && i.timer <= window.__game.guardInfo().window * 0.6
+    }, 4)
+    G.press('KeyV')
+    G.release('KeyV')
+    await window.__t.runFor(0.8)
+    return { gained: G.guardInfo().count - c0, hurt: hp0 - G.state().player.hp }
+  })
+  check(
+    backTurned.gained === 0,
+    '③-2 **등지고는 못 막는다** (가드는 맞서는 기술입니다)',
+    `가드 성립 ${backTurned.gained}회 · 피해 ${backTurned.hurt}`,
+  )
+
+  /**
    * ── ④ 만능 정답이 아니다 ────────────────────────────────────────
    *
    * **이 프로브에서 가장 중요한 검사입니다.** 가드가 아무 색에나 통하면
