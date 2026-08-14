@@ -123,6 +123,24 @@ export interface SidestepRow {
 
 const RAD2DEG = 180 / Math.PI
 
+/**
+ * ⏱ **이 색의 정답이 「타이밍」인가.**
+ *
+ * 무적 프레임으로 넘기는 색(🔴 직격 · 🔵 속박)만 참입니다. 이 둘은
+ * *"언제 누르는가"* 가 전부이고, 나머지 셋은 **미리** 움직여야 합니다
+ * (🟡 걸어 나가기 · 🟣 사거리 밖 · 🟢 예고 중에 반격).
+ *
+ * 어디에 쓰는가: 「지금」 신호(visuals.ts)를 **이 색들에만** 켭니다.
+ * 🟡🟣 에 마지막 순간 신호를 켜면 **이미 늦은 때 알려 주는 것**이라
+ * 도움이 아니라 거짓말이 됩니다.
+ *
+ * ⚠️ 색 번호를 새로 적지 않고 `ANSWER_OF` 를 그대로 씁니다 — 어떤 색이
+ *    어떤 답을 갖는지는 이 파일에 한 번만 적혀 있어야 합니다.
+ */
+export function isTimingAnswer(intent: AttackIntent): boolean {
+  return ANSWER_OF[intent] === 'iframe'
+}
+
 const KINDS: EnemyKind[] = Object.keys(ENEMY_DEFS).map((k) => Number(k) as EnemyKind)
 
 /**

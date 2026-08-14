@@ -119,9 +119,12 @@ try {
          */
         await window.__t.until(() => !G.enemyInfo(e)?.attacking, 3)
         // 이 적의 공격 목록에서 그 id 의 자리를 **게임에게** 물어봅니다.
-        const idx = G.punishTable()
-          .filter((r) => r.attackId === attackId)
-          .map((r) => r.index)[0]
+        // (`attackId` 가 null 이면 적이 스스로 고르게 두는 절입니다.)
+        const idx = attackId
+          ? G.punishTable()
+              .filter((r) => r.attackId === attackId)
+              .map((r) => r.index)[0]
+          : -1
         return { e, idx }
       },
     }
@@ -377,6 +380,106 @@ try {
     `순감소 -${midSwing.rich.spent} (회복분이 상쇄된 값)`,
   )
   check(!midSwing.poor.opened, '   **기력이 없으면 안 열린다** (그래야 값이 값입니다)')
+
+  /**
+   * ── ③-4 ⏱ **「지금」 신호** — 언제는 박자가, 무엇은 색이 ──────────
+   *
+   * ── 왜 이 절이 필요한가 ───────────────────────────────────────
+   * 자동 플레이에서 붙잡은 🔴 **26회 중 성공 4회**였습니다. 창이 0.18초인데
+   * 화면이 알려 주는 것은 **차오르는 그라데이션**뿐입니다 — *"점점
+   * 위험해진다"* 는 말하지만 ***"지금"*** 은 말하지 않습니다.
+   *
+   * ⚠️ **느낌은 봇으로 못 잽니다.** 봇은 숫자를 읽지 화면을 안 봅니다.
+   *    그래서 여기서 재는 것은 *"이 신호가 사람에게 도움이 되는가"* 가
+   *    **아니라** *"실제로 그려졌는가 · 제때 켜졌는가 · 켜져야 할 색에만
+   *    켜졌는가"* 입니다. `npm run contrast` 가 색 대비를 **실제로 그려진
+   *    픽셀**로 재는 것과 같은 자리입니다.
+   */
+  const beat = await page.evaluate(async () => {
+    const G = window.__game
+    /**
+     * ⚠️ **이름표는 관측된 것에서 가져옵니다.**
+     *
+     * 처음엔 `duel('grunt','grunt_sweep')` 로 부르고 그 이름으로 결과를
+     * 적었는데, 적이 스스로 고른 것은 `grunt_jab` 이었습니다. 그래서
+     * *"🟡 인데 타이밍색 true"* 라는 말이 안 되는 줄이 나왔습니다 —
+     * **요청한 것의 이름표를 붙이고 실제로 일어난 것을 재고** 있었습니다.
+     *
+     * 잡몹은 공격이 둘(🔴 찌르기 · 🟡 휩쓸기)뿐이므로, 한 마리를 오래
+     * 지켜보면 둘 다 나옵니다. 그리고 `telegraphs()` 가 **자기가 무엇인지
+     * 말해 주므로** 이름표를 제가 붙일 이유가 없습니다.
+     */
+    const win = G.guardInfo().window
+    const byId = {}
+    /**
+     * ⚠️ **공격이 하나뿐인 적**을 씁니다.
+     *
+     * 잡몹으로 22초를 지켜봤더니 🔴 찌르기만 나왔고, *"아닌 색"* 표본이
+     * 0이라 그 검사가 **공짜로 초록**이 됐습니다(게이트가 잡았습니다).
+     * 굴림에 맡기면 표본이 안 모이는 판이 생깁니다.
+     *
+     * 얽는 자는 🔵 하나, 끄는 자는 🟣 하나뿐입니다(enemies.ts — 색 하나를
+     * 확실히 가르치라고 그렇게 만든 적들입니다). 그래서 **반드시** 두 갈래가
+     * 다 모입니다. 덤으로 🔴 이 아닌 **다른 타이밍 색(🔵)** 을 재게 됩니다.
+     */
+    for (const [kind, dist] of [
+      ['binder', 4.0],
+      ['dragger', 6.0],
+    ]) {
+      const { e } = await window.__t.duel(kind, null, dist)
+      const dl = G.state().elapsed + 14
+      while (G.state().elapsed < dl) {
+        const t = G.telegraphs().find((x) => x.entity === e)
+        if (t) {
+          const r = (byId[t.attackId] ??= { timing: t.timing, inside: [], outside: [] })
+          ;(t.left <= win ? r.inside : r.outside).push(t.opacity)
+        }
+        await new Promise((r2) => setTimeout(r2, 8))
+      }
+    }
+    return Object.entries(byId).map(([atk, r]) => ({
+      atk,
+      timing: r.timing,
+      // ⚠️ 빈 배열이면 **없다고 말합니다.** 0 으로 채우면 "어둡다"로 읽힙니다.
+      inWindow: r.inside.length ? Math.max(...r.inside) : null,
+      outWindow: r.outside.length ? Math.max(...r.outside) : null,
+      nIn: r.inside.length,
+      nOut: r.outside.length,
+    }))
+  })
+  for (const b of beat) {
+    console.log(
+      `    ${b.atk} — 타이밍색 ${b.timing} · 창 밖 최대 ${b.outWindow}(${b.nOut}표본)` +
+        ` → 창 안 최대 ${b.inWindow}(${b.nIn}표본)`,
+    )
+  }
+  const timing = beat.filter((b) => b.timing && b.nIn > 0 && b.nOut > 0)
+  const nonTiming = beat.filter((b) => !b.timing && b.nIn > 0)
+  check(
+    timing.length > 0 && nonTiming.length > 0,
+    '③-4 타이밍 색과 아닌 색을 **둘 다** 관측했다 (측정이 성립했다)',
+    beat.map((b) => `${b.atk}(${b.timing ? '타이밍' : '아님'})`).join(' · ') || '아무것도 못 봄',
+  )
+  /**
+   * ⚠️ **처음에 세운 검사가 틀렸습니다.** *"타이밍이 아닌 색은 창 안에서
+   *    안 밝아진다"* 로 잡았는데 빨갰습니다 — 🟡 도 끝으로 갈수록 밝아지기
+   *    때문입니다. 그건 제 신호가 아니라 **원래 있던 그라데이션**
+   *    (`0.16 + p×0.72`, 천장 0.88)입니다. 검사가 신호와 그라데이션을 한
+   *    칸에 뭉쳐 놓고 있었습니다.
+   *
+   *    가르는 것은 **1.0 에 닿는가** 입니다 — 그라데이션은 0.88 에서 멈추고
+   *    「지금」 신호만 끝까지 밉니다.
+   */
+  check(
+    timing.every((b) => b.inWindow >= 0.999),
+    '   타이밍 색은 창 안에서 **끝까지 밝아진다** (「지금」이 보인다)',
+    timing.map((b) => `${b.atk} ${b.outWindow}→${b.inWindow}`).join(' · '),
+  )
+  check(
+    nonTiming.every((b) => b.inWindow < 0.999),
+    '   아닌 색은 끝까지 안 갑니다 (걸어 나가는 색에 마지막 순간 신호는 **거짓말**입니다)',
+    nonTiming.map((b) => `${b.atk} 최대 ${b.inWindow}`).join(' · '),
+  )
 
   /**
    * ── ④ 만능 정답이 아니다 ────────────────────────────────────────

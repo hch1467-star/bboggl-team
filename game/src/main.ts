@@ -3762,6 +3762,11 @@ class Game {
     }))
   }
 
+  /** ⏱ 예고 도형이 지금 화면에 어떻게 그려져 있는가 (visuals `debugTelegraphs`). */
+  debugTelegraphs(): ReturnType<Visuals['debugTelegraphs']> {
+    return this.visuals.debugTelegraphs()
+  }
+
   /** 🛡 저스트 가드 — 지금 상태와 **규칙값**(balance.ts `GUARD`). */
   debugGuardInfo(): {
     windowT: number
@@ -3902,6 +3907,15 @@ declare global {
       setPaused: (paused: boolean) => void
       /** 지금 검격 궤적이 떠 있는가 — 캡처 타이밍을 페이지 안에서 잡기 위한 것. */
       swingVisible: () => boolean
+      /** ⏱ 예고 도형이 지금 **화면에 어떻게 그려져 있는가** (visuals `debugTelegraphs`) */
+      telegraphs: () => {
+        entity: number
+        attackId: string
+        intent: number
+        timing: boolean
+        left: number
+        opacity: number
+      }[]
       /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
       spawnTestEnemy: (x: number, z: number, rotY?: number, asleep?: boolean) => number
       freezeEnemies: (frozen: boolean) => void
@@ -4468,6 +4482,7 @@ window.__game = {
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
   swingVisible: () => game.debugSwingVisible(),
+  telegraphs: () => game.debugTelegraphs(),
   spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),

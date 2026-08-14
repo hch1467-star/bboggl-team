@@ -1,8 +1,9 @@
 import * as THREE from 'three'
 import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
-import { AWARE, BOSS, COMBAT, FOCUS, GRUNT, PLAYER, TREASURE, hearDistance } from '../config/balance'
+import { AWARE, BOSS, COMBAT, FOCUS, GRUNT, GUARD, PLAYER, TREASURE, hearDistance } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
+import { isTimingAnswer } from '../config/punish'
 import { ENEMY_DEFS, enemyDef } from '../config/enemies'
 import {
   Actor,
@@ -945,6 +946,43 @@ export class Visuals {
               v.telegraphMat.opacity *= 0.55 + 0.45 * Math.abs(Math.sin(time.elapsed * 11))
             }
             v.telegraphMat.color.setHex(INTENT_COLOR[def.intent])
+            /**
+             * ── ⏱ **「지금」 — 타이밍으로 푸는 색에만** ────────────────
+             *
+             * ── 왜 필요했나 (잰 숫자) ─────────────────────────────────
+             * 저스트 가드를 넣고 자동 플레이로 재 보니, 붙잡은 🔴 **26회 중
+             * 성공 4회**였습니다. 창이 0.18초인데 화면이 알려 주는 것은
+             * **차오르는 그라데이션**뿐입니다. 그라데이션은 *"점점 위험해진다"*
+             * 는 말하지만 ***"지금"*** 은 말하지 않습니다.
+             *
+             * 기둥 2의 합격 기준은 *"죽었을 때 **내가 못 피했네** 라고 말해야
+             * 한다"* 입니다. 0.18초짜리 답에 시각 신호가 없으면 플레이어는
+             * **"언제 눌러야 하는지 몰랐네"** 라고 말하게 되고, 그건 이 문서가
+             * 금지한 쪽입니다.
+             *
+             * ── 참고한 게임들 ────────────────────────────────────────
+             * · **세키로** — 적의 공격에 붙은 짧은 소리. 색이 아니라 **박자**를
+             *   알려 주고, 그래서 모든 공격에 같은 소리를 씁니다.
+             * · **Lies of P · Wo Long** — 임박 순간의 번쩍임.
+             * · **Hi-Fi Rush** — 박자를 아예 게임의 문법으로 만듭니다.
+             *
+             * 공통점: **"무엇"은 색이, "언제"는 박자가** 말합니다. 둘을 한
+             * 신호에 섞으면 색을 안 읽어도 되는 게임이 됩니다.
+             *
+             * ⚠️ **타이밍으로 푸는 색에만 켭니다**(`isTimingAnswer`).
+             *    🟡 광역은 걸어 나가야 하고 🟣 강제이동은 사거리 밖에 있어야
+             *    합니다 — 그 둘에 마지막 순간 신호를 주면 **이미 늦은 때
+             *    알려 주는 것**이라 도움이 아니라 거짓말입니다.
+             *    🟢 반격은 예고 내내 깜빡이는 자기 문법이 이미 있습니다.
+             *
+             * 창의 크기는 **게임이 정한 값**을 씁니다(`GUARD.window`). 여기에
+             * 0.18 을 적어 두면 값을 바꾸는 날 신호만 옛 자리에 남습니다.
+             */
+            if (isTimingAnswer(def.intent) && Actor.timer[e] <= GUARD.window) {
+              // 색은 그대로 두고 **밝기만** 밀어 올립니다 — 색이 바뀌면
+              // "무엇"이 흔들려서, 언제만 알려 주려던 신호가 색을 덮습니다.
+              v.telegraphMat.opacity = 1
+            }
           } else {
             // 터지는 순간만 흰색으로 날립니다 — "지금이 판정"이 색과 무관하게 읽혀야 합니다.
             v.telegraphMat.opacity = 0.8
@@ -1050,6 +1088,53 @@ export class Visuals {
    *    통째로 안 그려도 통과합니다. 그래서 **메시의 실제 위치·투명도**를
    *    그대로 돌려줍니다.
    */
+  /**
+   * ⏱ **예고 도형이 지금 화면에 어떻게 그려져 있는가.**
+   *
+   * 「지금」 신호는 **느낌**이라 봇으로는 못 잽니다. 하지만 *"그 신호가
+   * 실제로 그려졌는가 · 제때 켜졌는가 · 켜져야 할 색에만 켜졌는가"* 는
+   * 잴 수 있습니다. 색 대비를 `npm run contrast` 가 **실제로 그려진 픽셀**로
+   * 재는 것과 같은 자리입니다.
+   *
+   * ⚠️ 판단(`timing`)은 게임이 합니다 — 프로브가 색 번호를 베껴 두면
+   *    색을 하나 더 넣는 날 조용히 틀립니다.
+   */
+  debugTelegraphs(): {
+    entity: number
+    attackId: string
+    intent: number
+    /** 이 색의 정답이 타이밍인가 (config/punish.ts `isTimingAnswer`) */
+    timing: boolean
+    /** 남은 예고 시간(초) */
+    left: number
+    /** 지금 그려진 투명도 — 「지금」 신호가 켜지면 1이 됩니다 */
+    opacity: number
+  }[] {
+    const out: {
+      entity: number
+      attackId: string
+      intent: number
+      timing: boolean
+      left: number
+      opacity: number
+    }[] = []
+    for (const [e, v] of this.items.entries()) {
+      if (!v.telegraph?.visible || !v.telegraphMat) continue
+      if (!hasComponent(Enemy, e)) continue
+      if (Actor.state[e] !== ActorState.Attack || Actor.phase[e] !== AttackPhase.Windup) continue
+      const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
+      out.push({
+        entity: e,
+        attackId: def.id,
+        intent: def.intent,
+        timing: isTimingAnswer(def.intent),
+        left: Number(Actor.timer[e].toFixed(3)),
+        opacity: Number(v.telegraphMat.opacity.toFixed(3)),
+      })
+    }
+    return out
+  }
+
   debugPoiseBars(): {
     entity: number
     /** 눈금이 바의 몇 % 지점에 있는가(0=왼쪽 끝, 1=오른쪽 끝) */
