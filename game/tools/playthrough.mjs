@@ -305,6 +305,8 @@ try {
     }
     /** 소비처로 가는 여행이 **어느 조건에서** 막혔는가(프레임 단위). */
     const tripBlock = { noFire: 0, cantBuy: 0, noGrowth: 0, cooling: 0, open: 0 }
+    /** 🧾 12m 안으로 지나친 소비처 — 그때의 지갑까지(위 설계 노트). */
+    const passBy = new Map()
     /**
      * 마지막으로 화톳불에 닿았을 때의 지갑. **늘어났을 때만** 다시 갑니다.
      *
@@ -1866,6 +1868,38 @@ try {
        */
       const passingStep = fire ? G.pathStep(fire.x, fire.z) : null
       const passingBy = !!passingStep && passingStep.dist <= 12
+      /**
+       * ── 🧾 **지나친 소비처를 그 순간의 지갑과 함께 적습니다** ──────────
+       *
+       * 세 번 고치고 세 번 중앙값에 부정당했습니다. 매번 한 판은 좋아졌고
+       * 3판은 `무기 강화 0.0` 이었습니다. 남은 가설이 둘인데 **처방이
+       * 정반대**입니다:
+       *
+       *   · 소비처를 **안 지나간다**        → 지도/동선 문제
+       *   · 지나가는데 **그때 돈이 없다**   → 경제(수입 시점) 문제
+       *
+       * `못삼 40% (19~91%)` 와 `남은 불티 390` 은 **둘 다와 어울립니다** —
+       * 그래서 이 둘을 가르는 자료가 지금 없습니다. 네 번째로 추측하는 대신
+       * **지나간 순간**을 적습니다: 어느 소비처를, 몇 m 로, 그때 지갑이
+       * 얼마였는지. 이 저장소가 매번 배운 것 그대로입니다 — 재기 전의
+       * 설명은 결론이 아닙니다.
+       */
+      if (passingBy && fire) {
+        const key = `${Math.round(fire.x)},${Math.round(fire.z)}`
+        const prev = passBy.get(key)
+        // 한 번 지나갈 때 한 번만 적습니다 — 프레임마다 적으면 "머문 시간"이 됩니다.
+        if (!prev || now() - prev.at > 8) {
+          passBy.set(key, {
+            at: Number(now().toFixed(1)),
+            dist: Math.round(passingStep.dist),
+            embers: em.embers,
+            stones: wu.stones,
+            canBuy: !!canUpgrade,
+            anvil: fire.anvil === true,
+            n: (prev?.n ?? 0) + 1,
+          })
+        }
+      }
 
       if (!fire) tripBlock.noFire++
       else if (!canUpgrade) tripBlock.cantBuy++
@@ -2151,9 +2185,43 @@ try {
              */
             visit.blockedBy = G.weaponUpgradeInfo().blockedBy ?? ''
           }
-          // 무기를 사고 **남은 것**으로 성수병을 봅니다(값은 결제 후에 다시 읽습니다).
+          /**
+           * ── 💰 **정련석을 쥐고 있으면 무기 몫을 남겨 둡니다** ──────────
+           *
+           * 새로 붙인 장부가 이 한 줄로 갈랐습니다:
+           *
+           *   `37.3초 화톳불 — 불티 72 · 정련석 1 · 성수병 강화 · 무기 불티 부족(12/80)`
+           *   끝: 불티 280 · 정련석 누적 6 · **무기 강화 0회**
+           *
+           * 무기(80)에 8이 모자란 상태에서 성수병(60)이 나갔고, 남은 것은
+           * **12** 였습니다. 그 뒤로 이 판은 `못삼 96%` 로 끝났습니다.
+           * 정련석 6개가 끝까지 안 쓰인 채 남습니다.
+           *
+           * 순서는 이미 무기 먼저로 뒤집어 뒀는데(위 설계 노트), **순서만으로는
+           * 부족했습니다** — 무기를 지금 못 사면 순서가 무의미하고, 싼 쪽이
+           * 그대로 돈을 가져갑니다.
+           *
+           * ⚠️ 이것을 **게임 문제로 오해할 뻔했습니다.** 이 저장소가 적어 둔
+           *    *"화폐 하나로 두 축을 사면 싼 쪽이 비싼 쪽을 굶깁니다"* 가
+           *    떠올라서 밸런스를 가르려 했는데, 게임은 **선택을 주고
+           *    있습니다.** 먼저 써 버리는 것은 봇입니다. 사람은 정련석을
+           *    쥐고 있으면 60짜리를 사서 80짜리를 못 사게 만들지 않습니다.
+           *    소울류에서 다음 강화를 눈앞에 두고 소모품에 소울을 태우는
+           *    사람은 없습니다.
+           *
+           * 규칙: **정련석이 다음 단계에 충분하면**, 그 단계의 불티 몫을
+           * 남기고 남는 것으로만 성수병을 봅니다. 정련석이 모자라면 무기는
+           * 어차피 못 사므로 아낄 이유가 없습니다.
+           */
           const em2 = G.emberInfo()
-          if (em2.upgradeCost > 0 && em2.embers >= em2.upgradeCost) {
+          const w3 = G.weaponUpgradeInfo()
+          const reserve =
+            w3.nextCost > 0 && w3.stones >= w3.nextStoneCost ? w3.nextCost : 0
+          if (reserve > 0) visit.reserved = reserve
+          if (
+            em2.upgradeCost > 0 &&
+            em2.embers - reserve >= em2.upgradeCost
+          ) {
             tap('KeyV')
             visit.vial = await applied(() => G.vialInfo().max, beforeVial)
           }
@@ -2356,6 +2424,7 @@ try {
       tripBlock,
       // 무기 강화가 **어느 갈림길에서 멈췄는지** — 게임이 직접 센 값.
       upgradeTries: G.upgradeTries?.() ?? null,
+      passBy: [...passBy.entries()].map(([k, v]) => ({ where: k, ...v })),
       boss: {
         fought: bossSeen,
         // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
@@ -2639,6 +2708,17 @@ try {
       `             소비처 여행이 막힌 곳 — 소비처없음 ${pc(t.noFire)} · 못삼 ${pc(t.cantBuy)}` +
         ` · 지갑안늘어 ${pc(t.noGrowth)} · 쿨다운 ${pc(t.cooling)} · **열림 ${pc(t.open)}**`,
     )
+  }
+  if (log.passBy?.length) {
+    console.log('             🧾 12m 안으로 지나친 소비처 — 그때의 지갑')
+    for (const b of log.passBy.slice(0, 6)) {
+      console.log(
+        `                ${String(b.at).padStart(6)}초 ${b.anvil ? '모루' : '화톳불'}(${b.where}) ${String(b.dist).padStart(2)}m` +
+          ` · ${b.n}회 · 불티 ${b.embers} · 정련석 ${b.stones} · ${b.canBuy ? '살 수 있었음' : '**못 삼**'}`,
+      )
+    }
+  } else {
+    console.log('             🧾 12m 안으로 지나친 소비처가 **한 곳도 없습니다** (동선 문제)')
   }
   if (log.upgradeTries) {
     const u = log.upgradeTries
