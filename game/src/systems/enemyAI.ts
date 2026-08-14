@@ -19,6 +19,7 @@ import {
   WIDE_ARC_DEG,
   attackAt,
   attacksFor,
+  openingOf,
   pickAttack,
 } from '../config/enemyAttacks'
 import {
@@ -1164,13 +1165,33 @@ export function enemyAiSystem(
           Actor.timer[e] = atk.active
           Actor.hitsLeft[e] = 1
           Actor.nextHitT[e] = 0
+          /**
+           * 🔁 아직 아무것도 못 했다고 세워 둡니다. combat.ts 가 플레이어를
+           * 맞히면 지웁니다. 아래에서 판정이 끝날 때 이 값을 읽습니다.
+           *
+           * ⚠️ `hitsLeft` 로는 못 가릅니다 — 그 값은 **맞았든 안 맞았든**
+           *    닳습니다(combat.ts 의 `hitsLeft -= 1` 은 `landed` 와 무관).
+           *    실제로 처음엔 그걸 쓰려다가, 헛쳐도 0이 되는 것을 보고
+           *    깃발을 따로 뒀습니다.
+           */
+          Enemy.whiffing[e] = 1
           ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg)
           // 실제로 휘두르는 순간. 예고음(windup 시작)과 시간이 벌어져 있어서
           // "예고 → 발동" 두 박자가 귀로도 잡힙니다.
           sfx.swing(cfg.heavy ? 0.95 : 0.55, Transform.x[e], Transform.z[e])
         } else if (phase === AttackPhase.Active) {
           Actor.phase[e] = AttackPhase.Recovery
-          Actor.timer[e] = atk.recovery
+          /**
+           * 🔁 **헛쳤으면 더 오래 무방비입니다.** 근거는 enemyAttacks.ts 의
+           * `whiffRecovery` 주석에 있습니다(몬헌·엘든링·격투게임이 공유하는
+           * 규칙: 맞았을 때가 아니라 **빗나갔을 때** 빈틈이 생깁니다).
+           *
+           * 값을 여기서 고르지 않고 `openingOf()` 에 물어보는 이유:
+           * 같은 판단이 프로브가 읽는 `punishTable()` 에도 필요한데,
+           * 두 곳에 같은 식을 적어 두면 한쪽만 고치는 날 **프로브가
+           * 게임을 안 재게 됩니다.** 규칙은 한 곳에만 둡니다.
+           */
+          Actor.timer[e] = Enemy.whiffing[e] === 1 ? openingOf(atk) : atk.recovery
         } else {
           /**
            * ── 연계 ────────────────────────────────────────────────

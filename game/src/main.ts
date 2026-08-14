@@ -38,6 +38,7 @@ import {
   attacksFor,
 } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
+import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
 import { ENEMY_DEFS, enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
@@ -3870,6 +3871,10 @@ declare global {
       bossPhaseBounds: () => number[]
       /** 페이즈별 가중치 덮어쓰기 — "적어 둔 성격이 실제로 나오는가"의 기대치입니다. */
       bossPhaseWeights: () => Record<string, number>[]
+      /** 🔁 정답대로 답한 사람이 한 대 갚을 수 있는가 (config/punish.ts) */
+      punishTable: () => PunishRow[]
+      /** 예고 동안 옆으로 빠져 부채꼴을 벗어날 수 있는가 */
+      sidestepTable: () => SidestepRow[]
       /** 🧪 실험대 전용 무적 (combat.ts 설계 노트). 게임 코드는 켜지 않습니다. */
       setPlayerInvulnerable: (on: boolean) => void
       /** 🟢 반격 검증용 */
@@ -4457,6 +4462,17 @@ window.__game = {
    * 적어 두면 가중치를 바꾸는 날 검사가 조용히 옛말이 됩니다.
    */
   bossPhaseWeights: () => BOSS_PHASES.map((p) => ({ ...(p.weights ?? {}) })),
+  /**
+   * 🔁 **갚을 수 있는가** — 정답대로 답한 사람의 돌아오는 길
+   *    (설계와 계산은 config/punish.ts).
+   *
+   * 통과/실패 판단(`ok`)까지 게임이 합니다. 프로브가 문턱을 들고 있으면
+   * 밸런스를 바꿀 때마다 프로브를 같이 고쳐야 하고, 그러다 보면 프로브가
+   * 게임을 따라 움직여서 **영영 빨개지지 않습니다.**
+   */
+  punishTable: () => punishTable(),
+  /** 예고 동안 옆으로 빠져 부채꼴을 벗어날 수 있는가 — 위 표의 반대편 근거. */
+  sidestepTable: () => sidestepTable(),
   /**
    * 🧪 실험대 전용 무적 — 근거는 combat.ts `setPlayerInvulnerable` 설계 노트.
    * (보스가 내주는 창을 재려면 그 앞에 오래 서 있어야 하는데, 한 번 죽으면

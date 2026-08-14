@@ -980,6 +980,16 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       attacker: a,
       attackId: attackerIsPlayer ? '' : attackAt(Enemy.kind[a], Enemy.attackIndex[a]).id,
     })
+    /**
+     * 🔁 **헛치지 않았습니다.** 이 깃발이 남아 있어야만 긴 후딜을 씁니다
+     * (근거는 enemyAttacks.ts `whiffRecovery` 주석).
+     *
+     * ⚠️ 여기에 두는 것이 중요합니다. 위쪽의 무적 프레임·실험대 무적은
+     *    `continue` 로 빠지므로 깃발이 **남습니다** — 즉 잘 구른 사람도
+     *    "빗나가게 만든 사람"으로 셉니다. 그게 맞습니다: 이 값이 갚아 주려는
+     *    대상은 *맞지 않은 사람*이지 *멀리 선 사람*이 아닙니다.
+     */
+    if (!attackerIsPlayer && targetIsPlayer) Enemy.whiffing[a] = 0
     landed = true
   }
   return landed
