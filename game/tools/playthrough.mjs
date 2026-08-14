@@ -450,6 +450,10 @@ try {
     let fieldsChecked = false
     /** 🛡 이미 센 🔴 예고 — 예고 하나를 한 번만 세기 위한 집합. */
     const guardSeen = new Set()
+    /** 🛡 그 예고에서 창(남은 예고 ≤ 가드 창)을 **실제로 본** 적들. */
+    const guardWindowSeen = new Set()
+    let guardSawWindow = 0
+    let guardBlockedByState = 0
     let guardTries = 0
     let greenEvents = 0
     let greenAnswerable = 0
@@ -1314,6 +1318,23 @@ try {
          * 처음엔 못 내는 동안에도 계속 붙잡고 서 있었는데, 그러면 답이
          * 하나도 없는 채로 맞기만 합니다(사망 0 → 2회).
          */
+        /**
+         * ⚠️ **왜 못 냈는지를 갈라 셉니다.** 24회 붙잡아 0회 성공이 나왔을 때
+         *    가능한 이야기가 둘인데 처방이 정반대입니다:
+         *      · 창을 **못 봤다**       → 폴링/타이밍 문제(봇을 고침)
+         *      · 봤는데 **못 냈다**     → 여는 자리가 좁은 것(게임을 고침)
+         *    합쳐 두면 어느 쪽인지 영영 모릅니다.
+         */
+        if (strike && strike.timer <= gi.window) {
+          if (!guardWindowSeen.has(strike.entity)) {
+            guardWindowSeen.add(strike.entity)
+            guardSawWindow++
+            if (!gi.canGuard) guardBlockedByState++
+          }
+        }
+        for (const id of [...guardWindowSeen]) {
+          if (!threats.some((t) => t.entity === id && t.winding)) guardWindowSeen.delete(id)
+        }
         if (strike && strike.timer <= gi.window && gi.canGuard) {
           markAct('가드')
           // 등지고는 못 막습니다(combat.ts) — 조준을 맞춥니다.
@@ -2090,6 +2111,8 @@ try {
        * (전자는 봇/안내, 후자는 창 길이).
        */
       guardTries,
+      guardSawWindow,
+      guardBlockedByState,
       guards: G.guardInfo().count,
       greenSwung: G.runStats().greenSwung,
       greenDied: G.runStats().greenDied,
@@ -2502,8 +2525,8 @@ try {
       ` (${Math.round((log.greenAnswerable / Math.max(1, log.greenEvents)) * 100)}%) · 실제 반격 ${log.counters}회\n` +
       `             예고가 끝난 방식 — 휘두름까지 ${log.greenSwung ?? 0}회 · 적이 죽음 ${log.greenDied ?? 0}회` +
       ` · **반격으로 끊김 ${log.greenCountered ?? 0}회** · 그 밖의 끊김 ${log.greenBroken ?? 0}회\n` +
-      `             🛡 저스트 가드 — 붙잡은 🔴 ${log.guardTries ?? 0}회 · **성공 ${log.guards ?? 0}회**` +
-      ` (${Math.round(((log.guards ?? 0) / Math.max(1, log.guardTries ?? 0)) * 100)}%)`,
+      `             🛡 저스트 가드 — 붙잡은 🔴 ${log.guardTries ?? 0}회 · 창을 본 것 ${log.guardSawWindow ?? 0}회` +
+      ` · 그중 **못 낸 자리** ${log.guardBlockedByState ?? 0}회 · **성공 ${log.guards ?? 0}회**`,
   )
   /**
    * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ────────────────────────
