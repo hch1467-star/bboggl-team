@@ -107,6 +107,9 @@ import {
   countChainsPending,
   readGreenOutcome,
   resetGreenOutcome,
+  readPickLog,
+  resetPickLog,
+  type PickRecord,
   readChainsLost,
   setAggroRangeOverride,
   spotEvents,
@@ -554,6 +557,8 @@ class Game {
     // 눈금도 같이 비웁니다 — 안 그러면 앞 판의 초록이 이번 판에 섞입니다
     // (조합 프로브가 '앞 검사가 깨워 놓은 적'을 세던 것과 같은 실수).
     resetGreenOutcome()
+    // 🎲 무엇을 골랐는지의 장부도 같은 자리에서 비웁니다(enemyAI `notePick` 설계 노트).
+    resetPickLog()
     resetStaminaSpent()
     // 🩸 피격 장부도 **판 시작에만** 지웁니다(연계 장부에서 배운 것 — 화톳불마다
     //    지우면 예약과 발동의 수명이 달라져 서로 비교할 수 없게 됩니다).
@@ -3871,6 +3876,8 @@ declare global {
       bossPhaseBounds: () => number[]
       /** 페이즈별 가중치 덮어쓰기 — "적어 둔 성격이 실제로 나오는가"의 기대치입니다. */
       bossPhaseWeights: () => Record<string, number>[]
+      /** 🎲 무엇을 왜 골랐는가 — 굴림 · 후보 · 대체까지 (enemyAI `notePick`) */
+      pickLog: () => PickRecord[]
       /** 🔁 정답대로 답한 사람이 한 대 갚을 수 있는가 (config/punish.ts) */
       punishTable: () => PunishRow[]
       /** 예고 동안 옆으로 빠져 부채꼴을 벗어날 수 있는가 */
@@ -4462,6 +4469,14 @@ window.__game = {
    * 적어 두면 가중치를 바꾸는 날 검사가 조용히 옛말이 됩니다.
    */
   bossPhaseWeights: () => BOSS_PHASES.map((p) => ({ ...(p.weights ?? {}) })),
+  /**
+   * 🎲 **무엇을 왜 골랐는가** (설계 노트는 enemyAI `notePick`).
+   *
+   * 휘두름 수를 가중치와 비교하면 굴림이 아닌 것(연계 · 광역 자리 대체 ·
+   * `preferReach`)이 섞여서 **엉뚱한 결론**이 납니다. 이 장부는 굴림 자체를
+   * 적으므로, 프로브가 추측 없이 *"굴려서 고른 것"* 만 골라 볼 수 있습니다.
+   */
+  pickLog: () => readPickLog(),
   /**
    * 🔁 **갚을 수 있는가** — 정답대로 답한 사람의 돌아오는 길
    *    (설계와 계산은 config/punish.ts).

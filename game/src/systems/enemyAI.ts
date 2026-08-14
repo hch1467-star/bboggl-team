@@ -21,6 +21,7 @@ import {
   attacksFor,
   openingOf,
   pickAttack,
+  type EnemyAttackDef,
 } from '../config/enemyAttacks'
 import {
   BOSS_PHASES,
@@ -693,6 +694,85 @@ function commitAttack(
  *    언젠가 두 숫자가 어긋나고, 그때 어느 쪽을 믿을지 알 수 없게 됩니다.
  *    여기서는 **예고가 끝난 방식**만 셉니다.
  */
+/**
+ * ── 🎲 **무엇을 왜 골랐는가** ────────────────────────────────────────
+ *
+ * `npm run boss` 의 *"가중치대로 고른다"* 가 오랫동안 흔들렸습니다. 표본을
+ * 7~8회에서 20여 회로 늘렸더니 흔들림이 아니라 **안정적인 어긋남**이
+ * 드러났습니다(2.1m 에서 🔴 직격 기대 50% · 실제 24%).
+ *
+ * 그런데 그때부터 세 번 연속으로 **이론만 세웠습니다** — 연계 탓인가,
+ * `preferReach` 탓인가, 광역 자리 대체 탓인가. 셋 다 그럴듯했고 셋 다
+ * 근거가 없었습니다. 이 저장소가 이번 세션에 열 번 넘게 배운 것이
+ * 정확히 그 자리입니다:
+ *
+ * > **재기 전의 설명은 결론이 아닙니다.**
+ *
+ * 문제의 뿌리는 프로브가 **휘두름 수**를 가중치와 비교한다는 것이었습니다.
+ * 휘두름에는 굴림이 아닌 것이 섞여 있습니다:
+ *   · **연계** — 이전 공격이 예약한 것. 굴린 적이 없습니다.
+ *   · **광역 자리 대체** — 굴려서 🟡 이 나왔는데 자리가 차서 다른 것으로
+ *     바꿔 답니다. 그 대체는 굴림이 아니라 **목록 순서**로 고릅니다.
+ *   · **`preferReach`** — 기다리다 지친 적은 가중치를 통째로 무시합니다.
+ *
+ * 그래서 게임이 **자기가 무엇을 어떻게 골랐는지** 직접 적습니다.
+ * 프로브는 이 장부를 읽고 *"굴려서 고른 것"* 만 가중치와 비교하면 됩니다.
+ * 추측할 필요가 없어집니다.
+ */
+export interface PickRecord {
+  kind: number
+  /** 고를 때의 거리 — 사거리 밖 패턴이 왜 후보에서 빠졌는지 설명합니다 */
+  dist: number
+  phase: number
+  /** 가중치를 무시하고 **가장 먼 사거리**를 고른 판인가 */
+  preferReach: boolean
+  /** 굴려서 나온 것. null 이면 후보가 없었습니다 */
+  rolled: string
+  /** 실제로 건 것. `rolled` 와 다르면 광역 자리가 차서 바뀐 것입니다 */
+  chosen: string
+  candidates: { id: string; w: number }[]
+}
+/** 상한을 둡니다 — 장부가 한 판 내내 자라면 그것 자체가 성능 문제가 됩니다. */
+const PICK_LOG_CAP = 600
+const pickLog: PickRecord[] = []
+
+function notePick(
+  e: number,
+  kind: number,
+  dist: number,
+  preferReach: boolean,
+  list: EnemyAttackDef[],
+  weights: Record<string, number> | undefined,
+  rolled: EnemyAttackDef | null,
+  chosen: EnemyAttackDef | null,
+): void {
+  if (pickLog.length >= PICK_LOG_CAP) return
+  pickLog.push({
+    kind,
+    dist: Number(dist.toFixed(2)),
+    phase: Enemy.phase[e],
+    preferReach,
+    rolled: rolled?.id ?? '',
+    chosen: chosen?.id ?? '',
+    /**
+     * 후보와 그 가중치도 같이 적습니다. 기대치를 프로브가 따로 계산하면
+     * 사거리 판정(min/max)을 **두 곳**에 두게 되고, 언젠가 한쪽만 고쳐서
+     * 프로브가 조용히 다른 기대치를 씁니다.
+     */
+    candidates: list
+      .filter((a) => dist >= a.minRange && dist <= a.maxRange)
+      .map((a) => ({ id: a.id, w: weights?.[a.id] ?? a.weight }))
+      .filter((c) => c.w > 0),
+  })
+}
+
+export function readPickLog(): PickRecord[] {
+  return pickLog.map((r) => ({ ...r, candidates: r.candidates.map((c) => ({ ...c })) }))
+}
+export function resetPickLog(): void {
+  pickLog.length = 0
+}
+
 const greenOutcome = { swung: 0, died: 0, countered: 0, broken: 0 }
 /** 지금 초록 예고 중인 적들 — 프레임마다 갱신하고, 빠진 것을 결산합니다. */
 const greenWinding = new Set<number>()
@@ -1314,12 +1394,14 @@ export function enemyAiSystem(
           weights = only
         }
       }
-      let picked = pickAttack(list, dist, combatRng.next(), weights, wantReach)
+      const rolled = pickAttack(list, dist, combatRng.next(), weights, wantReach)
+      let picked = rolled
       // 광역 자리가 찼으면 좁은 패턴으로 바꿔 답니다. 그냥 취소하면 그 적이
       // 아무것도 안 하고 서 있게 되어 전투가 심심해집니다 — 막는 게 아니라 **바꾸는** 것입니다.
       if (picked && picked.arcDeg >= WIDE_ARC_DEG && wideSlotsLeft <= 0) {
         picked = list.find((a) => a.arcDeg < WIDE_ARC_DEG && dist >= a.minRange && dist <= a.maxRange) ?? null
       }
+      notePick(e, kind, dist, wantReach, list, weights, rolled, picked)
       if (picked) {
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP

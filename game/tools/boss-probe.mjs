@@ -752,6 +752,15 @@ try {
       /** 지금까지의 누적을 **바닥으로** 잡습니다(장부는 누적입니다). */
       const base = {}
       for (const [id, v] of Object.entries(G.bossSwingLog())) base[id] = v.swings
+      /**
+       * 🎲 **굴림 장부의 바닥도 같이 찍습니다.**
+       *
+       * 아래에서 세는 `bossSwingLog` 는 **휘두름**이고, 휘두름에는 굴림이
+       * 아닌 것이 섞여 있습니다(연계 · 광역 자리 대체). 가중치와 비교해야
+       * 하는 것은 **굴림**입니다. 그 구분을 프로브가 추측하지 않도록
+       * 게임이 `pickLog()` 로 적어 줍니다(enemyAI `notePick` 설계 노트).
+       */
+      const pickBase = G.pickLog().length
       const t0 = G.state().simElapsed
       /**
        * ⚠️ **26 → 70초.** 같은 커밋에서 이 프로브가 한 번은 22/23, 한 번은
@@ -781,75 +790,104 @@ try {
         const n = v.swings - (base[id] ?? 0)
         if (n > 0) got[id] = n
       }
+      const picked = G.pickLog().slice(pickBase)
       G.setPlayerInvulnerable(false)
       G.clearEnemies()
-      out.push({ d, got })
+      out.push({ d, got, picked })
     }
     return { spots, out, atks }
   })
 
   /**
-   * 기대치도 **게임에서** 만듭니다 — 그 거리에서 후보인 패턴들의 가중치
-   * 비율입니다. 프로브가 따로 계산한 "정답"을 들고 있으면, 가중치를 바꾸는
-   * 날 이 검사가 조용히 옛말이 됩니다.
+   * ── 🎲 **굴림**을 가중치와 비교합니다 (예전에는 휘두름을 비교했습니다) ──
+   *
+   * 이 검사는 오래 흔들렸고, 표본을 20여 회로 늘리자 **안정적으로 빨개졌습니다**
+   * (2.1m 의 🔴 직격 — 기대 50% · 실제 24%). 그때부터 이론을 셋 세웠습니다:
+   * 연계 탓인가, `preferReach` 탓인가, 광역 자리 대체 탓인가.
+   *
+   * 게임에게 물어보니(`pickLog()`) **셋 다 틀렸습니다** — 그 판에서
+   * `preferReach` 0회, 대체 0회였고, **굴림 자체는 가중치대로**였습니다
+   * (직격 53% · 광역 37% · 속박 11%). 틀린 것은 게임이 아니라 **비교 대상**
+   * 이었습니다: 휘두름에는 굴린 적 없는 **연계**가 섞여 있습니다.
+   *
+   * 그래서 이제 굴림만 봅니다. 그리고 **세 거리를 합쳐서** 봅니다 —
+   * 기대치가 거리마다 다르므로 각 굴림이 자기 후보표에서 자기 기대치를
+   * 갖고 오면, 합쳐도 뜻이 흐려지지 않고 표본만 세 배가 됩니다.
+   *
+   * ⚠️ 기대치는 **게임이 적어 준 후보와 가중치**로 만듭니다. 프로브가
+   *    사거리(min/max)를 다시 판정하면 그 판정이 두 곳에 살게 되고,
+   *    언젠가 한쪽만 고쳐서 조용히 다른 기대치를 씁니다.
    */
-  const phaseW = await page.evaluate(() => window.__game.bossPhaseWeights())
-  const w3 = phaseW[2] ?? {}
-  const expectAt = (d) => {
-    const live = picks.atks.filter((a) => d >= a.minRange && d <= a.maxRange)
-    const total = live.reduce((n, a) => n + (w3[a.id] ?? a.weight), 0)
-    return live.map((a) => ({ id: a.id, p: total > 0 ? (w3[a.id] ?? a.weight) / total : 0 }))
+  const allPicks = picks.out.flatMap((r) => r.picked ?? [])
+  /** 굴림이 아닌 경로가 실제로 얼마나 끼는지 — 위 표가 왜 달랐는지의 근거입니다. */
+  const swapped = allPicks.filter((q) => q.rolled !== q.chosen).length
+  const preferred = allPicks.filter((q) => q.preferReach).length
+  const rolls = new Map()
+  const expect = new Map()
+  for (const q of allPicks) {
+    if (!q.rolled) continue
+    rolls.set(q.rolled, (rolls.get(q.rolled) ?? 0) + 1)
+    const total = q.candidates.reduce((n, c) => n + c.w, 0)
+    if (total <= 0) continue
+    for (const c of q.candidates) expect.set(c.id, (expect.get(c.id) ?? 0) + c.w / total)
   }
-  let worstGap = 0
-  let worstLine = ''
+  const nRolls = allPicks.filter((q) => q.rolled).length
   for (const row of picks.out) {
     const n = Object.values(row.got).reduce((a2, b2) => a2 + b2, 0)
-    const exp = expectAt(row.d)
-    const parts = exp.map((e) => {
-      const got = row.got[e.id] ?? 0
-      const p = n > 0 ? got / n : 0
-      const gap = Math.abs(p - e.p)
-      if (gap > worstGap) {
-        worstGap = gap
-        worstLine = `${row.d}m 의 ${e.id} — 기대 ${(e.p * 100).toFixed(0)}% 실제 ${(p * 100).toFixed(0)}%`
-      }
-      return `${e.id} ${(p * 100).toFixed(0)}%(기대 ${(e.p * 100).toFixed(0)}%)`
-    })
-    console.log(`    ${String(row.d).padStart(4)}m  휘두름 ${String(n).padStart(3)}회 — ${parts.join(' · ')}`)
+    const nPick = (row.picked ?? []).filter((q) => q.rolled).length
+    const parts = Object.entries(row.got).map(([id, v]) => `${id} ${v}`)
+    console.log(
+      `    ${String(row.d).padStart(4)}m  휘두름 ${String(n).padStart(3)}회 · 그중 굴림 ${String(nPick).padStart(3)}회 — ${parts.join(' · ')}`,
+    )
   }
+  console.log(
+    `    [합쳐서] 굴림 ${nRolls}회 · 광역 자리로 바뀐 것 ${swapped}회 · preferReach ${preferred}회`,
+  )
+  let worstGap = 0
+  let worstLine = ''
+  const summary = []
+  for (const [id, e] of [...expect].sort((a, b) => b[1] - a[1])) {
+    const o = rolls.get(id) ?? 0
+    const gap = nRolls > 0 ? Math.abs(o - e) / nRolls : 0
+    if (gap > worstGap) {
+      worstGap = gap
+      worstLine = `${id} — 기대 ${((e / nRolls) * 100).toFixed(0)}% 실제 ${((o / nRolls) * 100).toFixed(0)}%`
+    }
+    summary.push(`${id} ${((o / nRolls) * 100).toFixed(0)}%(기대 ${((e / nRolls) * 100).toFixed(0)}%)`)
+  }
+  console.log(`    ${summary.join(' · ')}`)
   /**
    * **표본이 문턱에 어울리는 크기인가.**
    *
    * 원래 이 게이트는 `>= 3` 이었습니다. 3회 표본에서 25%p 문턱은 아무
-   * 뜻이 없습니다 — 휘두름 하나가 통째로 33%p 이기 때문입니다. 게이트와
-   * 문턱이 **서로 다른 세계에서 온 숫자**였고, 그래서 아래 검사가 굴림에
-   * 따라 흔들렸습니다.
+   * 뜻이 없습니다 — 한 번이 통째로 33%p 이기 때문입니다. 게이트와 문턱이
+   * **서로 다른 세계에서 온 숫자**였고, 그래서 아래 검사가 흔들렸습니다.
    *
    * 16 은 계산해서 나온 값입니다: 확률 p 의 비율은 표본 n 에서 표준편차가
    * `sqrt(p(1-p)/n)` 입니다. 가장 흔들리는 p=0.5 에서 0.25 가 **2σ** 가
-   * 되려면 `2·sqrt(0.25/n) = 0.25` → **n = 16**. 즉 이 게이트를 통과한
-   * 표본에서만 아래 문턱이 *"운이 아니라 규칙"* 을 뜻합니다.
+   * 되려면 `2·sqrt(0.25/n) = 0.25` → **n = 16**. 거리 셋을 합쳐서 보므로
+   * 48 을 요구합니다. 이 게이트를 통과한 표본에서만 아래 문턱이
+   * *"운이 아니라 규칙"* 을 뜻합니다.
+   *
+   * ⚠️ 세는 대상이 **휘두름에서 굴림으로** 바뀐 것이 이 라운드의 핵심입니다.
+   *    휘두름에는 굴린 적 없는 연계가 섞여 있어서, 아무리 표본을 늘려도
+   *    가중치와는 영영 안 맞습니다. 표본 수보다 **무엇을 세는가**가 먼저입니다.
    */
-  const MIN_SWINGS = 16
+  const MIN_ROLLS = 48
   check(
-    picks.out.every((r) => Object.values(r.got).reduce((a2, b2) => a2 + b2, 0) >= MIN_SWINGS),
-    `거리마다 문턱에 어울릴 만큼 휘둘렀다 (${MIN_SWINGS}회 이상 — 아래 25%p 가 2σ 가 되는 크기)`,
-    picks.out
-      .map((r) => `${r.d}m ${Object.values(r.got).reduce((a2, b2) => a2 + b2, 0)}회`)
-      .join(' · '),
+    nRolls >= MIN_ROLLS,
+    `문턱에 어울릴 만큼 굴렸다 (${MIN_ROLLS}회 이상 — 아래 25%p 가 2σ 가 되는 크기)`,
+    `굴림 ${nRolls}회`,
   )
   /**
    * **가중치대로 고르는가.** 문턱 0.25 는 관대한 편입니다 — 굴림이라
-   * 표본 20~40 회에서 ±10%p 는 흔들립니다. 그보다 크게 벌어지면 그건
+   * 표본 50~60 회에서 ±10%p 는 흔들립니다. 그보다 크게 벌어지면 그건
    * 운이 아니라 **규칙이 다른 것**입니다.
    *
-   * ⚠️ 이 주석이 말하는 *"표본 20~40회"* 가 **오랫동안 사실이 아니었습니다.**
-   *    실제로는 거리마다 7~8회만 모으고 있었고, 그래서 이 검사가 굴림
-   *    하나에 흔들렸습니다(같은 커밋에서 22/23 과 23/23 이 둘 다 나왔습니다).
-   *    관측 시간을 26 → 70초로 늘려 주석이 말하던 크기를 실제로 맞췄고,
-   *    위에 `MIN_SWINGS` 게이트를 세워 **다시는 조용히 작아지지 못하게**
-   *    했습니다. 표본이 모자라면 이 검사가 통과하기 전에 그 게이트가 먼저
-   *    빨개집니다.
+   * ⚠️ 예전 주석은 *"표본 20~40회"* 라고 적어 두고 잡은 문턱인데, 실제로는
+   *    거리마다 7~8회만 모으고 있었습니다. 관측을 26 → 70초로 늘리고
+   *    위에 게이트를 세워 **다시는 조용히 작아지지 못하게** 했습니다.
+   *    표본이 모자라면 이 검사가 통과하기 전에 게이트가 먼저 빨개집니다.
    */
   check(
     worstGap <= 0.25,
