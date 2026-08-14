@@ -183,6 +183,105 @@ try {
   )
 
   console.log('')
+  /**
+   * ── 🎟 **공격 토큰이 한 종류에게 쏠리는가** ────────────────────────
+   *
+   * 3판 벤치의 적 쪽 줄을 나란히 놓으면 이렇습니다:
+   *
+   *   grunt    깨어 218초 중 **공격 43%**   · 예고 52회
+   *   dragger  깨어  55초 중 공격 30% · **사거리 안 대기 35%** · 예고 6회
+   *   archer   깨어  43초 중 공격  7% · **사거리 안 대기 39%** · 예고 2회
+   *   binder   깨어  77초 중 공격 18% · 접근 56%                · 예고 7회
+   *
+   * 색을 가르치는 적들이 **사거리 안에 서서 아무것도 안 합니다.**
+   * 코드를 보면 이유가 한 줄입니다 — `grantAttackTokens` 이
+   * `waiting.sort((a, b) => a.d - b.d)`, 즉 **가장 가까운 적**에게만
+   * 토큰을 줍니다. 잡몹은 수가 많고 빨리 붙으니 늘 가장 가깝고,
+   * 그래서 토큰을 독점합니다.
+   *
+   * ── 다른 게임은 이 자리를 어떻게 두는가 ─────────────────────────
+   * · **배트맨: 아캄 / 섀도우 오브 모르도르** — 둘러싼 적에게 공격 허가를
+   *   **돌아가며** 줍니다. 특수 적을 일부러 앞세워 플레이어가 **다른
+   *   대응**을 보게 만듭니다. 같은 잡기만 스무 번 오면 배울 것이 없습니다.
+   * · **헤일로**(전투 지휘자) — 공격 슬롯을 배분하고 **회전**시킵니다.
+   *   한 부류가 슬롯을 독차지하지 못하게 하는 것이 명시적 목표입니다.
+   * · **소울류** — 적마다 망설임 타이머가 따로 돌아, 가장 가까운 놈이
+   *   무한히 우선권을 갖지 않습니다.
+   *
+   * 공통점은 하나입니다 — **거리는 우선순위의 전부가 아닙니다.**
+   * 우리 기둥 2("색마다 다른 정답")는 색이 **실제로 나와야** 성립하는데,
+   * 지금 규칙은 🔴 잡몹만 계속 나오게 만듭니다.
+   *
+   * ⚠️ 이 절은 **판정하지 않고 재기만** 하던 것을 검사로 바꾼 것입니다.
+   *    존 판(벤치)에서는 배치·지형·봇 판단이 섞여서 원인을 못 가립니다.
+   *    여기서는 **같은 거리에** 섞어 세워 두고 거리 변수를 없앱니다.
+   */
+  console.log('')
+  const share = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    G.reset()
+    await window.__t.runFor(0.6)
+    G.clearEnemies()
+    await window.__t.runFor(0.6)
+    const p = G.state().player
+    /**
+     * 잡몹 둘 + 가르치는 적 둘을 **같은 반지름**에 둥글게 세웁니다.
+     * 거리를 똑같이 맞추는 것이 이 실험의 전부입니다 — 지금 규칙이
+     * 거리로 고르므로, 거리가 같으면 남는 것은 **순서**뿐입니다.
+     */
+    const R = 3.0
+    const plan = ['grunt', 'grunt', 'dragger', 'binder']
+    const ids = []
+    plan.forEach((kind, i) => {
+      const a = (i / plan.length) * Math.PI * 2
+      const e = G.spawnEnemyKind(kind, p.x + Math.sin(a) * R, p.z + Math.cos(a) * R)
+      G.wakeEnemy(e)
+      ids.push({ e, kind })
+    })
+    // 플레이어는 아무것도 안 합니다 — 재려는 것은 실력이 아니라 **차례**입니다.
+    const swings = {}
+    const wasAttacking = new Map()
+    const t0 = G.state().simElapsed
+    while (G.state().simElapsed - t0 < 30) {
+      for (const { e, kind } of ids) {
+        const i = G.enemyInfo(e)
+        if (!i) continue
+        // **올라가는 순간에만** 셉니다 — 프레임마다 세면 예고가 긴 쪽이 커집니다.
+        const now = !!i.winding
+        if (now && !wasAttacking.get(e)) swings[kind] = (swings[kind] ?? 0) + 1
+        wasAttacking.set(e, now)
+      }
+      // 죽으면 표본이 사라지므로 체력만 채워 둡니다.
+      if (G.state().player.hp < 50) G.setHp(G.playerEntity(), 100)
+      for (const { e } of ids) if (G.enemyInfo(e)) G.setHp(e, 999)
+      await sleep()
+    }
+    return { swings, alive: ids.filter(({ e }) => !!G.enemyInfo(e)).length }
+  })
+  const rows = Object.entries(share.swings).sort((a, b) => b[1] - a[1])
+  const total = rows.reduce((a, r) => a + r[1], 0)
+  console.log(
+    `  [토큰] 같은 거리(3m)에 잡몹2+끄는자1+얽는자1 · 30초 — ` +
+      (rows.map(([k, v]) => `${k} ${v}회`).join(' · ') || '아무도 안 휘두름'),
+  )
+  /**
+   * 문턱: 가르치는 둘(끄는 자·얽는 자)이 **전체의 1/4 이상**.
+   *
+   * 근거: 넷 중 둘이므로 완전히 공평하면 50% 입니다. 잡몹이 더 빠르고
+   * 쿨다운도 짧으니 절반은 무리이지만, **1/4 밑이면 그 색은 존에서
+   * 배울 수 없습니다** — map-probe 가 이미 적어 둔 기준과 같은 이야기입니다
+   * ("한 번은 배우는 게 아니라 구경입니다").
+   */
+  const teach = (share.swings.dragger ?? 0) + (share.swings.binder ?? 0)
+  check(
+    total >= 8 && teach / Math.max(1, total) >= 0.25,
+    '🎟 **가르치는 적도 차례를 받는다** (거리만으로 토큰을 주면 잡몹이 독점합니다)',
+    total < 8
+      ? `표본이 ${total}회뿐 — 계측기를 먼저 의심하십시오`
+      : `가르치는 둘 ${teach}/${total}회 (${Math.round((teach / total) * 100)}%)`,
+  )
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
