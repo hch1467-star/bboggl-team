@@ -31,7 +31,15 @@ import { consumePress, isDown } from '../core/input'
 import { time } from '../core/time'
 import { WEAPONS } from '../config/arsenal'
 import { assistAim } from './combat'
-import { cooldownOf, cycleRune, setCooldown, skillForSlot, tickCooldowns, weaponOf } from './loadout'
+import {
+  cooldownOf,
+  cycleRune,
+  setCooldown,
+  skillForSlot,
+  SLOT_COUNT,
+  tickCooldowns,
+  weaponOf,
+} from './loadout'
 
 /**
  * 플레이어 조작 — 이동 + 조준 + 기본 콤보 + 회피 + **스킬 5슬롯**.
@@ -129,7 +137,7 @@ export function resetStaminaSpent(): void {
 const skillCasts = new Array<number>(8).fill(0)
 let lightSwings = 0
 export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
-  return { skillCasts: skillCasts.slice(0, 5), lightSwings }
+  return { skillCasts: skillCasts.slice(0, SLOT_COUNT), lightSwings }
 }
 
 /**

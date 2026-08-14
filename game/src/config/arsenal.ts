@@ -115,7 +115,117 @@ function skill(def: Partial<SkillDef> & Pick<SkillDef, 'id' | 'name' | 'desc'>):
   }
 }
 
+/**
+ * ── ⚔️ **무기 기예** — 무기마다 자기 kit 에 **없던 동사** 하나씩 ────────
+ *
+ * 무기 스킬이 셋이었는데, 세 무기 모두 *"때리는 방법"* 세 가지였습니다.
+ * 다크 소울 3의 **전투 기술**, 로스트아크의 **각성기**, 몬스터헌터의 무기별
+ * 고유 동작이 하는 일은 하나입니다 — **그 무기만 할 수 있는 일**을 줍니다.
+ * 그래야 무기를 바꾸는 것이 수치가 아니라 **선택지**가 바뀌는 일이 됩니다.
+ *
+ * 셋 다 벤치가 찍은 숫자에 답하도록 골랐습니다. 없는 구멍을 메우는 것이지
+ * 칸을 채우는 것이 아닙니다.
+ */
+export const ARTS: Record<string, SkillDef> = {
+  /**
+   * 🗡 **롱소드 — 투구가르기.**
+   *
+   * 근거가 된 숫자: `강인도 붕괴 16회 · 처형 8회`. 붕괴는 일어나는데
+   * **의도해서 만드는 수단이 없습니다** — 때리다 보면 무너집니다. 그래서
+   * 처형(이 게임에서 가장 큰 한 방)이 우연에 가깝습니다.
+   *
+   * 이 기술은 피해가 아니라 **강인도**를 팝니다(trauma 1.1 — 롱소드 마무리
+   * 타의 두 배 이상). *"지금 무너뜨리고 처형한다"* 를 손으로 만들 수 있게
+   * 하는 것이 전부입니다. 소울류의 대검 강공격이 하는 역할과 같습니다.
+   */
+  cleave_helm: skill({
+    id: 'cleave_helm',
+    name: '투구가르기',
+    shape: 'cone',
+    range: 2.9,
+    arcDeg: 70,
+    cooldown: 11,
+    // 예고가 깁니다 — 강인도를 파는 대가입니다. 아무 때나 낼 수 없어야 합니다.
+    windup: 0.42,
+    active: 0.12,
+    recovery: 0.5,
+    damage: 26,
+    knockback: 3,
+    hitstop: 0.13,
+    // 🔨 이 값이 이 기술의 정체입니다. combat.ts applyPoise 가 trauma 로 강인도를 깎습니다.
+    trauma: 1.1,
+    color: 0xffd9a0,
+    desc: '내리찍어 강인도를 크게 깎는다. 무너뜨리고 처형으로 잇는 기술',
+  }),
+
+  /**
+   * 🪓 **대검 — 밀쳐내기.**
+   *
+   * 근거가 된 숫자: `동시 교전 둘 이상인 시간 58% · 최대 7마리`. 그리고
+   * 대검은 후딜이 가장 길어(콤보 한 바퀴 1.51초) **둘러싸이면 빠져나올
+   * 수단이 없습니다.** 스킬 셋(대지 강타·광폭 휘두르기·도약 강타)이 전부
+   * 느린 광역이라 갇힌 상태에서는 셋 다 늦습니다.
+   *
+   * 그래서 **빠르고(예고 0.14) 약하고(피해 8) 크게 미는(넉백 9)** 기술을
+   * 줍니다. 딜이 아니라 **자리**를 버는 기술입니다 — 몬스터헌터 대검의
+   * 태클, 소울류의 방패 밀치기가 정확히 이 자리에 있습니다.
+   */
+  shove: skill({
+    id: 'shove',
+    name: '밀쳐내기',
+    shape: 'cone',
+    range: 2.8,
+    arcDeg: 150,
+    cooldown: 7,
+    windup: 0.14,
+    active: 0.1,
+    recovery: 0.24,
+    damage: 8,
+    knockback: 9,
+    hitstop: 0.05,
+    trauma: 0.3,
+    moveScale: 0.5,
+    color: 0xc9d6ff,
+    desc: '크게 밀어내 자리를 만든다. 피해는 낮고 대신 빠르다',
+  }),
+
+  /**
+   * 🗡🗡 **쌍단검 — 등지기.**
+   *
+   * 근거가 된 숫자: `백어택 19~24%`. 이 무기의 축이 *"등 뒤를 잡고 오래
+   * 붙어 있는 것"* 인데(arsenal 의 dodgeDurationScale 주석), 등을 잡는 것을
+   * **손으로 만드는 수단이 없습니다.** 적이 돌아설 때까지 기다릴 뿐입니다.
+   *
+   * 대시 거리(4.6m)를 사거리(1.8m)보다 크게 잡은 것이 이 기술의 전부입니다 —
+   * **지나쳐서 뒤에 섭니다.** 소울류의 백스텝, 세키로의 스텝이 하는 일과
+   * 같습니다. 무적을 짧게 붙여 예고를 넘기며 파고들 수 있게 했습니다.
+   */
+  backstep_cut: skill({
+    id: 'backstep_cut',
+    name: '등지기',
+    shape: 'cone',
+    range: 1.8,
+    arcDeg: 120,
+    cooldown: 9,
+    windup: 0.1,
+    active: 0.1,
+    recovery: 0.26,
+    damage: 14,
+    hits: 2,
+    knockback: 0,
+    hitstop: 0.05,
+    trauma: 0.2,
+    // ⚠️ 사거리(1.8)보다 **크게** — 지나쳐야 등 뒤에 섭니다.
+    dash: 4.6,
+    iFrames: [0.02, 0.18],
+    color: 0xb9a7ff,
+    desc: '지나치며 벤다. 끝나면 적의 등 뒤에 선다',
+  }),
+}
+
 export const SKILLS: Record<string, SkillDef> = {
+  // ⚔️ 무기 기예 셋 — 위 ARTS 에 근거와 함께 정의돼 있습니다.
+  ...ARTS,
   // ── 롱소드 전용 ─────────────────────────────────────────────
   lunge_slash: skill({
     id: 'lunge_slash',
@@ -647,7 +757,7 @@ export interface WeaponDef {
   dodgeDurationScale?: number
   combo: ComboStep[]
   /** Q, E, R 슬롯에 들어가는 전용 스킬 */
-  skills: [string, string, string]
+  skills: [string, string, string, string]
 }
 
 export const WEAPONS: WeaponDef[] = [
@@ -660,7 +770,7 @@ export const WEAPONS: WeaponDef[] = [
     comboWindow: 0.42,
     // 만능형 — 어느 축에서도 1등이 아니지만 어느 축에서도 꼴찌가 아닙니다.
     poiseScale: 1,
-    skills: ['lunge_slash', 'whirlwind', 'blade_wave'],
+    skills: ['lunge_slash', 'whirlwind', 'blade_wave', 'cleave_helm'],
     combo: [
       { name: '1타', windup: 0.12, active: 0.08, recovery: 0.2, damage: 12, range: 2.3, arcDeg: 110, staminaCost: 10, hitstop: 0.055, trauma: 0.22, lunge: 1.5, knockback: 1.6 },
       { name: '2타', windup: 0.1, active: 0.08, recovery: 0.22, damage: 14, range: 2.3, arcDeg: 120, staminaCost: 11, hitstop: 0.06, trauma: 0.26, lunge: 1.7, knockback: 1.8 },
@@ -682,7 +792,7 @@ export const WEAPONS: WeaponDef[] = [
     poiseScale: 1.7,
     // 대검은 기본값(1)입니다. 무거운 무기에 벌을 더 주면 "느리고 무겁다"가
     // 성격이 아니라 **불이익 두 겹**이 됩니다.
-    skills: ['earthshatter', 'wide_cleave', 'leap_slam'],
+    skills: ['earthshatter', 'wide_cleave', 'leap_slam', 'shove'],
     combo: [
       { name: '1타', windup: 0.26, active: 0.11, recovery: 0.34, damage: 26, range: 3.1, arcDeg: 130, staminaCost: 26, hitstop: 0.09, trauma: 0.4, lunge: 1.6, knockback: 3.4 },
       { name: '2타(마무리)', windup: 0.36, active: 0.13, recovery: 0.6, damage: 46, range: 3.5, arcDeg: 165, staminaCost: 42, hitstop: 0.15, trauma: 0.7, lunge: 2.2, knockback: 7.5 },
@@ -732,7 +842,7 @@ export const WEAPONS: WeaponDef[] = [
      * 같이 줄어서, 완벽 회피는 오히려 어려워집니다.
      */
     dodgeDurationScale: 0.85,
-    skills: ['shadow_step', 'flurry', 'hamstring'],
+    skills: ['shadow_step', 'flurry', 'hamstring', 'backstep_cut'],
     combo: [
       { name: '1타', windup: 0.07, active: 0.06, recovery: 0.12, damage: 7, range: 1.9, arcDeg: 95, staminaCost: 5, hitstop: 0.035, trauma: 0.14, lunge: 1.1, knockback: 0.8 },
       { name: '2타', windup: 0.06, active: 0.06, recovery: 0.12, damage: 8, range: 1.9, arcDeg: 95, staminaCost: 5, hitstop: 0.035, trauma: 0.15, lunge: 1.1, knockback: 0.8 },
@@ -752,4 +862,11 @@ export function weaponAt(index: number): WeaponDef {
  * 룬 교체는 Tab(F슬롯) / C(G슬롯) — G가 스킬 키가 되면서 옮겼습니다.
  */
 export const SKILL_KEYS = ['Q', 'E', 'R', 'F', 'G'] as const
-export const SKILL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyG'] as const
+/**
+ * ⌨️ 스킬 키. **여섯 자리**입니다 — 무기 스킬 4 + 룬 2.
+ *
+ * ⚠️ 새로 넣은 `KeyC` 가 맥락 키(V·B)와 겹치지 않는지는 `npm run guard` 가
+ *    봅니다. 가드 키를 V 에 얹었다가 사다리와 부딪혀 봇이 90프레임 갇힌
+ *    사고가 있었습니다 — 상시 키와 맥락 키는 절대 같으면 안 됩니다.
+ */
+export const SKILL_KEY_CODES = ['KeyQ', 'KeyE', 'KeyR', 'KeyC', 'KeyF', 'KeyG'] as const

@@ -9,15 +9,19 @@ import { time } from '../core/time'
  *
  * 슬롯 규약 (arsenal.ts 설계 노트):
  *   0 = 무기 스킬 1 (Q)   1 = 무기 스킬 2 (E)   2 = 무기 스킬 3 (R)
- *   3 = 룬 슬롯 1  (F)   4 = 룬 슬롯 2  (G)
+ *   3 = 무기 기예   (C)   4 = 룬 슬롯 1  (F)   5 = 룬 슬롯 2  (G)
+ *
+ * ⚠️ **룬 슬롯 번호가 바뀌었습니다**(3·4 → 4·5). 그래서 이 규약을 숫자로
+ *    베껴 쓴 곳이 있으면 조용히 어긋납니다. 아래 `FIRST_RUNE_SLOT` 하나만
+ *    보게 되어 있는지가 이 파일의 존재 이유입니다.
  *
  * 무기 슬롯은 무기를 바꿔야 바뀌고, 룬 슬롯은 탐험으로 얻은 것을 자유롭게 끼웁니다.
  * 이 파일이 그 규칙을 한 곳에 모아 두는 유일한 지점입니다.
  */
 
-export const SLOT_COUNT = 5
+export const SLOT_COUNT = 6
 /** 이 번호부터가 룬 슬롯입니다. 무기 스킬 개수와 항상 같아야 합니다. */
-export const FIRST_RUNE_SLOT = 3
+export const FIRST_RUNE_SLOT = 4
 
 /**
  * 지금 든 무기의 강화 단계.
@@ -81,8 +85,10 @@ export function cooldownOf(e: number, slot: number): number {
       return Loadout.cd2[e]
     case 3:
       return Loadout.cd3[e]
-    default:
+    case 4:
       return Loadout.cd4[e]
+    default:
+      return Loadout.cd5[e]
   }
 }
 
@@ -99,6 +105,9 @@ export function setCooldown(e: number, slot: number, value: number): void {
       break
     case 3:
       Loadout.cd3[e] = value
+      break
+    case 4:
+      Loadout.cd4[e] = value
       break
     default:
       Loadout.cd4[e] = value
@@ -120,6 +129,7 @@ export function tickCooldowns(e: number): void {
   if (Loadout.cd2[e] > 0) Loadout.cd2[e] = Math.max(0, Loadout.cd2[e] - dt)
   if (Loadout.cd3[e] > 0) Loadout.cd3[e] = Math.max(0, Loadout.cd3[e] - dt)
   if (Loadout.cd4[e] > 0) Loadout.cd4[e] = Math.max(0, Loadout.cd4[e] - dt)
+  if (Loadout.cd5[e] > 0) Loadout.cd5[e] = Math.max(0, Loadout.cd5[e] - dt)
 }
 
 /** 획득한 룬을 슬롯에 채웁니다. 빈 슬롯 우선, 둘 다 차 있으면 두 번째를 교체합니다. */

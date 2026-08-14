@@ -113,6 +113,8 @@ function applyMods(base: SkillDef, mods: TripodMods): SkillDef {
   if (mods.arcAdd !== undefined) out.arcDeg = Math.min(360, Math.max(10, out.arcDeg + mods.arcAdd))
   if (mods.hitsAdd !== undefined) out.hits = Math.max(1, out.hits + mods.hitsAdd)
   if (mods.knockbackMult !== undefined) out.knockback *= mods.knockbackMult
+  // 🔨 강인도 피해 — combat.ts applyPoise 가 이 값으로 강인도를 깎습니다.
+  if (mods.traumaMult !== undefined) out.trauma *= mods.traumaMult
   if (mods.windupMult !== undefined) out.windup = Math.max(0.02, out.windup * mods.windupMult)
   if (mods.recoveryMult !== undefined) out.recovery = Math.max(0.05, out.recovery * mods.recoveryMult)
   if (mods.moveScaleAdd !== undefined) {

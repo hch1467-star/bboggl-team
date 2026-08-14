@@ -99,6 +99,7 @@ export function spawnPlayer(x = 0, z = 0): number {
   Loadout.cd2[e] = 0
   Loadout.cd3[e] = 0
   Loadout.cd4[e] = 0
+  Loadout.cd5[e] = 0
   Renderable.kind[e] = KIND_PLAYER
   return e
 }

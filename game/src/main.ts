@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { TRIPOD_TIERS, tripodsFor } from './config/tripods'
 import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
 import {
   RUNE_ORDER,
@@ -10,6 +11,7 @@ import {
   ROLL_COMBO,
   HEAVY_COMBO,
   FINISH_COMBO,
+  SKILL_KEY_CODES,
 } from './config/arsenal'
 import {
   AWARE,
@@ -134,6 +136,7 @@ import { bonfireSystem, setBonfireReach, type Bonfire } from './systems/bonfire'
 import { deathEvents, healthSystem } from './systems/health'
 import {
   SLOT_COUNT,
+  FIRST_RUNE_SLOT,
   cooldownOf,
   grantRune,
   setCooldown,
@@ -1717,12 +1720,15 @@ class Game {
     } else {
       this.hud.setProgress(this.wave, enemiesLeft, this.kills)
     }
-    this.cdBuf[0] = Loadout.cd0[p]
-    this.cdBuf[1] = Loadout.cd1[p]
-    this.cdBuf[2] = Loadout.cd2[p]
-    this.cdBuf[3] = Loadout.cd3[p]
-    this.cdBuf[4] = Loadout.cd4[p]
-    for (let i = 0; i < SLOT_COUNT; i++) this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
+    /**
+     * ⚠️ 예전에는 `cd0..cd4` 를 손으로 늘어놓았습니다. 슬롯이 하나 늘자
+     *    이 줄만 옛 개수를 그리고 있었을 자리입니다 — 화면에 안 보이는
+     *    슬롯이 생기는, 조용한 종류의 고장입니다. `cooldownOf` 하나만 봅니다.
+     */
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      this.cdBuf[i] = cooldownOf(p, i)
+      this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
+    }
     this.skillBar.update(this.cdBuf, this.cdMaxBuf)
     /**
      * 🗡 예약된 무기 전환을 스킬바에 비춥니다.
@@ -3786,12 +3792,11 @@ class Game {
   /** 슬롯별 남은 쿨다운(초). 봇이 "쓸 수 있는 스킬"을 고르는 데 씁니다. */
   debugSlotCooldowns(): { slot: number; key: string; cd: number; empty: boolean }[] {
     const p = this.playerEntity
-    const keys = ['KeyQ', 'KeyE', 'KeyR', 'KeyF', 'KeyG']
-    const cds = [Loadout.cd0[p], Loadout.cd1[p], Loadout.cd2[p], Loadout.cd3[p], Loadout.cd4[p]]
-    return keys.map((key, slot) => ({
+    // ⌨️ 키도 개수도 **게임의 표**를 그대로 씁니다 — 봇이 옛 다섯 칸을 보지 않게.
+    return SKILL_KEY_CODES.slice(0, SLOT_COUNT).map((key: string, slot: number) => ({
       slot,
       key,
-      cd: Number(cds[slot].toFixed(2)),
+      cd: Number(cooldownOf(p, slot).toFixed(2)),
       empty: skillForSlot(p, slot) === null,
     }))
   }
@@ -3963,13 +3968,9 @@ class Game {
         comboLength: weaponOf(p).combo.length,
         runesOwned: Loadout.runesOwned[p],
         slots: Array.from({ length: SLOT_COUNT }, (_, i) => skillForSlot(p, i)?.id ?? null),
-        cooldowns: [
-          Number(Loadout.cd0[p].toFixed(2)),
-          Number(Loadout.cd1[p].toFixed(2)),
-          Number(Loadout.cd2[p].toFixed(2)),
-          Number(Loadout.cd3[p].toFixed(2)),
-          Number(Loadout.cd4[p].toFixed(2)),
-        ],
+        cooldowns: Array.from({ length: SLOT_COUNT }, (_, i) =>
+          Number(cooldownOf(p, i).toFixed(2)),
+        ),
       },
       levelMode: this.levelMode,
       levelName: this.levelName,
@@ -4215,6 +4216,10 @@ declare global {
         refund: number
         poise: number
       }
+      /** 🎛 슬롯 규약 — 검사가 숫자를 베끼지 않게 */
+      slotInfo: () => { count: number; firstRuneSlot: number }
+      /** 🌿 트라이포드 표의 크기 */
+      tripodTable: () => { skills: number; tiers: number; perTier: number }
       /** ⚔️ 지금 좌클릭이 무엇이 되는가 — 상황 모션 검증용 */
       moveInfo: () => {
         pending: string
@@ -4883,6 +4888,20 @@ window.__game = {
   guardInfo: () => game.debugGuardInfo(),
   dodgeInfo: () => game.debugDodgeInfo(),
   moveInfo: () => game.debugMoveInfo(),
+  /**
+   * 🎛 슬롯 규약 — **loadout.ts 가 정한 것을 그대로** 내보냅니다.
+   * 검사가 "룬은 3·4번" 같은 숫자를 들고 있으면, 슬롯을 늘리는 날
+   * 게임은 멀쩡한데 검사만 빨개집니다(실제로 그렇게 됐습니다).
+   */
+  slotInfo: () => ({ count: SLOT_COUNT, firstRuneSlot: FIRST_RUNE_SLOT }),
+  /** 🌿 트라이포드 **표의 크기** — 창에 몇 개가 그려져야 하는지 게임이 압니다. */
+  tripodTable: () => ({
+    skills: WEAPONS[Loadout.weapon[game.debugPlayerEntity()]].skills.filter((id) =>
+      tripodsFor(id),
+    ).length,
+    tiers: TRIPOD_TIERS,
+    perTier: 2,
+  }),
   focusInfo: () => ({
     focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
     max: FOCUS.max,

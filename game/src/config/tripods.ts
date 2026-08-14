@@ -47,6 +47,12 @@ export interface TripodMods {
   /** 다단히트 횟수에 더하는 값 */
   hitsAdd?: number
   knockbackMult?: number
+  /**
+   * 강인도 피해 배율. combat.ts `applyPoise` 가 `trauma` 로 강인도를 깎으므로,
+   * *"무너뜨리는 기술"* 을 만들려면 이 손잡이가 필요합니다 — 무기 기예
+   * (투구가르기·밀쳐내기)가 정확히 그 자리를 노립니다.
+   */
+  traumaMult?: number
   /** 선행동작/후딜 배율 — 1보다 작으면 빨라집니다 */
   windupMult?: number
   recoveryMult?: number
@@ -386,6 +392,114 @@ export const TRIPODS: Record<string, [TripodTier, TripodTier, TripodTier]> = {
           name: '독날',
           desc: '보조기가 주력기가 된다. 피해 +190%',
           mods: { damageMult: 2.9, snareAdd: -0.6 },
+        },
+      ],
+    },
+  ],
+
+  /**
+   * ── ⚔️ 무기 기예 셋 ────────────────────────────────────────────────
+   * 3단계는 **정체가 바뀌어야** 합니다(위 설계 노트). 셋 다 그 무기가
+   * 원래 못 하던 일을 한 발 더 밀어 주는 쪽으로 잡았습니다.
+   */
+  cleave_helm: [
+    {
+      title: '1단계 · 성능',
+      options: [
+        { id: 'ch1a', name: '무거운 날', desc: '강인도 피해 +40%', mods: { traumaMult: 1.4 } },
+        { id: 'ch1b', name: '익숙한 손', desc: '쿨다운 -30%', mods: { cooldownMult: 0.7 } },
+      ],
+    },
+    {
+      title: '2단계 · 운용',
+      options: [
+        { id: 'ch2a', name: '빠른 내리침', desc: '선행동작 -35% — 예고를 보고도 낼 수 있다', mods: { windupMult: 0.65 } },
+        { id: 'ch2b', name: '넓은 궤적', desc: '각도 +70° — 둘을 한 번에 무너뜨린다', mods: { arcAdd: 70 } },
+      ],
+    },
+    {
+      title: '3단계 · 변형',
+      options: [
+        {
+          // 강인도를 파는 기술이 **피해기**가 됩니다 — 무너뜨리기를 포기하는 대신.
+          id: 'ch3a',
+          name: '벼락치기',
+          desc: '피해 +150%, 강인도 피해 -60%. 무너뜨리기를 포기하고 한 방을 얻는다',
+          mods: { damageMult: 2.5, traumaMult: 0.4 },
+        },
+        {
+          id: 'ch3b',
+          name: '깨뜨리기',
+          desc: '강인도 피해 +120%. 한 번에 무너뜨리고 처형으로 잇는다',
+          mods: { traumaMult: 2.2, damageMult: 0.7 },
+        },
+      ],
+    },
+  ],
+  shove: [
+    {
+      title: '1단계 · 성능',
+      options: [
+        { id: 'sv1a', name: '억센 어깨', desc: '넉백 +60%', mods: { knockbackMult: 1.6 } },
+        { id: 'sv1b', name: '반사적으로', desc: '쿨다운 -35%', mods: { cooldownMult: 0.65 } },
+      ],
+    },
+    {
+      title: '2단계 · 운용',
+      options: [
+        { id: 'sv2a', name: '둘러보기', desc: '각도 +120° — 둘러싸였을 때 전부 민다', mods: { arcAdd: 120 } },
+        { id: 'sv2b', name: '파고들며', desc: '앞으로 3m 밀고 나간다', mods: { dashAdd: 3 } },
+      ],
+    },
+    {
+      title: '3단계 · 변형',
+      options: [
+        {
+          // 자리를 버는 기술이 **끊는 기술**이 됩니다.
+          id: 'sv3a',
+          name: '흔들기',
+          desc: '강인도 피해 +200%. 미는 대신 **예고를 끊는다**',
+          mods: { traumaMult: 3, knockbackMult: 0.4 },
+        },
+        {
+          id: 'sv3b',
+          name: '절벽으로',
+          desc: '넉백 +160%. 이 존은 절벽이 많습니다',
+          mods: { knockbackMult: 2.6 },
+        },
+      ],
+    },
+  ],
+  backstep_cut: [
+    {
+      title: '1단계 · 성능',
+      options: [
+        { id: 'bs1a', name: '두 번 긋기', desc: '타수 +2', mods: { hitsAdd: 2 } },
+        { id: 'bs1b', name: '가벼운 발', desc: '쿨다운 -35%', mods: { cooldownMult: 0.65 } },
+      ],
+    },
+    {
+      title: '2단계 · 운용',
+      options: [
+        { id: 'bs2a', name: '더 멀리', desc: '지나치는 거리 +2.4m', mods: { dashAdd: 2.4 } },
+        { id: 'bs2b', name: '길게 흘리기', desc: '무적 구간이 끝까지 이어진다', mods: { iFrames: [0.02, 0.3] } },
+      ],
+    },
+    {
+      title: '3단계 · 변형',
+      options: [
+        {
+          // 지나치는 기술이 **파고드는 기술**이 됩니다 — 등 뒤를 포기하고 딜을 얻습니다.
+          id: 'bs3a',
+          name: '파고들기',
+          desc: '거리 -3.2m, 타수 +3. 지나치지 않고 그 자리에서 몰아친다',
+          mods: { dashAdd: -3.2, hitsAdd: 3 },
+        },
+        {
+          id: 'bs3b',
+          name: '그림자 밟기',
+          desc: '피해 +80%. 등을 잡는 그 한 발에 힘을 싣는다',
+          mods: { damageMult: 1.8 },
         },
       ],
     },

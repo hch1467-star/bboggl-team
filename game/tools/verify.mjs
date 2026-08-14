@@ -248,6 +248,26 @@ async function main() {
      *    회피 값을 25 → 18 로 옮기는 날 이 줄만 옛 값을 들고 빨개집니다 —
      *    게임은 멀쩡한데 검사가 틀리는, 이 저장소가 제일 싫어하는 모양입니다.
      */
+    const dodgeCost = await page.evaluate(() => window.__game.dodgeInfo().cost)
+    check(
+      `회피가 스태미나 ${dodgeCost} 소모`,
+      dodging.ok && Math.abs(before.player.stamina - dodging.state.player.stamina - dodgeCost) < 3,
+      `${before.player.stamina} -> ${dodging.state.player.stamina}`,
+    )
+    const rolled = await waitUntil((st) => st.player.state !== 2, 3000)
+    const rollDist = Math.hypot(rolled.state.player.x - before.player.x, rolled.state.player.z - before.player.z)
+    check('회피 이동거리 약 4.2m', rollDist > 3.0 && rollDist < 5.5, `${rollDist.toFixed(2)}m`)
+    const staminaBack = await waitUntil((st) => st.player.stamina > 95, 6000)
+    check('스태미나 자동 회복', staminaBack.ok, `${staminaBack.state.player.stamina}`)
+
+    /**
+     * ⚠️ **앞뒤를 리셋으로 격리합니다.** 이 절은 달리고 구르므로, 격리하지
+     *    않으면 남은 속도가 다음 검사에 얹힙니다 — 실제로 *"회피 이동거리
+     *    4.2m"* 가 5.63m → 9.37m 으로 두 번 빨개졌고, 두 번 다 게임이 아니라
+     *    **앞 검사가 뒤 검사를 오염시킨** 것이었습니다.
+     */
+    await page.evaluate(() => window.__game.reset())
+    await sleep(300)
     /**
      * ── ⚔️ **상황이 모션을 바꾸는가** ────────────────────────────────
      *
@@ -265,37 +285,52 @@ async function main() {
       // ① 아무것도 안 하면 평범한 1타 — **실패할 수 있는 짝**입니다.
       check('가만히 서서 치면 평소 1타', mv.pending === '1타', `"${mv.pending}"`)
 
-      // ② 굴러 넘긴 **직후** — 갚는 손이 열립니다.
-      const rolled = await page.evaluate(async () => {
+      /**
+       * ②③ 굴러 넘긴 **직후** 창이 열리고, 지나면 닫히는가.
+       *
+       * ⚠️ **한 번의 evaluate 안에서 둘 다 잽니다.** 처음엔 나눠 불렀는데,
+       *    두 호출 사이의 왕복이 창(0.35초)보다 길어져서 *"창이 지나면 도로
+       *    1타"* 가 엉뚱하게 빨개졌습니다. 따로 추적해 보니 게임은 정확히
+       *    0.35 → 0 으로 닫히고 있었습니다 — **계측기가 창보다 느렸습니다.**
+       *    창보다 짧은 것을 재려면 재는 쪽이 그 안에 있어야 합니다.
+       */
+      const rollWin = await page.evaluate(async () => {
         const G = window.__game
+        const step = () => new Promise((r) => setTimeout(r, 8))
         G.press('Space')
         G.release('Space')
-        // 구르기가 끝날 때까지 기다렸다가 **창이 살아 있는 동안** 읽습니다.
-        const deadline = G.state().elapsed + 2
-        while (G.state().elapsed < deadline) {
+        let opened = null
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 2) {
           const m = G.moveInfo()
-          if (m.rollWindowT > 0) return m
-          await new Promise((r) => setTimeout(r, 8))
+          if (m.rollWindowT > 0) {
+            opened = m
+            break
+          }
+          await step()
         }
-        return G.moveInfo()
+        let closed = null
+        const t1 = G.state().elapsed
+        while (G.state().elapsed - t1 < 2) {
+          const m = G.moveInfo()
+          if (m.rollWindowT === 0) {
+            closed = m
+            break
+          }
+          await step()
+        }
+        return { opened, closed }
       })
       check(
         '구른 직후엔 **구르기 공격**이 열린다',
-        rolled.pending === '구르기 공격' && rolled.rollWindowT > 0,
-        `"${rolled.pending}" · 창 ${rolled.rollWindowT}초`,
+        rollWin.opened?.pending === '구르기 공격' && rollWin.opened?.rollWindowT > 0,
+        `"${rollWin.opened?.pending}" · 창 ${rollWin.opened?.rollWindowT}초`,
       )
-      // ③ 창이 지나면 도로 1타 — 창이 실제로 닫히는가.
-      const closed = await page.evaluate(async () => {
-        const G = window.__game
-        const deadline = G.state().elapsed + 2
-        while (G.state().elapsed < deadline) {
-          const m = G.moveInfo()
-          if (m.rollWindowT === 0) return m
-          await new Promise((r) => setTimeout(r, 8))
-        }
-        return G.moveInfo()
-      })
-      check('창이 지나면 도로 1타 (상시 기술이 아니다)', closed.pending === '1타', `"${closed.pending}"`)
+      check(
+        '창이 지나면 도로 1타 (상시 기술이 아니다)',
+        rollWin.closed?.pending === '1타',
+        `"${rollWin.closed?.pending}"`,
+      )
 
       // ④ 달리는 중 — 거리를 좁히는 기술로 바뀝니다.
       const running = await page.evaluate(async () => {
@@ -312,6 +347,15 @@ async function main() {
         const out = { ...m }
         G.release('KeyW')
         G.release('ShiftLeft')
+        /**
+         * ⚠️ **멈출 때까지 기다립니다.** 이걸 빼먹었더니 바로 다음 검사인
+         *    *"회피 이동거리 약 4.2m"* 가 **5.63m** 로 빨개졌습니다 —
+         *    달리던 속도가 남아 구르기 거리에 얹힌 것입니다. 게임은 멀쩡한데
+         *    **앞 검사가 뒤 검사를 오염시킨** 것이고, 이 저장소에서 제일
+         *    비싼 종류의 거짓말입니다.
+         */
+        const stop = G.state().elapsed + 1.2
+        while (G.state().elapsed < stop) await new Promise((r) => setTimeout(r, 8))
         return out
       })
       check(
@@ -350,17 +394,8 @@ async function main() {
       )
     }
 
-    const dodgeCost = await page.evaluate(() => window.__game.dodgeInfo().cost)
-    check(
-      `회피가 스태미나 ${dodgeCost} 소모`,
-      dodging.ok && Math.abs(before.player.stamina - dodging.state.player.stamina - dodgeCost) < 3,
-      `${before.player.stamina} -> ${dodging.state.player.stamina}`,
-    )
-    const rolled = await waitUntil((st) => st.player.state !== 2, 3000)
-    const rollDist = Math.hypot(rolled.state.player.x - before.player.x, rolled.state.player.z - before.player.z)
-    check('회피 이동거리 약 4.2m', rollDist > 3.0 && rollDist < 5.5, `${rollDist.toFixed(2)}m`)
-    const staminaBack = await waitUntil((st) => st.player.stamina > 95, 6000)
-    check('스태미나 자동 회복', staminaBack.ok, `${staminaBack.state.player.stamina}`)
+    await page.evaluate(() => window.__game.reset())
+    await sleep(300)
 
     // ---------- 5. 공격 상태 기계 & 콤보 ----------
     await page.evaluate(() => window.__game.reset())
@@ -884,11 +919,18 @@ async function main() {
     )
     check('시작 지점이 바닥 위(높이 2)', zs.player.terrainLevel === 2, `높이 단계 ${zs.player.terrainLevel}`)
     check('시작 지점 근처에는 적이 없음', (zs.nearestEnemy?.dist ?? 99) > 8, `가장 가까운 적 ${zs.nearestEnemy?.dist}m`)
-    // 룬 슬롯은 이제 3, 4번입니다(0~2가 무기 스킬 3개).
+    /**
+     * ⚠️ **슬롯 번호를 여기 적지 않습니다.** 예전엔 *"룬은 3·4번"* 이라고
+     *    박아 뒀는데, 무기 기예가 들어와 무기 스킬이 4개가 되자 룬이 4·5번으로
+     *    밀렸고 이 줄만 옛 규약을 봤습니다. 규약은 loadout.ts 한 곳에 있고,
+     *    `slotInfo()` 가 그것을 그대로 내보냅니다.
+     */
+    const slotRule = await zone.evaluate(() => window.__game.slotInfo())
+    const runeSlots = zs.loadout.slots.slice(slotRule.firstRuneSlot)
     check(
       '존 시작 시 룬 슬롯 2개는 비어 있음(탐험으로 획득)',
-      zs.loadout.slots[3] === null && zs.loadout.slots[4] === null,
-      `슬롯 ${JSON.stringify(zs.loadout.slots)}`,
+      runeSlots.length === 2 && runeSlots.every((v) => v === null),
+      `룬 슬롯 ${slotRule.firstRuneSlot}번부터 · ${JSON.stringify(zs.loadout.slots)}`,
     )
 
     await zone.evaluate(() => window.__game.requestSample())
@@ -1006,9 +1048,11 @@ async function main() {
     )
     // 시험장은 룬 2개를 미리 쥐여줍니다(전투 검증용). 레벨 모드에서는 비어 있고,
     // 그건 바로 위 9.5 존 검사가 확인합니다.
+    const armSlots = await page.evaluate(() => window.__game.slotInfo())
     check(
-      '스킬 슬롯이 5개(무기 3 + 룬 2)로 확장됨',
-      arm.loadout.slots.length === 5 && arm.loadout.cooldowns.length === 5,
+      `스킬 슬롯이 ${armSlots.count}개(무기 ${armSlots.firstRuneSlot} + 룬 ${armSlots.count - armSlots.firstRuneSlot})로 확장됨`,
+      arm.loadout.slots.length === armSlots.count &&
+        arm.loadout.cooldowns.length === armSlots.count,
       `슬롯 ${arm.loadout.slots.length}개 · 쿨다운 ${arm.loadout.cooldowns.length}개`,
     )
 
@@ -1065,9 +1109,14 @@ async function main() {
       skills: document.querySelectorAll('#tripodBody .tpSkill').length,
       options: document.querySelectorAll('#tripodBody .tpOpt').length,
     }))
-    check('T 창이 열리고 스킬 3개 × 3단계 × 2선택이 그려짐',
-      panel.open && panel.skills === 3 && panel.options === 18,
-      `스킬 ${panel.skills}개 · 선택지 ${panel.options}개`)
+    // 몇 개가 그려져야 하는지도 **게임이 압니다** — 스킬을 하나 넣는 날
+    // 이 줄만 옛 숫자를 들고 빨개지면, 고쳐야 할 것은 게임이 아니라 검사입니다.
+    const tri = await page.evaluate(() => window.__game.tripodTable())
+    check(
+      `T 창이 열리고 스킬 ${tri.skills}개 × ${tri.tiers}단계 × ${tri.perTier}선택이 그려짐`,
+      panel.open && panel.skills === tri.skills && panel.options === tri.skills * tri.tiers * tri.perTier,
+      `스킬 ${panel.skills}개 · 선택지 ${panel.options}개`,
+    )
     await page.evaluate(() => window.__game.toggleTripodPanel())
 
     // ---------- 9.58 세이브 ----------
