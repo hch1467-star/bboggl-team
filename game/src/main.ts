@@ -3742,6 +3742,7 @@ class Game {
   debugGuardInfo(): {
     windowT: number
     canGuard: boolean
+    key: string
     lockT: number
     count: number
     window: number
@@ -3755,6 +3756,8 @@ class Game {
       windowT: Number(Player.guardT[p].toFixed(3)),
       /** 지금 낼 수 있는가 — 판단은 playerControl 한 곳에만 있습니다. */
       canGuard: canGuardNow(p),
+      /** ⌨️ 이 동작의 키. 프로브·봇이 베끼지 않게 게임이 알려 줍니다. */
+      key: GUARD.key,
       lockT: Number(Player.guardLockT[p].toFixed(3)),
       count: this.justGuards,
       window: GUARD.window,
@@ -4051,6 +4054,8 @@ declare global {
         windowT: number
         /** 🛡 지금 누르면 열리는가 (서 있거나 후딜일 때만) — 봇이 베끼지 않게 */
         canGuard: boolean
+        /** ⌨️ 이 동작의 키 — 옮겨도 프로브·봇이 따라옵니다 */
+        key: string
         /** 헛쳐서 굳어 있는 남은 시간(초) */
         lockT: number
         /** 이번 판에 성립한 저스트 가드 수 */

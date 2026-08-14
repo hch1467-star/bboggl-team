@@ -82,7 +82,11 @@ function moduleScopeNames(src) {
   }
   for (const m of src.matchAll(/^import\s+([^'"]+?)\s+from\s+/gm)) {
     for (const part of m[1].replace(/[{}]/g, ' ').split(',')) {
-      const name = part.trim().split(/\s+as\s+/).pop()?.trim()
+      const name = part
+        .trim()
+        .split(/\s+as\s+/)
+        .pop()
+        ?.trim()
       if (name && /^[A-Za-z_$][\w$]*$/.test(name)) names.add(name)
     }
   }
@@ -121,7 +125,7 @@ for (const f of files) {
      */
     const bodyAt = b.text.indexOf('=>')
     let body = bodyAt < 0 ? b.text : b.text.slice(bodyAt)
-    body = body.replace(/,\s*\[[\s\S]*\]\s*,?\s*\)\s*$/, '')  // 꼬리 쉼표까지
+    body = body.replace(/,\s*\[[\s\S]*\]\s*,?\s*\)\s*$/, '') // 꼬리 쉼표까지
     /** 블록 **안에서** 선언된 같은 이름은 남의 이름이 아닙니다. */
     const localNames = new Set(
       [...body.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
@@ -173,15 +177,67 @@ check(
  * 겹치면** 빨강입니다. 상시 키는 "그 자리에서만"이라는 전제를 깹니다.
  */
 {
-  const readKeys = (file) => {
-    const src = readFileSync(path.join(HERE, '..', file), 'utf8')
-    const noC = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-    return new Set([...noC.matchAll(/consumePress\(\s*'([A-Za-z0-9]+)'\s*\)/g)].map((m) => m[1]))
+  /**
+   * ⚠️ **리터럴만 보면 검사가 조용히 약해집니다.**
+   *
+   * 가드 키를 `GUARD.key` 상수로 빼자마자 이 검사가 세는 상시 키가
+   * **10개 → 9개**로 줄었습니다. 코드는 멀쩡한데 **검사만 눈이 멀었습니다.**
+   * 이 파일이 막으려는 실패 모드가 정확히 그것입니다.
+   *
+   * 그래서 두 가지를 합니다:
+   *   ① `config/balance.ts` 에 선언된 `key: 'KeyX'` 도 상시 키로 셉니다.
+   *   ② 리터럴도 상수도 아닌 `consumePress(...)` 가 있으면 **못 읽었다고
+   *      빨갛게 말합니다.** 조용히 빠뜨리는 것보다 낫습니다.
+   */
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  /** config 에 선언된 키들 — `key: 'KeyZ'` 와 `NAME = ['KeyQ', ...]` 둘 다 읽습니다. */
+  const configText = ['src/config/balance.ts', 'src/config/arsenal.ts']
+    .map((f) => strip(readFileSync(path.join(HERE, '..', f), 'utf8')))
+    .join('\n')
+  const configKeys = new Set(
+    [...configText.matchAll(/\bkey:\s*'([A-Za-z0-9]+)'/g)].map((m) => m[1]),
+  )
+  /** 배열 선언 — 스킬 키(QERFG)가 여기 있습니다. 이름별로 담아 둡니다. */
+  const keyArrays = new Map()
+  for (const m of configText.matchAll(/\b([A-Z_]+)\s*=\s*\[([^\]]*)\]/g)) {
+    const items = [...m[2].matchAll(/'([A-Za-z0-9]+)'/g)].map((x) => x[1])
+    if (
+      items.length > 0 &&
+      items.every((k) => /^(Key|Digit|Mouse|Arrow|Shift|Space|Tab|F\d)/.test(k))
+    ) {
+      keyArrays.set(m[1], items)
+    }
+  }
+  const unresolved = []
+  const readKeys = (file, allowConst) => {
+    const noC = strip(readFileSync(path.join(HERE, '..', file), 'utf8'))
+    const out = new Set()
+    for (const m of noC.matchAll(/consumePress\(\s*([^)]*?)\s*\)/g)) {
+      const arg = m[1].trim()
+      const lit = /^'([A-Za-z0-9]+)'$/.exec(arg)
+      if (lit) {
+        out.add(lit[1])
+      } else if (allowConst && /^[A-Z_]+\.key$/.test(arg)) {
+        // `GUARD.key` 같은 선언 — config 에서 읽은 키들을 전부 상시로 봅니다.
+        for (const k of configKeys) out.add(k)
+      } else if (allowConst && keyArrays.has(arg.replace(/\[.*$/, ''))) {
+        // `SKILL_KEY_CODES[i]` 같은 배열 접근 — 그 배열의 키 전부가 상시 키입니다.
+        for (const k of keyArrays.get(arg.replace(/\[.*$/, ''))) out.add(k)
+      } else {
+        unresolved.push(`${file}: consumePress(${arg})`)
+      }
+    }
+    return out
   }
   /** 상시 키 — 언제나 그 뜻입니다(전투 동사). */
-  const always = readKeys('src/systems/playerControl.ts')
+  const always = readKeys('src/systems/playerControl.ts', true)
   /** 맥락 키 — "이 자리에서 할 수 있는 일". 서로 겹쳐도 되지만 상시 키와는 안 됩니다. */
-  const contextual = readKeys('src/main.ts')
+  const contextual = readKeys('src/main.ts', false)
+  check(
+    unresolved.length === 0,
+    '모든 `consumePress` 인자를 읽어냈다 (못 읽으면 아래 검사가 조용히 약해집니다)',
+    unresolved.join(' · ') || `상수 선언 ${configKeys.size}개 포함`,
+  )
   const clash = [...always].filter((k) => contextual.has(k))
   check(
     clash.length === 0,

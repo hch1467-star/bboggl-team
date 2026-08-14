@@ -153,8 +153,8 @@ try {
       const i = G.enemyInfo(e)
       return !!i && i.winding && i.timer <= window.__game.guardInfo().window * 0.6
     }, 4)
-    G.press('KeyV')
-    G.release('KeyV')
+    G.press(G.guardInfo().key)
+    G.release(G.guardInfo().key)
     let broke = false
     const deadline = G.state().elapsed + 0.8
     while (G.state().elapsed < deadline) {
@@ -212,8 +212,8 @@ try {
     await window.__t.until(() => G.enemyInfo(e)?.winding === true, 6)
     const t0 = G.state().elapsed
     const leftAtPress = G.enemyInfo(e)?.timer ?? 0
-    G.press('KeyV')
-    G.release('KeyV')
+    G.press(G.guardInfo().key)
+    G.release(G.guardInfo().key)
     /**
      * ⚠️ **타임라인을 같이 적습니다.** 처음엔 이 검사가 빨간 이유를 두고
      *    이론을 세우려 했습니다 — 창이 안 닫히나? 입력이 늦나? 적이 이미
@@ -271,8 +271,8 @@ try {
     G.clearEnemies()
     await window.__t.runFor(0.3)
     const before = G.state().player.stamina ?? 0
-    G.press('KeyV')
-    G.release('KeyV')
+    G.press(G.guardInfo().key)
+    G.release(G.guardInfo().key)
     /**
      * ⚠️ 창은 **다음 프레임**에 열립니다(입력을 프레임 첫머리에서 소비하므로).
      *    누르자마자 읽으면 언제나 0이라, 이 검사가 게임이 아니라 **읽는
@@ -317,8 +317,8 @@ try {
       const i = G.enemyInfo(e)
       return !!i && i.winding && i.timer <= window.__game.guardInfo().window * 0.6
     }, 4)
-    G.press('KeyV')
-    G.release('KeyV')
+    G.press(G.guardInfo().key)
+    G.release(G.guardInfo().key)
     await window.__t.runFor(0.8)
     return { gained: G.guardInfo().count - c0, hurt: hp0 - G.state().player.hp }
   })
@@ -355,8 +355,8 @@ try {
       await window.__t.until(() => window.__game.guardInfo().canGuard === rich, 1)
       const before = G.state().player.stamina
       const can = G.guardInfo().canGuard
-      G.press('KeyV')
-      G.release('KeyV')
+      G.press(G.guardInfo().key)
+      G.release(G.guardInfo().key)
       const opened = await window.__t.until(() => window.__game.guardInfo().windowT > 0, 0.6)
       out[rich ? 'rich' : 'poor'] = {
         can,
@@ -371,7 +371,11 @@ try {
     '③-3 휘두르는 중에도 **기력이 있으면** 열린다',
     `기력 ${midSwing.rich.spent} 냄`,
   )
-  check(midSwing.rich.spent > 0, '   그리고 공짜가 아니다 (커밋을 뚫는 값)', `순감소 -${midSwing.rich.spent} (회복분이 상쇄된 값)`)
+  check(
+    midSwing.rich.spent > 0,
+    '   그리고 공짜가 아니다 (커밋을 뚫는 값)',
+    `순감소 -${midSwing.rich.spent} (회복분이 상쇄된 값)`,
+  )
   check(!midSwing.poor.opened, '   **기력이 없으면 안 열린다** (그래야 값이 값입니다)')
 
   /**
@@ -398,8 +402,8 @@ try {
           const i = G.enemyInfo(e)
           return !!i && i.winding && i.timer <= window.__game.guardInfo().window * 0.6
         }, 4)
-        G.press('KeyV')
-        G.release('KeyV')
+        G.press(G.guardInfo().key)
+        G.release(G.guardInfo().key)
         await window.__t.runFor(0.8)
         return { gained: G.guardInfo().count - c0, hurt: hp0 - G.state().player.hp }
       },

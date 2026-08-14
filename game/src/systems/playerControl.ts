@@ -602,7 +602,7 @@ export function playerControlSystem(ctx: ControlContext): void {
    * *"내가 언제 눌렀는지"* 와 *"언제 열렸는지"* 가 어긋납니다 — 타이밍 기술의
    * 판정을 게임이 대신 흔드는 셈입니다.
    */
-  const guardPressed = consumePress('KeyZ')
+  const guardPressed = consumePress(GUARD.key)
   const drinkPressed = consumePress('KeyX')
   let skillPressed = -1
   for (let i = 0; i < SKILL_KEY_CODES.length; i++) {

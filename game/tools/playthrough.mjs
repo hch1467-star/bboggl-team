@@ -1380,7 +1380,8 @@ try {
         if (strike) G.aimAtWorld(strike.x, strike.z)
         if (strike && strike.timer <= gi.window && strike.facing && gi.canGuard) {
           markAct('가드')
-          tap('KeyZ')
+          // 키도 **게임에게 묻습니다** — 옮겨도 봇이 따라옵니다(balance.ts `GUARD.key`).
+          tap(gi.key)
           await sleep()
           continue
         }
