@@ -23,6 +23,7 @@ import {
   pickAttack,
   type EnemyAttackDef,
 } from '../config/enemyAttacks'
+import { isTimingAnswer } from '../config/punish'
 import {
   BOSS_PHASES,
   NO_CHAIN,
@@ -34,6 +35,7 @@ import {
 import {
   AWARE,
   BOSS_ARENA,
+  GUARD,
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
   PLAYER,
@@ -1238,6 +1240,28 @@ export function enemyAiSystem(
         decayVelocity(e, dt, 12)
       }
 
+      /**
+       * ⏱ **「지금」 박자** — 답해야 하는 순간에 한 번만 울립니다.
+       *
+       * 화면의 「지금」 신호(visuals.ts)는 **그 적을 보고 있어야** 도움이
+       * 됩니다. 벤치가 말하길 둘 이상과 싸우는 시간이 **61%**(최대 7마리)
+       * 이므로 다 볼 수 없습니다. 세키로가 이 신호를 소리로 준 이유입니다.
+       *
+       * **경계를 넘는 그 프레임에만** 울립니다 — `timer` 가 창 위에 있다가
+       * 아래로 내려가는 순간. 깃발을 따로 두지 않아도 정확히 한 번입니다.
+       *
+       * ⚠️ 타이밍으로 푸는 색에만(`isTimingAnswer`). 🟡 은 걸어 나가야 하고
+       *    🟣 는 사거리 밖에 있어야 하므로, 마지막 순간의 박자는 도움이
+       *    아니라 **이미 늦은 때 알려 주는 거짓말**입니다.
+       */
+      if (
+        phase === AttackPhase.Windup &&
+        isTimingAnswer(atk.intent) &&
+        Actor.timer[e] > GUARD.window &&
+        Actor.timer[e] - dt <= GUARD.window
+      ) {
+        sfx.nowBeat(Transform.x[e], Transform.z[e])
+      }
       Actor.timer[e] -= dt
       if (Actor.timer[e] <= 0) {
         if (phase === AttackPhase.Windup) {

@@ -4990,6 +4990,12 @@ window.__game = {
           sfx.telegraph(a, at.x + b, at.z)
           break
         }
+        case 'nowBeat': {
+          // ⏱ 「지금」 박자도 **위치가 있는 소리**입니다(예고음과 같은 규칙).
+          const at = sfx.debugListener()
+          sfx.nowBeat(at.x + b, at.z)
+          break
+        }
         case 'dodge':
           sfx.dodge()
           break

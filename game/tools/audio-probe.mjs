@@ -108,6 +108,12 @@ try {
     for (const r of roster) {
       for (const a of r.attacks) if (!intents.has(a.intent)) intents.set(a.intent, a.color)
     }
+    /**
+     * ⏱ 「지금」 박자도 큐 목록에 넣습니다 — **소리가 실제로 나는지**가
+     * 먼저이고, *"제때 울리는가 · 켜져야 할 색에만 울리는가"* 는 아래에서
+     * 따로 잽니다.
+     */
+    CUES.push({ name: 'nowBeat', args: [0, 3], label: '⏱ 「지금」 박자' })
     const telegraphCues = [...intents.entries()]
       .sort((a, b) => a[0] - b[0])
       // 예고음은 위치가 있는 소리 — 두 번째 인자는 플레이어로부터의 거리(m).
@@ -314,7 +320,9 @@ try {
    * 통과하는 검사보다 나쁜 것은 아무 말도 안 하는 검사이고,
    * 그보다 더 나쁜 것은 **죽으면서 성공했다고 말하는 검사**입니다.
    */
-  console.error(`\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`)
+  console.error(
+    `\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`,
+  )
   fail++
 } finally {
   await browser.close()

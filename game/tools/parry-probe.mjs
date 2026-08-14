@@ -482,6 +482,90 @@ try {
   )
 
   /**
+   * ── ③-5 🔊 「지금」을 **귀로도** ─────────────────────────────────
+   *
+   * 화면의 「지금」 신호는 **그 적을 보고 있어야** 도움이 됩니다. 그런데
+   * 벤치가 말합니다 — *"둘 이상과 싸우는 시간 **61%**, 최대 7마리"*.
+   * 다 볼 수 없습니다. 세키로가 이 신호를 소리로 준 이유입니다.
+   *
+   * 여기서 재는 것: **예고 도중 소리가 한 번 더 나는가**, 그리고 그것이
+   * **타이밍 색에서만** 나는가. 실제 파형이 났는지는 `npm run audio` 가
+   * 따로 잽니다 — 여기서는 **제때 · 맞는 색에** 를 봅니다.
+   */
+  const beatSound = await page.evaluate(async () => {
+    const G = window.__game
+    /**
+     * ⚠️ **소리를 먼저 켭니다.** 이 프로브는 여태 오디오를 열지 않았고,
+     *    그래서 첫 측정에서 창 안팎이 **둘 다 0** 이었습니다. 그건
+     *    "박자가 안 난다"가 아니라 **"아무 소리도 안 난다"** 입니다.
+     *    그리고 *"아닌 색은 안 난다"* 검사가 `0 ≤ 0` 으로 **공짜로 초록**이
+     *    됐습니다 — 혼자 초록인 검사는 대개 아무것도 안 재고 있습니다.
+     */
+    G.audio.unlock()
+    await window.__t.runFor(0.3)
+    const out = {}
+    for (const [kind, dist] of [
+      ['binder', 4.0],
+      ['dragger', 6.0],
+    ]) {
+      const { e } = await window.__t.duel(kind, null, dist)
+      const win = G.guardInfo().window
+      let peakEarly = 0
+      let peakLate = 0
+      let id = ''
+      let timing = null
+      const dl = G.state().elapsed + 12
+      while (G.state().elapsed < dl) {
+        const t = G.telegraphs().find((x) => x.entity === e)
+        if (t) {
+          id = t.attackId
+          timing = t.timing
+          const v = G.audio.level()
+          /**
+           * ⚠️ 예고 **시작음**과 「지금」 박자를 갈라야 합니다. 시작음은
+           *    예고가 뜨는 순간 한 번 울리므로, 창 밖 **후반**만 봅니다
+           *    (시작음이 이미 잦아든 뒤). 안 가르면 "소리가 났다"가
+           *    시작음인지 박자인지 알 수 없습니다.
+           */
+          if (t.left <= win) peakLate = Math.max(peakLate, v)
+          else if (t.left <= win * 2.5) peakEarly = Math.max(peakEarly, v)
+        }
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      out[id || kind] = {
+        timing,
+        early: Number(peakEarly.toFixed(4)),
+        late: Number(peakLate.toFixed(4)),
+      }
+    }
+    return out
+  })
+  for (const [id, v] of Object.entries(beatSound)) {
+    console.log(`    ${id} — 타이밍색 ${v.timing} · 창 직전 ${v.early} → 창 안 ${v.late}`)
+  }
+  const bTiming = Object.values(beatSound).filter((v) => v.timing)
+  const bOther = Object.values(beatSound).filter((v) => v.timing === false)
+  check(
+    bTiming.length > 0 &&
+      bOther.length > 0 &&
+      Object.values(beatSound).some((v) => v.early > 0.001 || v.late > 0.001),
+    '③-5 소리가 실제로 나는 상태에서 쟀다 (측정이 성립했다)',
+    Object.entries(beatSound)
+      .map(([id, v]) => `${id} ${Math.max(v.early, v.late)}`)
+      .join(' · '),
+  )
+  check(
+    bTiming.every((v) => v.late > v.early),
+    '   타이밍 색은 창에 들어설 때 **소리가 한 번 더** 난다',
+    bTiming.map((v) => `${v.early} → ${v.late}`).join(' · '),
+  )
+  check(
+    bOther.every((v) => v.late <= v.early),
+    '   아닌 색은 안 납니다 (걸어 나가는 색에 마지막 박자는 **거짓말**입니다)',
+    bOther.map((v) => `${v.early} → ${v.late}`).join(' · '),
+  )
+
+  /**
    * ── ④ 만능 정답이 아니다 ────────────────────────────────────────
    *
    * **이 프로브에서 가장 중요한 검사입니다.** 가드가 아무 색에나 통하면
