@@ -449,6 +449,38 @@ console.log(
       )
     }
   }
+  /**
+   * ── 🚧 **소비처 여행이 어디서 막혔는가** ──────────────────────────
+   *
+   * `닿음 0.0회 · 무기 강화 0.0회` 가 **벤치 여덟 번 내내** 같습니다. 그런데
+   * 갈림길 장부는 **단일 판 보고서에만** 있어서, 40분짜리 벤치를 돌리고도
+   * *"왜 0인가"* 에 답할 자료가 없었습니다. 이 저장소가 반복해서 데인
+   * 모양 그대로입니다 — playthrough 에만 넣고 벤치를 돌리는 것.
+   *
+   * 조건이 넷이고 **처방이 전부 다릅니다**:
+   *   · 소비처없음 → 배치        · 못삼   → 경제(비용·수입)
+   *   · 지갑안늘어 → 수입/기준선  · 쿨다운 → 봇 규칙
+   * 뭉쳐 놓으면 어느 쪽인지 영영 모르고, 지난번처럼 또 헛짚습니다.
+   */
+  {
+    const has = logs.filter((l) => l.tripBlock)
+    if (has.length) {
+      const share = (k) =>
+        fmt(
+          has.map((l) => {
+            const t = l.tripBlock
+            const tot = t.noFire + t.cantBuy + t.noGrowth + t.cooling + t.open
+            return tot ? Math.round((t[k] / tot) * 100) : 0
+          }),
+          0,
+        )
+      console.log(
+        `  막힌 곳       소비처없음 ${share('noFire')}% · 못삼 ${share('cantBuy')}%` +
+          ` · 지갑안늘어 ${share('noGrowth')}% · 쿨다운 ${share('cooling')}%` +
+          ` · **열림 ${share('open')}%**`,
+      )
+    }
+  }
 }
 
 /**
