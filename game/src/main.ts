@@ -3657,6 +3657,25 @@ class Game {
      * (combat.ts `shapeDist`: `dist <= reach + 내 반지름`)을 씁니다.
      */
     willReach: boolean
+    /**
+     * 👁 **내가 이 적을 보고 있는가.**
+     *
+     * `inFront` 와 **반대 방향**입니다 — 저건 *"내가 적의 정면에 있는가"*
+     * (반격 조건)이고, 이건 *"적이 내 정면에 있는가"* (가드 조건)입니다.
+     * 둘을 한 칸으로 두면 반드시 헷갈립니다.
+     *
+     * ── 왜 필요했나 (계산으로 좁혀진 것) ──────────────────────────
+     * 봇이 22번 붙잡아 12번 열었는데 **11번 헛쳤습니다.** 남은 원인을
+     * 산수로 좁히니 하나가 남았습니다:
+     *
+     *     플레이어 회전 900°/s → 180° 도는 데 **0.200초**
+     *     가드 창 **0.18초**
+     *
+     * 즉 등지고 있다가 누르는 순간 조준을 돌리면 **물리적으로 못 돌립니다.**
+     * 가드는 **이미 보고 있어야** 성립합니다 — 설계상 옳고(맞서는 기술),
+     * 봇은 그걸 몰랐습니다.
+     */
+    facing: boolean
     hp: number
   }[] {
     const p = this.playerEntity
@@ -3684,6 +3703,14 @@ class Game {
         // 판정과 **같은 식**입니다(combat.ts `shapeDist`) — 대상의 굵기를 더합니다.
         willReach:
           attacking && d <= attackAt(Enemy.kind[e], Enemy.attackIndex[e]).reach + Body.radius[p],
+        /** 가드 판정과 **같은 함수**입니다(combat.ts) — 뜻이 두 개가 되지 않게. */
+        facing: !isBehindPoint(
+          Transform.x[e],
+          Transform.z[e],
+          Transform.x[p],
+          Transform.z[p],
+          Transform.rotY[p],
+        ),
         inFront: !isBehindPoint(
           Transform.x[p],
           Transform.z[p],
@@ -4094,6 +4121,8 @@ declare global {
         timer: number
         /** 🎯 이 예고가 지금 내 자리에 닿는가 (판정과 같은 식) */
         willReach: boolean
+        /** 👁 내가 이 적을 보고 있는가 (가드 조건). `inFront` 와 반대 방향입니다 */
+        facing: boolean
         hp: number
       }[]
       slotCooldowns: () => { slot: number; key: string; cd: number; empty: boolean }[]

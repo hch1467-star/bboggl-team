@@ -1287,7 +1287,7 @@ try {
          */
         if (!fieldsChecked && threats.length > 0) {
           fieldsChecked = true
-          for (const k of ['entity', 'x', 'z', 'dist', 'intent', 'winding', 'inFront', 'timer', 'willReach']) {
+          for (const k of ['entity', 'x', 'z', 'dist', 'intent', 'winding', 'inFront', 'timer', 'willReach', 'facing']) {
             if (!(k in threats[0])) throw new Error(`threats() 에 '${k}' 칸이 없습니다`)
           }
         }
@@ -1364,10 +1364,22 @@ try {
         for (const id of [...guardWindowSeen]) {
           if (!threats.some((t) => t.entity === id && t.winding)) guardWindowSeen.delete(id)
         }
-        if (strike && strike.timer <= gi.window && gi.canGuard) {
+        /**
+         * ⚠️ **누르기 전에 먼저 봅니다.**
+         *
+         * 12번 열어 11번 헛쳤을 때, 남은 원인을 산수로 좁히니 하나였습니다:
+         *
+         *     플레이어 회전 900°/s → 180° 도는 데 **0.200초**
+         *     가드 창 **0.18초**
+         *
+         * 누르는 순간에 조준을 돌리면 **물리적으로 못 돌립니다.** 그래서
+         * 붙잡은 순간부터 계속 조준을 맞추고, `facing`(게임 판단)이 참일
+         * 때만 누릅니다. 조준은 공짜이므로 `canGuard` 와 무관하게 합니다 —
+         * 못 낼 때 안 돌려 놓으면 낼 수 있게 된 순간에 또 늦습니다.
+         */
+        if (strike) G.aimAtWorld(strike.x, strike.z)
+        if (strike && strike.timer <= gi.window && strike.facing && gi.canGuard) {
           markAct('가드')
-          // 등지고는 못 막습니다(combat.ts) — 조준을 맞춥니다.
-          G.aimAtWorld(strike.x, strike.z)
           tap('KeyV')
           await sleep()
           continue
@@ -1375,7 +1387,6 @@ try {
         if (strike && gi.canGuard) {
           // 창이 올 때까지 **기다립니다.** 이 기다림이 이 기술의 값입니다.
           markAct('가드대기')
-          G.aimAtWorld(strike.x, strike.z)
           await sleep()
           continue
         }
