@@ -448,6 +448,8 @@ try {
     const greenSeen = new Set()
     /** 🛡 저스트 가드를 **시도한** 횟수. 성공 수는 게임이 셉니다(guardInfo().count). */
     let fieldsChecked = false
+    /** 🛡 이미 센 🔴 예고 — 예고 하나를 한 번만 세기 위한 집합. */
+    const guardSeen = new Set()
     let guardTries = 0
     let greenEvents = 0
     let greenAnswerable = 0
@@ -1285,17 +1287,45 @@ try {
         const strike = threats.find(
           (t) => t.winding && t.intent === 0 && t.dist < 4.5 && t.timer <= gi.window * 2.5,
         )
-        if (strike && gi.lockT <= 0) {
+        /**
+         * ⚠️ **예고 하나를 한 번만 셉니다.**
+         *
+         * 처음엔 이 가지에 들어올 때마다 셌습니다. 봇은 8ms마다 도는데
+         * 게임은 10fps 라, 한 예고에서 수십 번 들어옵니다 — 한 판에
+         * **2530회**가 찍혔고 그건 시도가 아니라 **프레임 수**였습니다.
+         * (성공 1회와 나란히 놓으면 0% 인데, 그 0% 는 아무 뜻이 없습니다.)
+         *
+         * 초록 예고를 세는 쪽이 이미 같은 규칙을 씁니다 — *"올라가는 순간에만
+         * 셉니다. 프레임마다 세면 예고가 긴 패턴일수록 커져서, 횟수가 아니라
+         * 시간을 재게 됩니다."* 그 규칙을 여기에도 씁니다.
+         */
+        if (strike && !guardSeen.has(strike.entity)) {
+          guardSeen.add(strike.entity)
           guardTries++
+        }
+        for (const id of [...guardSeen]) {
+          if (!threats.some((t) => t.entity === id && t.winding)) guardSeen.delete(id)
+        }
+        /**
+         * **낼 수 있는지는 게임에게 묻습니다**(`canGuard`). 봇이 조건을
+         * 베끼면 여는 자리를 바꾸는 날 봇만 옛 규칙을 씁니다.
+         *
+         * 못 낼 때는 **붙잡지 않고 흘려보냅니다** — 아래 구르기로 갑니다.
+         * 처음엔 못 내는 동안에도 계속 붙잡고 서 있었는데, 그러면 답이
+         * 하나도 없는 채로 맞기만 합니다(사망 0 → 2회).
+         */
+        if (strike && strike.timer <= gi.window && gi.canGuard) {
+          markAct('가드')
           // 등지고는 못 막습니다(combat.ts) — 조준을 맞춥니다.
           G.aimAtWorld(strike.x, strike.z)
-          if (strike.timer <= gi.window && gi.windowT <= 0) {
-            markAct('가드')
-            tap('KeyV')
-          } else {
-            // 창이 올 때까지 **기다립니다.** 이 기다림이 이 기술의 값입니다.
-            markAct('가드대기')
-          }
+          tap('KeyV')
+          await sleep()
+          continue
+        }
+        if (strike && gi.canGuard) {
+          // 창이 올 때까지 **기다립니다.** 이 기다림이 이 기술의 값입니다.
+          markAct('가드대기')
+          G.aimAtWorld(strike.x, strike.z)
           await sleep()
           continue
         }

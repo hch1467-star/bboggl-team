@@ -148,6 +148,7 @@ import {
   healEvents,
   playerControlSystem,
   readInputFlow,
+  canGuardNow,
   readLearnedActions,
   readRhythm,
   readStaminaSpent,
@@ -3692,6 +3693,7 @@ class Game {
   /** 🛡 저스트 가드 — 지금 상태와 **규칙값**(balance.ts `GUARD`). */
   debugGuardInfo(): {
     windowT: number
+    canGuard: boolean
     lockT: number
     count: number
     window: number
@@ -3703,6 +3705,8 @@ class Game {
     const p = this.playerEntity
     return {
       windowT: Number(Player.guardT[p].toFixed(3)),
+      /** 지금 낼 수 있는가 — 판단은 playerControl 한 곳에만 있습니다. */
+      canGuard: canGuardNow(p),
       lockT: Number(Player.guardLockT[p].toFixed(3)),
       count: this.justGuards,
       window: GUARD.window,
@@ -3997,6 +4001,8 @@ declare global {
       guardInfo: () => {
         /** 지금 창이 열려 있는 남은 시간(초) */
         windowT: number
+        /** 🛡 지금 누르면 열리는가 (서 있거나 후딜일 때만) — 봇이 베끼지 않게 */
+        canGuard: boolean
         /** 헛쳐서 굳어 있는 남은 시간(초) */
         lockT: number
         /** 이번 판에 성립한 저스트 가드 수 */

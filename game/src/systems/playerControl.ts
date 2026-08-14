@@ -483,6 +483,32 @@ function beginDrink(p: number): void {
   sfx.cast(0)
 }
 
+/**
+ * 🛡 **지금 저스트 가드를 낼 수 있는가.**
+ *
+ * ── 왜 함수로 빼는가 ────────────────────────────────────────────────
+ * 봇이 이 조건을 **자기 쪽에서 다시 세우려다** 문제가 드러났습니다. 봇은
+ * 대부분 공격·접근 중인데 가드는 서 있을 때(Idle)와 **후딜**에서만 열립니다.
+ * 그래서 봇이 눌러도 대부분 거절당했고, 한 판에서 성공이 **1회**였습니다.
+ *
+ * 조건을 봇이 베끼면 여는 자리를 바꾸는 날 봇만 옛 규칙을 씁니다. 그러면
+ * 봇은 **게임이 아닌 것**을 재게 되고, 그 숫자로 밸런스를 고칩니다.
+ * 그래서 판단은 여기 한 곳에 두고 `guardInfo().canGuard` 로 내보냅니다.
+ *
+ * **여는 자리를 좁게 잡은 근거**(위 설계 노트와 같음): 예고·판정 중에도
+ * 열리면, 구르기 취소(기력 45)를 내야 하는 자리를 가드가 **공짜로**
+ * 빠져나갑니다. 두 탈출구의 값이 다르면 싼 쪽만 쓰입니다.
+ */
+export function canGuardNow(p: number): boolean {
+  if (Player.guardLockT[p] > 0 || Player.guardT[p] > 0) return false
+  const st = Actor.state[p] as ActorState
+  if (st === ActorState.Idle) return true
+  return (
+    (st === ActorState.Attack || st === ActorState.Skill) &&
+    Actor.phase[p] === AttackPhase.Recovery
+  )
+}
+
 function beginDodge(p: number, dirX: number, dirZ: number): void {
   noteLearned('dodge')
   Actor.state[p] = ActorState.Dodge
@@ -893,12 +919,7 @@ export function playerControlSystem(ctx: ControlContext): void {
     const guardLocked = Player.guardLockT[p] > 0
     if (guardLocked) moveScale = Math.min(moveScale, 0.25)
     if (guardPressed && !guardLocked && Player.guardT[p] <= 0) {
-      const st = Actor.state[p] as ActorState
-      const canGuard =
-        st === ActorState.Idle ||
-        ((st === ActorState.Attack || st === ActorState.Skill) &&
-          Actor.phase[p] === AttackPhase.Recovery)
-      if (canGuard) {
+      if (canGuardNow(p)) {
         Player.guardT[p] = GUARD.window
         noteLearned('guard')
         sfx.cast(1)
