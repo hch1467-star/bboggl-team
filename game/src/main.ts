@@ -3142,6 +3142,9 @@ class Game {
     skillCasts: number[]
     /** 기둥 1 — 스태미나로 낸 기본 공격 횟수 */
     lightSwings: number
+    /** ⚔️ 상황 모션이 실제로 나간 횟수 */
+    runAttacks: number
+    rollAttacks: number
     /** 이어짐 눈금 — 선입력이 실제로 일했는가 (playerControl.ts readInputFlow) */
     inputUsed: number
     inputExpired: number
@@ -3170,6 +3173,8 @@ class Game {
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
       skillCasts: readRhythm().skillCasts,
       lightSwings: readRhythm().lightSwings,
+      runAttacks: readRhythm().runAttacks,
+      rollAttacks: readRhythm().rollAttacks,
       inputUsed: readInputFlow().used,
       inputExpired: readInputFlow().expired,
       inputDropped: readInputFlow().dropped,
@@ -3889,6 +3894,15 @@ class Game {
     sprinting: boolean
     /** 규칙값 — 프로브가 베끼지 않게 */
     rollWindow: number
+    /**
+     * 🏃 달리기 공격이 **닿는 거리**(사거리 + 파고들기).
+     *
+     * 봇이 이걸 몰라서 첫 판에 **달리기 공격 0회**가 나왔습니다 — 붙고 나서야
+     * 쳤고, 붙으면 이미 달리는 중이 아니니까요. 소울류의 달리기 공격은
+     * **도착하기 전에** 칩니다. 그 거리를 봇이 계산하면 배율을 바꾸는 날
+     * 봇만 옛 값을 쓰므로 게임이 알려 줍니다.
+     */
+    runReach: number
   } {
     const p = this.playerEntity
     const w = weaponOf(p)
@@ -3909,6 +3923,7 @@ class Game {
       rollWindowT: Number(Player.rollAttackT[p].toFixed(3)),
       sprinting: isSprinting(p),
       rollWindow: PLAYER_CFG.contextAttack.rollWindow,
+      runReach: Number((runningStep(w).range + runningStep(w).lunge).toFixed(2)),
     }
   }
 
@@ -4227,6 +4242,7 @@ declare global {
         rollWindowT: number
         sprinting: boolean
         rollWindow: number
+        runReach: number
       }
       /** 🤸 구르기 규칙 — 프로브·봇이 문턱과 키를 베끼지 않게 */
       dodgeInfo: () => {

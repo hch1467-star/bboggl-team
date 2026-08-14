@@ -1522,11 +1522,73 @@ try {
         }
         if (behindMe || now() >= circleUntil) circleUntil = 0
 
+        /**
+         * 🤸 **굴러 넘겼으면 갚습니다.**
+         *
+         * 게임에 구르기 공격이 생겼는데(창 0.35초) 봇에는 그 가지가
+         * 없었습니다. 넣어 두고 안 쓰면 다음 벤치가 *"효과가 없다"* 와
+         * *"쓰이질 않았다"* 를 못 가립니다 — 취소 회피를 여덟 판 돌리고
+         * 나서야 배운 그 자리입니다.
+         *
+         * 소울류에서 구르기 공격이 도는 이유는 **굴러 넘긴 직후가 적의
+         * 후딜**이기 때문입니다. 그래서 조건은 하나뿐입니다: 창이 열려
+         * 있고 적이 닿는 거리면 **바로 친다.** 창(0.35초)이 알아서
+         * "직후"를 보장하므로 봇이 타이밍을 따로 세지 않습니다.
+         *
+         * ⚠️ 창 길이도 사거리도 **게임에게 묻습니다**(`moveInfo`·`near.dist`).
+         *    봇이 0.35 를 들고 있으면 값을 바꾸는 날 봇만 옛 규칙을 씁니다.
+         */
+        const mv = G.moveInfo()
+        if (mv.rollWindowT > 0 && near.dist <= 2.6) {
+          markAct('구르기공격')
+          G.aimAtWorld(near.x, near.z)
+          tap('Mouse0')
+          await sleep()
+          continue
+        }
+
+        /**
+         * 🏃 **도착하기 전에 칩니다.**
+         *
+         * 첫 판에 **달리기 공격 0회**가 나왔습니다. 봇은 Shift 를 잡고 달렸는데,
+         * 2.2m 안에 들어와 **Shift 를 놓은 뒤에** 쳤습니다 — 그때는 이미 달리는
+         * 중이 아니라 평범한 1타입니다. 소울류의 달리기 공격은 **붙기 전에**
+         * 내는 기술이고, 파고들기(1타의 2.6배)가 남은 거리를 대신 좁혀 줍니다.
+         *
+         * 닿는 거리는 **게임에게 묻습니다**(`moveInfo().runReach` = 사거리 +
+         * 파고들기). 봇이 배율을 곱하면 값을 바꾸는 날 봇만 옛 규칙을 씁니다.
+         */
+        if (mv.sprinting && near.dist > 2.2 && near.dist <= mv.runReach) {
+          markAct('달리기공격')
+          G.aimAtWorld(near.x, near.z)
+          tap('Mouse0')
+          await sleep()
+          continue
+        }
+
         if (near.dist > 2.2) {
           markAct('접근')
+          /**
+           * 🏃 **멀면 달려서 붙습니다 — 그리고 그 속도로 칩니다.**
+           *
+           * 달리기 공격은 파고들기가 1타의 2.6배라 *"접근"* 시간을 공격으로
+           * 바꿉니다. 봇은 지금까지 Shift 를 **한 번도** 누른 적이 없어서
+           * (`npm run sprint` 가 그걸 잡았습니다) 이 기술이 존에서 영영
+           * 안 나올 참이었습니다.
+           *
+           * 문턱 4.5m: 달리기가 최고 속도에 붙는 데 0.3초 걸리고, 그 사이
+           * 5.4~8.4m/s 로 2m 남짓을 갑니다. 그보다 가까우면 달릴 새도 없이
+           * 도착하므로 누르는 값만 치릅니다.
+           */
+          // ⚠️ `hold`/`release` 를 씁니다 — `G.press` 를 직접 부르면 `held` 에
+          //    안 잡혀서 `releaseAll` 이 못 놓고, Shift 가 영영 눌린 채 남습니다.
+          if (near.dist > 4.5) hold('ShiftLeft')
+          else release('ShiftLeft')
           // 다가갈 때도 길을 따라갑니다 — 직선으로 가면 다시 절벽에 붙습니다.
           moveToward(reachable.x - p.x, reachable.z - p.z)
         } else {
+          // 붙었으면 달리기를 놓습니다 — 안 놓으면 제자리 달리기가 됩니다.
+          release('ShiftLeft')
           releaseAll()
           /**
            * 🗡️ **처형 안내가 떠 있으면 그것부터 누릅니다.**
@@ -2193,6 +2255,13 @@ try {
        * "쓰이질 않았다"인지 가릴 수가 없습니다.
        */
       inputCancels: G.runStats().inputCancels ?? 0,
+      /**
+       * ⚔️ 상황 모션이 **실제로 나간** 횟수. 봇이 "눌렀다"를 세면 안 됩니다 —
+       * 누른 것과 나간 것은 다르고(기력·상태가 막습니다), 이 프로젝트에서
+       * 잡은 계기 버그 열둘이 전부 그 틈에서 나왔습니다.
+       */
+      runAttacks: G.runStats().runAttacks ?? 0,
+      rollAttacks: G.runStats().rollAttacks ?? 0,
       /** 시뮬레이션 1초당 봇이 판단한 횟수 — 판끼리 견줄 수 있는지 가릅니다. */
       botTicksPerSec: Number((botTicks / Math.max(1, now())).toFixed(1)),
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
@@ -2657,6 +2726,10 @@ try {
       ` · 버려짐(만료) ${log.inputExpired ?? 0}회\n` +
       `             그중 누른 순간엔 못 냈던 것 ${log.inputDropped ?? 0}회 (겹침)` +
       ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초`,
+  )
+  // ⚔️ 넣어 두고 안 쓰이면 "효과가 없다"와 "쓰이질 않았다"를 못 가립니다.
+  console.log(
+    `             ⚔️ 상황 모션 — 달리기 공격 ${log.runAttacks ?? 0}회 · 구르기 공격 ${log.rollAttacks ?? 0}회`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist

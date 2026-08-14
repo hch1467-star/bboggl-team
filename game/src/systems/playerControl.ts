@@ -110,6 +110,8 @@ export function resetStaminaSpent(): void {
   staminaSpent = 0
   skillCasts.fill(0)
   lightSwings = 0
+  runAttacks = 0
+  rollAttacks = 0
   inputFlow.used = 0
   inputFlow.expired = 0
   inputFlow.dropped = 0
@@ -136,8 +138,20 @@ export function resetStaminaSpent(): void {
  */
 const skillCasts = new Array<number>(8).fill(0)
 let lightSwings = 0
-export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
-  return { skillCasts: skillCasts.slice(0, SLOT_COUNT), lightSwings }
+/**
+ * ⚔️ 상황 모션이 **실제로 나간** 횟수. 넣어 두고 안 쓰이면 다음 벤치가
+ * *"효과가 없다"* 와 *"쓰이질 않았다"* 를 못 가립니다 — 취소 회피를 여덟 판
+ * 돌리고 나서야 그 눈금이 없다는 걸 알았던 자리와 같은 교훈입니다.
+ */
+let runAttacks = 0
+let rollAttacks = 0
+export function readRhythm(): {
+  skillCasts: number[]
+  lightSwings: number
+  runAttacks: number
+  rollAttacks: number
+} {
+  return { skillCasts: skillCasts.slice(0, SLOT_COUNT), lightSwings, runAttacks, rollAttacks }
 }
 
 /**
@@ -352,6 +366,8 @@ function beginAttack(p: number, index: number, aimRot: number): void {
    * 2타까지 구르기 공격이 되어, 한 번 구른 것으로 두 번 갚게 됩니다.
    */
   if (index === ROLL_COMBO) Player.rollAttackT[p] = 0
+  if (index === RUN_COMBO) runAttacks++
+  else if (index === ROLL_COMBO) rollAttacks++
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
   // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
