@@ -138,7 +138,27 @@ try {
     await window.__t.until(() => (window.__game.bossEncounter()?.encounter ?? 0) === 2, 6)
     const b = window.__game.bossEncounter().entity
     // 체력을 깎고 페이즈를 올린 상태로 도망칩니다.
-    window.__game.damageEntity(b, window.__game.bossEncounter().maxHp * 0.5)
+    /**
+     * ⚠️ **1단계 학습 잠금을 끄고 잽니다.**
+     *
+     * 이 검사 셋이 **아주 오래 빨간 채**로 있었습니다. 원인은 게임이 아니라
+     * 이 프로브였습니다 — 보스는 1단계에서 색 셋을 다 보여줄 때까지 체력이
+     * `최대치 × 0.75 + 0.5` 아래로 **안 내려갑니다**(enemyAI 학습 잠금).
+     * 그래서 체력을 절반 깎아도 620 → **465.5** 로 되돌아오고, 페이즈가
+     * 영영 안 올라갑니다. 넣은 피해 310 중 154.5 만 남은 것처럼 보였습니다.
+     *
+     * `npm run boss` 는 이 함정을 이미 알고 있었습니다(그 파일 주석:
+     * *"학습 잠금이 켜져 있으면 상관없는 검사 열 개가 같이 빨개집니다 —
+     * 실제로 그렇게 만들어 놓고 한 번 당했습니다"*). 이 프로브만 그 처리를
+     * 못 받은 채 남아 있었습니다.
+     *
+     * 여기서 재는 것은 **도망과 귀환**이지 학습이 아니므로, 재는 자리를
+     * 나눕니다 — 잠금 자체는 `npm run boss` 가 켠 채로 잽니다.
+     */
+    window.__game.setPhaseTeaching(false)
+    const before = window.__game.bossEncounter()
+    window.__game.damageEntity(b, before.maxHp * 0.5)
+
     await window.__t.until(() => (window.__game.bossEncounter()?.phase ?? 0) > 0, 6)
     const hurt = window.__game.bossEncounter()
 
@@ -177,12 +197,18 @@ try {
     const leashed = window.__game.bossEncounter()
     // 자리로 돌아가 초기화될 때까지.
     await window.__t.until(() => (window.__game.bossEncounter()?.encounter ?? 9) === 0, 30)
+    // 끝나면 원래대로 — 다음 절이 잠금 켜진 게임을 재도록.
+    window.__game.setPhaseTeaching(true)
     return { hurt, lured, brief, returned, leashed, reset: window.__game.bossEncounter() }
   })
   check(
     flee.hurt.hp < flee.hurt.maxHp && flee.hurt.phase > 0,
     '교전 중 체력이 깎이고 페이즈가 올라감',
-    `체력 ${flee.hurt.hp}/${flee.hurt.maxHp} · ${flee.hurt.phase + 1}단계`,
+    `체력 ${flee.hurt.hp}/${flee.hurt.maxHp} · ${flee.hurt.phase + 1}단계` +
+      // 안 올라갔다면 **왜인지**를 게임에게 물어서 같이 냅니다(설계 노트: phaseTeachHold).
+      (flee.hurt.phase === 0 && flee.hurt.teachHold?.holding
+        ? ` — ⚠️ 학습 잠금이 붙잡는 중(색 ${flee.hurt.teachHold.seen}/${flee.hurt.teachHold.need})`
+        : ''),
   )
   check(
     flee.lured.selfHomeDist > 5,
@@ -228,6 +254,13 @@ try {
 
     // 페이즈를 올리면 음악도 세져야 합니다.
     const b = window.__game.bossEncounter().entity
+    /**
+     * ⚠️ 여기도 **학습 잠금을 끕니다.** 위 도망 절과 같은 이유입니다 —
+     *    잠금이 켜져 있으면 체력을 아무리 깎아도 1단계에 붙잡혀 있어서
+     *    *"페이즈가 오르면 음악도 거세짐"* 이 영영 성립하지 않습니다.
+     *    이 절이 재는 것은 **음악이 페이즈를 따라가는가**이지 학습이 아닙니다.
+     */
+    window.__game.setPhaseTeaching(false)
     window.__game.damageEntity(b, window.__game.bossEncounter().maxHp * 0.4)
     await window.__t.until(() => window.__game.audio.music().level > 1, 8)
     const phase2 = window.__game.audio.music()

@@ -364,6 +364,30 @@ export function resetPhaseTeaching(): void {
  *    끄는 것은 **잠금 하나**뿐이고, 그 잠금 자체는 같은 프로브의 뒷부분이
  *    켠 채로 잽니다. 규칙을 안 재는 게 아니라 **재는 자리를 나눈 것**입니다.
  */
+/**
+ * 🎓 **지금 학습 잠금이 이 보스의 페이즈를 붙잡고 있는가.**
+ *
+ * ── 왜 내보내는가 (프로브 셋이 오래 빨갰습니다) ────────────────────
+ * 이 잠금은 1단계에서 색 셋을 다 보여줄 때까지 체력을
+ * `최대치 × 0.75 + 0.5` 아래로 **안 내려가게 붙잡습니다.** 아레나 프로브가
+ * 체력을 절반 깎고 페이즈가 오르기를 기다리다 영영 못 기다렸고, 검사 셋이
+ * **아주 오래 빨간 채**로 있었습니다. 넣은 피해 310 중 154.5 만 남은 것처럼
+ * 보여서, 하마터면 `damageEntity` 를 의심할 뻔했습니다.
+ *
+ * 게임이 *"지금 붙잡고 있다"* 고 말해 주면 다음 사람은 안 당합니다.
+ * 이 저장소가 가장 비싸게 여기는 실패가 **아무 말도 안 하는 계측기**인데,
+ * 여기서는 **아무 말도 안 하는 게임**이었습니다.
+ */
+export function phaseTeachHold(e: number): { holding: boolean; seen: number; need: number } {
+  const seen = taughtInPhase1.get(e)?.size ?? 0
+  const held = phase1HeldT.get(e) ?? 0
+  return {
+    holding: phaseTeachingOn && Enemy.phase[e] === 0 && seen < PHASE1_TEACH_COLORS && held < PHASE1_TEACH_CAP,
+    seen,
+    need: PHASE1_TEACH_COLORS,
+  }
+}
+
 export function setPhaseTeaching(on: boolean): void {
   phaseTeachingOn = on
 }
