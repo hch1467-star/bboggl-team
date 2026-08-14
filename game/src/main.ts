@@ -3639,6 +3639,24 @@ class Game {
      * 이건 **보이는 것을 숫자로 준 것**입니다.
      */
     timer: number
+    /**
+     * 🎯 **이 예고가 지금 내 자리에 닿는가.**
+     *
+     * ── 왜 필요했나 (잰 숫자) ──────────────────────────────────────
+     * 봇에게 저스트 가드를 가르쳤더니 이랬습니다:
+     *
+     *     붙잡은 🔴 5회 · **창을 연 것 5회 · 헛친 것 5회 · 성공 0회**
+     *
+     * 스팸이 아니었습니다(연 횟수 = 붙잡은 횟수). 연 것이 **전부** 헛쳤습니다.
+     * 원인은 봇이 `dist < 4.5` 로 붙잡았다는 것 — 그런데 잡몹의 찌르기는
+     * 사거리가 **2.5m** 입니다. **닿지도 않을 공격을 막으려고** 창을 열고
+     * 기력을 냈습니다. 막을 것이 없으니 당연히 100% 헛칩니다.
+     *
+     * 봇이 사거리를 자기 쪽에 적어 두면 밸런스를 바꾸는 날 봇만 옛 값을
+     * 씁니다. 그래서 **게임이 판단해서 내보냅니다** — 판정과 같은 식
+     * (combat.ts `shapeDist`: `dist <= reach + 내 반지름`)을 씁니다.
+     */
+    willReach: boolean
     hp: number
   }[] {
     const p = this.playerEntity
@@ -3663,6 +3681,9 @@ class Game {
           attacking && Actor.phase[e] === AttackPhase.Windup
             ? Number(Actor.timer[e].toFixed(3))
             : 0,
+        // 판정과 **같은 식**입니다(combat.ts `shapeDist`) — 대상의 굵기를 더합니다.
+        willReach:
+          attacking && d <= attackAt(Enemy.kind[e], Enemy.attackIndex[e]).reach + Body.radius[p],
         inFront: !isBehindPoint(
           Transform.x[p],
           Transform.z[p],
@@ -4071,6 +4092,8 @@ declare global {
         inFront: boolean
         /** ⏳ 남은 예고 시간(초). 예고 중이 아니면 0 — 화면의 투명도와 같은 값입니다. */
         timer: number
+        /** 🎯 이 예고가 지금 내 자리에 닿는가 (판정과 같은 식) */
+        willReach: boolean
         hp: number
       }[]
       slotCooldowns: () => { slot: number; key: string; cd: number; empty: boolean }[]

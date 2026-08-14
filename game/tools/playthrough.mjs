@@ -1287,7 +1287,7 @@ try {
          */
         if (!fieldsChecked && threats.length > 0) {
           fieldsChecked = true
-          for (const k of ['entity', 'x', 'z', 'dist', 'intent', 'winding', 'inFront', 'timer']) {
+          for (const k of ['entity', 'x', 'z', 'dist', 'intent', 'winding', 'inFront', 'timer', 'willReach']) {
             if (!(k in threats[0])) throw new Error(`threats() 에 '${k}' 칸이 없습니다`)
           }
         }
@@ -1307,8 +1307,18 @@ try {
         guardWindowOpen = gi.windowT > 0
         if (gi.lockT > 0 && !guardLockOn) guardWhiffs++
         guardLockOn = gi.lockT > 0
+        /**
+         * ⚠️ **닿는 공격만 붙잡습니다.**
+         *
+         * 처음엔 `dist < 4.5` 로 붙잡았는데, 잡몹 찌르기는 사거리가 2.5m
+         * 입니다. 닿지도 않을 공격을 막으려고 창을 열고 기력을 냈고,
+         * 그래서 **연 것이 전부 헛쳤습니다**(5회 열어 5회 헛침, 성공 0).
+         *
+         * 거리를 봇이 판단하면 밸런스를 바꾸는 날 봇만 옛 값을 씁니다 —
+         * `willReach` 는 게임이 판정과 같은 식으로 계산해 줍니다.
+         */
         const strike = threats.find(
-          (t) => t.winding && t.intent === 0 && t.dist < 4.5 && t.timer <= gi.window * 2.5,
+          (t) => t.winding && t.intent === 0 && t.willReach && t.timer <= gi.window * 2.5,
         )
         /**
          * ⚠️ **예고 하나를 한 번만 셉니다.**
