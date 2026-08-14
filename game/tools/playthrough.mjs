@@ -1838,13 +1838,6 @@ try {
        *   · 소비처없음 → 배치        · 못삼   → 경제(비용·수입)
        *   · 지갑안늘어 → 수입/기준선  · 쿨다운 → 봇 규칙
        */
-      if (!fire) tripBlock.noFire++
-      else if (!canUpgrade) tripBlock.cantBuy++
-      // ⚠️ 위 분기와 **같은 조건**이어야 합니다. 장부가 옛 규칙을 세면
-      //    "지갑안늘어 27%" 같은 숫자가 거짓말이 됩니다.
-      else if (!walletGrew && !(G.pathStep(fire.x, fire.z)?.dist <= 12)) tripBlock.noGrowth++
-      else if (now() < fireCooldownUntil) tripBlock.cooling++
-      else tripBlock.open++
       /**
        * ── 🔨 **지나가다 들르는 것에는 관문이 필요 없습니다** ────────────
        *
@@ -1873,7 +1866,29 @@ try {
        */
       const passingStep = fire ? G.pathStep(fire.x, fire.z) : null
       const passingBy = !!passingStep && passingStep.dist <= 12
-      if (fire && canUpgrade && (walletGrew || passingBy) && now() >= fireCooldownUntil) {
+
+      if (!fire) tripBlock.noFire++
+      else if (!canUpgrade) tripBlock.cantBuy++
+      // ⚠️ 위 분기와 **같은 조건**이어야 합니다. 장부가 옛 규칙을 세면
+      //    "지갑안늘어 27%" 같은 숫자가 거짓말이 됩니다.
+      else if (!walletGrew && !(G.pathStep(fire.x, fire.z)?.dist <= 12)) tripBlock.noGrowth++
+      // ⚠️ 위 분기와 **같은 조건**이어야 합니다 — 장부만 옛 규칙을 세면 거짓말이 됩니다.
+      else if (!passingBy && now() < fireCooldownUntil) tripBlock.cooling++
+      else tripBlock.open++
+      /**
+       * ⚠️ **쿨다운은 왕복에만 겁니다.**
+       *
+       * 벤치가 `쿨다운 32% (0~58%)` 를 찍었고, 같은 판에서 무기 강화는
+       * 중앙값 0회였습니다. 이 쿨다운(30초)은 *"왕복이 실패했을 때 무한히
+       * 오가던 336초짜리 사고"* 를 막으려고 넣은 것입니다. 그런데 **12m
+       * 안을 지나가는 것**까지 같이 막고 있었습니다 — 12m 를 걷는 데는
+       * 2초가 걸리고, 그것으로는 336초를 오갈 수가 없습니다.
+       *
+       * 소울류에서 화톳불을 밟고 지나가는데 *"아까 다른 데 가려다 실패해서
+       * 30초는 못 쉰다"* 는 규칙은 없습니다. 쿨다운이 지키려던 것은
+       * **거리**이지 소비처 자체가 아닙니다.
+       */
+      if (fire && canUpgrade && (walletGrew || passingBy) && (passingBy || now() >= fireCooldownUntil)) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
         /**
