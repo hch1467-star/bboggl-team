@@ -2852,6 +2852,8 @@ class Game {
      * 결국 "빈손으로 다음 싸움에 들어가지 않는가"이기 때문입니다.
      */
     maxStamina: number
+    /** 플레이어 몸 반지름 — 포위 탈출 틈을 재는 데 씁니다. */
+    bodyRadius: number
     dodgeStaminaCost: number
     staminaRegen: number
     staminaRegenDelay: number
@@ -2892,6 +2894,7 @@ class Game {
       dodgeDistance: PLAYER_CFG.dodge.distance,
       walkSpeed: PLAYER_CFG.moveSpeed,
       maxStamina: PLAYER_CFG.maxStamina,
+      bodyRadius: PLAYER_CFG.radius,
       dodgeStaminaCost: PLAYER_CFG.dodge.staminaCost,
       /** 스태미나 회복 — 실전 리듬이 성립하는지 재려면 프로브가 알아야 합니다. */
       staminaRegen: PLAYER_CFG.staminaRegen,
@@ -4166,6 +4169,8 @@ declare global {
         walkSpeed: number
         /** 스태미나 최대치 — 이완 구간이 충분한지 재는 데 씁니다. */
         maxStamina: number
+        /** 플레이어 몸 반지름 — "포위됐을 때 몸이 지나갈 틈이 있는가"를 재려면 필요합니다. */
+        bodyRadius: number
         dodgeStaminaCost: number
         staminaRegen: number
         staminaRegenDelay: number

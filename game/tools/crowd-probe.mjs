@@ -12,7 +12,7 @@
  *
  * 실행: npm run crowd
  */
-import { preview } from 'vite'
+import { createServer } from 'vite'
 import { chromium } from 'playwright'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -22,11 +22,35 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 4199
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const server = await preview({
+let pass = 0
+let fail = 0
+function check(ok, label, detail) {
+  if (ok) {
+    pass++
+    console.log(`  ✅ ${label}${detail ? ` — ${detail}` : ''}`)
+  } else {
+    fail++
+    console.log(`  ❌ ${label}${detail ? ` — ${detail}` : ''}`)
+  }
+}
+
+/**
+ * ⚠️ **`preview` 가 아니라 `createServer`(개발 서버)를 씁니다.**
+ *
+ * 원래 이 프로브만 `vite preview` 였습니다 — 그건 **소스가 아니라 마지막
+ * 빌드**를 띄웁니다. `npm run crowd` 는 빌드를 하지 않으므로, 이 프로브는
+ * 언제 만들어졌는지도 모르는 `dist/` 를 재고 있었습니다. 실제로 이번에
+ * 새로 노출한 값이 `undefined` 로 와서 들켰습니다(플레이어 지름 NaN).
+ *
+ * 이 저장소가 이번 세션에 아홉 번째로 밟은 같은 함정입니다 —
+ * **계측기가 내가 생각한 것과 다른 것을 재고 있다.**
+ */
+const server = await createServer({
   root: ROOT,
-  preview: { port: PORT, strictPort: true, host: '127.0.0.1' },
+  server: { port: PORT, strictPort: true, host: '127.0.0.1' },
   logLevel: 'error',
 })
+await server.listen()
 const browser = await chromium.launch({
   executablePath: ['/opt/pw-browsers/chromium'].find((p) => existsSync(p)),
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
@@ -91,6 +115,87 @@ try {
     return { hist, maxTele, maxWide, hp: st.player.hp }
   }
 
+  /**
+   * ── 🕳 **포위됐을 때 몸이 지나갈 틈이 있는가** ─────────────────────
+   *
+   * ── 왜 이걸 재게 됐는가 ──────────────────────────────────────────
+   * 맵을 재다가 나온 숫자입니다: 이 존에는 **한 자리에서 동시에 깨어날 수
+   * 있는 적이 최대 7마리**인 구간이 있습니다. 공격 토큰(작업 #20)이 *동시에
+   * 때리는 수*는 막지만, **토큰 없는 나머지가 무엇을 하는지**는 아무도 재지
+   * 않았습니다.
+   *
+   * 아캄·니오·섀도 오브 모르도르가 대기 중인 적을 **돌게** 만드는 이유가
+   * 이것입니다 — 안 때려도 **몸으로 막으면** 회피가 답이 아니게 됩니다.
+   * 이 게임의 4색은 전부 *"움직여서 답한다"* 이므로(구르기·걸어서 이탈·
+   * 사거리 밖), 나갈 틈이 없으면 **색 전체가 무효**가 됩니다.
+   *
+   * ── 무엇을 재는가 ────────────────────────────────────────────────
+   * 플레이어에서 본 적들의 **각도**를 정렬해 이웃 사이 빈 각을 구하고,
+   * 그 각이 실제로 **몸이 지나갈 만한 폭**인지를 봅니다:
+   *
+   *     틈 폭 = 2·r·sin(Δθ/2) − (적 반지름 × 2)   ≥   플레이어 지름
+   *
+   * 반지름은 전부 게임에서 읽습니다(로스터 · terrainInfo.bodyRadius).
+   * 여기 숫자를 적으면 몸 크기를 손보는 날 이 검사가 옛말이 됩니다.
+   */
+  const gapTrial = async (n, seconds = 12) => {
+    await page.evaluate(() => window.__game.reset())
+    await sleep(500)
+    await page.evaluate((k) => {
+      window.__game.clearEnemies()
+      for (let i = 0; i < k; i++) {
+        const a2 = (i / k) * Math.PI * 2
+        window.__game.spawnTestEnemy(Math.sin(a2) * 3.4, Math.cos(a2) * 3.4)
+      }
+    }, n)
+    await sleep(900)
+    const cfg = await page.evaluate(() => ({
+      t: window.__game.terrainInfo(),
+      r: window.__game.enemyRoster(),
+    }))
+    const foeR = Math.min(...cfg.r.map((x) => x.radius))
+    const meD = cfg.t.bodyRadius * 2
+    let worst = Infinity
+    let maxTele = 0
+    const t0 = Date.now()
+    while (Date.now() - t0 < seconds * 1000) {
+      const snap = await page.evaluate(() => {
+        const st = window.__game.state()
+        return { p: st.player, tele: st.telegraphing, foes: window.__game.threats(12) }
+      })
+      maxTele = Math.max(maxTele, snap.tele)
+      const near = snap.foes.filter((f) => f.dist <= 4.5)
+      if (near.length >= 2) {
+        const angs = near
+          .map((f) => ({ a: Math.atan2(f.x - snap.p.x, f.z - snap.p.z), d: f.dist }))
+          .sort((x, y) => x.a - y.a)
+        let best = 0
+        for (let i = 0; i < angs.length; i++) {
+          const cur = angs[i]
+          const nxt = angs[(i + 1) % angs.length]
+          let dth = nxt.a - cur.a
+          if (dth < 0) dth += Math.PI * 2
+          const r = (cur.d + nxt.d) / 2
+          const width = 2 * r * Math.sin(dth / 2) - foeR * 2
+          if (width > best) best = width
+        }
+        if (best < worst) worst = best
+      }
+      await sleep(70)
+    }
+    return { worst: worst === Infinity ? -1 : worst, maxTele, meD }
+  }
+  const ring = await gapTrial(7)
+  console.log(
+    `\n  🕳 7마리에 포위 — 가장 좁았던 순간의 **가장 넓은 틈** ${ring.worst.toFixed(2)}m ` +
+      `· 플레이어 지름 ${ring.meD.toFixed(2)}m · 그때 최대 동시 예고 ${ring.maxTele}개`,
+  )
+  check(
+    ring.worst > ring.meD,
+    '**포위돼도 빠져나갈 틈이 남는다** (움직여서 답하는 게임이므로)',
+    `가장 좁았던 순간 ${ring.worst.toFixed(2)}m vs 몸 지름 ${ring.meD.toFixed(2)}m`,
+  )
+
   const still = await trial(false)
   const total = [...still.hist.values()].reduce((a, b) => a + b, 0)
   console.log('동시 예고 개수 분포 (20초, 잡몹 5마리에 포위)')
@@ -129,4 +234,8 @@ try {
 } finally {
   await browser.close()
   await server.close()
+}
+if (fail > 0 || pass > 0) {
+  console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패`)
+  if (fail > 0) process.exitCode = 1
 }

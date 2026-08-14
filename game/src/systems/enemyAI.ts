@@ -34,6 +34,7 @@ import {
   BOSS_ARENA,
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
+  PLAYER,
   POISE,
   hearDistance,
 } from '../config/balance'
@@ -1313,6 +1314,50 @@ export function enemyAiSystem(
       // 사거리 안이지만 쿨다운 중 — 제자리에서 노려봅니다.
       // 계속 파고들면 플레이어가 적 무리에 파묻혀 아무것도 안 보이게 됩니다.
       decayVelocity(e, dt, 8)
+      /**
+       * ── 🕳 **기다리는 적은 옆으로 벌어집니다** ──────────────────────
+       *
+       * ── 왜 (재고 나서 넣었습니다) ─────────────────────────────────
+       * 공격 토큰(#20)은 *동시에 때리는 수*를 막습니다. 그런데 **안 때리는
+       * 적이 무엇을 하는지**는 아무도 재지 않았습니다. 7마리에 둘러싸여
+       * 재 보니, 가장 좁았던 순간 이웃 사이의 가장 넓은 틈이 **0.70m** 이고
+       * 플레이어 몸 지름은 **0.90m** 였습니다 — **빠져나갈 틈이 없습니다.**
+       *
+       * 이 게임의 4색은 전부 *"움직여서 답한다"* 입니다(구르기 · 걸어서 이탈 ·
+       * 사거리 밖). 나갈 틈이 없으면 **색 전체가 무효**가 됩니다. 아캄·니오·
+       * 섀도 오브 모르도르가 대기 중인 적을 **돌게** 만드는 이유가 이것입니다 —
+       * 안 때려도 몸으로 막으면 그건 난이도가 아니라 잠금입니다.
+       *
+       * ⚠️ 간격의 기준을 숫자로 적지 않습니다. *"두 몸 사이로 플레이어가
+       *    지나갈 만큼"* 이므로 **몸 반지름들에서** 나옵니다:
+       *        내 반지름 + 이웃 반지름 + 플레이어 지름
+       *    몸 크기를 손보면 이 간격도 따라 움직입니다.
+       *
+       * 미는 힘은 **약하게**(접근 가속의 1/3) 둡니다. 세게 밀면 서로 튕겨
+       * 나가 포위가 풀려 버리고, 그건 다대일 설계를 없애는 것입니다.
+       */
+      let sx = 0
+      let sz = 0
+      for (let j = 0; j < enemies.count; j++) {
+        const o = ids[j]
+        if (o === e || !isAlive(o) || Actor.state[o] === ActorState.Dead) continue
+        if (Enemy.aggro[o] === 0) continue
+        const ox = Transform.x[e] - Transform.x[o]
+        const oz = Transform.z[e] - Transform.z[o]
+        const od = Math.hypot(ox, oz)
+        const want = cfg.radius + enemyDef(Enemy.kind[o]).radius + PLAYER.radius * 2
+        if (od > 0.0001 && od < want) {
+          sx += (ox / od) * (want - od)
+          sz += (oz / od) * (want - od)
+        }
+      }
+      if (sx !== 0 || sz !== 0) {
+        const sd = Math.hypot(sx, sz)
+        const push = cfg.moveSpeed * 0.85 * snareScale
+        const accel = 9 * dt
+        Velocity.x[e] += clampMag((sx / sd) * push - Velocity.x[e], accel)
+        Velocity.z[e] += clampMag((sz / sd) * push - Velocity.z[e], accel)
+      }
     } else {
       const nx = dist > 0.0001 ? dx / dist : 0
       const nz = dist > 0.0001 ? dz / dist : 0
