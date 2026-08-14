@@ -22,6 +22,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+/**
+ * 곁길 예산은 **봇과 같은 값**을 봐야 합니다(policy.mjs 설계 노트).
+ * 여기서 40 을 따로 적으면, 봇이 예산을 바꾼 날 이 검사만 옛 값을 씁니다.
+ *
+ * ⚠️ `playthrough.mjs` 에서 가져오면 안 됩니다 — 불러오는 순간 판이 돕니다.
+ *    그래서 정책 상수만 담은 파일이 따로 있습니다.
+ */
+import { DETOUR_BUDGET } from './policy.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5193
@@ -1103,11 +1111,61 @@ try {
       const has =
         level.entities.some((e) => REWARD.includes(e.kind) && inside(cellOf(e))) ||
         tops.some(inside)
-      dead.push({ name: g.name, cost: lo, has })
+      dead.push({ name: g.name, cost: lo, has, opensShortcut: tops.some(inside) })
     }
     console.log(
       `\n  🎁 막다른 곁길 — ` +
         dead.map((r) => `${r.name} 왕복 ${r.cost}m ${r.has ? '보상 있음' : '**없음**'}`).join(' · '),
+    )
+    /**
+     * ── 🚶 **그 곁길이 갈 만한 거리인가** ──────────────────────────
+     *
+     * 위 검사는 *"값을 치르게 했으면 갚는가"* 만 봤습니다. 그런데 **값이
+     * 낼 만한가**는 아무도 안 봤습니다. 그 결과:
+     *
+     *     맵 프로브 — 4곳 전부 보상 있음 ✅
+     *     벤치 5판  — (17,-57) **3/3판 못 주움** · (27,-43) **3/3판 못 주움**
+     *
+     * 정적 검사는 초록인데 실제로는 아무도 안 갑니다. 보상을 놓아 두고
+     * **아무도 못 가는 자리**에 둔 것은, 안 놓아 둔 것과 결과가 같습니다.
+     *
+     * ⚠️ 문턱은 `policy.mjs` 의 `DETOUR_BUDGET` 입니다. 그 파일 주석이
+     *    이미 이 제약을 적어 두었습니다:
+     *
+     *      > 봇이 곁길을 40m 에서 자르면, 41m 짜리 보물은 아무리 잘 보여도
+     *      > **규칙상 영영 안 갑니다.** 그러니 배치를 검사하는 프로브도
+     *      > 같은 값을 봐야 합니다.
+     *
+     *    적어 두기만 하고 **아무도 안 봤습니다.** 이 저장소가 계속 확인하는
+     *    그 문장 그대로입니다 — *주석은 읽는 사람에게만 말합니다.*
+     *
+     * 다른 게임의 좌표: 다크 소울 1 의 곁길은 대개 **주 동선에서 보이는**
+     * 짧은 고리이고 되돌아오지 않게 이어집니다. 할로우 나이트의 선택 방도
+     * 한두 방 거리입니다. **긴 곁길은 보상이 아니라 세금**입니다.
+     */
+    /**
+     * ⚠️ **지름길을 여는 곁길은 예외입니다.**
+     *
+     * 처음엔 예산을 넘는 곁길을 전부 빨갛게 잡았는데, 그러면 성벽마루가
+     * 걸립니다. 그런데 그 구역이 갚는 것은 물건이 아니라 **지름길을 여는
+     * 일**입니다 — 게임에게 물어보니 그 사다리의 `saving` 이 `null`,
+     * 즉 *"이 사다리가 없으면 위에서 내려올 길이 아예 없다"* 였습니다.
+     * 없는 길을 만드는 것이므로 절약이 큰 정도가 아니라 **길 자체**입니다.
+     *
+     * 다크 소울 1 의 긴 등반이 정확히 이 계약입니다 — 한 번 오르는 값은
+     * 크지만 **그 뒤로 영원히** 짧아집니다. 그래서 한 번의 예산으로 재면
+     * 안 됩니다.
+     *
+     * 물건만 놓인 곁길에는 그 논리가 없습니다. 보물은 한 번 줍고 끝이므로
+     * **그 한 번의 왕복이 예산 안**이어야 합니다.
+     */
+    const tooFar = dead.filter((r) => r.cost > DETOUR_BUDGET && !r.opensShortcut)
+    check(
+      tooFar.length === 0,
+      `**물건만 있는 곁길은 갈 만한 거리다** (예산 ${DETOUR_BUDGET}m — 넘으면 보상이 아니라 세금입니다)`,
+      tooFar.length === 0
+        ? dead.map((r) => `${r.name} ${r.cost}m${r.opensShortcut ? '(지름길)' : ''}`).join(' · ')
+        : tooFar.map((r) => `${r.name} 왕복 ${r.cost}m`).join(' · '),
     )
     check(
       dead.length > 0 && dead.every((r) => r.has),
