@@ -1994,13 +1994,6 @@ try {
       greenDied: G.runStats().greenDied,
       greenCountered: G.runStats().greenCountered,
       greenBroken: G.runStats().greenBroken,
-      /**
-       * 🟢 **답할 수 있었는가.** 위 네 칸은 예고가 *어떻게 끝났는가* 이고,
-       * 이건 *답을 손에 갖고 있었는가* 입니다. 둘은 다릅니다 — 못 답한
-       * 예고가 쿨다운 때문이면 설계 문제이고, 손에 답이 있었는데 안 썼으면
-       * **봇의 습관**입니다. 판단은 게임이 합니다(main.ts `counterBlock`).
-       */
-      greenAnswer: G.greenAnswer(),
       regionLog: merged.map((r) => ({ name: r.name, seconds: Number(r.seconds.toFixed(1)) })),
       regionDanger: Object.entries(regionDanger)
         .filter(([, v]) => v.seconds >= 3)

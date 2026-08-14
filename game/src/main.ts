@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
-import { RUNE_ORDER, SKILLS, SKILL_KEYS, WEAPONS } from './config/arsenal'
+import { RUNE_ORDER, SKILLS, WEAPONS } from './config/arsenal'
 import {
   AWARE,
   hearDistance,
@@ -27,7 +27,7 @@ import {
   WORLD,
 } from './config/balance'
 import {
-  AttackIntent,
+  type AttackIntent,
   INTENT_COLOR,
   INTENT_ANSWER,
   INTENT_EMOJI,
@@ -286,23 +286,8 @@ class Game {
       free: number
       /** 손이 묶여 있던 **이유별** 시간. 처방이 갈리므로 칸을 나눕니다. */
       blocked: Record<string, number>
-      /** 🟢 이 예고 동안 **한 번이라도** 반격이 손에 있었는가 */
-      counterEver: boolean
     }
   >()
-  /**
-   * 🟢 **초록 예고에 답할 수 있었는가**의 장부 (설계 노트는 `counterBlock`).
-   *
-   * `events` 중 `everCould` 가 적으면, 못 답한 것이 아니라 **답을 가질 수
-   * 없었던** 것입니다. 그건 실력이 아니라 설계 문제이고, 고칠 곳도 다릅니다.
-   */
-  private greenAnswer: {
-    events: number
-    everCould: number
-    seconds: number
-    freeSeconds: number
-    blocked: Record<string, number>
-  } = { events: 0, everCould: 0, seconds: 0, freeSeconds: 0, blocked: {} }
   private hurtLedger: {
     attackId: string
     intent: number
@@ -574,8 +559,6 @@ class Game {
     resetGreenOutcome()
     // 🎲 무엇을 골랐는지의 장부도 같은 자리에서 비웁니다(enemyAI `notePick` 설계 노트).
     resetPickLog()
-    // 🟢 초록에 답할 수 있었는가의 장부도 판 시작에만 비웁니다.
-    this.greenAnswer = { events: 0, everCould: 0, seconds: 0, freeSeconds: 0, blocked: {} }
     resetStaminaSpent()
     // 🩸 피격 장부도 **판 시작에만** 지웁니다(연계 장부에서 배운 것 — 화톳불마다
     //    지우면 예약과 발동의 수명이 달라져 서로 비교할 수 없게 됩니다).
@@ -2376,33 +2359,13 @@ class Game {
           seen: 0,
           free: 0,
           blocked: {},
-          counterEver: false,
         }
         this.hurtWatch.set(e, rec)
-        if (rec.intent === AttackIntent.Counter) this.greenAnswer.events++
       }
       if (this.onScreen(e)) rec.seen += dt
       const why = this.answerBlock(p)
       if (why === '') rec.free += dt
       else rec.blocked[why] = (rec.blocked[why] ?? 0) + dt
-      /**
-       * 🟢 초록 예고에만 **반격 쪽 장부**를 하나 더 답니다.
-       * (근거는 `counterBlock` 설계 노트 — 못 답한 이유마다 처방이 다릅니다)
-       */
-      if (rec.intent === AttackIntent.Counter) {
-        const g = this.greenAnswer
-        g.seconds += dt
-        const cw = this.counterBlock(p, e)
-        if (cw === '') {
-          g.freeSeconds += dt
-          if (!rec.counterEver) {
-            rec.counterEver = true
-            g.everCould++
-          }
-        } else {
-          g.blocked[cw] = Number(((g.blocked[cw] ?? 0) + dt).toFixed(3))
-        }
-      }
     }
     // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
     for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
@@ -2449,59 +2412,6 @@ class Game {
       (swinging ? PLAYER_CFG.dodge.cancelExtraCost : 0)
     if (Stamina.value[p] < cost) return 'stamina'
     return ''
-  }
-
-  /**
-   * 🟢 **지금 이 순간 반격이라는 답이 손에 있는가.**
-   *
-   * ── 왜 필요해졌는가 ────────────────────────────────────────────────
-   * 기둥 1 을 고치면서 `SKILL_COOLDOWN_SCALE` 을 1.5배로 올렸고, 그때
-   * 이렇게 적어 두었습니다:
-   *
-   *   > *"지켜볼 것: 반격은 스킬로만 냅니다. 쿨다운이 길어지면 반격
-   *   > 기회도 줄어듭니다(3회 → 1회). 다음 판들에서 이 숫자를 봅니다."*
-   *
-   * 그런데 지금 있는 눈금으로는 답할 수 없습니다. 벤치는 초록 예고가
-   * **어떻게 끝났는지**(휘두름/죽음/반격/그 밖)까지는 나누지만, 못 답한
-   * 예고가 **왜** 못 답한 것인지는 안 셉니다. 이야기마다 처방이 정반대입니다:
-   *
-   *   cooldown — 스킬이 전부 식는 중  → **설계 문제.** 쿨다운이 색 하나를 잠갔습니다
-   *   range    — 준비는 됐는데 안 닿음 → 사거리·접근 문제
-   *   behind   — 등 뒤라 성립 안 함    → 위치 문제(반격은 정면만)
-   *   ''       — 손에 답이 있었다      → 못 쓴 것은 **봇의 습관**입니다
-   *
-   * 마지막 갈래가 이 눈금의 존재 이유입니다. 이 저장소는 이미 한 번
-   * *"봇의 습관을 게임의 성질로 착각"* 해서 멀쩡한 스태미나를 조일 뻔했습니다.
-   *
-   * ⚠️ **손이 묶였는지(휘두르는 중인지)는 일부러 안 봅니다.** 여기서 묻는
-   *    것은 *"반격이라는 답을 갖고 있는가"* 이지 *"이 프레임에 낼 수 있는가"*
-   *    가 아닙니다. 초록 예고는 1.25~1.4초인데 후딜은 0.2~0.6초라, 순간의
-   *    묶임은 예고 안에서 저절로 풀립니다. 그것까지 섞으면 쿨다운 문제와
-   *    후딜 문제가 한 칸에 뭉쳐서 처방을 못 고릅니다.
-   *
-   * 판단은 **combat.ts 가 실제로 쓰는 조건**을 따릅니다 — 스킬일 것,
-   * 등 뒤가 아닐 것, 그리고 판정이 닿을 것(`range + 대상 반지름`).
-   */
-  private counterBlock(p: number, e: number): string {
-    const st = Actor.state[p]
-    if (st === ActorState.Dead) return 'dead'
-    if (st === ActorState.Stagger) return 'stagger'
-    if (st === ActorState.Drink) return 'drink'
-    if (isBehindPoint(Transform.x[p], Transform.z[p], Transform.x[e], Transform.z[e], Transform.rotY[e]))
-      return 'behind'
-    const dist = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
-    let anyReady = false
-    // 슬롯 수는 **arsenal 이 아는 것**입니다 — 5를 적어 두면 슬롯을 늘리는 날
-    // 이 눈금만 조용히 마지막 슬롯을 안 보게 됩니다.
-    for (let slot = 0; slot < SKILL_KEYS.length; slot++) {
-      const def = skillForSlot(p, slot)
-      if (!def) continue
-      if (cooldownOf(p, slot) > 0) continue
-      anyReady = true
-      // 판정과 **같은 식**입니다(combat.ts `shapeDist`): 대상의 굵기를 더합니다.
-      if (dist <= def.range + Body.radius[e]) return ''
-    }
-    return anyReady ? 'range' : 'cooldown'
   }
 
   /**
@@ -3732,24 +3642,6 @@ class Game {
     }))
   }
 
-  /** 🟢 초록 예고에 답할 수 있었는가 (설계 노트는 `counterBlock`). */
-  debugGreenAnswer(): {
-    events: number
-    everCould: number
-    seconds: number
-    freeSeconds: number
-    blocked: Record<string, number>
-  } {
-    const g = this.greenAnswer
-    return {
-      events: g.events,
-      everCould: g.everCould,
-      seconds: Number(g.seconds.toFixed(2)),
-      freeSeconds: Number(g.freeSeconds.toFixed(2)),
-      blocked: { ...g.blocked },
-    }
-  }
-
   /** 헤드리스 검증용 스냅샷 */
   debugState() {
     const p = this.playerEntity
@@ -3986,14 +3878,6 @@ declare global {
       bossPhaseWeights: () => Record<string, number>[]
       /** 🎲 무엇을 왜 골랐는가 — 굴림 · 후보 · 대체까지 (enemyAI `notePick`) */
       pickLog: () => PickRecord[]
-      /** 🟢 초록 예고에 답할 수 있었는가 — 못 답한 **이유별**로 나눠 셉니다 */
-      greenAnswer: () => {
-        events: number
-        everCould: number
-        seconds: number
-        freeSeconds: number
-        blocked: Record<string, number>
-      }
       /** 🔁 정답대로 답한 사람이 한 대 갚을 수 있는가 (config/punish.ts) */
       punishTable: () => PunishRow[]
       /** 예고 동안 옆으로 빠져 부채꼴을 벗어날 수 있는가 */
@@ -4593,13 +4477,6 @@ window.__game = {
    * 적으므로, 프로브가 추측 없이 *"굴려서 고른 것"* 만 골라 볼 수 있습니다.
    */
   pickLog: () => readPickLog(),
-  /**
-   * 🟢 초록 예고에 **답할 수 있었는가** (설계 노트는 Game `counterBlock`).
-   *
-   * 판단은 여기서 합니다 — 프로브가 쿨다운·사거리를 다시 계산하면 그 규칙이
-   * 두 곳에 살게 되고, 스킬을 하나 바꾸는 날 조용히 다른 답을 냅니다.
-   */
-  greenAnswer: () => game.debugGreenAnswer(),
   /**
    * 🔁 **갚을 수 있는가** — 정답대로 답한 사람의 돌아오는 길
    *    (설계와 계산은 config/punish.ts).
