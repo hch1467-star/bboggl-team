@@ -1380,7 +1380,7 @@ try {
         if (strike) G.aimAtWorld(strike.x, strike.z)
         if (strike && strike.timer <= gi.window && strike.facing && gi.canGuard) {
           markAct('가드')
-          tap('KeyV')
+          tap('KeyZ')
           await sleep()
           continue
         }
