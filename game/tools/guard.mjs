@@ -217,8 +217,8 @@ check(
       const lit = /^'([A-Za-z0-9]+)'$/.exec(arg)
       if (lit) {
         out.add(lit[1])
-      } else if (allowConst && /^[A-Z_]+\.key$/.test(arg)) {
-        // `GUARD.key` 같은 선언 — config 에서 읽은 키들을 전부 상시로 봅니다.
+      } else if (allowConst && /^[A-Z_]+(?:\.[A-Za-z]+)*\.key$/.test(arg)) {
+        // `GUARD.key` · `PLAYER.dodge.key` 같은 선언 — config 에서 읽은 키들을 전부 상시로 봅니다.
         for (const k of configKeys) out.add(k)
       } else if (allowConst && keyArrays.has(arg.replace(/\[.*$/, ''))) {
         // `SKILL_KEY_CODES[i]` 같은 배열 접근 — 그 배열의 키 전부가 상시 키입니다.

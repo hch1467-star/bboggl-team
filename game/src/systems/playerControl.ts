@@ -103,6 +103,7 @@ export function resetStaminaSpent(): void {
   inputFlow.dropped = 0
   inputFlow.waitSum = 0
   inputFlow.cancels = 0
+  inputFlow.exhausted = 0
 }
 
 /**
@@ -151,13 +152,14 @@ export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
  *
  * ⚠️ 봇이 아니라 **게임이** 셉니다. 누른 것과 나간 것은 다릅니다.
  */
-const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0 }
+const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0, exhausted: 0 }
 export function readInputFlow(): {
   used: number
   expired: number
   dropped: number
   waitAvg: number
   cancels: number
+  exhausted: number
 } {
   return {
     used: inputFlow.used,
@@ -166,6 +168,13 @@ export function readInputFlow(): {
     waitAvg: inputFlow.used > 0 ? inputFlow.waitSum / inputFlow.used : 0,
     // 공격을 도중에 끊고 구른 횟수. `used` 안에 포함된 값이라 더하면 안 됩니다.
     cancels: inputFlow.cancels,
+    /**
+     * 🫁 **빚내서 낸 방어 행동**의 횟수 — 스태미나가 비용보다 적은데도
+     * 나간 구르기입니다. 이 값이 0이면 새 규칙이 **한 번도 일하지 않은**
+     * 것이고, 그러면 "못 피함이 줄었다"는 다른 이유 때문입니다.
+     * 규칙이 실제로 켜졌는지 프로브가 이 숫자 하나로 가릅니다.
+     */
+    exhausted: inputFlow.exhausted,
   }
 }
 /**
@@ -183,8 +192,17 @@ const TEMPO = PLAYER.tempo.attackScale
 function spendStamina(p: number, cost: number): void {
   const used = Math.min(Stamina.value[p], cost)
   staminaSpent += used
+  /**
+   * 🫁 **모자랐던 만큼**(빚). 0보다 크면 "빚내서 낸 행동"입니다.
+   * 근거는 balance.ts `staminaExhaustDelay` 주석 — 거절하는 대신 뒤에
+   * 청구합니다. 공격은 여전히 `>= 비용` 으로 막혀 있으므로 여기서 빚이
+   * 생기는 것은 **방어 행동뿐**입니다.
+   */
+  const short = cost - used
   Stamina.value[p] = Math.max(0, Stamina.value[p] - cost)
-  Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
+  Stamina.regenDelayT[p] =
+    short > 0 ? PLAYER.staminaExhaustDelay : PLAYER.staminaRegenDelay
+  if (short > 0) inputFlow.exhausted++
 }
 const finishable = defineQuery(Enemy, Transform, Health, Actor)
 
@@ -522,6 +540,50 @@ export function guardOpenCost(p: number): number {
   return swinging ? GUARD.commitCost : 0
 }
 
+/**
+ * 🤸 **지금 구르기가 막혀 있다면, 무엇이 막고 있는가.** 빈 문자열이면 낼 수 있습니다.
+ *
+ * ── 왜 함수로 빼는가 ────────────────────────────────────────────────
+ * 이 판단이 **두 곳에** 따로 적혀 있었습니다. 시스템 쪽 `canDodge` 와
+ * main.ts 의 `answerBlock`(맞은 이유 장부)이 각자 비용식을 다시 썼습니다.
+ * 이 저장소가 이번 세션에만 세 번 데인 자리입니다 — 장부가 둘이면 **규칙을
+ * 고친 날 장부 하나만 따라오고**, 그 뒤로는 두 숫자가 영영 안 맞습니다.
+ * (연계 예약/발동이 정확히 그렇게 어긋나 있었습니다.)
+ *
+ * 그래서 규칙은 여기 한 곳에 두고, 장부와 봇은 **읽기만** 합니다.
+ *
+ * ⚠️ **순서가 곧 처방입니다.** 굳어서 못 낸 것과 내가 다 써서 못 낸 것은
+ *    책임이 반대이므로 앞선 실패를 적습니다(main.ts `answerBlock` 주석).
+ */
+export type DodgeBlock = '' | 'dead' | 'stagger' | 'drink' | 'cooldown' | 'stamina'
+
+export function dodgeBlock(p: number): DodgeBlock {
+  const st = Actor.state[p] as ActorState
+  if (st === ActorState.Dead) return 'dead'
+  if (st === ActorState.Stagger) return 'stagger'
+  if (st === ActorState.Drink) return 'drink'
+  if (Player.dodgeCooldownT[p] > 0) return 'cooldown'
+  const swinging =
+    (st === ActorState.Attack || st === ActorState.Skill) &&
+    Actor.phase[p] !== AttackPhase.Recovery
+  if (swinging) {
+    /**
+     * 휘두름을 **끊고** 구르는 길은 예전 그대로 `>= 비용` 입니다.
+     * 근거는 balance.ts `cancelExtraCost` — 공짜로 끊으면 판단이 아니라
+     * 그냥 버튼이 됩니다. 새 규칙(빚)은 여기에 **일부러** 안 옵니다.
+     */
+    const cancel =
+      PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) + PLAYER.dodge.cancelExtraCost
+    return Stamina.value[p] >= cancel ? '' : 'stamina'
+  }
+  /**
+   * 평상시 구르기(서 있을 때·후딜)는 **0보다 크면** 나갑니다.
+   * 근거는 balance.ts `staminaExhaustDelay` — 소울류·몬헌·세키로가 모두
+   * 위험한 순간에 방어 입력을 거절하지 않고 **뒤에** 청구합니다.
+   */
+  return Stamina.value[p] > 0 ? '' : 'stamina'
+}
+
 function beginDodge(p: number, dirX: number, dirZ: number): void {
   noteLearned('dodge')
   Actor.state[p] = ActorState.Dodge
@@ -575,7 +637,8 @@ export function playerControlSystem(ctx: ControlContext): void {
    * 가장 비싼 지연입니다(무적 프레임이 0.06~0.3초 구간입니다).
    * 키가 남아 있으니 굳이 한 키에 겹칠 이유가 없습니다.
    */
-  const dodgePressed = consumePress('Space')
+  // ⌨️ 키는 balance.ts 에만 적혀 있습니다 — 프로브·봇이 `dodgeInfo().key` 로 따라옵니다.
+  const dodgePressed = consumePress(PLAYER.dodge.key)
   /**
    * 🛡 **저스트 가드 — `Z`.**
    *
@@ -821,9 +884,13 @@ export function playerControlSystem(ctx: ControlContext): void {
       if (aimTurned > Math.PI) noteLearned('aim')
     }
 
-    const canDodge =
-      Stamina.value[p] >= PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) &&
-      Player.dodgeCooldownT[p] <= 0
+    /**
+     * ⚠️ 이 자리는 **평상시 구르기**(서 있을 때·후딜)의 문입니다. 휘두름을
+     *    끊는 길은 `tryDodgeCancel` 이 따로 지킵니다. 그래서 `dodgeBlock` 의
+     *    커밋 분기가 아니라 평상시 분기를 보게 상태를 그대로 넘깁니다 —
+     *    규칙은 그 함수 한 곳에만 있습니다.
+     */
+    const canDodge = dodgeBlock(p) === ''
     const weapon = weaponOf(p)
 
     /** 슬롯을 지금 쓸 수 있는지 — 룬이 비었거나 쿨다운이면 불가. */

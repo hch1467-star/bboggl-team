@@ -2147,6 +2147,13 @@ try {
        * "쓰이질 않았다"인지 가릴 수가 없습니다.
        */
       inputCancels: G.runStats().inputCancels ?? 0,
+      /**
+       * 🫁 빚내서 낸 구르기 — 새 규칙이 **실제로 일했는지** 가리는 숫자.
+       * 위 `inputCancels` 주석과 같은 교훈입니다: 기능을 켜고 끄고 비교하면서
+       * 정작 그 기능이 몇 번 쓰였는지 모르면, 차이가 없을 때 "효과가 없다"인지
+       * "쓰이질 않았다"인지 가릴 수 없습니다.
+       */
+      inputExhausted: G.runStats().inputExhausted ?? 0,
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
       tweaks: G.tweaks ? G.tweaks() : [],
       inputExpired: G.runStats().inputExpired,
@@ -2608,7 +2615,9 @@ try {
       ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, settled)) * 100)}%)` +
       ` · 버려짐(만료) ${log.inputExpired ?? 0}회\n` +
       `             그중 누른 순간엔 못 냈던 것 ${log.inputDropped ?? 0}회 (겹침)` +
-      ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초`,
+      ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초\n` +
+      // 🫁 빚내서 낸 구르기 — 0이면 새 규칙이 한 번도 일하지 않은 것입니다.
+      `             🫁 기력이 모자란 채로 낸 구르기 ${log.inputExhausted ?? 0}회`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist

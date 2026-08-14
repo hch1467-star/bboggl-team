@@ -547,8 +547,23 @@ for (let i = 0; i < 3; i++) {
 }
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
+/**
+ * ⚠️ **이 줄이 아래 장부와 다른 숫자를 세고 있었습니다.**
+ *
+ * 3판 벤치가 `연계 예약 10.0회 / 발동 0.0회` 를 찍었는데, 바로 아래 장부는
+ * 잔액 0 으로 **맞았습니다.** 둘 다 맞을 수는 없습니다. 원인은 이 줄이
+ * `bossSwings[].chained`(**보스만**, **판정에 들어갈 때**)를 세고 있었던
+ * 것입니다. 반면 `chainsArmed` 는 **모든 적**의 예약을 **예고가 시작될 때**
+ * 셉니다. 무리도 시점도 다른 두 숫자를 빗금 하나로 붙여 놓았으니, 나눗셈이
+ * 뜻하는 것이 아무것도 없었습니다.
+ *
+ * 같은 판을 단일 출력으로 돌리면 `예약 14 · 발동 13` 이 나옵니다 —
+ * playthrough.mjs 는 처음부터 `chainsFired` 를 썼기 때문입니다.
+ * **한 저장소 안에서 같은 것을 두 번 세면, 언젠가 두 값이 갈립니다.**
+ * 아래 장부와 **같은 칸**을 읽게 고칩니다.
+ */
 console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 0), 1)}회 / ` +
-  `${fmt(boss.map((l) => (l.bossSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0)), 1)}회`)
+  `${fmt(boss.map((l) => l.boss.chainsFired ?? 0), 1)}회`)
 /**
  * ── 예약된 연계의 **결말을 전부** 셉니다 ────────────────────────
  *
@@ -604,7 +619,9 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
   const m = (f) => median(boss.map(f))
   const worst = rests.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0)
   console.log(
-    `                 결말 — 발동(모든 적) ${m((l) => (l.foeSwings ?? []).reduce((a, b) => a + (b.chained ?? 0), 0))}` +
+    // ⚠️ 잔액 계산(`fired`)과 **같은 칸**을 보여 줍니다. 예전엔 여기만
+    //    `foeSwings[].chained` 였고, 그래서 화면의 항목들이 잔액과 안 맞았습니다.
+    `                 결말 — 발동(모든 적) ${m((l) => l.boss.chainsFired ?? 0)}` +
       ` · 무너짐 ${m((l) => (l.boss.chainsLost ?? []).reduce((a, b) => a + b, 0))}` +
       ` · 페이즈전환 ${m((l) => l.boss.chainsDropped?.phase ?? 0)}` +
       ` · 귀환 ${m((l) => l.boss.chainsDropped?.leash ?? 0)}` +
@@ -665,6 +682,10 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
   console.log(
     `                 그중 누른 순간엔 못 냈던 것 ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 (겹침) · ` +
       `평균 대기 ${fmt(pick((l) => l.inputWaitAvg ?? 0), 2)}초`,
+  )
+  // 🫁 빚내서 낸 구르기 — 0이면 새 규칙(balance.ts staminaExhaustDelay)이 안 켜진 것입니다.
+  console.log(
+    `                 🫁 기력이 모자란 채로 낸 구르기 ${fmt(pick((l) => l.inputExhausted ?? 0), 0)}회`,
   )
 }
 

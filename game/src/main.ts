@@ -153,6 +153,7 @@ import {
   readRhythm,
   readStaminaSpent,
   resetStaminaSpent,
+  dodgeBlock,
   type ControlContext,
 } from './systems/playerControl'
 import {
@@ -322,6 +323,14 @@ class Game {
   private counterCount = 0
   /** 🛡 이번 판에 성립한 저스트 가드 수 — 프로브가 "실제로 되는가"를 묻습니다. */
   private justGuards = 0
+  /**
+   * 🧪 실험대에서 **붙들어 둔** 기력(null 이면 안 붙듦). 위 루프 주석 참고 —
+   * 한 번 써 넣는 것과 매 프레임 유지하는 것은 다릅니다.
+   */
+  private staminaPin: number | null = null
+  setStaminaPin(n: number | null): void {
+    this.staminaPin = n
+  }
   /**
    * 이번 실행에서 **번** 정련석의 총합.
    *
@@ -511,6 +520,9 @@ class Game {
   }
 
   reset(): void {
+    // 🧪 붙들어 둔 기력은 **판을 넘기지 않습니다.** 남겨 두면 다음 실험이
+    //    이유를 모른 채 이상하게 돌고, 그게 이 저장소가 제일 비싸게 친 실패입니다.
+    this.staminaPin = null
     // 기존 엔티티의 Three.js 오브젝트를 먼저 떼어냅니다(안 하면 유령 메시가 남습니다).
     for (let e = 0; e < 4096; e++) if (isAlive(e)) this.visuals.detach(e)
     resetWorld()
@@ -762,6 +774,29 @@ class Game {
      * 플레이어가 격자 칸을 옮길 때만 다시 계산합니다 — 대부분의 프레임은 캐시입니다.
      */
     this.terrain?.buildPlayerField(Transform.x[p], Transform.z[p])
+    /**
+     * 🧪 실험대 전용 — 기력을 **붙들어 둡니다**(`pinStamina`).
+     *
+     * ⚠️ 왜 `setStamina` 로는 부족한가: 프로브는 8ms 마다 JS 로 0을 써
+     *    넣었는데, 시뮬레이션은 그 사이에도 돌면서 기력을 **회복시킵니다**
+     *    (34/초). 문턱이 25였을 땐 그래도 계속 25 밑이라 티가 안 났지만,
+     *    문턱을 *"0보다 큰가"* 로 바꾸자마자 **0을 쓰는 즉시 0.3씩 차올라**
+     *    "기력 0" 이라던 판이 사실은 기력 0이 아니게 됐습니다.
+     *    프로브의 검사 셋이 한꺼번에 빨개진 것이 그 증상이었습니다.
+     *
+     * 재려는 조건을 **게임이 매 프레임 지켜 줘야** 실험이 실험이 됩니다.
+     */
+    if (this.staminaPin !== null) {
+      Stamina.value[p] = this.staminaPin
+      /**
+       * ⚠️ **회복도 같이 막아야 합니다.** 여기서 값만 써 넣었더니
+       *    바로 뒤 `playerControlSystem` 안의 회복이 같은 프레임에 돌아서
+       *    0으로 붙든 기력이 **1.7 로 올라간 채** 구르기 판정을 만났습니다
+       *    (34/초 × 최대 50ms 프레임 = 1.7 — 프로브가 찍은 값과 정확히 같습니다).
+       *    붙든다는 것은 *"쓰기"* 가 아니라 *"그 값으로 유지"* 입니다.
+       */
+      Stamina.regenDelayT[p] = 999
+    }
     if (playerAlive) playerControlSystem(this.controlCtx)
     enemyAiSystem(p, playerAlive, this.controlCtx)
     physicsSystem()
@@ -2435,32 +2470,19 @@ class Game {
   /**
    * 지금 이 프레임에 **구르기를 시작할 수 있는가.**
    *
-   * ⚠️ 값을 새로 정하지 않고 playerControl 이 실제로 쓰는 조건을 그대로
-   *    옮겨 적습니다 — 경직·사망·마시는 중이 아니고, 쿨다운이 없고, 기력이
-   *    충분할 것. 휘두르는 중(예고·판정)에는 **취소 추가분**까지 있어야
-   *    하는 것도 같습니다(playerControl `cancelCost`).
+   * ⚠️ **여기서 판단하지 않습니다.** 예전에는 이 자리에 조건을 "그대로 옮겨
+   *    적어" 두었는데, 옮겨 적은 것은 **장부가 둘**이라는 뜻입니다. 실제로
+   *    구르기 문턱을 바꾼 날(balance.ts `staminaExhaustDelay`) 시스템만
+   *    바뀌고 이 장부는 옛 규칙을 계속 세었을 것이고, 그러면 *"맞은 이유:
+   *    stamina"* 가 **거짓말**이 됩니다 — 게임은 내줬는데 장부는 막혔다고
+   *    적는 것이니까요. 판단은 playerControl `dodgeBlock` 한 곳에 있습니다.
+   *
+   * 순서가 곧 처방이라는 규칙(사망·경직·마심 → 쿨다운 → 기력)도 그 함수가
+   * 갖고 있습니다. 내가 기력을 다 쓴 것과 맞아서 굳은 것은 **책임이 반대**라,
+   * 한 칸으로 뭉치면 39%가 나와도 어디를 고칠지 알 수 없습니다.
    */
   private answerBlock(p: number): string {
-    const st = Actor.state[p]
-    /**
-     * ⚠️ **순서가 곧 처방입니다.** "손이 묶였다"를 한 칸으로 두면
-     *    39%가 나와도 어디를 고쳐야 할지 모릅니다 — 내가 기력을 다 쓴 것과
-     *    맞아서 굳은 것은 **책임이 반대**입니다. 앞의 것은 소울류가 말하는
-     *    정당한 대가이고, 뒤의 것은 *"한 대 맞으면 다음 대도 맞는"* 연쇄로
-     *    소울류에서 가장 미움받는 모양입니다.
-     */
-    if (st === ActorState.Dead) return 'dead'
-    if (st === ActorState.Stagger) return 'stagger'
-    if (st === ActorState.Drink) return 'drink'
-    if (Player.dodgeCooldownT[p] > 0) return 'cooldown'
-    const swinging =
-      (st === ActorState.Attack || st === ActorState.Skill) &&
-      Actor.phase[p] !== AttackPhase.Recovery
-    const cost =
-      PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) +
-      (swinging ? PLAYER_CFG.dodge.cancelExtraCost : 0)
-    if (Stamina.value[p] < cost) return 'stamina'
-    return ''
+    return dodgeBlock(p)
   }
 
   /**
@@ -3109,6 +3131,13 @@ class Game {
     inputWaitAvg: number
     /** 공격/스킬을 끊고 구른 횟수. inputUsed 안에 **포함**된 값입니다. */
     inputCancels: number
+    /**
+     * 🫁 **빚내서 낸 구르기** — 기력이 비용보다 적은데도 나간 횟수.
+     * 새 규칙(balance.ts `staminaExhaustDelay`)이 실제로 일했는지 가리는
+     * 유일한 숫자입니다. 0이면 규칙이 켜지지 않은 것이고, 그러면 "못 피함이
+     * 줄었다"는 **다른 이유** 때문입니다.
+     */
+    inputExhausted: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -3135,6 +3164,7 @@ class Game {
       inputDropped: readInputFlow().dropped,
       inputWaitAvg: Number(readInputFlow().waitAvg.toFixed(3)),
       inputCancels: readInputFlow().cancels,
+      inputExhausted: readInputFlow().exhausted,
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -3797,6 +3827,46 @@ class Game {
     }
   }
 
+  /**
+   * 🤸 **구르기 규칙을 밖으로 내보냅니다** — 프로브·봇이 베끼지 않게.
+   *
+   * ⚠️ `rolling` 을 굳이 여기서 계산하는 이유: 프로브가 `state === 2` 로
+   *    비교하면 열거형 순서를 바꾸는 날 **조용히** 다른 상태를 재게 됩니다.
+   *    이 저장소는 이미 그 사고를 한 번 겪었습니다(`enemyInfo.attacking`).
+   *    상태 번호는 게임 안에서만 뜻이 있습니다.
+   */
+  debugDodgeInfo(): {
+    /** 막혀 있다면 무엇이 막는가 — '' 면 지금 나갑니다 */
+    block: string
+    /** 지금 구르기 중인가 */
+    rolling: boolean
+    stamina: number
+    /** 규칙값 — 프로브가 문턱을 들고 있지 않게 게임이 알려 줍니다 */
+    cost: number
+    cancelExtraCost: number
+    regenDelay: number
+    exhaustDelay: number
+    /** 회복이 시작되기까지 남은 시간(초) — 빚을 졌는지 여기로 드러납니다 */
+    regenDelayT: number
+    /** 이번 판에 **빚내서** 낸 구르기 횟수 */
+    exhausted: number
+    key: string
+  } {
+    const p = this.playerEntity
+    return {
+      block: dodgeBlock(p),
+      rolling: Actor.state[p] === ActorState.Dodge,
+      stamina: Number(Stamina.value[p].toFixed(2)),
+      cost: PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1),
+      cancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
+      regenDelay: PLAYER_CFG.staminaRegenDelay,
+      exhaustDelay: PLAYER_CFG.staminaExhaustDelay,
+      regenDelayT: Number(Stamina.regenDelayT[p].toFixed(3)),
+      exhausted: readInputFlow().exhausted,
+      key: PLAYER_CFG.dodge.key,
+    }
+  }
+
   /** 헤드리스 검증용 스냅샷 */
   debugState() {
     const p = this.playerEntity
@@ -4105,6 +4175,19 @@ declare global {
         refund: number
         poise: number
       }
+      /** 🤸 구르기 규칙 — 프로브·봇이 문턱과 키를 베끼지 않게 */
+      dodgeInfo: () => {
+        block: string
+        rolling: boolean
+        stamina: number
+        cost: number
+        cancelExtraCost: number
+        regenDelay: number
+        exhaustDelay: number
+        regenDelayT: number
+        exhausted: number
+        key: string
+      }
       /** 🥋 집중 검증용 */
       focusInfo: () => {
         focus: number
@@ -4115,6 +4198,8 @@ declare global {
       }
       setFocus: (n: number) => void
       setStamina: (n: number) => void
+      /** 🧪 기력을 매 프레임 붙들어 둡니다. null 이면 풀립니다. */
+      pinStamina: (n: number | null) => void
       grantPerfectDodge: () => void
       /** 실험대 전용 — 적을 깨웁니다. */
       wakeEnemy: (entity: number) => void
@@ -4738,6 +4823,7 @@ window.__game = {
   },
   counterCount: () => game.debugCounterCount(),
   guardInfo: () => game.debugGuardInfo(),
+  dodgeInfo: () => game.debugDodgeInfo(),
   focusInfo: () => ({
     focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
     max: FOCUS.max,
@@ -4761,6 +4847,15 @@ window.__game = {
   setStamina: (n) => {
     const p = game.debugPlayerEntity()
     Stamina.value[p] = Math.max(0, Math.min(Stamina.max[p], n))
+  },
+  /**
+   * 🧪 기력을 **매 프레임** 그 값으로 붙들어 둡니다(null 이면 풉니다).
+   * `setStamina` 는 한 번 써 넣을 뿐이라, 회복이 도는 사이에 값이 올라갑니다.
+   * 근거는 게임 루프의 `staminaPin` 주석.
+   */
+  pinStamina: (n) => {
+    const p = game.debugPlayerEntity()
+    game.setStaminaPin(n === null ? null : Math.max(0, Math.min(Stamina.max[p], n)))
   },
   /**
    * 실험대 전용 — 완벽 회피 직후 상태(확정 치명타 창)를 강제로 엽니다.

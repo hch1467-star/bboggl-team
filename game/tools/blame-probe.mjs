@@ -118,9 +118,17 @@ try {
          * 장부가 안 채워지고, 잘 피하면 "공정했나"를 물을 사건 자체가
          * 사라집니다. 여기서 재려는 것은 실력이 아니라 **기회**입니다.
          */
+        /**
+         * ⚠️ **매 프레임 붙들어야 합니다.** 예전엔 아래 루프에서 8ms 마다
+         *    `setStamina(0)` 을 썼는데, 그 사이에도 시뮬레이션이 돌면서
+         *    기력이 회복됩니다(34/초). 문턱이 25 였을 땐 티가 안 났지만
+         *    문턱이 *"0보다 큰가"* 로 바뀌자 **0을 쓰자마자 차올라** 이 판이
+         *    더 이상 "기력 0" 이 아니게 됐고, 검사 셋이 한꺼번에 빨개졌습니다.
+         *    재려는 조건은 **게임이** 지켜 줘야 합니다.
+         */
+        if (kill) G.pinStamina(0)
         const t1 = now()
         while (now() - t1 < 22) {
-          if (kill) G.setStamina(0)
           // 죽으면 그 뒤로는 맞을 일이 없으니 체력만 채워 둡니다.
           if (G.state().player.hp < 40) G.setHp(G.playerEntity(), 100)
           await sleep()
@@ -226,9 +234,10 @@ try {
         const pz = G.state().player.z
         G.spawnEnemyKind('grunt', px + 2.2, pz)
         G.spawnEnemyKind('grunt', px - 2.2, pz)
+        // 위와 같은 이유로 **붙들어** 둡니다 — 한 번 써 넣는 것으론 안 됩니다.
+        if (kill) G.pinStamina(0)
         const t1 = now()
         while (now() - t1 < 30) {
-          if (kill) G.setStamina(0)
           // 죽을 때까지 체력을 아주 낮게 눌러 둡니다 — 한 대면 끝나게.
           if (G.state().player.hp > 6) G.setHp(G.playerEntity(), 6)
           if (G.state().player.hp <= 0) break
@@ -265,6 +274,123 @@ try {
     /기력/.test(deathStarved.sub),
     '기력이 없어 죽으면 화면이 **기력을 지목한다** (다음 판에 바꿀 것을 짚어 준다)',
     deathStarved.sub || '(빈 화면)',
+  )
+
+  /**
+   * ---- 6. 🫁 **빚내서 구르기** — 위 3·4번이 부른 처방을 실제로 재 봅니다 ----
+   *
+   * 3판 벤치가 *"맞은 이유 45대 · 못 피함 27(60%) · 손이 묶임 stamina 15"* 를
+   * 찍었고, 예시로 뽑힌 여덟 줄이 **전부** `locked:stamina` 였습니다. 즉
+   * 맞은 대의 절반 이상이 *"봤고, 알았고, 눌렀는데 게임이 거절한"* 것입니다.
+   *
+   * 다크 소울·엘든 링은 행동의 문턱이 *"비용 이상"* 이 아니라 ***"0보다
+   * 큰가"*** 이고, 모자란 만큼은 **더 긴 회복 지연**으로 갚습니다.
+   * 몬스터헌터도 스태미나가 바닥나도 회피는 나가고 막히는 건 달리기입니다.
+   * 세키로는 회피에서 자원을 아예 뺐습니다. 셋의 공통점은 **위험한 순간에
+   * 방어 입력을 조용히 거절하지 않는다**입니다.
+   *
+   * ⚠️ 여기서 재는 것은 네 가지이고, **넷이 다 있어야** 규칙이 규칙입니다:
+   *   ① 기력이 모자라도 구르기가 **나간다**       (내주는가)
+   *   ② 빚을 지면 회복이 **늦게** 시작된다        (값을 치르는가)
+   *   ③ 기력이 **0이면 여전히 못 낸다**           ← 공짜가 아님을 증명
+   *   ④ 게임이 그 횟수를 **세고 있다**            ← 안 세면 다음에 못 잰다
+   *
+   * ③ 이 없으면 "늘 나간다"와 구분이 안 됩니다. 통과만 하는 검사는 아무것도
+   * 증명하지 않는다는 이 파일의 뼈대와 같은 이유입니다.
+   */
+  console.log('')
+  const rule = await page.evaluate(() => window.__game.dodgeInfo())
+  console.log(
+    `  [규칙] 키 ${rule.key} · 비용 ${rule.cost} · 평소 회복지연 ${rule.regenDelay}초 · ` +
+      `빚졌을 때 ${rule.exhaustDelay}초`,
+  )
+  check(
+    rule.exhaustDelay > rule.regenDelay,
+    '빚졌을 때의 회복 지연이 **평소보다 길다** (값을 치르는 규칙인가)',
+    `${rule.regenDelay}초 → ${rule.exhaustDelay}초`,
+  )
+
+  /** 기력을 원하는 값으로 맞추고 구르기를 한 번 눌러 봅니다. */
+  const tryRoll = (stamina) =>
+    page.evaluate(
+      async ([sta]) => {
+        const G = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 8))
+        const now = () => G.state().simElapsed
+        G.reset()
+        const t0 = now()
+        while (now() - t0 < 0.6) await sleep()
+        // 적이 없어야 맞아서 굳는 것과 섞이지 않습니다 — 재려는 건 기력 하나입니다.
+        G.clearEnemies()
+        while (now() - t0 < 1.2) await sleep()
+        /**
+         * 붙들어 둡니다 — 누르는 프레임에 **실제로 그 값이어야** 합니다.
+         * 한 번 써 넣기만 하면 눌리기 전에 회복이 값을 올려 버립니다.
+         */
+        G.pinStamina(sta)
+        while (now() - t0 < 1.4) await sleep()
+        const before = G.dodgeInfo()
+        const key = before.key
+        G.press(key)
+        G.release(key)
+        /** 구르기가 **시작됐는지**만 봅니다. 판정은 게임의 `rolling` 이 내립니다. */
+        let rolled = false
+        const t1 = now()
+        while (now() - t1 < 0.5) {
+          if (G.dodgeInfo().rolling) {
+            rolled = true
+            break
+          }
+          await sleep()
+        }
+        /**
+         * ⚠️ **회복 지연을 읽기 전에 풉니다.** 붙들어 둔 채로 읽으면 기력이
+         *    안 줄어 빚이 안 생기고, 그러면 재려던 것이 사라집니다.
+         *    (구르기는 이미 시작했으므로 값은 그때 정해졌습니다.)
+         */
+        G.pinStamina(null)
+        // 구른 뒤의 회복 지연을 읽습니다 — 빚을 졌으면 여기가 길어야 합니다.
+        const after = G.dodgeInfo()
+        return { before, after, rolled }
+      },
+      [stamina],
+    )
+
+  /** 비용의 5분의 1만 남긴 상태 — 예전 규칙(`>= 비용`)이면 거절당합니다. */
+  const poor = await tryRoll(Math.max(1, Math.round(rule.cost / 5)))
+  const empty = await tryRoll(0)
+  const rich = await tryRoll(100)
+  console.log(
+    `  [기력 ${poor.before.stamina}] 굴렀나 ${poor.rolled ? 'O' : 'X'} · 막은 것 "${poor.before.block}" · ` +
+      `구른 뒤 회복지연 ${poor.after.regenDelayT}초`,
+  )
+  console.log(
+    `  [기력 ${empty.before.stamina}] 굴렀나 ${empty.rolled ? 'O' : 'X'} · 막은 것 "${empty.before.block}"`,
+  )
+  console.log(
+    `  [기력 ${rich.before.stamina}] 굴렀나 ${rich.rolled ? 'O' : 'X'} · ` +
+      `구른 뒤 회복지연 ${rich.after.regenDelayT}초\n`,
+  )
+
+  check(
+    poor.rolled,
+    '기력이 **비용보다 적어도 구르기가 나간다** (읽고 눌렀는데 거절당하지 않는다)',
+    `기력 ${poor.before.stamina} < 비용 ${rule.cost} — ${poor.rolled ? '나감' : `막힘("${poor.before.block}")`}`,
+  )
+  check(
+    !empty.rolled && empty.before.block === 'stamina',
+    '기력이 **0이면 여전히 못 낸다** (공짜가 아니라는 것 — 이 줄이 없으면 위 검사가 무의미합니다)',
+    `굴렀나 ${empty.rolled ? 'O' : 'X'} · 막은 것 "${empty.before.block}"`,
+  )
+  check(
+    poor.after.regenDelayT > rich.after.regenDelayT,
+    '빚내서 구르면 **회복이 더 늦게** 시작된다 (뒤에 청구한다)',
+    `모자랄 때 ${poor.after.regenDelayT}초 vs 넉넉할 때 ${rich.after.regenDelayT}초`,
+  )
+  check(
+    poor.after.exhausted > poor.before.exhausted,
+    '게임이 **빚내서 낸 구르기를 세고 있다** (벤치가 "쓰이질 않았다"와 "효과가 없다"를 가릅니다)',
+    `${poor.before.exhausted}회 → ${poor.after.exhausted}회`,
   )
 
   console.log('')
