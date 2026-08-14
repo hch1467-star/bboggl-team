@@ -29,7 +29,7 @@ import { createServer } from 'vite'
  * ⚠️ `playthrough.mjs` 에서 가져오면 안 됩니다 — 불러오는 순간 판이 돕니다.
  *    그래서 정책 상수만 담은 파일이 따로 있습니다.
  */
-import { DETOUR_BUDGET } from './policy.mjs'
+import { DETOUR_BUDGET, SPEND_BUDGET } from './policy.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5193
@@ -690,6 +690,105 @@ try {
             ` ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초 = ${shots.toFixed(1)}발`,
         )
       }
+    }
+
+    /**
+     * ── 💰 **소비처가 갈 만한 거리인가** ────────────────────────────
+     *
+     * 3판 벤치가 세 번 연속 같은 말을 했습니다:
+     *
+     *   > 소비처 — 닿음 **0.0회** · 가려다 접음 2.0회 · 접은 거리 **46~86m**
+     *   > 무기 강화 **0.0회** · 남은 불티 404 · 보스 앞 장비 **+0**
+     *
+     * 불티도 정련석도 제때 모입니다(`늦게 모인 판 0/3`). 닿기만 하면 삽니다
+     * (`닿았을 때 무기 강화함 1회`). **끊긴 고리는 거리 하나뿐**입니다.
+     * 그런데 지금까지 그것을 재는 검사가 **없었습니다** — 벤치를 한 판씩
+     * 40분 돌려야만 알 수 있었고, 그건 이 저장소가 매번 데이는 모양입니다.
+     *
+     * ⚠️ **양쪽을 다 잽니다.** 이 지도에서 북쪽 단상이 *"들어가긴 94m,
+     *    나오는 데 172m"* 였습니다 — 걷기 그래프는 **방향이 있습니다**
+     *    (1단 초과는 못 오르고, 내려가는 것은 공짜). 가는 길만 재면
+     *    **주머니**를 못 봅니다.
+     *
+     * 판정은 `policy.mjs` 의 `SPEND_BUDGET` 이 내립니다. 봇이 그 거리에서
+     * 발길을 돌리므로, 그 밖의 소비처는 **있으나 마나**입니다.
+     */
+    {
+      /** 동선 → 이 칸 (위 BFS 는 동선에서 바깥으로 폈으므로 이 방향입니다) */
+      const toSpot = (c) => distToRoute.get(key(c.cx, c.cz)) ?? Infinity
+      /**
+       * 이 칸 → 동선 (**되돌아 나오는** 길).
+       *
+       * ⚠️ 칸마다 BFS 를 돌리면 안 됩니다(동선 칸 수 × 지도 크기).
+       *    **간선을 뒤집어** 동선에서 한 번만 폅니다: 위 BFS 는
+       *    `nh - h <= maxClimb`(여기서 저기로 오를 수 있나)를 봤고,
+       *    여기서는 `h - nh <= maxClimb`(저기서 여기로 올 수 있나)를 봅니다.
+       *    걷기 그래프는 **방향이 있어서** 두 값이 다릅니다 —
+       *    이 지도의 북쪽 단상이 94m 로 들어가 172m 로 나오던 자리입니다.
+       */
+      const distFromCell = new Map()
+      {
+        let f = []
+        for (const c of routeCells) {
+          distFromCell.set(key(c.cx, c.cz), 0)
+          f.push(c)
+        }
+        while (f.length) {
+          const next = []
+          for (const cur of f) {
+            const h = heightAt(cur.cx, cur.cz)
+            const d = distFromCell.get(key(cur.cx, cur.cz))
+            for (const [nx, nz] of [
+              [cur.cx - 1, cur.cz],
+              [cur.cx + 1, cur.cz],
+              [cur.cx, cur.cz - 1],
+              [cur.cx, cur.cz + 1],
+            ]) {
+              const nh = heightAt(nx, nz)
+              // 뒤집힌 조건 — **n 에서 cur 로** 걸어올 수 있는가.
+              if (nh === VOID || h - nh > maxClimb) continue
+              const k = key(nx, nz)
+              if (distFromCell.has(k)) continue
+              distFromCell.set(k, d + CELL)
+              next.push({ cx: nx, cz: nz })
+            }
+          }
+          f = next
+        }
+      }
+      const backToRoute = (c) => distFromCell.get(key(c.cx, c.cz)) ?? Infinity
+      const spots = level.entities.filter((e) => e.kind === 'anvil' || e.kind === 'bonfire')
+      const rows = spots.map((e) => {
+        const c = cellOf(e)
+        return { e, c, out: toSpot(c), back: backToRoute(c) }
+      })
+      for (const r of rows) {
+        console.log(
+          `  [소비처] ${r.e.kind === 'anvil' ? '모루' : '화톳불'}(${r.c.cx},${r.c.cz}) — ` +
+            `가는 길 ${Number.isFinite(r.out) ? `${r.out}m` : '길없음'} · ` +
+            `나오는 길 ${Number.isFinite(r.back) ? `${r.back}m` : '길없음'}`,
+        )
+      }
+      /**
+       * **모루만** 문턱을 겁니다. 화톳불은 부활 지점이라 주 동선 위에
+       * 있는 것이 당연하고, 실제로 못 닿아서 문제가 된 것은 모루입니다.
+       * 하나라도 예산 안에 있으면 통과입니다 — 소비처가 흔해지면
+       * *"들르는 일"* 이 판단이 아니게 되기 때문입니다(DESIGN.md).
+       */
+      const anvils = rows.filter((r) => r.e.kind === 'anvil')
+      const reachable = anvils.filter((r) => r.out <= SPEND_BUDGET && r.back <= SPEND_BUDGET)
+      check(
+        anvils.length > 0 && reachable.length > 0,
+        `모루 하나 이상이 **주 동선에서 예산(${SPEND_BUDGET}m) 안**이다 (왕복 양쪽 모두)`,
+        anvils
+          .map(
+            (r) =>
+              `(${r.c.cx},${r.c.cz}) 가는 ${Number.isFinite(r.out) ? `${r.out}m` : '길없음'}/` +
+              `나오는 ${Number.isFinite(r.back) ? `${r.back}m` : '길없음'}` +
+              `${r.out <= SPEND_BUDGET && r.back <= SPEND_BUDGET ? ' ✅' : ''}`,
+          )
+          .join(' · '),
+      )
     }
   }
 
