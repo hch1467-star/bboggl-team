@@ -610,6 +610,107 @@ try {
       .join(', ') || '전부 안 막힘',
   )
 
+  /**
+   * ── ⑤ **실제로 통하는 구간은 얼마인가** ──────────────────────────
+   *
+   * 설계값은 0.18초입니다. 그런데 자동 플레이의 깔때기는 이렇습니다:
+   *
+   *   창을 연 것 13회 · **헛친 것 12회** · 성공 2회
+   *
+   * 92%가 헛칩니다. 봇은 `timer <= 창` 일 때만 누르는데도요. 그러면 남은
+   * 이야기는 둘인데 **처방이 정반대**입니다:
+   *
+   *   · 창은 제대로 0.18초인데 봇이 **늦게/일찍** 누른다  → 봇을 고침
+   *   · 창이 실제로는 훨씬 **좁다**                        → 게임을 고침
+   *
+   * 지금까지 이걸 가를 자료가 없었습니다. 그래서 **쓸어 봅니다** —
+   * 남은 예고를 여러 지점에서 잡아 누르고, 어디서 통하는지 표로 찍습니다.
+   *
+   * ⚠️ **프레임 시간을 같이 잽니다.** 이 컨테이너는 GPU 가 없어 8~20fps
+   *    입니다. 프레임이 125ms 면 0.18초 창은 **1.4프레임**이고, 그러면
+   *    "창이 좁다"의 정체가 밸런스가 아니라 **기계**입니다. 그 둘을 안
+   *    갈라 놓으면 또 엉뚱한 값을 돌리게 됩니다(이번 라운드에 이미 한 번
+   *    기계 속도를 밸런스 변화로 읽을 뻔했습니다).
+   */
+  console.log('')
+  const dt = await page.evaluate(async () => {
+    const G = window.__game
+    let prev = G.state().simElapsed
+    let min = Infinity
+    for (let i = 0; i < 200; i++) {
+      await new Promise((r) => setTimeout(r, 4))
+      const now = G.state().simElapsed
+      const d = now - prev
+      if (d > 0.0001 && d < min) min = d
+      prev = now
+    }
+    return Number(min.toFixed(4))
+  })
+  console.log(`  [기계] 시뮬 한 프레임 ${(dt * 1000).toFixed(0)}ms — 창 ${rule.window}초 = ${(rule.window / dt).toFixed(1)}프레임`)
+
+  /**
+   * 누르는 시점을 **창의 배수**로 잡습니다 — 창 길이를 프로브가 베끼지
+   * 않게(게임이 알려 준 `rule.window` 를 곱합니다). 1.0 을 넘는 지점은
+   * *"일찍 누른 것"* 이라 실패가 정상입니다 — 표의 **위쪽 경계**입니다.
+   */
+  const FRACTIONS = [1.6, 1.2, 1.0, 0.8, 0.6, 0.4, 0.2, 0.05]
+  const sweep = []
+  for (const f of FRACTIONS) {
+    const r = await page.evaluate(
+      async ({ f }) => {
+        const G = window.__game
+        const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 1.8)
+        const hp0 = G.state().player.hp
+        const c0 = G.guardInfo().count
+        G.forceAttack(e, idx)
+        const ok = await window.__t.until(() => {
+          const i = G.enemyInfo(e)
+          return !!i && i.winding && i.timer <= window.__game.guardInfo().window * f
+        }, 4)
+        // 실제로 **누른 순간에 남아 있던** 예고 — 의도가 아니라 사실을 적습니다.
+        const left = G.enemyInfo(e)?.timer ?? -1
+        G.press(G.guardInfo().key)
+        G.release(G.guardInfo().key)
+        await window.__t.runFor(0.9)
+        return {
+          reached: ok,
+          left: Number(left.toFixed(3)),
+          gained: G.guardInfo().count - c0,
+          hurt: hp0 - G.state().player.hp,
+        }
+      },
+      { f },
+    )
+    sweep.push({ f, ...r })
+    console.log(
+      `  창×${String(f).padEnd(4)} — 누를 때 남은 예고 ${String(r.left).padEnd(6)}초 · ` +
+        `${r.gained > 0 ? '✅ 막음' : `❌ 못 막음(피해 ${r.hurt})`}`,
+    )
+  }
+
+  /**
+   * ⚠️ **위쪽 경계도 같이 봅니다.** 통한 구간만 세면 *"항상 통한다"* 와
+   *    구분이 안 됩니다 — 창 밖(×1.6)에서도 막히면 그건 창이 아니라
+   *    상시 가드입니다.
+   */
+  const inside = sweep.filter((r) => r.reached && r.left >= 0 && r.left <= rule.window)
+  const worked = inside.filter((r) => r.gained > 0)
+  check(
+    inside.length >= 3 && worked.length >= Math.ceil(inside.length / 2),
+    '⑤ 창 **안**에서 누르면 절반 이상 실제로 막힌다 (설계값이 실전값과 같은가)',
+    `창 안 ${inside.length}지점 중 ${worked.length}지점 성공` +
+      ` — ${inside.map((r) => `${r.left}초${r.gained > 0 ? '✅' : '❌'}`).join(' · ')}`,
+  )
+  const outside = sweep.filter((r) => r.reached && r.left > rule.window)
+  check(
+    outside.length > 0 && outside.every((r) => r.gained === 0),
+    '   창 **밖**에서 누르면 못 막는다 (이 줄이 없으면 위 검사가 무의미합니다)',
+    outside.length
+      ? outside.map((r) => `${r.left}초${r.gained > 0 ? ' ❌막힘' : ' ✅못막음'}`).join(' · ')
+      : '표본 없음',
+  )
+
+  console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (e) {
   fail++
