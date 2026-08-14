@@ -3622,6 +3622,22 @@ class Game {
     winding: boolean
     /** 내가 이 적의 정면에 있는가 (반격 가능 방향) */
     inFront: boolean
+    /**
+     * ⏳ **남은 예고 시간**(초). 예고 중이 아니면 0.
+     *
+     * ── 왜 이게 없어서 가지 하나가 죽었나 ──────────────────────────
+     * 봇에게 저스트 가드를 가르치면서 `t.timer <= 창 × 2.5` 라고 썼는데,
+     * 이 목록에 `timer` 가 **없었습니다.** `undefined <= 0.45` 는 언제나
+     * 거짓이라 그 가지가 통째로 죽었고, 한 판에서 **시도 0회**가 나왔습니다.
+     * 기둥 3 이 여러 라운드 동안 죽어 있던 것과 같은 모양입니다.
+     *
+     * ── 봇에게 숨은 정보를 주는 것이 아닙니다 ──────────────────────
+     * 예고 도형의 **투명도가 남은 시간 비율**로 계산됩니다(가득 찰수록
+     * 진해집니다). 즉 사람도 화면에서 이 값을 보고 있습니다. 안 보이는
+     * 것을 봇에게 주면 봇이 사람보다 잘하게 되어 밸런스가 거짓이 되는데,
+     * 이건 **보이는 것을 숫자로 준 것**입니다.
+     */
+    timer: number
     hp: number
   }[] {
     const p = this.playerEntity
@@ -3642,6 +3658,10 @@ class Game {
         /** 나를 쫓고 있는가 — "몇 마리를 동시에 상대하는가"를 재려면 필요합니다. */
         aggro: Enemy.aggro[e] === 1,
         winding: attacking && Actor.phase[e] === AttackPhase.Windup,
+        timer:
+          attacking && Actor.phase[e] === AttackPhase.Windup
+            ? Number(Actor.timer[e].toFixed(3))
+            : 0,
         inFront: !isBehindPoint(
           Transform.x[p],
           Transform.z[p],
@@ -4043,6 +4063,8 @@ declare global {
         aggro: boolean
         winding: boolean
         inFront: boolean
+        /** ⏳ 남은 예고 시간(초). 예고 중이 아니면 0 — 화면의 투명도와 같은 값입니다. */
+        timer: number
         hp: number
       }[]
       slotCooldowns: () => { slot: number; key: string; cd: number; empty: boolean }[]

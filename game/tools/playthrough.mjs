@@ -447,6 +447,7 @@ try {
      */
     const greenSeen = new Set()
     /** 🛡 저스트 가드를 **시도한** 횟수. 성공 수는 게임이 셉니다(guardInfo().count). */
+    let fieldsChecked = false
     let guardTries = 0
     let greenEvents = 0
     let greenAnswerable = 0
@@ -1262,6 +1263,24 @@ try {
          * 안으로 들어왔을 때만 붙잡습니다. 그보다 이르면 평소대로 구릅니다 —
          * 초보자가 "빨간 게 보이자마자 막기 자세"를 잡지는 않습니다.
          */
+        /**
+         * ⚠️ **봇이 읽는 칸이 실제로 있는지 한 번 확인합니다.**
+         *
+         * 저스트 가드 가지가 `t.timer` 를 읽는데 `threats()` 에 그 칸이
+         * 없었습니다. `undefined <= 0.45` 는 언제나 거짓이라 가지가 통째로
+         * 죽었고, **한 판을 다 돌고 나서야** 시도 0회로 들켰습니다.
+         * 기둥 3 이 `near.entity` 가 없어서 여러 라운드 죽어 있던 것과
+         * 같은 모양입니다 — JS 는 없는 칸을 조용히 `undefined` 로 줍니다.
+         *
+         * 그래서 **첫 위협을 만나는 순간 큰 소리로 죽습니다.** 8분을 돌고
+         * 0을 보는 것보다, 3초 만에 이름을 대며 멈추는 쪽이 낫습니다.
+         */
+        if (!fieldsChecked && threats.length > 0) {
+          fieldsChecked = true
+          for (const k of ['entity', 'x', 'z', 'dist', 'intent', 'winding', 'inFront', 'timer']) {
+            if (!(k in threats[0])) throw new Error(`threats() 에 '${k}' 칸이 없습니다`)
+          }
+        }
         const gi = G.guardInfo()
         const strike = threats.find(
           (t) => t.winding && t.intent === 0 && t.dist < 4.5 && t.timer <= gi.window * 2.5,
