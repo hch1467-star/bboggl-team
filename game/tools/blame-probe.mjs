@@ -277,40 +277,46 @@ try {
   )
 
   /**
-   * ---- 6. 🫁 **빚내서 구르기** — 위 3·4번이 부른 처방을 실제로 재 봅니다 ----
+   * ---- 6. 🛡 **방어의 값** — 위 3·4번이 부른 처방을 재 봅니다 ----
    *
    * 3판 벤치가 *"맞은 이유 45대 · 못 피함 27(60%) · 손이 묶임 stamina 15"* 를
-   * 찍었고, 예시로 뽑힌 여덟 줄이 **전부** `locked:stamina` 였습니다. 즉
-   * 맞은 대의 절반 이상이 *"봤고, 알았고, 눌렀는데 게임이 거절한"* 것입니다.
+   * 찍었고, 예시로 뽑힌 여덟 줄이 **전부** `locked:stamina` 였습니다.
    *
-   * 다크 소울·엘든 링은 행동의 문턱이 *"비용 이상"* 이 아니라 ***"0보다
-   * 큰가"*** 이고, 모자란 만큼은 **더 긴 회복 지연**으로 갚습니다.
-   * 몬스터헌터도 스태미나가 바닥나도 회피는 나가고 막히는 건 달리기입니다.
-   * 세키로는 회피에서 자원을 아예 뺐습니다. 셋의 공통점은 **위험한 순간에
-   * 방어 입력을 조용히 거절하지 않는다**입니다.
+   * ⚠️ **먼저 문턱을 없애 봤고, 되돌렸습니다.** 소울류의 실제 규칙(*"0보다
+   *    크면 나간다"*)로 바꿨더니 봇이 판당 42회를 빚내며 영구 파산했고
+   *    받은 피해 162 → 280, 클리어 195 → 248초로 **더 나빠졌습니다.**
+   *    문턱은 스스로를 지키는 브레이크였습니다. 고칠 곳은 **값**이었습니다.
    *
-   * ⚠️ 여기서 재는 것은 네 가지이고, **넷이 다 있어야** 규칙이 규칙입니다:
-   *   ① 기력이 모자라도 구르기가 **나간다**       (내주는가)
-   *   ② 빚을 지면 회복이 **늦게** 시작된다        (값을 치르는가)
-   *   ③ 기력이 **0이면 여전히 못 낸다**           ← 공짜가 아님을 증명
-   *   ④ 게임이 그 횟수를 **세고 있다**            ← 안 세면 다음에 못 잰다
-   *
-   * ③ 이 없으면 "늘 나간다"와 구분이 안 됩니다. 통과만 하는 검사는 아무것도
-   * 증명하지 않는다는 이 파일의 뼈대와 같은 이유입니다.
+   * 그래서 여기서 재는 것은 셋입니다:
+   *   ① 방어(구르기)가 **공격 두 대보다 싸다**   ← 소울류에서 뒤집힌 적 없는 부등호
+   *   ② 값 이상이면 나간다
+   *   ③ 값보다 적으면 **못 낸다**                ← 실패할 수 있는 검사
    */
   console.log('')
   const rule = await page.evaluate(() => window.__game.dodgeInfo())
-  console.log(
-    `  [규칙] 키 ${rule.key} · 비용 ${rule.cost} · 평소 회복지연 ${rule.regenDelay}초 · ` +
-      `빚졌을 때 ${rule.exhaustDelay}초`,
-  )
+  const arms = await page.evaluate(() => window.__game.weaponTable())
+  console.log(`  [규칙] 키 ${rule.key} · 구르기 ${rule.cost} · 회복지연 ${rule.regenDelay}초`)
+
+  /**
+   * ① **방어가 공격보다 싸야 합니다.**
+   *
+   * 블러드본의 퀵스텝은 공격보다 싸고, 엘든 링의 구르기는 강공격보다
+   * 싸며, 세키로는 회피에서 자원을 아예 뺐습니다. 이 부등호가 뒤집히면
+   * **공격한 사람이 방어할 수 없습니다** — 벤치의 `locked:stamina` 가
+   * 그 모양이었습니다.
+   *
+   * 견주는 대상을 "가벼운 공격 두 대"로 잡은 근거: 한 번의 교전에서 두 대는
+   * 넣고 물러나는 것이 이 게임의 기본 리듬이고(콤보 3타 중 둘), 그 뒤에
+   * 구르지 못하면 리듬 자체가 성립하지 않습니다.
+   */
+  const flipped = arms.filter((w) => !(w.dodgeCost < w.firstTwoStamina))
   check(
-    rule.exhaustDelay > rule.regenDelay,
-    '빚졌을 때의 회복 지연이 **평소보다 길다** (값을 치르는 규칙인가)',
-    `${rule.regenDelay}초 → ${rule.exhaustDelay}초`,
+    arms.length >= 3 && flipped.length === 0,
+    '**세 무기 모두** 구르기가 가벼운 공격 두 대보다 싸다 (방어가 공격보다 비싸면 안 됩니다)',
+    arms.map((w) => `${w.id} ${w.dodgeCost}<${w.firstTwoStamina}${w.dodgeCost < w.firstTwoStamina ? '' : ' ❌'}`).join(' · '),
   )
 
-  /** 기력을 원하는 값으로 맞추고 구르기를 한 번 눌러 봅니다. */
+  /** 기력을 붙들어 두고 구르기를 한 번 눌러 봅니다. */
   const tryRoll = (stamina) =>
     page.evaluate(
       async ([sta]) => {
@@ -343,54 +349,29 @@ try {
           }
           await sleep()
         }
-        /**
-         * ⚠️ **회복 지연을 읽기 전에 풉니다.** 붙들어 둔 채로 읽으면 기력이
-         *    안 줄어 빚이 안 생기고, 그러면 재려던 것이 사라집니다.
-         *    (구르기는 이미 시작했으므로 값은 그때 정해졌습니다.)
-         */
         G.pinStamina(null)
-        // 구른 뒤의 회복 지연을 읽습니다 — 빚을 졌으면 여기가 길어야 합니다.
-        const after = G.dodgeInfo()
-        return { before, after, rolled }
+        return { before, rolled }
       },
       [stamina],
     )
 
-  /** 비용의 5분의 1만 남긴 상태 — 예전 규칙(`>= 비용`)이면 거절당합니다. */
-  const poor = await tryRoll(Math.max(1, Math.round(rule.cost / 5)))
-  const empty = await tryRoll(0)
-  const rich = await tryRoll(100)
+  const rich = await tryRoll(Math.ceil(rule.cost) + 5)
+  const poor = await tryRoll(Math.max(0, Math.floor(rule.cost) - 5))
   console.log(
-    `  [기력 ${poor.before.stamina}] 굴렀나 ${poor.rolled ? 'O' : 'X'} · 막은 것 "${poor.before.block}" · ` +
-      `구른 뒤 회복지연 ${poor.after.regenDelayT}초`,
+    `  [기력 ${rich.before.stamina}] 굴렀나 ${rich.rolled ? 'O' : 'X'} · 막은 것 "${rich.before.block}"`,
   )
   console.log(
-    `  [기력 ${empty.before.stamina}] 굴렀나 ${empty.rolled ? 'O' : 'X'} · 막은 것 "${empty.before.block}"`,
-  )
-  console.log(
-    `  [기력 ${rich.before.stamina}] 굴렀나 ${rich.rolled ? 'O' : 'X'} · ` +
-      `구른 뒤 회복지연 ${rich.after.regenDelayT}초\n`,
-  )
-
-  check(
-    poor.rolled,
-    '기력이 **비용보다 적어도 구르기가 나간다** (읽고 눌렀는데 거절당하지 않는다)',
-    `기력 ${poor.before.stamina} < 비용 ${rule.cost} — ${poor.rolled ? '나감' : `막힘("${poor.before.block}")`}`,
+    `  [기력 ${poor.before.stamina}] 굴렀나 ${poor.rolled ? 'O' : 'X'} · 막은 것 "${poor.before.block}"\n`,
   )
   check(
-    !empty.rolled && empty.before.block === 'stamina',
-    '기력이 **0이면 여전히 못 낸다** (공짜가 아니라는 것 — 이 줄이 없으면 위 검사가 무의미합니다)',
-    `굴렀나 ${empty.rolled ? 'O' : 'X'} · 막은 것 "${empty.before.block}"`,
+    rich.rolled && rich.before.block === '',
+    '값 이상이면 구르기가 나간다',
+    `기력 ${rich.before.stamina} ≥ ${rule.cost} — ${rich.rolled ? '나감' : `막힘("${rich.before.block}")`}`,
   )
   check(
-    poor.after.regenDelayT > rich.after.regenDelayT,
-    '빚내서 구르면 **회복이 더 늦게** 시작된다 (뒤에 청구한다)',
-    `모자랄 때 ${poor.after.regenDelayT}초 vs 넉넉할 때 ${rich.after.regenDelayT}초`,
-  )
-  check(
-    poor.after.exhausted > poor.before.exhausted,
-    '게임이 **빚내서 낸 구르기를 세고 있다** (벤치가 "쓰이질 않았다"와 "효과가 없다"를 가릅니다)',
-    `${poor.before.exhausted}회 → ${poor.after.exhausted}회`,
+    !poor.rolled && poor.before.block === 'stamina',
+    '값보다 적으면 **못 낸다** (이 줄이 없으면 위 검사가 아무것도 증명하지 않습니다)',
+    `기력 ${poor.before.stamina} < ${rule.cost} — 굴렀나 ${poor.rolled ? 'O' : 'X'} · "${poor.before.block}"`,
   )
 
   console.log('')

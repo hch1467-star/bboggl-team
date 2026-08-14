@@ -103,7 +103,6 @@ export function resetStaminaSpent(): void {
   inputFlow.dropped = 0
   inputFlow.waitSum = 0
   inputFlow.cancels = 0
-  inputFlow.exhausted = 0
 }
 
 /**
@@ -152,14 +151,13 @@ export function readRhythm(): { skillCasts: number[]; lightSwings: number } {
  *
  * ⚠️ 봇이 아니라 **게임이** 셉니다. 누른 것과 나간 것은 다릅니다.
  */
-const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0, exhausted: 0 }
+const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0 }
 export function readInputFlow(): {
   used: number
   expired: number
   dropped: number
   waitAvg: number
   cancels: number
-  exhausted: number
 } {
   return {
     used: inputFlow.used,
@@ -168,13 +166,6 @@ export function readInputFlow(): {
     waitAvg: inputFlow.used > 0 ? inputFlow.waitSum / inputFlow.used : 0,
     // 공격을 도중에 끊고 구른 횟수. `used` 안에 포함된 값이라 더하면 안 됩니다.
     cancels: inputFlow.cancels,
-    /**
-     * 🫁 **빚내서 낸 방어 행동**의 횟수 — 스태미나가 비용보다 적은데도
-     * 나간 구르기입니다. 이 값이 0이면 새 규칙이 **한 번도 일하지 않은**
-     * 것이고, 그러면 "못 피함이 줄었다"는 다른 이유 때문입니다.
-     * 규칙이 실제로 켜졌는지 프로브가 이 숫자 하나로 가릅니다.
-     */
-    exhausted: inputFlow.exhausted,
   }
 }
 /**
@@ -192,17 +183,8 @@ const TEMPO = PLAYER.tempo.attackScale
 function spendStamina(p: number, cost: number): void {
   const used = Math.min(Stamina.value[p], cost)
   staminaSpent += used
-  /**
-   * 🫁 **모자랐던 만큼**(빚). 0보다 크면 "빚내서 낸 행동"입니다.
-   * 근거는 balance.ts `staminaExhaustDelay` 주석 — 거절하는 대신 뒤에
-   * 청구합니다. 공격은 여전히 `>= 비용` 으로 막혀 있으므로 여기서 빚이
-   * 생기는 것은 **방어 행동뿐**입니다.
-   */
-  const short = cost - used
   Stamina.value[p] = Math.max(0, Stamina.value[p] - cost)
-  Stamina.regenDelayT[p] =
-    short > 0 ? PLAYER.staminaExhaustDelay : PLAYER.staminaRegenDelay
-  if (short > 0) inputFlow.exhausted++
+  Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
 }
 const finishable = defineQuery(Enemy, Transform, Health, Actor)
 
@@ -577,11 +559,15 @@ export function dodgeBlock(p: number): DodgeBlock {
     return Stamina.value[p] >= cancel ? '' : 'stamina'
   }
   /**
-   * 평상시 구르기(서 있을 때·후딜)는 **0보다 크면** 나갑니다.
-   * 근거는 balance.ts `staminaExhaustDelay` — 소울류·몬헌·세키로가 모두
-   * 위험한 순간에 방어 입력을 거절하지 않고 **뒤에** 청구합니다.
+   * 평상시 구르기(서 있을 때·후딜)는 **비용 이상**이어야 합니다.
+   *
+   * ⚠️ 여기를 *"0보다 큼"* 으로 바꿔 본 적이 있습니다(소울류의 실제 규칙).
+   *    봇이 판당 42회를 빚내며 영구 파산했고 받은 피해가 162 → 280 으로
+   *    늘어 **되돌렸습니다**(DESIGN.md). 고친 것은 문턱이 아니라 값입니다
+   *    — balance.ts `dodge.staminaCost` 25 → 18.
    */
-  return Stamina.value[p] > 0 ? '' : 'stamina'
+  const cost = PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
+  return Stamina.value[p] >= cost ? '' : 'stamina'
 }
 
 function beginDodge(p: number, dirX: number, dirZ: number): void {

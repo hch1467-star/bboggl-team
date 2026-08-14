@@ -242,9 +242,16 @@ async function main() {
     await tap('Space')
     const dodging = await waitUntil((st) => st.player.state === 2, 2500)
     check('Space로 회피 구르기 진입', dodging.ok, `state=${dodging.state.player.state}`)
+    /**
+     * ⚠️ **숫자를 여기 적어 두지 않습니다.** 예전에는 `- 25` 라고 박아 뒀는데,
+     *    그건 규칙의 **세 번째 사본**이었습니다(playerControl · main · 여기).
+     *    회피 값을 25 → 18 로 옮기는 날 이 줄만 옛 값을 들고 빨개집니다 —
+     *    게임은 멀쩡한데 검사가 틀리는, 이 저장소가 제일 싫어하는 모양입니다.
+     */
+    const dodgeCost = await page.evaluate(() => window.__game.dodgeInfo().cost)
     check(
-      '회피가 스태미나 25 소모',
-      dodging.ok && Math.abs(before.player.stamina - dodging.state.player.stamina - 25) < 3,
+      `회피가 스태미나 ${dodgeCost} 소모`,
+      dodging.ok && Math.abs(before.player.stamina - dodging.state.player.stamina - dodgeCost) < 3,
       `${before.player.stamina} -> ${dodging.state.player.stamina}`,
     )
     const rolled = await waitUntil((st) => st.player.state !== 2, 3000)

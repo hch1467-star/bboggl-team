@@ -3131,13 +3131,6 @@ class Game {
     inputWaitAvg: number
     /** 공격/스킬을 끊고 구른 횟수. inputUsed 안에 **포함**된 값입니다. */
     inputCancels: number
-    /**
-     * 🫁 **빚내서 낸 구르기** — 기력이 비용보다 적은데도 나간 횟수.
-     * 새 규칙(balance.ts `staminaExhaustDelay`)이 실제로 일했는지 가리는
-     * 유일한 숫자입니다. 0이면 규칙이 켜지지 않은 것이고, 그러면 "못 피함이
-     * 줄었다"는 **다른 이유** 때문입니다.
-     */
-    inputExhausted: number
   } {
     return {
       poiseBreaks: this.poiseBreaks,
@@ -3164,7 +3157,6 @@ class Game {
       inputDropped: readInputFlow().dropped,
       inputWaitAvg: Number(readInputFlow().waitAvg.toFixed(3)),
       inputCancels: readInputFlow().cancels,
-      inputExhausted: readInputFlow().exhausted,
       deaths: this.deathCount,
       rests: this.restCount,
       kills: this.kills,
@@ -3845,11 +3837,8 @@ class Game {
     cost: number
     cancelExtraCost: number
     regenDelay: number
-    exhaustDelay: number
-    /** 회복이 시작되기까지 남은 시간(초) — 빚을 졌는지 여기로 드러납니다 */
+    /** 회복이 시작되기까지 남은 시간(초) */
     regenDelayT: number
-    /** 이번 판에 **빚내서** 낸 구르기 횟수 */
-    exhausted: number
     key: string
   } {
     const p = this.playerEntity
@@ -3860,9 +3849,7 @@ class Game {
       cost: PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1),
       cancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
       regenDelay: PLAYER_CFG.staminaRegenDelay,
-      exhaustDelay: PLAYER_CFG.staminaExhaustDelay,
       regenDelayT: Number(Stamina.regenDelayT[p].toFixed(3)),
-      exhausted: readInputFlow().exhausted,
       key: PLAYER_CFG.dodge.key,
     }
   }
@@ -4183,9 +4170,7 @@ declare global {
         cost: number
         cancelExtraCost: number
         regenDelay: number
-        exhaustDelay: number
         regenDelayT: number
-        exhausted: number
         key: string
       }
       /** 🥋 집중 검증용 */
@@ -5026,6 +5011,20 @@ window.__game = {
       /** 콤보 한 바퀴의 합계 — 무기 성격이 가장 잘 드러나는 값들입니다. */
       comboDamage: w.combo.reduce((a, c) => a + c.damage, 0),
       comboStamina: w.combo.reduce((a, c) => a + c.staminaCost, 0),
+      /**
+       * 🛡 **방어와 공격의 값을 나란히** 내보냅니다.
+       *
+       * 소울류에서 뒤집힌 적 없는 부등호가 하나 있습니다 — **구르기가
+       * 공격보다 싸다**(블러드본 퀵스텝 · 엘든 링 구르기 < 강공격 ·
+       * 세키로는 회피에 자원 없음). 이 게임은 25 vs 롱소드 1·2타 21 로
+       * **뒤집혀 있었고**, 벤치의 `locked:stamina` 60% 가 그 결과였습니다.
+       *
+       * ⚠️ 프로브가 배율을 다시 곱하지 않게 **여기서 곱해** 보냅니다.
+       *    `dodgeCostScale` 을 프로브가 들고 있으면, 무기를 하나 더 넣는 날
+       *    프로브만 옛 식을 씁니다.
+       */
+      firstTwoStamina: w.combo.slice(0, 2).reduce((a, c) => a + c.staminaCost, 0),
+      dodgeCost: PLAYER_CFG.dodge.staminaCost * (w.dodgeCostScale ?? 1),
       comboSeconds: Number(
         w.combo.reduce((a, c) => a + c.windup + c.active + c.recovery, 0).toFixed(3),
       ),

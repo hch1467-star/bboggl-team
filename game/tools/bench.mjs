@@ -683,10 +683,6 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
     `                 그중 누른 순간엔 못 냈던 것 ${fmt(pick((l) => l.inputDropped ?? 0), 0)}회 (겹침) · ` +
       `평균 대기 ${fmt(pick((l) => l.inputWaitAvg ?? 0), 2)}초`,
   )
-  // 🫁 빚내서 낸 구르기 — 0이면 새 규칙(balance.ts staminaExhaustDelay)이 안 켜진 것입니다.
-  console.log(
-    `                 🫁 기력이 모자란 채로 낸 구르기 ${fmt(pick((l) => l.inputExhausted ?? 0), 0)}회`,
-  )
 }
 
 console.log('\n  ── 배움과 성장 ────────────────────────')
