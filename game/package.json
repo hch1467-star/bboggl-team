@@ -60,7 +60,8 @@
     "pace": "node tools/pace-probe.mjs",
     "react": "node tools/react-probe.mjs",
     "blame": "node tools/blame-probe.mjs",
-    "punish": "node tools/punish-probe.mjs"
+    "punish": "node tools/punish-probe.mjs",
+    "parry": "node tools/parry-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

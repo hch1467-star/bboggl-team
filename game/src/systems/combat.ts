@@ -1,5 +1,5 @@
 import { FINISH_COMBO, HEAVY_COMBO, finisherStep, heavyStep, type SkillShape } from '../config/arsenal'
-import { COMBAT, COUNTER, FOCUS, PLAYER, POISE } from '../config/balance'
+import { COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -9,6 +9,7 @@ import {
   EnemyKind,
   Health,
   Player,
+  Stamina,
   Status,
   Transform,
   Velocity,
@@ -456,6 +457,12 @@ export const counterEvents: BreakEvent[] = []
 
 /** 🥋 완벽 회피 — 실제로 맞을 공격을 무적 프레임으로 넘긴 순간. */
 export const perfectDodgeEvents: BreakEvent[] = []
+/**
+ * 🛡 저스트 가드가 성립한 순간들. **막은 적**의 자리를 담습니다
+ * (완벽 회피는 *구른 나*의 자리를 담습니다 — 연출이 향하는 곳이 다릅니다:
+ * 회피는 "내가 잘 피했다", 가드는 **"저 녀석이 튕겨 나갔다"** 입니다).
+ */
+export const justGuardEvents: BreakEvent[] = []
 
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
 export function currentSpec(a: number): AttackSpec | null {
@@ -695,6 +702,49 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      *    플레이어를 유령으로 만드는 것이 아닙니다.
      */
     if (targetIsPlayer && debugPlayerInvulnerable) continue
+    /**
+     * 🛡 **저스트 가드** — 완벽 회피보다 **먼저** 봅니다.
+     *
+     * 순서가 곧 뜻입니다. 둘 다 성립할 수 있는 순간(구르는 중에 가드가
+     * 열려 있는 경우)에 회피를 먼저 보면, 가드는 **영영 안 잡히는 판정**이
+     * 됩니다 — 창이 더 짧은 쪽이 먼저 와야 짧게 만든 값이 살아납니다.
+     * 다만 실제로는 겹치지 않게 playerControl 이 구르는 중 가드를 막습니다.
+     *
+     * ⚠️ **🔴 직격에만 통합니다**(설계 근거는 balance.ts `GUARD`). 아무
+     *    색에나 통하면 "전부 가드로 푼다"가 만능 정답이 되어 색 다섯이
+     *    통째로 무의미해집니다.
+     */
+    if (
+      targetIsPlayer &&
+      Player.guardT[t] > 0 &&
+      !attackerIsPlayer &&
+      hasComponent(Enemy, a) &&
+      attackAt(Enemy.kind[a], Enemy.attackIndex[a]).intent === AttackIntent.Strike
+    ) {
+      /**
+       * 창을 **닫습니다.** 안 닫으면 남은 창 동안 두 번째·세 번째 공격까지
+       * 공짜로 막혀서, 다대일에서 가드 한 번이 전부를 지웁니다.
+       */
+      Player.guardT[t] = 0
+      Stamina.value[t] = Math.min(Stamina.max[t], Stamina.value[t] + GUARD.refund)
+      /**
+       * 보상은 **강인도**입니다 — 완벽 회피(다음 한 대 확정 치명타)와
+       * 다른 것을 벌어야 두 답이 각자 값을 갖습니다. 세키로가 튕기기를
+       * 체간에, 회피를 위치에 붙여 나눈 것과 같은 자리입니다.
+       * 무기의 `poiseScale` 을 그대로 태워, 무엇을 들었는지가 남습니다.
+       */
+      Enemy.poiseIdleT[a] = 0
+      Enemy.poise[a] -= poiseDamage(
+        GUARD.poise,
+        weaponOf(t).poiseScale ?? 1,
+        1,
+        Enemy.kind[a],
+        Enemy.phase[a],
+      )
+      if (Enemy.poise[a] <= 0) breakPoise(a)
+      justGuardEvents.push({ entity: a, x: Transform.x[a], y: Transform.y[a], z: Transform.z[a] })
+      continue
+    }
     if (targetIsPlayer && isInIFrames(t)) {
       perfectDodgeEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
       continue

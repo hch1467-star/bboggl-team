@@ -6,7 +6,7 @@ import {
   heavyStep,
   type SkillDef,
 } from '../config/arsenal'
-import { FINISHER, FOCUS, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
+import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
@@ -537,6 +537,20 @@ export function playerControlSystem(ctx: ControlContext): void {
    * 키가 남아 있으니 굳이 한 키에 겹칠 이유가 없습니다.
    */
   const dodgePressed = consumePress('Space')
+  /**
+   * 🛡 **저스트 가드 — `V`.**
+   *
+   * 왜 새 키인가: 기본 공격(좌클릭)·강타(우클릭)·구르기(Space)·스킬(QERFG)이
+   * 이미 차 있고, 가드는 **다른 답**이므로 다른 키여야 합니다. 처형처럼
+   * 기존 키에 얹으면 *"지금 누른 게 무엇이 될지"* 를 상황이 정하게 되는데,
+   * 그건 0.18초 창을 노리는 입력에는 최악입니다.
+   *
+   * 선입력을 안 겁니다(공격·구르기·스킬과 다릅니다). 가드는 **누른 그 순간
+   * 부터** 창이 열리는 것이 규칙이라, 버퍼에 넣어 나중에 여는 순간
+   * *"내가 언제 눌렀는지"* 와 *"언제 열렸는지"* 가 어긋납니다 — 타이밍 기술의
+   * 판정을 게임이 대신 흔드는 셈입니다.
+   */
+  const guardPressed = consumePress('KeyV')
   const drinkPressed = consumePress('KeyX')
   let skillPressed = -1
   for (let i = 0; i < SKILL_KEY_CODES.length; i++) {
@@ -662,6 +676,22 @@ export function playerControlSystem(ctx: ControlContext): void {
        * 판정을 아는 유일한 자리라서).
        */
       Player.perfectCritT[p] = Math.max(0, Player.perfectCritT[p] - dt)
+      /**
+       * 🛡 저스트 가드의 두 타이머도 **같은 자리**에서 흐릅니다.
+       *
+       * 창이 닫히는 그 프레임에 **잠김을 겁니다** — 헛친 것이기 때문입니다.
+       * (막았으면 combat.ts 가 이미 `guardT` 를 0으로 지웠으므로 여기 안 옵니다.
+       *  지웠는지 아닌지로 성공/실패가 갈리므로, 깃발을 따로 두지 않습니다.)
+       */
+      if (Player.guardT[p] > 0) {
+        Player.guardT[p] = Math.max(0, Player.guardT[p] - dt)
+        if (Player.guardT[p] === 0) {
+          Player.guardLockT[p] = GUARD.whiffLock
+          spendStamina(p, GUARD.whiffStamina)
+          sfx.deny()
+        }
+      }
+      Player.guardLockT[p] = Math.max(0, Player.guardLockT[p] - dt)
       if (Stamina.regenDelayT[p] > 0) {
         Stamina.regenDelayT[p] = Math.max(0, Stamina.regenDelayT[p] - dt)
       } else if (Stamina.value[p] < Stamina.max[p]) {
@@ -846,8 +876,42 @@ export function playerControlSystem(ctx: ControlContext): void {
      */
     let forwardOverride: number | null = null
 
+    /**
+     * ── 🛡 **저스트 가드** ──────────────────────────────────────────
+     *
+     * 상태 기계 **밖**에서 처리합니다. 가드는 자리를 지키는 답이라
+     * 이동·조준을 멈출 이유가 없고, 상태로 만들면 그 프레임 동안 다른 것이
+     * 전부 멈춰서 「누르고 서 있기」가 됩니다(components.ts `guardT` 노트).
+     *
+     * **열 수 있는 자리**를 좁게 잡습니다 — 서 있을 때(Idle)와 동작의
+     * **후딜**뿐입니다. 예고·판정 중에도 열리게 하면, 구르기 취소(기력 45)를
+     * 내야 하는 자리를 가드가 **공짜로** 빠져나가게 됩니다. 두 탈출구의
+     * 값이 다르면 싼 쪽만 쓰입니다.
+     *
+     * 잠긴 동안(`guardLockT`)은 아무것도 못 합니다 — 헛친 값입니다.
+     */
+    const guardLocked = Player.guardLockT[p] > 0
+    if (guardLocked) moveScale = Math.min(moveScale, 0.25)
+    if (guardPressed && !guardLocked && Player.guardT[p] <= 0) {
+      const st = Actor.state[p] as ActorState
+      const canGuard =
+        st === ActorState.Idle ||
+        ((st === ActorState.Attack || st === ActorState.Skill) &&
+          Actor.phase[p] === AttackPhase.Recovery)
+      if (canGuard) {
+        Player.guardT[p] = GUARD.window
+        noteLearned('guard')
+        sfx.cast(1)
+      } else {
+        // 조용히 무시하면 "키가 씹혔나"와 구분이 안 됩니다 — 성수병·강타와 같은 규칙.
+        sfx.deny()
+      }
+    }
+
     switch (Actor.state[p] as ActorState) {
       case ActorState.Idle: {
+        // 🛡 헛친 가드로 굳어 있는 동안은 아무것도 못 합니다(위 설계 노트).
+        if (guardLocked) break
         const queued = takeBufferedSkill()
         if (queued) {
           beginSkill(p, queued.slot, queued.def, aimRot, ctx)

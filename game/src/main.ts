@@ -13,6 +13,7 @@ import {
   FALL,
   FINISHER,
   FOCUS,
+  GUARD,
   KILL_FEEDBACK,
   LADDER_REACH,
   LEVEL_AGGRO_LEAD,
@@ -84,6 +85,7 @@ import {
   finisherEvents,
   counterEvents,
   countLivingEnemies,
+  justGuardEvents,
   perfectDodgeEvents,
   hitEvents,
   isBackAttack,
@@ -317,6 +319,8 @@ class Game {
   private deathCount = 0
   /** 🟢 반격 성공 횟수 — 프로브와 봇이 추측하지 않고 읽습니다. */
   private counterCount = 0
+  /** 🛡 이번 판에 성립한 저스트 가드 수 — 프로브가 "실제로 되는가"를 묻습니다. */
+  private justGuards = 0
   /**
    * 이번 실행에서 **번** 정련석의 총합.
    *
@@ -564,6 +568,7 @@ class Game {
     //    지우면 예약과 발동의 수명이 달라져 서로 비교할 수 없게 됩니다).
     this.hurtLedger = []
     this.hurtWatch.clear()
+    this.justGuards = 0
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -1236,6 +1241,28 @@ class Game {
       this.hud.showBanner('완벽 회피', '집중 +1 · 다음 일격 확정 치명타', 0.9)
     }
     perfectDodgeEvents.length = 0
+
+    /**
+     * ---- 3.78 🛡 저스트 가드 성공 ----
+     *
+     * 완벽 회피와 **다른 연출**을 씁니다. 회피는 *"내가 잘 피했다"* 라
+     * 내 자리에서 터지고, 가드는 *"저 녀석이 튕겨 나갔다"* 라 **막힌 적**의
+     * 자리에서 터집니다. 두 답이 다른 것을 벌었다는 사실이 눈으로 갈려야,
+     * 플레이어가 "언제 구르고 언제 막을까"를 배웁니다.
+     *
+     * 히트스톱을 짧게 겁니다 — 저스트 가드의 손맛은 화면이 멎는 길이가
+     * 아니라 **딱 맞았다는 순간**에 있습니다(세키로의 튕기기 소리가 짧은 것과
+     * 같은 이유). 길게 걸면 자기 다음 행동이 늦어져 오히려 손해로 느껴집니다.
+     */
+    for (const g of justGuardEvents) {
+      this.justGuards++
+      requestHitstop(0.07)
+      this.cam.addTrauma(0.22)
+      sfx.impact(true, true, g.x, g.z)
+      this.vfx.spawnHitSpark(g.x, g.y + 1.0, g.z, 1.3)
+      this.hud.showBanner('저스트 가드', '자세를 무너뜨립니다', 0.8)
+    }
+    justGuardEvents.length = 0
 
     /**
      * ---- 3.79 🟢 반격 성공 ----
@@ -3642,6 +3669,30 @@ class Game {
     }))
   }
 
+  /** 🛡 저스트 가드 — 지금 상태와 **규칙값**(balance.ts `GUARD`). */
+  debugGuardInfo(): {
+    windowT: number
+    lockT: number
+    count: number
+    window: number
+    whiffLock: number
+    whiffStamina: number
+    refund: number
+    poise: number
+  } {
+    const p = this.playerEntity
+    return {
+      windowT: Number(Player.guardT[p].toFixed(3)),
+      lockT: Number(Player.guardLockT[p].toFixed(3)),
+      count: this.justGuards,
+      window: GUARD.window,
+      whiffLock: GUARD.whiffLock,
+      whiffStamina: GUARD.whiffStamina,
+      refund: GUARD.refund,
+      poise: GUARD.poise,
+    }
+  }
+
   /** 헤드리스 검증용 스냅샷 */
   debugState() {
     const p = this.playerEntity
@@ -3916,6 +3967,27 @@ declare global {
         verdict: string
       }[]
       counterCount: () => number
+      /**
+       * 🛡 저스트 가드의 **게임 쪽 판정**을 그대로 냅니다.
+       *
+       * 프로브가 창 길이·잠김을 따로 적어 두면, 값을 바꾸는 날 그 프로브가
+       * 조용히 옛 규칙을 재게 됩니다. 규칙은 balance.ts `GUARD` 한 곳에만
+       * 있고 여기서는 **읽기만** 합니다.
+       */
+      guardInfo: () => {
+        /** 지금 창이 열려 있는 남은 시간(초) */
+        windowT: number
+        /** 헛쳐서 굳어 있는 남은 시간(초) */
+        lockT: number
+        /** 이번 판에 성립한 저스트 가드 수 */
+        count: number
+        /** 규칙값 — 프로브가 베끼지 않게 게임이 알려 줍니다 */
+        window: number
+        whiffLock: number
+        whiffStamina: number
+        refund: number
+        poise: number
+      }
       /** 🥋 집중 검증용 */
       focusInfo: () => {
         focus: number
@@ -4541,6 +4613,7 @@ window.__game = {
     }
   },
   counterCount: () => game.debugCounterCount(),
+  guardInfo: () => game.debugGuardInfo(),
   focusInfo: () => ({
     focus: Number(Player.focus[game.debugPlayerEntity()].toFixed(3)),
     max: FOCUS.max,
