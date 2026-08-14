@@ -329,6 +329,52 @@ try {
   )
 
   /**
+   * ── ③-3 휘두르는 중에도 열 수 있되 **값을 낸다** ────────────────
+   *
+   * 자동 플레이에서 붙잡은 🔴 18회 중 **창을 본 것이 18회(100%)** 인데
+   * 그중 **9회**가 "낼 자리가 없어서" 사라졌습니다. 읽었는데 답할 수
+   * 없는 것은 기둥 2 가 가장 싫어하는 모양입니다.
+   *
+   * 그래서 구르기 취소와 **같은 계약**으로 엽니다 — 낼 수는 있게, 대신
+   * 비싸게. 여기서는 두 방향을 다 잽니다: **기력이 있으면 열리고, 없으면
+   * 안 열린다.** 한쪽만 재면 "그냥 항상 열린다"와 구분이 안 됩니다.
+   */
+  const midSwing = await page.evaluate(async () => {
+    const G = window.__game
+    const out = {}
+    for (const rich of [true, false]) {
+      G.reset()
+      await window.__t.runFor(0.5)
+      G.clearEnemies()
+      await window.__t.runFor(0.3)
+      // 기력을 통제합니다 — 값을 못 내는 상태를 만들어야 반대쪽이 재집니다.
+      G.setStamina(rich ? 100 : 5)
+      // 좌클릭으로 휘두르는 중(커밋)에 V 를 누릅니다.
+      G.press('Mouse0')
+      G.release('Mouse0')
+      await window.__t.until(() => window.__game.guardInfo().canGuard === rich, 1)
+      const before = G.state().player.stamina
+      const can = G.guardInfo().canGuard
+      G.press('KeyV')
+      G.release('KeyV')
+      const opened = await window.__t.until(() => window.__game.guardInfo().windowT > 0, 0.6)
+      out[rich ? 'rich' : 'poor'] = {
+        can,
+        opened,
+        spent: Number((before - G.state().player.stamina).toFixed(0)),
+      }
+    }
+    return out
+  })
+  check(
+    midSwing.rich.opened,
+    '③-3 휘두르는 중에도 **기력이 있으면** 열린다',
+    `기력 ${midSwing.rich.spent} 냄`,
+  )
+  check(midSwing.rich.spent > 0, '   그리고 공짜가 아니다 (커밋을 뚫는 값)', `순감소 -${midSwing.rich.spent} (회복분이 상쇄된 값)`)
+  check(!midSwing.poor.opened, '   **기력이 없으면 안 열린다** (그래야 값이 값입니다)')
+
+  /**
    * ── ④ 만능 정답이 아니다 ────────────────────────────────────────
    *
    * **이 프로브에서 가장 중요한 검사입니다.** 가드가 아무 색에나 통하면

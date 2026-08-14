@@ -503,10 +503,23 @@ export function canGuardNow(p: number): boolean {
   if (Player.guardLockT[p] > 0 || Player.guardT[p] > 0) return false
   const st = Actor.state[p] as ActorState
   if (st === ActorState.Idle) return true
-  return (
+  if (st !== ActorState.Attack && st !== ActorState.Skill) return false
+  // 후딜에서는 공짜입니다.
+  if (Actor.phase[p] === AttackPhase.Recovery) return true
+  /**
+   * 예고·판정 중(=커밋 중)에도 열 수 있되 **기력을 냅니다.**
+   * 근거와 값은 balance.ts `GUARD.commitCost` — 구르기 취소와 같은 계약입니다.
+   */
+  return Stamina.value[p] >= GUARD.commitCost
+}
+
+/** 지금 창을 여는 것이 **커밋을 뚫고 나가는 것**인가(= 값을 내야 하는가). */
+export function guardOpenCost(p: number): number {
+  const st = Actor.state[p] as ActorState
+  const swinging =
     (st === ActorState.Attack || st === ActorState.Skill) &&
-    Actor.phase[p] === AttackPhase.Recovery
-  )
+    Actor.phase[p] !== AttackPhase.Recovery
+  return swinging ? GUARD.commitCost : 0
 }
 
 function beginDodge(p: number, dirX: number, dirZ: number): void {
@@ -920,6 +933,9 @@ export function playerControlSystem(ctx: ControlContext): void {
     if (guardLocked) moveScale = Math.min(moveScale, 0.25)
     if (guardPressed && !guardLocked && Player.guardT[p] <= 0) {
       if (canGuardNow(p)) {
+        // 커밋을 뚫고 여는 것이면 여기서 값을 냅니다(서서 내면 0).
+        const cost = guardOpenCost(p)
+        if (cost > 0) spendStamina(p, cost)
         Player.guardT[p] = GUARD.window
         noteLearned('guard')
         sfx.cast(1)
