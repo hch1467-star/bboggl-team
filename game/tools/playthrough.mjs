@@ -129,7 +129,23 @@ try {
      * (많이 때릴수록 더 부풀려지므로, 밸런스를 바꾸면 오차도 같이 변합니다.)
      */
     const now = () => G.state().simElapsed
-    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    /**
+     * 🕐 **봇이 몇 번 판단했는가** — 판을 견줄 수 있는지 가르는 값.
+     *
+     * 이 루프는 **벽시계**에 묶여 있습니다(8ms). GPU 가 없는 이 컨테이너는
+     * 판마다 프레임률이 흔들리고, 느린 판에서는 같은 시뮬레이션 1초 동안
+     * 봇이 **더 적게** 판단합니다 — 즉 늦게 반응하고 더 맞습니다.
+     *
+     * 실제로 3판 벤치 셋의 판당 벽시계가 240~316초 → 339~413초 →
+     * 481~723초 로 **73% 느려졌고**, 그 위에서 "받은 피해 162 → 280" 을
+     * 밸런스 변화로 읽을 뻔했습니다. 기계 속도를 안 적으면 그 착각을
+     * 막을 방법이 없습니다.
+     */
+    let botTicks = 0
+    const sleep = () => {
+      botTicks++
+      return new Promise((r) => setTimeout(r, 8))
+    }
 
     const held = new Set()
     const hold = (code) => {
@@ -1759,10 +1775,40 @@ try {
        */
       if (!fire) tripBlock.noFire++
       else if (!canUpgrade) tripBlock.cantBuy++
-      else if (!walletGrew) tripBlock.noGrowth++
+      // ⚠️ 위 분기와 **같은 조건**이어야 합니다. 장부가 옛 규칙을 세면
+      //    "지갑안늘어 27%" 같은 숫자가 거짓말이 됩니다.
+      else if (!walletGrew && !(G.pathStep(fire.x, fire.z)?.dist <= 12)) tripBlock.noGrowth++
       else if (now() < fireCooldownUntil) tripBlock.cooling++
       else tripBlock.open++
-      if (fire && canUpgrade && walletGrew && now() >= fireCooldownUntil) {
+      /**
+       * ── 🔨 **지나가다 들르는 것에는 관문이 필요 없습니다** ────────────
+       *
+       * `npm run map` 이 모순을 드러냈습니다:
+       *
+       *   [소비처] 모루(68,44) — 가는 길 **4m** · 나오는 길 4m
+       *   [소비처] 모루(56,50) — 가는 길 **0m** · 나오는 길 0m
+       *   벤치      닿음 **0.0회** · 접은 거리 46~82m
+       *
+       * 모루는 주 동선 **바로 위**에 있습니다. 그런데 봇은 판당 0회 들릅니다.
+       * 막고 있던 것은 지도가 아니라 **관문**이었습니다 — `walletGrew`
+       * (지난 방문 뒤로 지갑이 늘었나)와 30초 쿨다운. 그 둘은 *"존을
+       * 되돌아가는 긴 왕복"* 을 막으려고 넣은 것인데, **밟고 지나가는
+       * 소비처까지 같이 막고** 있었습니다. 갈림길 장부가 그대로 말합니다:
+       * `지갑안늘어 27% · 쿨다운 38% · 열림 21%`.
+       *
+       * 어느 게임도 이런 관문을 두지 않습니다 — 소울류는 **밟고 있는**
+       * 화톳불에서 쉬고, 세키로는 조각상이 촘촘해서 지나가며 씁니다.
+       * *"지난번보다 벌었는가"* 를 묻는 상점은 없습니다. 그 질문은 **먼
+       * 왕복**에만 뜻이 있습니다.
+       *
+       * 그래서 **가까우면 관문을 건너뜁니다.** 12m 로 잡은 근거: 곁길
+       * 예산(40m)의 1/3 이하 — *"가는 일"* 이 아니라 *"지나가다 들르는 일"*
+       * 이 되는 거리입니다. 쿨다운은 그대로 지킵니다(왕복이 실패했을 때
+       * 무한히 오가던 336초짜리 사고가 있었습니다).
+       */
+      const passingStep = fire ? G.pathStep(fire.x, fire.z) : null
+      const passingBy = !!passingStep && passingStep.dist <= 12
+      if (fire && canUpgrade && (walletGrew || passingBy) && now() >= fireCooldownUntil) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
         /**
@@ -2147,6 +2193,8 @@ try {
        * "쓰이질 않았다"인지 가릴 수가 없습니다.
        */
       inputCancels: G.runStats().inputCancels ?? 0,
+      /** 시뮬레이션 1초당 봇이 판단한 횟수 — 판끼리 견줄 수 있는지 가릅니다. */
+      botTicksPerSec: Number((botTicks / Math.max(1, now())).toFixed(1)),
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
       tweaks: G.tweaks ? G.tweaks() : [],
       inputExpired: G.runStats().inputExpired,

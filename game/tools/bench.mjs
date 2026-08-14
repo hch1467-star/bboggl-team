@@ -127,6 +127,7 @@ for (let i = 0; i < RUNS; i++) {
     console.log(`⏱️ 벽시계로 잘림 — 집계에서 뺍니다 (${secs}초)`)
     continue
   }
+  log.wallSecs = Number(secs)
   logs.push(log)
   console.log(
     `${log.clearedAt > 0 ? `★ ${log.clearedAt}초 클리어` : '클리어 못함'} · 사망 ${log.deaths} (${secs}초)`,
@@ -155,6 +156,24 @@ console.log(`  클리어 시간    ${fmt(cleared.map((l) => l.clearedAt))}초`)
 console.log(`  사망           ${fmt(pick((l) => l.deaths), 1)}회`)
 console.log(`  처치           ${fmt(pick((l) => l.kills), 0)}마리`)
 console.log(`  받은 피해      ${fmt(pick((l) => l.damageTaken), 0)}`)
+/**
+ * ── 🕐 **기계 속도** — 이 판들을 다른 벤치와 견줄 수 있는가 ──────────
+ *
+ * 봇의 판단 루프는 **벽시계**에 묶여 있습니다(8ms). GPU 없는 이 컨테이너는
+ * 부하에 따라 프레임률이 흔들리고, 느린 판에서는 같은 시뮬레이션 1초 동안
+ * 봇이 더 적게 판단합니다 — **늦게 반응하고 더 맞습니다.**
+ *
+ * ⚠️ 이 줄이 없어서 하마터면 틀린 결론을 낼 뻔했습니다. 벤치 셋의 판당
+ *    벽시계가 240~316 → 339~413 → 481~723초 로 **73% 느려졌는데**,
+ *    그 위에서 `받은 피해 162 → 280` 을 **밸런스 변화로 읽었습니다.**
+ *    전투 숫자를 다른 벤치와 견주기 전에 **이 값이 비슷한지 먼저** 보십시오.
+ *    다르면 견줄 수 있는 것은 지도·경제처럼 속도에 안 묶인 것뿐입니다.
+ */
+console.log(
+  `  기계 속도      판당 벽시계 ${fmt(pick((l) => l.wallSecs ?? NaN), 0)}초` +
+    ` · 봇 판단 ${fmt(pick((l) => l.botTicksPerSec ?? NaN), 1)}회/시뮬초` +
+    '  ← 다른 벤치와 견주기 전에 이 줄을 먼저 보십시오',
+)
 /**
  * 🩸 **맞은 이유** — 기둥 2의 합격 기준을 숫자로 답합니다.
  *
