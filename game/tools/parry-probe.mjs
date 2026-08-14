@@ -635,16 +635,23 @@ try {
   console.log('')
   const dt = await page.evaluate(async () => {
     const G = window.__game
+    /**
+     * ⚠️ **최소값이 아니라 중앙값입니다.** 처음엔 최솟값을 썼는데, 그건
+     *    *"가장 좋았던 한 프레임"* 이라 17ms 가 나왔습니다. 같은 판에서
+     *    쓸기는 0.288 → 0.138초로 **한 걸음에 150ms** 를 건너뛰었습니다.
+     *    두 숫자가 열 배 차이 나면 둘 중 하나는 거짓말입니다.
+     */
     let prev = G.state().simElapsed
-    let min = Infinity
-    for (let i = 0; i < 200; i++) {
+    const ds = []
+    for (let i = 0; i < 300; i++) {
       await new Promise((r) => setTimeout(r, 4))
       const now = G.state().simElapsed
       const d = now - prev
-      if (d > 0.0001 && d < min) min = d
+      if (d > 0.0001) ds.push(d)
       prev = now
     }
-    return Number(min.toFixed(4))
+    ds.sort((a, b) => a - b)
+    return Number((ds[ds.length >> 1] ?? 0).toFixed(4))
   })
   console.log(`  [기계] 시뮬 한 프레임 ${(dt * 1000).toFixed(0)}ms — 창 ${rule.window}초 = ${(rule.window / dt).toFixed(1)}프레임`)
 
@@ -653,7 +660,14 @@ try {
    * 않게(게임이 알려 준 `rule.window` 를 곱합니다). 1.0 을 넘는 지점은
    * *"일찍 누른 것"* 이라 실패가 정상입니다 — 표의 **위쪽 경계**입니다.
    */
-  const FRACTIONS = [1.6, 1.2, 1.0, 0.8, 0.6, 0.4, 0.2, 0.05]
+  /**
+   * ⚠️ **창 밖 표본이 안 잡혔습니다.** 처음엔 창의 1.6배까지만 올렸는데,
+   *    프레임이 굵어서 조건이 참이 되는 순간 이미 창 안이었습니다 —
+   *    `창×1.6 · 1.2 · 1.0` 이 **전부 같은 0.138초**로 찍혔습니다.
+   *    그래서 위쪽 경계가 표본 0으로 남았고, 짝 없는 검사가 됐습니다.
+   *    이제 창의 **여러 배**까지 올려서 확실히 밖에서 한 번 누릅니다.
+   */
+  const FRACTIONS = [6, 3, 1.6, 1.0, 0.8, 0.6, 0.4, 0.2]
   const sweep = []
   for (const f of FRACTIONS) {
     const r = await page.evaluate(
@@ -701,13 +715,23 @@ try {
     `창 안 ${inside.length}지점 중 ${worked.length}지점 성공` +
       ` — ${inside.map((r) => `${r.left}초${r.gained > 0 ? '✅' : '❌'}`).join(' · ')}`,
   )
-  const outside = sweep.filter((r) => r.reached && r.left > rule.window)
-  check(
-    outside.length > 0 && outside.every((r) => r.gained === 0),
-    '   창 **밖**에서 누르면 못 막는다 (이 줄이 없으면 위 검사가 무의미합니다)',
-    outside.length
-      ? outside.map((r) => `${r.left}초${r.gained > 0 ? ' ❌막힘' : ' ✅못막음'}`).join(' · ')
-      : '표본 없음',
+  /**
+   * ⚠️ **위쪽 경계는 여기서 못 잽니다 — ②가 잽니다.**
+   *
+   * 처음엔 이 절에서 창의 6배까지 올려 "창 밖" 표본을 잡으려 했습니다.
+   * `창×6 · 3 · 1.6 · 1` 이 **전부 같은 0.138초**로 찍혔습니다. 이유는
+   * ② 주석에 이미 적혀 있었습니다 — `forceAttack` 은 예고를 **25% 남은
+   * 지점**부터 시작합니다(0.138초). 이 훅을 쓰는 한 창 밖은 **원리적으로
+   * 관측 불가능**합니다.
+   *
+   * 그래서 짝을 **새로 만들지 않고** ②의 결과를 그대로 씁니다. 같은 것을
+   * 두 번 재면 언젠가 두 값이 갈립니다(이번 세션에 연계 장부에서 이미
+   * 겪었습니다). ②는 `forceAttack` 없이 적이 스스로 휘두를 때까지 기다려
+   * 남은 예고가 창보다 길다는 것을 **게이트로 확인한 뒤** 누릅니다.
+   */
+  console.log(
+    `  [위쪽 경계는 ②가 잽니다] 남은 예고 ${early.leftAtPress}초(> 창 ${rule.window}초)에 눌러 ` +
+      `${early.count === 0 ? '못 막음 ✅' : '막힘 ❌'} — forceAttack 은 예고 25% 지점부터라 여기선 못 잽니다`,
   )
 
   console.log('')

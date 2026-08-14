@@ -184,102 +184,142 @@ try {
 
   console.log('')
   /**
-   * ── 🎟 **공격 토큰이 한 종류에게 쏠리는가** ────────────────────────
+   * ── 📏 **붙는 거리에서 색이 나오는가** ──────────────────────────
    *
-   * 3판 벤치의 적 쪽 줄을 나란히 놓으면 이렇습니다:
+   * 3판 벤치의 적 쪽 줄:
    *
-   *   grunt    깨어 218초 중 **공격 43%**   · 예고 52회
-   *   dragger  깨어  55초 중 공격 30% · **사거리 안 대기 35%** · 예고 6회
-   *   archer   깨어  43초 중 공격  7% · **사거리 안 대기 39%** · 예고 2회
-   *   binder   깨어  77초 중 공격 18% · 접근 56%                · 예고 7회
+   *   grunt    공격 43% · **사거리 안 대기 8%**  · 예고 43회
+   *   dragger  공격 30% · **사거리 안 대기 35%** · 예고 6회
+   *   archer   공격  7% · **사거리 안 대기 39%** · 예고 2회 · 적중 **0%**
    *
-   * 색을 가르치는 적들이 **사거리 안에 서서 아무것도 안 합니다.**
-   * 코드를 보면 이유가 한 줄입니다 — `grantAttackTokens` 이
-   * `waiting.sort((a, b) => a.d - b.d)`, 즉 **가장 가까운 적**에게만
-   * 토큰을 줍니다. 잡몹은 수가 많고 빨리 붙으니 늘 가장 가깝고,
-   * 그래서 토큰을 독점합니다.
+   * 처음엔 공격 토큰(`grantAttackTokens` 가 **가장 가까운 적**에게만 준다)을
+   * 의심했습니다. 같은 거리에 넷을 세워 재 봤더니 3.0m 에서는 잡몹 29 : 0,
+   * 4.0m 에서는 가르치는 둘이 80% — **반지름이 승자를 정했습니다.**
+   * 즉 그 실험은 토큰을 잰 적이 없습니다. 패턴마다 **띠가 다르기** 때문입니다:
+   *
+   *     grunt_jab    0~2.4      grunt_sweep   0~4.2
+   *     binder_web   0~6.0      charger_rush  0~7.5
+   *     dragger_hook **3**~12   archer_shot   **3**~12
+   *
+   * 여기서 진짜 그림이 보입니다. 끄는 자와 쏘는 자는 **최소 사거리 3m** 가
+   * 있고, 플레이어는 무기 사거리(2.3m)로 싸우니 **늘 그 안쪽**입니다.
+   * 그러면 둘은 영영 못 쏩니다 — 벤치의 `사거리 안 대기 35%·39%` 와
+   * `적중 0%` 가 그것입니다.
    *
    * ── 다른 게임은 이 자리를 어떻게 두는가 ─────────────────────────
-   * · **배트맨: 아캄 / 섀도우 오브 모르도르** — 둘러싼 적에게 공격 허가를
-   *   **돌아가며** 줍니다. 특수 적을 일부러 앞세워 플레이어가 **다른
-   *   대응**을 보게 만듭니다. 같은 잡기만 스무 번 오면 배울 것이 없습니다.
-   * · **헤일로**(전투 지휘자) — 공격 슬롯을 배분하고 **회전**시킵니다.
-   *   한 부류가 슬롯을 독차지하지 못하게 하는 것이 명시적 목표입니다.
-   * · **소울류** — 적마다 망설임 타이머가 따로 돌아, 가장 가까운 놈이
-   *   무한히 우선권을 갖지 않습니다.
+   * · **몬스터헌터** — 몬스터는 자기 패턴을 쓸 수 있는 자리로 **다시
+   *   잡습니다**. 품에 파고들면 뒷걸음질이나 도약으로 거리를 만듭니다.
+   * · **소울류** — 궁수는 붙으면 **근접 수단**(발차기·단검)으로 바꾸거나
+   *   물러섭니다. 가만히 서서 활을 든 채 맞고만 있지 않습니다.
+   * · **로스트아크** — 원거리 몹은 **카이팅**합니다.
+   * · **검은 신화: 오공** — 장병기 적은 **한 발 물러나** 휘두릅니다.
    *
-   * 공통점은 하나입니다 — **거리는 우선순위의 전부가 아닙니다.**
-   * 우리 기둥 2("색마다 다른 정답")는 색이 **실제로 나와야** 성립하는데,
-   * 지금 규칙은 🔴 잡몹만 계속 나오게 만듭니다.
+   * 공통점: **자기 띠 밖에 있으면 띠로 돌아갑니다.** 우리 적은 서 있습니다.
    *
-   * ⚠️ 이 절은 **판정하지 않고 재기만** 하던 것을 검사로 바꾼 것입니다.
-   *    존 판(벤치)에서는 배치·지형·봇 판단이 섞여서 원인을 못 가립니다.
-   *    여기서는 **같은 거리에** 섞어 세워 두고 거리 변수를 없앱니다.
+   * 그래서 이 절은 토큰이 아니라 **띠**를 잽니다 — 여러 반지름에 세워 놓고
+   * 누가 휘두르는지 표로 찍습니다. 문턱은 마지막 줄에 있습니다.
+   *
+   * ⚠️ **붙들지 않습니다.** 처음엔 매 프레임 순간이동으로 거리를 고정했는데,
+   *    그러자 같은 코드가 세 번 다른 답을 냈습니다(잡몹 29 : 0 → 3 → **0**).
+   *    붙드는 것이 AI 의 접근·조준을 방해하고 있었습니다. **계측기가 재려는
+   *    것을 바꿔 버리면 그 숫자는 게임의 것이 아닙니다.** 그래서 세워만 두고,
+   *    적이 **스스로 고른 거리**를 함께 적습니다 — 물러나는지 서 있는지가
+   *    바로 이 절이 묻는 것이기도 합니다.
    */
   console.log('')
-  const share = await page.evaluate(async () => {
-    const G = window.__game
-    const sleep = () => new Promise((r) => setTimeout(r, 8))
-    G.reset()
-    await window.__t.runFor(0.6)
-    G.clearEnemies()
-    await window.__t.runFor(0.6)
-    const p = G.state().player
-    /**
-     * 잡몹 둘 + 가르치는 적 둘을 **같은 반지름**에 둥글게 세웁니다.
-     * 거리를 똑같이 맞추는 것이 이 실험의 전부입니다 — 지금 규칙이
-     * 거리로 고르므로, 거리가 같으면 남는 것은 **순서**뿐입니다.
-     */
-    const R = 3.0
-    const plan = ['grunt', 'grunt', 'dragger', 'binder']
-    const ids = []
-    plan.forEach((kind, i) => {
-      const a = (i / plan.length) * Math.PI * 2
-      const e = G.spawnEnemyKind(kind, p.x + Math.sin(a) * R, p.z + Math.cos(a) * R)
-      G.wakeEnemy(e)
-      ids.push({ e, kind })
-    })
-    // 플레이어는 아무것도 안 합니다 — 재려는 것은 실력이 아니라 **차례**입니다.
-    const swings = {}
-    const wasAttacking = new Map()
-    const t0 = G.state().simElapsed
-    while (G.state().simElapsed - t0 < 30) {
-      for (const { e, kind } of ids) {
-        const i = G.enemyInfo(e)
-        if (!i) continue
-        // **올라가는 순간에만** 셉니다 — 프레임마다 세면 예고가 긴 쪽이 커집니다.
-        const now = !!i.winding
-        if (now && !wasAttacking.get(e)) swings[kind] = (swings[kind] ?? 0) + 1
-        wasAttacking.set(e, now)
-      }
-      // 죽으면 표본이 사라지므로 체력만 채워 둡니다.
-      if (G.state().player.hp < 50) G.setHp(G.playerEntity(), 100)
-      for (const { e } of ids) if (G.enemyInfo(e)) G.setHp(e, 999)
-      await sleep()
-    }
-    return { swings, alive: ids.filter(({ e }) => !!G.enemyInfo(e)).length }
-  })
-  const rows = Object.entries(share.swings).sort((a, b) => b[1] - a[1])
-  const total = rows.reduce((a, r) => a + r[1], 0)
-  console.log(
-    `  [토큰] 같은 거리(3m)에 잡몹2+끄는자1+얽는자1 · 30초 — ` +
-      (rows.map(([k, v]) => `${k} ${v}회`).join(' · ') || '아무도 안 휘두름'),
-  )
+  const RADII = [2.0, 3.0, 4.5, 7.0]
+  const PLAN = ['grunt', 'binder', 'dragger', 'archer']
+  const band = []
+  for (const R of RADII) {
+    const r = await page.evaluate(
+      async ({ R, PLAN }) => {
+        const G = window.__game
+        const sleep = () => new Promise((res) => setTimeout(res, 8))
+        G.reset()
+        await window.__t.runFor(0.6)
+        G.clearEnemies()
+        await window.__t.runFor(0.6)
+        const p = G.state().player
+        const ids = []
+        PLAN.forEach((kind, i) => {
+          const a = (i / PLAN.length) * Math.PI * 2
+          const e = G.spawnEnemyKind(kind, p.x + Math.sin(a) * R, p.z + Math.cos(a) * R)
+          G.wakeEnemy(e)
+          ids.push({ e, kind, a })
+        })
+        const swings = {}
+        /** 붙들지 **않은** 채로도 재려고, 마지막 거리를 같이 남깁니다. */
+        const lastDist = {}
+        const was = new Map()
+        const t0 = G.state().simElapsed
+        while (G.state().simElapsed - t0 < 24) {
+          const pp = G.state().player
+          for (const { e, kind, a } of ids) {
+            const i = G.enemyInfo(e)
+            if (!i) continue
+            // 올라가는 순간에만 셉니다 — 프레임마다 세면 예고가 긴 쪽이 커집니다.
+            const now = !!i.winding
+            if (now && !was.get(e)) swings[kind] = (swings[kind] ?? 0) + 1
+            was.set(e, now)
+            lastDist[kind] = Number(Math.hypot(i.x - pp.x, i.z - pp.z).toFixed(1))
+            void a
+          }
+          if (G.state().player.hp < 50) G.setHp(G.playerEntity(), 100)
+          for (const { e } of ids) if (G.enemyInfo(e)) G.setHp(e, 999)
+          await sleep()
+        }
+        return { swings, lastDist }
+      },
+      { R, PLAN },
+    )
+    band.push({ R, ...r })
+    console.log(
+      `  [띠] 반지름 ${R.toFixed(1)}m · 24초 — ` +
+        PLAN.map((k) => `${k} ${r.swings[k] ?? 0}회`).join(' · '),
+    )
+  }
+
   /**
-   * 문턱: 가르치는 둘(끄는 자·얽는 자)이 **전체의 1/4 이상**.
-   *
-   * 근거: 넷 중 둘이므로 완전히 공평하면 50% 입니다. 잡몹이 더 빠르고
-   * 쿨다운도 짧으니 절반은 무리이지만, **1/4 밑이면 그 색은 존에서
-   * 배울 수 없습니다** — map-probe 가 이미 적어 둔 기준과 같은 이야기입니다
-   * ("한 번은 배우는 게 아니라 구경입니다").
+   * ⚠️ **표본이 있는지 먼저 묻습니다.** 아무도 안 휘두르면 어떤 부등호든
+   *    통과합니다 — 이 저장소가 빈 배열로 세 번 데인 자리입니다.
    */
-  const teach = (share.swings.dragger ?? 0) + (share.swings.binder ?? 0)
+  const total = band.reduce(
+    (a, b) => a + PLAN.reduce((x, k) => x + (b.swings[k] ?? 0), 0),
+    0,
+  )
+  check(total >= 12, '📏 측정이 성립했다 — 표를 채울 만큼 휘둘렀다', `전체 ${total}회`)
+
+  /**
+   * **붙는 거리(2m)** 에서 네 종류가 모두 무언가를 하는가.
+   *
+   * 2m 를 고른 근거: 플레이어 무기 사거리가 2.3m 이고, 벤치가 잰 보스전
+   * 거리 분포도 *"2.5m 미만 55%"* 입니다. 즉 **사람이 실제로 서 있는
+   * 자리**입니다. 그 자리에서 못 쓰는 패턴은 존에서 없는 패턴입니다.
+   */
+  /**
+   * ⚠️ **진단이 두 번 바뀌었습니다 — 자리한 거리를 같이 찍어서 갈렸습니다.**
+   *
+   * 처음엔 *"최소 사거리(3m) 안쪽이라 못 쏜다"* 고 적었습니다. 그런데 표가
+   * 말하는 것은 반대입니다 — 끄는 자는 **8.1m**, 쏘는 자는 **8.6m** 에
+   * 자리를 잡습니다. 둘 다 자기 띠(3~12m) **한가운데**입니다. 그런데도
+   * 24초 동안 **0회**입니다. 네 반지름 어디서 시작해도 같습니다.
+   *
+   * 그러면 남는 것은 **차례**입니다. `grantAttackTokens` 는 거리로 줄을
+   * 세우고 앞에서부터 토큰을 줍니다. 잡몹(2.1m)과 얽는 자(5.8m)가 늘 앞
+   * 둘이고, 멀리서 싸우는 것이 **정체성인** 둘은 영영 셋째·넷째입니다.
+   *
+   * 즉 이 게임에서 원거리 적은 배치의 문제가 아니라 **규칙상 못 쏩니다.**
+   */
+  const close = band.find((b) => b.R === 2.0)
+  const mute = PLAN.filter((k) => band.every((b) => (b.swings[k] ?? 0) === 0))
   check(
-    total >= 8 && teach / Math.max(1, total) >= 0.25,
-    '🎟 **가르치는 적도 차례를 받는다** (거리만으로 토큰을 주면 잡몹이 독점합니다)',
-    total < 8
-      ? `표본이 ${total}회뿐 — 계측기를 먼저 의심하십시오`
-      : `가르치는 둘 ${teach}/${total}회 (${Math.round((teach / total) * 100)}%)`,
+    mute.length === 0,
+    '📏 **모든 종류가 어느 거리에선가는 휘두른다** (멀리서 싸우는 적이 규칙상 침묵하지 않게)',
+    mute.length
+      ? `${mute.join(', ')} 가 네 반지름 **전부에서 0회** — 자리한 거리 ` +
+        `${mute.map((k) => `${k} ${close?.lastDist[k] ?? '?'}m`).join(' · ')}` +
+        ` (자기 띠 안인데도 못 씁니다 → 거리가 아니라 **차례** 문제)`
+      : '넷 다 휘두름',
   )
 
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
