@@ -453,6 +453,10 @@ try {
     /** 🛡 그 예고에서 창(남은 예고 ≤ 가드 창)을 **실제로 본** 적들. */
     const guardWindowSeen = new Set()
     let guardSawWindow = 0
+    let guardOpens = 0
+    let guardWhiffs = 0
+    let guardWindowOpen = false
+    let guardLockOn = false
     let guardBlockedByState = 0
     let guardTries = 0
     let greenEvents = 0
@@ -1288,6 +1292,21 @@ try {
           }
         }
         const gi = G.guardInfo()
+        /**
+         * 🛡 **연 횟수와 헛친 횟수를 직접 셉니다.**
+         *
+         * "못 낸 자리"가 9 → 12로 **늘어난 것**이 이 눈금을 만든 이유입니다.
+         * 넓혔는데 나빠졌다면 기제가 하나 있습니다: 창을 열면 그동안(0.18초)과
+         * 잠긴 동안(0.35초)은 `canGuard` 가 거짓이라, **헛친 가드가 다음
+         * 기회를 스스로 지웁니다.** 그러면 눌러 볼수록 못 내게 됩니다.
+         *
+         * 그게 사실이면 고칠 곳은 게임(창·값)이 아니라 **봇이 언제 누르는가**
+         * 입니다. 연 횟수 ≫ 성공이면 스팸이고, 연 횟수 ≈ 성공이면 아닙니다.
+         */
+        if (gi.windowT > 0 && !guardWindowOpen) guardOpens++
+        guardWindowOpen = gi.windowT > 0
+        if (gi.lockT > 0 && !guardLockOn) guardWhiffs++
+        guardLockOn = gi.lockT > 0
         const strike = threats.find(
           (t) => t.winding && t.intent === 0 && t.dist < 4.5 && t.timer <= gi.window * 2.5,
         )
@@ -2113,6 +2132,8 @@ try {
       guardTries,
       guardSawWindow,
       guardBlockedByState,
+      guardOpens,
+      guardWhiffs,
       guards: G.guardInfo().count,
       greenSwung: G.runStats().greenSwung,
       greenDied: G.runStats().greenDied,
@@ -2526,7 +2547,9 @@ try {
       `             예고가 끝난 방식 — 휘두름까지 ${log.greenSwung ?? 0}회 · 적이 죽음 ${log.greenDied ?? 0}회` +
       ` · **반격으로 끊김 ${log.greenCountered ?? 0}회** · 그 밖의 끊김 ${log.greenBroken ?? 0}회\n` +
       `             🛡 저스트 가드 — 붙잡은 🔴 ${log.guardTries ?? 0}회 · 창을 본 것 ${log.guardSawWindow ?? 0}회` +
-      ` · 그중 **못 낸 자리** ${log.guardBlockedByState ?? 0}회 · **성공 ${log.guards ?? 0}회**`,
+      ` · 그중 **못 낸 자리** ${log.guardBlockedByState ?? 0}회\n` +
+      `                          창을 연 것 ${log.guardOpens ?? 0}회 · 헛친 것 ${log.guardWhiffs ?? 0}회` +
+      ` · **성공 ${log.guards ?? 0}회**`,
   )
   /**
    * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ────────────────────────
