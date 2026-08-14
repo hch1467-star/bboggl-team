@@ -682,6 +682,31 @@ console.log(
     `반격으로 끊김 ${fmt(pick((l) => l.greenCountered ?? 0), 0)}회 · ` +
     `그 밖의 끊김 ${fmt(pick((l) => l.greenBroken ?? 0), 0)}회`,
 )
+/**
+ * 🟢 **답을 손에 갖고 있었는가.** 위 줄은 예고가 *어떻게 끝났는가* 이고
+ * 이 줄은 *답할 수 있었는가* 입니다. 둘을 안 나누면, 반격이 적을 때
+ * 쿨다운을 풀어야 할지 봇을 고쳐야 할지 알 수 없습니다.
+ *
+ * `한 번이라도 가능` 이 `초록 예고` 에 한참 못 미치면 그건 실력이 아니라
+ * **답을 가질 수 없었던** 것입니다 — 기둥 1 이 쿨다운을 1.5배로 올릴 때
+ * 남긴 숙제가 정확히 이 숫자입니다.
+ */
+{
+  const ev = pick((l) => l.greenAnswer?.events ?? 0)
+  const could = pick((l) => l.greenAnswer?.everCould ?? 0)
+  const blocked = {}
+  for (const l of logs)
+    for (const [k, v] of Object.entries(l.greenAnswer?.blocked ?? {}))
+      blocked[k] = (blocked[k] ?? 0) + v
+  const why = Object.entries(blocked)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k} ${v.toFixed(1)}초`)
+    .join(' · ')
+  console.log(
+    `                 답할 수 있었나 — 예고 ${fmt(ev, 0)}회 중 **한 번이라도 가능 ${fmt(could, 0)}회**` +
+      (why ? ` · 막힌 이유: ${why}` : ''),
+  )
+}
 console.log(`  보물           ${fmt(pick((l) => Number(String(l.treasures).split('/')[0])), 0)} / ` +
   `${logs[0].treasures?.split('/')[1] ?? '?'}`)
 console.log(`  무기 강화      ${fmt(pick((l) => l.weaponUps ?? 0), 1)}회`)
