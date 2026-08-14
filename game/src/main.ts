@@ -389,6 +389,11 @@ class Game {
     { player: 0, foe: 0, foeSteps: 0, byKind: {} }
   /** 지금 서 있는 자리에서 강화가 되는가 — 게임의 판단(봇이 다시 계산하지 않게). */
   private canSpendHere = false
+  /**
+   * 지금 강화가 **왜** 안 되는가 — `''`(된다) · `'foe'`(적이 막음) · `'away'`(안 닿음).
+   * 봇이 밖에서 추측하지 않게, 갈림길에 이름을 붙여 내보냅니다.
+   */
+  private spendBlock: '' | 'foe' | 'away' = 'away'
   /** 무기 강화 시도의 **갈림길별** 횟수 — 밖에서 추측하지 않도록 게임이 셉니다. */
   private upgradeTries = { seen: 0, notStation: 0, consumed: 0, noStone: 0, noEmber: 0, done: 0 }
   /** 지난 프레임에 판정 중이던 적 — 같은 휘두르기를 여러 프레임 세지 않기 위해. */
@@ -913,6 +918,22 @@ class Game {
        * 에서 이미 정한 방식대로, **판단은 게임이 하고 봇은 읽기만** 합니다.
        */
       this.canSpendHere = atFire || nearAnvil
+      /**
+       * ⚠️ **왜 못 쓰는지까지 남깁니다.**
+       *
+       * `자리아님 4회` 라는 숫자는 나오는데, 그 넷이 *"가까이 안 갔다"* 인지
+       * *"갔는데 적 때문에 막혔다"* 인지 알 수 없었습니다. 처방이 정반대입니다:
+       * 앞은 **봇의 이동**, 뒤는 **정리부터 하고 쉬라**는 설계 그대로입니다.
+       *
+       * 이 저장소가 이번 세션에 계속 확인한 규칙 그대로 — 결과 하나를
+       * **갈래마다 나눠 셉니다.** 그리고 그 갈래는 사건이 일어난 이 자리에서
+       * 이름이 붙어야 밖에서 추측하지 않습니다.
+       */
+      this.spendBlock = this.canSpendHere
+        ? ''
+        : rest.near !== null && rest.blocked
+          ? 'foe' // 화톳불에 닿았는데 적이 14m 안에 있습니다
+          : 'away' // 아직 어느 소비처에도 안 닿았습니다
       this.tryUpgrade(p, this.canSpendHere)
       this.tryUpgradeWeapon(p, this.canSpendHere)
       if (nearAnvil && !atFire) this.hud.setRest(true, 0, false, true)
@@ -3020,6 +3041,8 @@ class Game {
     levels: number[]
     /** **지금 이 자리에서** 강화가 되는가. 봇이 거리를 다시 재지 않게. */
     atStation: boolean
+    /** 안 되면 **왜** 안 되는가 — `'foe'`(적이 막음) · `'away'`(안 닿음) · `''`(된다). */
+    blockedBy: '' | 'foe' | 'away'
   } {
     const p = this.playerEntity
     const w = Loadout.weapon[p]
@@ -3036,6 +3059,7 @@ class Game {
       damagePerLevel: WEAPON_UPGRADE.damagePerLevel,
       levels: [Loadout.wLv0[p], Loadout.wLv1[p], Loadout.wLv2[p]],
       atStation: this.canSpendHere,
+      blockedBy: this.spendBlock,
     }
   }
 

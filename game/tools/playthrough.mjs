@@ -1992,6 +1992,13 @@ try {
              * 여기 `atAfter` 가 false 로 남습니다.
              */
             visit.atAfter = G.weaponUpgradeInfo().atStation === true
+            /**
+             * ⚠️ **왜 자리가 아닌지도 받아 적습니다.** `자리 X→X` 만으로는
+             *    "가까이 안 갔다"와 "갔는데 적이 막았다"가 구분이 안 되고,
+             *    처방이 정반대입니다(봇의 이동 vs 정리부터 하라는 설계).
+             *    판단은 게임이 합니다(main.ts `spendBlock`).
+             */
+            visit.blockedBy = G.weaponUpgradeInfo().blockedBy ?? ''
           }
           // 무기를 사고 **남은 것**으로 성수병을 봅니다(값은 결제 후에 다시 읽습니다).
           const em2 = G.emberInfo()
@@ -2457,7 +2464,8 @@ try {
           ? `정련석 ${v.stones}/${v.stoneNeed} 부족`
             : v.embers - (v.vial ? v.vialCost : 0) < v.emberNeed
               ? `불티 부족(${v.embers - (v.vial ? v.vialCost : 0)}/${v.emberNeed})`
-              : `**눌렀는데 안 됨** (자리 ${v.atStation ? 'O' : 'X'}→${v.atAfter ? 'O' : 'X'})`
+              : `**눌렀는데 안 됨** (자리 ${v.atStation ? 'O' : 'X'}→${v.atAfter ? 'O' : 'X'}` +
+                `${v.blockedBy ? ` · ${v.blockedBy === 'foe' ? '적이 막음' : '안 닿음'}` : ''})`
     console.log(
       `             ${String(v.at).padStart(6)}초 ${v.anvil ? '모루  ' : '화톳불'} — 불티 ${v.embers} · 정련석 ${v.stones}` +
         ` · 성수병 ${v.vial ? '강화' : '못함'} · 무기 ${why}`,
