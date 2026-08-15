@@ -328,6 +328,25 @@ try {
     /** 🧾 12m 안으로 지나친 소비처 — 그때의 지갑까지(위 설계 노트). */
     const passBy = new Map()
     /**
+     * 🧾 **소비처마다 실제로 얼마나 가까이 갔는가** — 보물과 같은 방식.
+     *
+     * ── 왜 필요해졌는가 ──────────────────────────────────────────
+     * 두 계측기가 서로 다른 말을 합니다:
+     *   · `npm run map` — 모루가 **주 동선에서 0m** (밟고 지나갑니다)
+     *   · 봇 장부      — 판 전체에서 12m 안으로 지나친 소비처 **1곳**
+     *                    (그것도 0초의 시작 화톳불, 지갑 0)
+     *
+     * 둘 다 참일 수는 없습니다. 그런데 `passBy` 는 **봇이 고른 `fire`**
+     * 에 대해서만 적힙니다 — 봇이 엉뚱한 곳을 고르고 있으면, 다른
+     * 소비처를 밟고 지나가도 장부에 한 줄도 안 남습니다. 즉 지금 장부는
+     * *"소비처를 안 지나간다"* 와 *"고르는 규칙이 틀렸다"* 를 **못 가릅니다.**
+     *
+     * 그래서 고르는 규칙과 **무관하게** 모든 소비처의 최소 접근 거리를
+     * 적습니다. 보물에서 바로 이 방식이 10m 짜리 범인을 찾아냈습니다.
+     */
+    const spendBest = {}
+    let lastSpendScan = -99
+    /**
      * 마지막으로 화톳불에 닿았을 때의 지갑. **늘어났을 때만** 다시 갑니다.
      *
      * 예전에는 한 번 들르면 60초 동안 안 갔습니다. 그래서 판마다 화톳불
@@ -1942,7 +1961,36 @@ try {
        * 무한히 오가던 336초짜리 사고가 있었습니다).
        */
       const passingStep = fire ? G.pathStep(fire.x, fire.z) : null
-      const passingBy = !!passingStep && passingStep.dist <= 12
+      /**
+       * 🧭 **"지나가다 들르는 것"의 기준을 12m 에서 곁길 예산으로 바꿉니다.**
+       *
+       * ── 12m 이 왜 틀렸는가 (재고 나서 압니다) ──────────────────────
+       * 12m 는 *"곁길 예산의 1/3"* 이라는 어림으로 정한 값이었습니다. 그런데
+       * 소비처마다 **실제로 얼마나 가까이 갔는지**를 재 보니 이랬습니다:
+       *
+       *     화톳불(17,1)  18m · 51초 · 불티 74 · 정련석 1 · 살 수 있었음
+       *     모루 (49,17)  36m · 93초 · 불티 140 · 정련석 4 · 살 수 있었음
+       *
+       * **한 번도 12m 안에 들어간 적이 없습니다**(시작 화톳불 제외). 그래서
+       * 관문(`walletGrew`)은 늘 닫혀 있었고, 판당 무기 강화는 0회였습니다 —
+       * 정련석 4개와 불티 140을 손에 쥔 채로요.
+       *
+       * ── 왜 예산과 같은 값이어야 하는가 ────────────────────────────
+       * 이 봇은 **보물**은 40m 까지 아무 관문 없이 주우러 갑니다. 그런데
+       * 소비처는 12m 밖이면 관문을 통과해야 했습니다. 소비처는 그 보물의
+       * 값어치가 **실현되는 곳**인데, 가는 값이 보물보다 비쌌던 셈입니다.
+       * 같은 질문("얼마나 벗어나면 곁길인가")에 두 개의 답을 두면 언젠가
+       * 갈라지고, 여기서는 이미 갈라져 있었습니다.
+       *
+       * ⚠️ 무한 왕복(336초짜리 사고)을 막던 성질은 그대로입니다 —
+       *    아래에서 **가장 가까운 곁길일 때만** 관문을 건너뛰게 하고,
+       *    실패 쿨다운도 그대로 둡니다. "가장 가까운 것으로 간다"는
+       *    규칙에는 왔다 갔다 할 여지가 없습니다.
+       */
+      const passingBy =
+        !!passingStep &&
+        passingStep.dist <= TREASURE_DETOUR &&
+        !treasureClaims(passingStep.dist)
       /**
        * ── 🧾 **지나친 소비처를 그 순간의 지갑과 함께 적습니다** ──────────
        *
@@ -1959,6 +2007,29 @@ try {
        * 얼마였는지. 이 저장소가 매번 배운 것 그대로입니다 — 재기 전의
        * 설명은 결론이 아닙니다.
        */
+      /**
+       * 🧾 **고른 곳이 아니라 모든 소비처를** 잽니다 — 위 `spendBest` 주석.
+       * 2초마다 한 번이면 충분합니다(매 프레임 길찾기 5회는 비쌉니다).
+       */
+      if (now() - lastSpendScan > 2) {
+        lastSpendScan = now()
+        for (const sp of spendPts) {
+          const st2 = G.pathStep(sp.x, sp.z)
+          if (!st2) continue
+          const key = `${Math.round(sp.x)},${Math.round(sp.z)}`
+          const cur = spendBest[key]
+          if (!cur || st2.dist < cur.dist) {
+            spendBest[key] = {
+              dist: Number(st2.dist.toFixed(1)),
+              at: Number(now().toFixed(1)),
+              anvil: sp.anvil === true,
+              embers: em.embers,
+              stones: wu.stones,
+              canBuy: !!canUpgrade,
+            }
+          }
+        }
+      }
       if (passingBy && fire) {
         const key = `${Math.round(fire.x)},${Math.round(fire.z)}`
         const prev = passBy.get(key)
@@ -1980,7 +2051,7 @@ try {
       else if (!canUpgrade) tripBlock.cantBuy++
       // ⚠️ 위 분기와 **같은 조건**이어야 합니다. 장부가 옛 규칙을 세면
       //    "지갑안늘어 27%" 같은 숫자가 거짓말이 됩니다.
-      else if (!walletGrew && !(G.pathStep(fire.x, fire.z)?.dist <= 12)) tripBlock.noGrowth++
+      else if (!walletGrew && !passingBy) tripBlock.noGrowth++
       // ⚠️ 위 분기와 **같은 조건**이어야 합니다 — 장부만 옛 규칙을 세면 거짓말이 됩니다.
       else if (!passingBy && now() < fireCooldownUntil) tripBlock.cooling++
       else tripBlock.open++
@@ -2535,6 +2606,7 @@ try {
       // 무기 강화가 **어느 갈림길에서 멈췄는지** — 게임이 직접 센 값.
       upgradeTries: G.upgradeTries?.() ?? null,
       passBy: [...passBy.entries()].map(([k, v]) => ({ where: k, ...v })),
+      spendBest: Object.entries(spendBest).map(([k, v]) => ({ where: k, ...v })),
       boss: {
         fought: bossSeen,
         // 보스가 죽은 시각이 있으면 그때까지, 없으면 마지막으로 본 시각까지.
@@ -2847,6 +2919,14 @@ try {
     }
   } else {
     console.log('             🧾 12m 안으로 지나친 소비처가 **한 곳도 없습니다** (동선 문제)')
+  }
+  if (log.spendBest?.length) {
+    console.log('             🧭 소비처마다 가장 가까이 간 거리 (고르는 규칙과 무관하게)')
+    for (const b of [...log.spendBest].sort((a, b2) => a.dist - b2.dist)) {
+      console.log(
+        `                ${(b.anvil ? '모루' : '화톳불').padEnd(4)}(${b.where})  ${b.dist}m · ${b.at}초 · 불티 ${b.embers} · 정련석 ${b.stones} · ${b.canBuy ? '살 수 있었음' : '못 삼'}`,
+      )
+    }
   }
   if (log.upgradeTries) {
     const u = log.upgradeTries

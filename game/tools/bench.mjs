@@ -479,6 +479,34 @@ console.log(
           ` · 지갑안늘어 ${share('noGrowth')}% · 쿨다운 ${share('cooling')}%` +
           ` · **열림 ${share('open')}%**`,
       )
+      /**
+       * 🧭 **소비처마다 실제로 얼마나 가까이 갔는가** — 중앙값으로.
+       *
+       * 이 줄이 없어서 두 계측기가 오래 어긋나 있었습니다: `npm run map` 은
+       * *"모루가 주 동선에서 0m"* 라고 하고, 봇 장부는 *"판 전체에서 12m
+       * 안으로 지나친 소비처 1곳"* 이라고 했습니다. 둘 다 참이었습니다 —
+       * **봇의 실제 동선이 주 동선이 아니었기 때문**입니다. 그 차이를
+       * 보려면 고르는 규칙과 무관한 이 거리가 필요합니다.
+       */
+      const spots = new Map()
+      for (const l of logs) {
+        for (const b of l.spendBest ?? []) {
+          const k = `${b.anvil ? '모루' : '화톳불'} (${b.where})`
+          if (!spots.has(k)) spots.set(k, [])
+          spots.get(k).push(b)
+        }
+      }
+      if (spots.size) {
+        console.log('  🧭 소비처 접근   (가장 가까이 간 거리 · 그때 살 수 있었는지)')
+        for (const [k, rows] of [...spots.entries()].sort(
+          (a, b) => median(a[1].map((r) => r.dist)) - median(b[1].map((r) => r.dist)),
+        )) {
+          const buy = rows.filter((r) => r.canBuy).length
+          console.log(
+            `    ${k.padEnd(16)} ${fmt(rows.map((r) => r.dist), 0)}m · 살 수 있었던 판 ${buy}/${rows.length}`,
+          )
+        }
+      }
     }
   }
 }
