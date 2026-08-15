@@ -38,7 +38,12 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-const OUT_DIR = path.join(ROOT, 'src', 'levels')
+/**
+ * 출력 폴더. 환경변수로 바꿀 수 있게 두는 이유: `npm run guard` 가
+ * *"생성기와 실제 지도가 갈라졌는가"* 를 검사하려면 생성기를 돌려 봐야
+ * 하는데, 그때 **진짜 지도를 덮으면** 검사가 검사 대상을 바꿔 버립니다.
+ */
+const OUT_DIR = process.env.ZONE_OUT_DIR || path.join(ROOT, 'src', 'levels')
 
 const W = 88
 const H = 72

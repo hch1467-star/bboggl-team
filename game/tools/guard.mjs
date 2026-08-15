@@ -29,7 +29,9 @@
  *    **실제로 두 번 일어난 그 모양**은 확실히 잡습니다. 완벽한 검사보다
  *    "이미 두 번 데인 자리를 막는 검사"가 먼저입니다.
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -245,6 +247,87 @@ check(
     clash.length === 0
       ? `상시 ${always.size}개 · 맥락 ${contextual.size}개`
       : `${clash.join(', ')} — 한쪽이 먼저 소비해서 다른 쪽이 조용히 안 먹습니다`,
+  )
+}
+
+/**
+ * ── 🗺 **생성기와 지도가 갈라져 있지 않은가** ────────────────────────
+ *
+ * ── 무엇을 발견했는가 ───────────────────────────────────────────
+ * `tools/make-zone.mjs` 를 그대로 돌려 보고 게임이 읽는
+ * `src/levels/broken-gate.json` 과 견줘 봤더니 **크게 달랐습니다**:
+ *
+ *     사라짐: 사다리 1개 · 보물 2개 자리 · 적 4마리 자리
+ *     지형과 구역도 다름
+ *
+ * **사다리가 사라지는 것**이 특히 위험합니다 — 지름길은 이 존을 원으로
+ * 만드는 장치이고 `climb`·`retry`·`secret` 프로브가 전부 그걸 봅니다.
+ * 즉 누군가 `npm run zone` 을 한 번 돌리는 것만으로 내용이 조용히
+ * 없어집니다.
+ *
+ * 더 나쁜 것은 **주석이 거짓말을 하고 있다**는 점입니다. 생성기에는
+ * *"실측으로 옮긴 자리"* 라는 긴 근거들이 달려 있는데, 그 자리들이
+ * 게임에 들어가 있지 않습니다. 읽는 사람은 지도가 그렇게 생겼다고
+ * 믿게 됩니다.
+ *
+ * 생성기 파일 자신이 이미 같은 위험을 반대 방향으로 적어 뒀습니다 —
+ * *"손으로 고친 것이 코드에 없으면 다음 생성이 그걸 지웁니다."*
+ * 이제 그 일이 실제로 벌어져 있고, **아무도 소리를 안 내고 있었습니다.**
+ *
+ * 여기서는 고치지 않습니다(어느 쪽이 옳은지는 설계 판단입니다).
+ * 대신 **갈라졌다는 사실 자체를 빨간 불로** 만듭니다.
+ */
+{
+  const shipped = JSON.parse(
+    readFileSync(path.join(HERE, '..', 'src/levels/broken-gate.json'), 'utf8'),
+  )
+  const tmp = mkdtempSync(path.join(tmpdir(), 'zonecheck-'))
+  const r = spawnSync('node', ['tools/make-zone.mjs'], {
+    cwd: path.join(HERE, '..'),
+    env: { ...process.env, ZONE_OUT_DIR: tmp },
+    stdio: 'ignore',
+  })
+  /**
+   * ⚠️ 생성기가 **출력 경로를 안 받으면** 진짜 지도를 덮어씁니다.
+   *    그래서 덮어썼는지부터 확인하고, 덮어썼으면 되돌립니다.
+   *    (검사가 검사 대상을 바꾸면 그 숫자는 게임의 것이 아닙니다.)
+   */
+  const after = readFileSync(path.join(HERE, '..', 'src/levels/broken-gate.json'), 'utf8')
+  const shippedText = JSON.stringify(shipped)
+  if (after !== shippedText) {
+    writeFileSync(path.join(HERE, '..', 'src/levels/broken-gate.json'), shippedText)
+  }
+  const genPath = existsSync(path.join(tmp, 'broken-gate.json'))
+    ? path.join(tmp, 'broken-gate.json')
+    : null
+  const gen = genPath ? JSON.parse(readFileSync(genPath, 'utf8')) : JSON.parse(after)
+  rmSync(tmp, { recursive: true, force: true })
+
+  const key = (e) => `${e.kind}@${e.x},${e.z}`
+  const A = new Set(shipped.entities.map(key))
+  const B = new Set(gen.entities.map(key))
+  const lost = [...A].filter((k) => !B.has(k))
+  const added = [...B].filter((k) => !A.has(k))
+  /**
+   * 얼마나 갈라졌는지까지 셉니다 — *"다르다"* 만으로는 다음 사람이
+   * 무엇부터 손대야 할지 못 정합니다. 실제로 재 보니 아주 작았습니다:
+   * 지형은 6336칸 중 **12칸**뿐이고, 나머지는 구역 하나가 둘로 쪼개진
+   * 것과 사다리 하나입니다. 즉 **되살릴 수 있는 크기**입니다.
+   */
+  let cells = 0
+  const ha = shipped.heights ?? []
+  const hb = gen.heights ?? []
+  for (let i = 0; i < Math.max(ha.length, hb.length); i++) if (ha[i] !== hb[i]) cells++
+  const rA = (shipped.regions ?? []).map((x) => x.name)
+  const rB = (gen.regions ?? []).map((x) => x.name)
+  const rLost = rA.filter((n) => !rB.includes(n))
+  const ok = r.status === 0 && lost.length === 0 && added.length === 0 && cells === 0 && rLost.length === 0
+  check(
+    ok,
+    '`npm run zone` 을 돌려도 지도가 그대로다 (생성기와 실제 지도가 안 갈라졌다)',
+    ok
+      ? `배치 ${A.size}개 · 지형 · 구역 모두 일치`
+      : `지형 ${cells}/${ha.length}칸 다름 · 잃는 배치 ${lost.length}개 [${lost.slice(0, 3).join(' ')}] · 잃는 구역 [${rLost.join(', ') || '없음'}]`,
   )
 }
 
