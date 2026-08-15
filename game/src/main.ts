@@ -8,6 +8,8 @@ import {
   runningStep,
   rollingStep,
   plungeStep,
+  heavyStep,
+  finisherStep,
   RUN_COMBO,
   ROLL_COMBO,
   PLUNGE_COMBO,
@@ -4683,6 +4685,11 @@ declare global {
           lunge: number
           staminaCost: number
         }[]
+        /** ⚔️ 콤보 각 타의 제원 — 실측과 대조하려면 필요합니다 */
+        comboSteps: { name: string; damage: number; staminaCost: number }[]
+        /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
+        heavySteps: { spent: number; damage: number }[]
+        finisherDamage: number
         firstWindup: number
         firstLunge: number
         poiseScale: number
@@ -5395,6 +5402,26 @@ window.__game = {
           staminaCost: c.staminaCost,
         }
       }),
+      /**
+       * ⚔️ **콤보 각 타의 제원** — "조리법 대 요리" 대조에 씁니다.
+       *
+       * 지금까지 무기표는 합계(`comboDamage`)와 마지막 타만 내보냈습니다.
+       * 그러면 *"3타가 설계대로 들어가는가"* 를 물을 수가 없습니다. 이
+       * 저장소가 두 번 데인 자리가 정확히 거기입니다 — 파생값은 완벽했고
+       * 실제 타격은 다른 기술이었습니다.
+       */
+      comboSteps: w.combo.map((c) => ({
+        name: c.name,
+        damage: Number((c.damage * 1).toFixed(2)),
+        staminaCost: c.staminaCost,
+      })),
+      /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
+      heavySteps: [0, 1, 2, 3].map((n) => ({
+        spent: n,
+        damage: Number(heavyStep(w, n).damage.toFixed(2)),
+      })),
+      /** 처형 — 무방비인 적에게만 나가는 한 방 */
+      finisherDamage: Number(finisherStep(w).damage.toFixed(2)),
       firstWindup: w.combo[0].windup,
       firstLunge: w.combo[0].lunge,
       dodgeCost: PLAYER_CFG.dodge.staminaCost * (w.dodgeCostScale ?? 1),
