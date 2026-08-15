@@ -693,6 +693,96 @@ try {
     }
 
     /**
+     * ── 🧮 **소비처에 닿을 때 지갑이 차 있는가** ────────────────────
+     *
+     * 봇의 새 장부가 이 줄을 찍었습니다:
+     *
+     *   `70.9초 모루(25,29) **2m** · 불티 34 · 정련석 0 · **못 삼**`
+     *
+     * **동선은 문제가 아닙니다 — 2m 를 지나갑니다.** 그때 지갑이 비어
+     * 있는 것이고, 그건 봇 정책이 아니라 **수입 시점과 소비처 위치의
+     * 관계**입니다. 봇 쪽을 네 라운드 고쳤는데 벤치 중앙값이 한 번도
+     * 안 움직인 이유가 여기 있었습니다.
+     *
+     * 그리고 이건 **판을 돌리지 않고 셀 수 있습니다.** 존은 한 방향이라
+     * 동선 위의 순서가 곧 시간 순서입니다:
+     *
+     *   소비처 앞의 적 = 그때까지 벌 수 있는 **불티**
+     *   소비처 앞의 보물 = 그때까지 얻을 수 있는 **정련석**
+     *
+     * 판 편차가 97~226초로 벌어져 3판 벤치로는 아무것도 증명이 안 되는
+     * 상황에서, **결정적으로 답할 수 있는 유일한 자리**입니다.
+     *
+     * ⚠️ **최선의 경우**를 셉니다(앞의 것을 다 잡고 다 줍는다). 그래서
+     *    이 검사가 빨간 것은 *"운이 나빴다"* 가 아니라 **"원리적으로
+     *    불가능하다"** 는 뜻입니다. 초록이라고 실제로 된다는 보장은
+     *    없지만, 빨간데 되는 일은 없습니다.
+     */
+    {
+      const upg = await page.evaluate(() => window.__game.weaponUpgradeInfo())
+      const emberOf = new Map(roster.map((r) => [r.id, r.ember ?? 0]))
+      /** 동선 위의 **진행도** — 가장 가까운 동선 칸의 순번으로 잽니다. */
+      const progressOf = (c) => {
+        let best = Infinity
+        let at = -1
+        for (let i = 0; i < routeCells.length; i++) {
+          const d = Math.hypot(routeCells[i].cx - c.cx, routeCells[i].cz - c.cz)
+          if (d < best) {
+            best = d
+            at = i
+          }
+        }
+        return { at, off: best * CELL }
+      }
+      const foesOnRoute = level.entities
+        .filter((e) => FOE_KINDS.has(e.kind) || e.kind === 'archer')
+        .map((e) => ({ kind: e.kind, ...progressOf(cellOf(e)) }))
+      const treasuresOnRoute = level.entities
+        .filter((e) => e.kind === 'treasure')
+        .map((e) => ({ ...progressOf(cellOf(e)) }))
+      const anvilRows = level.entities
+        .filter((e) => e.kind === 'anvil' || e.kind === 'bonfire')
+        .map((e) => {
+          const pr = progressOf(cellOf(e))
+          const embers = foesOnRoute
+            .filter((f) => f.at < pr.at && f.off <= aggro)
+            .reduce((a, f) => a + (emberOf.get(f.kind) ?? 0), 0)
+          const stones = treasuresOnRoute.filter(
+            (t) => t.at < pr.at && t.off <= DETOUR_BUDGET,
+          ).length
+          return { kind: e.kind, c: cellOf(e), pr, embers, stones }
+        })
+        .sort((a, b) => a.pr.at - b.pr.at)
+      for (const r of anvilRows) {
+        console.log(
+          `  [지갑] ${r.kind === 'anvil' ? '모루' : '화톳불'}(${r.c.cx},${r.c.cz}) — ` +
+            `여기 오기까지 불티 ${r.embers} · 정련석 ${r.stones}` +
+            ` (첫 강화 ${upg.nextCost}불티 + ${upg.nextStoneCost}정련석)`,
+        )
+      }
+      /**
+       * 문턱: **하나 이상의 소비처**에서 첫 강화가 원리적으로 가능해야 합니다.
+       *
+       * 하나면 충분한 근거: 소비처가 흔해지면 *"들르는 일"* 이 판단이
+       * 아니게 됩니다(DESIGN.md). 다만 **한 곳도 없으면** 무기 축은
+       * 존에서 존재하지 않는 것입니다 — 실제로 벤치 열한 번 내내
+       * `무기 강화 0.0` 이었습니다.
+       */
+      const affordable = anvilRows.filter(
+        (r) => r.embers >= upg.nextCost && r.stones >= upg.nextStoneCost,
+      )
+      check(
+        affordable.length > 0,
+        `소비처 하나 이상에서 **첫 강화가 원리적으로 가능**하다 (${upg.nextCost}불티 + ${upg.nextStoneCost}정련석)`,
+        affordable.length
+          ? affordable.map((r) => `(${r.c.cx},${r.c.cz}) 불티 ${r.embers}·돌 ${r.stones}`).join(' · ')
+          : anvilRows
+              .map((r) => `(${r.c.cx},${r.c.cz}) 불티 ${r.embers}·돌 ${r.stones}`)
+              .join(' · ') + ' — 앞의 것을 **다 잡고 다 주워도** 못 삽니다',
+      )
+    }
+
+    /**
      * ── 💰 **소비처가 갈 만한 거리인가** ────────────────────────────
      *
      * 3판 벤치가 세 번 연속 같은 말을 했습니다:

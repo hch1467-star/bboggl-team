@@ -4698,6 +4698,8 @@ window.__game = {
         height: d.height,
         radius: d.radius,
         moveSpeed: d.moveSpeed,
+        // 처치가 주는 불티 — 지도 위의 **수입**을 정적으로 셀 수 있게 합니다.
+        ember: d.ember,
         /**
          * **사거리 밖에서 실제로 내는 속도.** 프로브가 `moveSpeed`만 보고
          * "가장 빠른 적"을 고르면 추격전에서는 틀린 답이 나옵니다 —
