@@ -974,6 +974,60 @@ try {
     }
   }
 
+  /**
+   * ── ⏳ **뜸 들인 공격도 처음부터 보이는가** ───────────────────────
+   *
+   * 지연을 넣으면서 화면 쪽을 안 봤습니다. 예고의 차오름이
+   * `1 - 남은시간 / **설정** 예고` 로 계산되고 있었는데, 뜸을 들이면
+   * 분자가 분모보다 커져 `p` 가 **음수**로 시작합니다. 투명도가 0 아래로
+   * 눌리므로 뜸 들인 공격은 처음 0.35초 동안 **아예 안 보입니다.**
+   *
+   * 예고가 늦게 뜨는 것은 난이도가 아니라 거짓말이고, 맞은 이유가
+   * `못 봄` 으로 찍혀야 할 자리입니다. 그래서 **뜬 순간의 투명도**를
+   * 직접 봅니다 — 규칙이 아니라 화면에 실제로 그려진 값입니다.
+   */
+  {
+    const seen = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+      G.clearEnemies()
+      await window.__t.runFor(0.3)
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 4, p.z)
+      G.wakeEnemy(b)
+      G.setPlayerInvulnerable(true)
+      await window.__t.runFor(0.4)
+      const rows = []
+      let wasWinding = false
+      const t0 = G.state().elapsed
+      while (G.state().elapsed - t0 < 90) {
+        const tg = G.telegraphs().find((t) => t.entity === b)
+        if (tg && !wasWinding) {
+          // 뜬 **첫 프레임**의 투명도. 여기가 0 이면 화면에 아무것도 없습니다.
+          rows.push({ opacity: tg.opacity, held: tg.held, windup: tg.windup })
+        }
+        wasWinding = !!tg
+        await sleep2()
+      }
+      return rows
+    })
+    const held = seen.filter((r) => r.held > 0)
+    const plain = seen.filter((r) => r.held === 0)
+    check(
+      seen.length >= 10 && held.length > 0,
+      '⏳ 예고가 뜬 첫 순간을 충분히 봤다 (뜸 들인 것 포함)',
+      `${seen.length}회 · 그중 뜸 ${held.length}회`,
+    )
+    if (held.length > 0) {
+      const worst = Math.min(...seen.map((r) => r.opacity))
+      check(
+        worst > 0.05,
+        '⏳ **뜸 들인 공격도 뜨는 순간부터 보인다** (안 보이는 예고는 난이도가 아니라 거짓말)',
+        `가장 흐렸던 첫 프레임 ${worst} (평소 ${plain.length}회 · 뜸 ${held.length}회)`,
+      )
+    }
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

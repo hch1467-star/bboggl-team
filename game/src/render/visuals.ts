@@ -947,7 +947,41 @@ export class Visuals {
           if (geo && v.telegraph.geometry !== geo) v.telegraph.geometry = geo
           v.telegraph.visible = true
           if (winding) {
-            const p = 1 - Actor.timer[e] / def.windup // 0 -> 1
+            /**
+             * ── ⏳ **차오름은 「실제로 건 예고」로 잽니다** ─────────────
+             *
+             * 예전에는 `def.windup`(설정값)으로 나눴습니다. 그 값은
+             * **페이즈 배율도 지연도 모릅니다.** 두 가지가 조용히 깨져
+             * 있었습니다:
+             *
+             *   · 보스 3단계(×0.9) — 실제 예고가 더 짧은데 분모는 그대로라
+             *     **다 차기 전에 칼이 나옵니다.** 차오름이 "이제 온다"를
+             *     말해 주지 못합니다.
+             *   · 지연 공격(`hold`) — 분자가 분모보다 커서 `p` 가 **음수**로
+             *     시작합니다. 투명도가 0 아래로 눌리므로 뜸 들인 공격은
+             *     처음 0.35초 동안 **아예 안 보입니다.** 지연을 넣으면서
+             *     제가 만든 버그이고, 예고가 늦게 뜨는 것은 난이도가 아니라
+             *     그냥 거짓말입니다.
+             *
+             * `Enemy.windupLen` 은 `commitAttack` 이 실제로 건 값입니다.
+             * **게임이 판단하고 화면은 읽습니다** — 이 저장소가 프로브에
+             * 적용해 온 규약을 렌더에도 그대로 씁니다.
+             *
+             * 이렇게 두면 지연이 **공정해집니다**: 뜸 들인 공격은 부채꼴이
+             * 그만큼 **천천히** 차오릅니다. 박자를 세던 사람은 걸리고,
+             * 화면을 본 사람은 그대로 답할 수 있습니다. 쿼터뷰에서 몸동작을
+             * 읽기 어려운 것을 지면 표시로 푸는 것은 로스트아크가 쓰는
+             * 방법이기도 합니다.
+             */
+            /**
+             * ⚠️ 분모가 0이면 **설정값으로 물러섭니다.** `windupLen` 은
+             *    상태를 세우는 모든 자리가 채워야 하는 값인데, 하나라도
+             *    빠뜨리면 투명도가 0 으로 눌려 **예고가 아예 안 보입니다.**
+             *    실제로 `debugForceAttack` 이 빠뜨려서 contrast 프로브가
+             *    6개 빨개졌습니다. 안전망은 두되, 고칠 곳은 세우는 쪽입니다.
+             */
+            const len = Enemy.windupLen[e] > 0 ? Enemy.windupLen[e] : def.windup
+            const p = 1 - Actor.timer[e] / Math.max(0.001, len) // 0 -> 1
             /**
              * ── 최고 투명도 0.54 → 0.68 ────────────────────────────────
              *
@@ -1199,6 +1233,10 @@ export class Visuals {
     timing: boolean
     /** 남은 예고 시간(초) */
     left: number
+    /** ⏳ 이번 공격에 실제로 건 예고 길이 — 차오름의 분모입니다 */
+    windup: number
+    /** ⏳ 그중 뜸 들인 몫 */
+    held: number
     /** 지금 그려진 투명도 — 「지금」 신호가 켜지면 1이 됩니다 */
     opacity: number
   }[] {
@@ -1208,6 +1246,8 @@ export class Visuals {
       intent: number
       timing: boolean
       left: number
+      windup: number
+      held: number
       opacity: number
     }[] = []
     for (const [e, v] of this.items.entries()) {
@@ -1221,6 +1261,10 @@ export class Visuals {
         intent: def.intent,
         timing: isTimingAnswer(def.intent),
         left: Number(Actor.timer[e].toFixed(3)),
+        /** ⏳ 이번 공격에 실제로 건 예고 길이 — 차오름의 분모입니다 */
+        windup: Number(Enemy.windupLen[e].toFixed(3)),
+        /** ⏳ 그중 뜸 들인 몫 */
+        held: Number(Enemy.heldT[e].toFixed(3)),
         opacity: Number(v.telegraphMat.opacity.toFixed(3)),
       })
     }

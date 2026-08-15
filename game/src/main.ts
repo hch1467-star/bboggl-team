@@ -2107,6 +2107,18 @@ class Game {
     // 그래서 타이머를 크게 넣으면 오히려 투명해져 아무것도 안 보입니다.
     // 잘 보이는 후반부(75% 지점)에 세워 둡니다.
     Actor.timer[entity] = list[i].windup * 0.25
+    /**
+     * ⏳ **세우는 쪽이 예고 길이도 적습니다.**
+     *
+     * 차오름의 분모가 `Enemy.windupLen` 으로 바뀐 뒤로, 이 줄이 없으면
+     * 분모가 0 이라 투명도가 0 으로 눌립니다 — `npm run contrast` 가
+     * 8개 중 6개 빨간색으로 그걸 잡았습니다. 화면에 아무것도 안 그려진
+     * 채로 "색이 안 갈린다"고 찍혔던 것입니다.
+     * 상태를 세우는 자리는 **정상 커밋과 같은 것을 다 채워야** 합니다
+     * (바로 위 `chainNext` 도 같은 이유로 여기 있습니다).
+     */
+    Enemy.windupLen[entity] = list[i].windup
+    Enemy.heldT[entity] = 0
     // 플레이어를 바라보게 돌려 둡니다 — 등지고 선 예고는 확인할 의미가 없습니다.
     const p = this.playerEntity
     Transform.rotY[entity] = Math.atan2(
@@ -4168,6 +4180,10 @@ declare global {
         intent: number
         timing: boolean
         left: number
+        /** ⏳ 이번 공격에 실제로 건 예고 길이 — 차오름의 분모 */
+        windup: number
+        /** ⏳ 그중 뜸 들인 몫 */
+        held: number
         opacity: number
       }[]
       /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
