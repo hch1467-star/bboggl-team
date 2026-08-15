@@ -60,7 +60,7 @@ const INTENT_TO_SFX: Record<AttackIntent, SfxIntent> = {
   [AttackIntent.Counter]: SfxIntent.Counter,
 }
 import { combatRng } from '../core/rng'
-import { isBehindPoint } from './combat'
+import { isBehindPoint, noteBleedDecay } from './combat'
 import { time } from '../core/time'
 
 /**
@@ -1037,7 +1037,10 @@ export function enemyAiSystem(
      */
     Enemy.bleedIdleT[e] += dt
     if (Enemy.bleedIdleT[e] >= BLEED.decayDelay && Enemy.bleed[e] > 0) {
+      const before = Enemy.bleed[e]
       Enemy.bleed[e] = Math.max(0, Enemy.bleed[e] - BLEED.decayPerSec * dt)
+      // 🩸 **깎은 쪽이 셉니다** — 관측은 프레임 사이에 날아간 양을 놓칩니다.
+      noteBleedDecay(e, before - Enemy.bleed[e])
     }
     Enemy.poiseIdleT[e] += dt
     if (Enemy.poiseIdleT[e] >= POISE.regenDelay && Enemy.poise[e] < cfg.poiseMax) {

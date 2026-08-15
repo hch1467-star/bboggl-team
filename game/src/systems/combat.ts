@@ -430,9 +430,34 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
 function applyBleed(t: number, spec: AttackSpec): void {
   const w = spec.bleedScale ?? 1
   if (w <= 0) return
+  const onBoss = Enemy.kind[t] === EnemyKind.Boss
+  /**
+   * 🩸 **때린 간격을 여기서 셉니다 — 0으로 지우기 직전에.**
+   *
+   * 보스에게 출혈이 96/100 까지 찼는데 한 번도 안 터졌습니다. 원인 후보가
+   * 넷인데(한 대당 12가 작다 · 유예 2.5초가 짧다 · 식는 속도 20/초가
+   * 빠르다 · 봇이 안 때린다) **숫자 없이는 어느 것도 못 고릅니다.**
+   * 값부터 만지면 "고쳤다고 믿는 것"만 남습니다.
+   *
+   * `bleedIdleT` 는 *"마지막 출혈 타격 이후 흐른 시간"* 이고, 바로 아래
+   * 줄에서 0이 됩니다. 그러니 지우기 **직전 값**이 곧 이번 타격의 간격
+   * 입니다 — 따로 시계를 둘 필요가 없습니다. 관측하는 쪽이 프레임 사이를
+   * 놓치는 문제도 없습니다(**쌓는 쪽이 셉니다**).
+   */
+  if (onBoss && bossEverBled) {
+    const gap = Enemy.bleedIdleT[t]
+    bossGapSum += gap
+    bossGapCount++
+    if (gap > bossGapMax) bossGapMax = gap
+    // 유예 안에 들어온 타격만이 **쌓입니다** — 그 밖은 식은 뒤에 다시 시작한 것.
+    if (gap <= BLEED.decayDelay) bossGapInside++
+  }
   Enemy.bleedIdleT[t] = 0
   Enemy.bleed[t] += BLEED.perHit * w
-  const onBoss = Enemy.kind[t] === EnemyKind.Boss
+  if (onBoss) {
+    bossBleedApplied += BLEED.perHit * w
+    bossEverBled = true
+  }
   if (Enemy.bleed[t] > bleedPeak) bleedPeak = Enemy.bleed[t]
   if (onBoss && Enemy.bleed[t] > bossBleedPeak) bossBleedPeak = Enemy.bleed[t]
   if (Enemy.bleed[t] < BLEED.max) return
@@ -492,13 +517,69 @@ let bleedPeak = 0
  */
 let bossBleedPeak = 0
 let bossBleedPops = 0
-export function readBleedPeak(): { any: number; boss: number; bossPops: number } {
-  return { any: bleedPeak, boss: bossBleedPeak, bossPops: bossBleedPops }
+/**
+ * 🩸 **보스 출혈이 어디서 새는가** — 네 후보를 가르는 최소한의 숫자들.
+ *
+ * `applied` 는 쌓은 총량, `decayed` 는 식어서 날아간 총량입니다. 둘의
+ * 차이가 곧 *"지금 남아 있는 것 + 터진 것"* 이므로, `applied` 가 100을
+ * 훨씬 넘는데 터짐이 0이면 **범인은 식는 쪽**입니다. `applied` 자체가
+ * 작으면 범인은 **타수**이고, 그건 값이 아니라 봇·전투 흐름 문제입니다.
+ */
+let bossBleedApplied = 0
+let bossBleedDecayed = 0
+/**
+ * ⚠️ **간격을 재는 문을 여기에 둡니다** — 게이지가 아니라 *"한 번이라도
+ * 출혈을 준 적이 있는가"* 로.
+ *
+ * 처음엔 문이 `Enemy.bleed[t] > 0` 이었습니다. 첫 타격은 잴 이전 간격이
+ * 없으니 빼려던 것인데, **게이지가 0까지 다 식은 뒤의 타격도 같이
+ * 빠졌습니다.** 즉 *"오래 못 때려서 다 날아간"* 경우 — 바로 제가 찾던
+ * 그 경우 — 만 골라서 통계에서 제외하고 있었습니다. 그래서 평균 1.24초·
+ * 최대 2.88초 라는 **살아남은 것들만의 분포**가 나왔습니다.
+ *
+ * 재려는 것을 빼고 재면, 숫자는 늘 "문제 없음"이라고 말합니다.
+ */
+let bossEverBled = false
+let bossGapSum = 0
+let bossGapCount = 0
+let bossGapInside = 0
+let bossGapMax = 0
+export function noteBleedDecay(t: number, lost: number): void {
+  if (Enemy.kind[t] === EnemyKind.Boss) bossBleedDecayed += lost
+}
+export function readBleedPeak(): {
+  any: number
+  boss: number
+  bossPops: number
+  bossApplied: number
+  bossDecayed: number
+  bossGapAvg: number
+  bossGapMax: number
+  /** 유예(2.5초) 안에 이어진 타격의 비율 — 1에 가까울수록 압박이 안 끊긴 것 */
+  bossGapInsideRate: number
+} {
+  return {
+    any: bleedPeak,
+    boss: bossBleedPeak,
+    bossPops: bossBleedPops,
+    bossApplied: bossBleedApplied,
+    bossDecayed: bossBleedDecayed,
+    bossGapAvg: bossGapCount > 0 ? bossGapSum / bossGapCount : 0,
+    bossGapMax: bossGapMax,
+    bossGapInsideRate: bossGapCount > 0 ? bossGapInside / bossGapCount : 0,
+  }
 }
 export function resetBleedPeak(): void {
   bleedPeak = 0
   bossBleedPeak = 0
   bossBleedPops = 0
+  bossBleedApplied = 0
+  bossBleedDecayed = 0
+  bossGapSum = 0
+  bossGapCount = 0
+  bossGapInside = 0
+  bossGapMax = 0
+  bossEverBled = false
 }
 
 /**
@@ -1059,36 +1140,63 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Actor.hitsLeft[t] = 0
         Actor.comboWindowT[t] = 0
         Actor.bufferedAttack[t] = 0
-      } else if (countered) {
-        // 강인도를 **깎지 않고 즉시 부숩니다.** 반격은 누적의 결과가 아니라
-        // 타이밍의 결과여야 합니다 — 강인도가 얼마나 남았든 성공해야 합니다.
-        breakPoise(t)
-        Enemy.brokenT[t] = COUNTER.brokenTime
-        Actor.timer[t] = COUNTER.brokenTime
-        counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
-      } else if (ambush) {
-        // 기습은 **강인도를 깎지 않고 즉시 부숩니다** — 위 설계 노트 참고.
-        breakPoise(t)
-        // 유예를 비웁니다 — 한 번 놀란 적을 계속 기습할 수는 없습니다.
-        Enemy.unawareT[t] = 0
-      } else if (spec.finisher && hasComponent(Enemy, t)) {
-        /**
-         * **처형은 무방비를 소모합니다.** 넣는 순간 적이 일어납니다.
-         *
-         * 이게 처형을 "공짜로 얹는 피해"가 아니라 **거래**로 만드는 지점입니다.
-         * 남은 창에서 두세 대 더 넣는 쪽을 고를 수도 있어야 선택이 생깁니다.
-         * 강인도도 가득 채워 돌려줍니다 — 안 그러면 일어나자마자 다시 무너져
-         * 처형이 무한히 이어집니다.
-         */
-        Enemy.brokenT[t] = 0
-        Enemy.poise[t] = enemyDef(Enemy.kind[t]).poiseMax
-        Enemy.poiseIdleT[t] = 0
-        if (Actor.state[t] === ActorState.Stagger) Actor.timer[t] = 0
       } else if (hasComponent(Enemy, t)) {
-        // `back` 은 위에서 이미 계산했습니다(근접 부채꼴 + 등 뒤).
-        // 강인도에도 같은 판정을 그대로 씁니다 — 두 번 계산하면 언젠가 어긋납니다.
-        applyPoise(t, spec, back)
+        /**
+         * 🩸 **출혈은 어느 가지로 가든 쌓입니다 — 사슬 밖에 둡니다.**
+         *
+         * ── 여기 있던 버그 ────────────────────────────────────────
+         * `applyBleed` 가 이 사슬의 **마지막 가지 안**에 있었습니다. 그래서
+         * 반격·기습·처형으로 때린 타격은 출혈을 **한 방울도** 안 쌓았습니다.
+         * 보스에게 출혈이 한 번도 안 터진 이유가 이것이었습니다 — 잘 싸울수록
+         * (반격 6회 · 처형 2회) 출혈 축이 더 죽었습니다. **잘하면 손해**가
+         * 되는 규칙이 숨어 있었던 셈입니다.
+         *
+         * 더 나쁜 것은 간격입니다. 출혈은 *"얼마나 이어졌는가"* 를 재는데,
+         * 반격하는 동안에도 `bleedIdleT` 는 계속 자랍니다. 즉 게임이 가장
+         * 칭찬하는 행동이 출혈 게이지에는 **때리지 않은 시간**으로 잡혔습니다.
+         *
+         * 참고 게임은 전부 반대입니다 — 엘든 링·다크 소울 3 에서 치명타·
+         * 백스탭·리포스트도 출혈을 쌓고, 몬헌은 타격 종류와 무관하게 상태를
+         * 누적하며, 로스트아크의 무력화·파괴 게이지도 출처를 안 가립니다.
+         * 공통 규칙은 하나입니다: **누적은 "맞았는가"의 성질이지 "어느
+         * 가지로 갔는가"의 성질이 아닙니다.**
+         *
+         * 강인도(`applyPoise`)는 반대로 사슬 **안**에 그대로 둡니다. 반격과
+         * 기습은 강인도를 *깎는* 게 아니라 **즉시 부수는** 것이라, 두 번
+         * 처리하면 규칙이 겹칩니다.
+         */
         applyBleed(t, spec)
+
+        if (countered) {
+          // 강인도를 **깎지 않고 즉시 부숩니다.** 반격은 누적의 결과가 아니라
+          // 타이밍의 결과여야 합니다 — 강인도가 얼마나 남았든 성공해야 합니다.
+          breakPoise(t)
+          Enemy.brokenT[t] = COUNTER.brokenTime
+          Actor.timer[t] = COUNTER.brokenTime
+          counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+        } else if (ambush) {
+          // 기습은 **강인도를 깎지 않고 즉시 부숩니다** — 위 설계 노트 참고.
+          breakPoise(t)
+          // 유예를 비웁니다 — 한 번 놀란 적을 계속 기습할 수는 없습니다.
+          Enemy.unawareT[t] = 0
+        } else if (spec.finisher) {
+          /**
+           * **처형은 무방비를 소모합니다.** 넣는 순간 적이 일어납니다.
+           *
+           * 이게 처형을 "공짜로 얹는 피해"가 아니라 **거래**로 만드는 지점입니다.
+           * 남은 창에서 두세 대 더 넣는 쪽을 고를 수도 있어야 선택이 생깁니다.
+           * 강인도도 가득 채워 돌려줍니다 — 안 그러면 일어나자마자 다시 무너져
+           * 처형이 무한히 이어집니다.
+           */
+          Enemy.brokenT[t] = 0
+          Enemy.poise[t] = enemyDef(Enemy.kind[t]).poiseMax
+          Enemy.poiseIdleT[t] = 0
+          if (Actor.state[t] === ActorState.Stagger) Actor.timer[t] = 0
+        } else {
+          // `back` 은 위에서 이미 계산했습니다(근접 부채꼴 + 등 뒤).
+          // 강인도에도 같은 판정을 그대로 씁니다 — 두 번 계산하면 언젠가 어긋납니다.
+          applyPoise(t, spec, back)
+        }
       }
     }
 

@@ -612,6 +612,81 @@ async function main() {
           shown.every((b) => Math.abs(b.fill - b.bleed / rule.max) < 0.05),
         shown.map((b) => `${b.bleed}/${rule.max} vs ${(b.fill * 100) | 0}%`).join(' · ') || '**표본 없음**',
       )
+
+      /**
+       * ── 🩸 **잘 싸운 타격도 출혈을 쌓는가** ──────────────────────
+       *
+       * 여기가 이번에 실제로 빨갰던 자리입니다. `applyBleed` 가 판정
+       * 사슬의 **마지막 가지 안**에 있어서, 반격·기습·처형으로 때린
+       * 타격은 출혈을 한 방울도 안 쌓았습니다. 보스에게 출혈이 한 번도
+       * 안 터진 이유가 이것이었고 — **잘 싸울수록 이 축이 죽었습니다.**
+       *
+       * 참고 게임의 공통 규칙: 누적은 *"맞았는가"* 의 성질이지 *"어느
+       * 가지로 갔는가"* 의 성질이 아닙니다(엘든 링의 치명타·백스탭,
+       * 몬헌의 상태이상, 로스트아크의 무력화 게이지).
+       *
+       * ⚠️ 앞의 검사들은 **평타**로만 쟀기 때문에 이걸 못 잡았습니다.
+       *    가지가 넷이면 검사도 가지를 알아야 합니다.
+       */
+      const branches = await page.evaluate(async () => {
+        const G = window.__game
+        const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+        const runFor = async (s) => {
+          const t = G.state().elapsed + s
+          while (G.state().elapsed < t) await sleep2()
+        }
+        /** 적 하나를 붙잡고 한 대 때린 뒤, 출혈이 얼마나 올랐는지 돌려줍니다. */
+        const hitOnce = async (asleep, breakFirst) => {
+          G.reset()
+          await runFor(0.4)
+          const e = G.spawnEnemyKind('grunt', 6, 0, asleep)
+          await runFor(0.3)
+          G.setHp(e, 9999)
+          const i0 = G.enemyInfo(e)
+          if (!i0) return null
+          G.teleportPlayer(i0.x - 1.2, i0.z)
+          G.aimAtWorld(i0.x, i0.z)
+          await runFor(0.2)
+          if (breakFirst) G.breakEnemy(e)
+          await runFor(0.05)
+          const before = G.enemyInfo(e)?.bleed ?? -1
+          const finBefore = G.runStats().finishers
+          const hitsBefore = G.state().hitsDealt
+          G.press('Mouse0')
+          G.release('Mouse0')
+          // 판정이 뜰 때까지만 기다립니다 — 식기 전에 읽어야 합니다.
+          const deadline = G.state().elapsed + 1.5
+          while (G.state().elapsed < deadline && G.state().hitsDealt === hitsBefore) {
+            G.setHp(e, 9999)
+            await sleep2()
+          }
+          return {
+            before,
+            after: G.enemyInfo(e)?.bleed ?? -1,
+            hit: G.state().hitsDealt > hitsBefore,
+            finisher: G.runStats().finishers > finBefore,
+          }
+        }
+        return { ambush: await hitOnce(true, false), finisher: await hitOnce(false, true) }
+      })
+      // 게이트 — 때리지도 못했으면 아래 비교는 아무 뜻이 없습니다.
+      check(
+        '가지별 측정이 성립했다 (기습·처형 둘 다 실제로 맞혔다)',
+        branches.ambush?.hit === true && branches.finisher?.hit === true,
+        `기습 ${branches.ambush?.hit ? 'O' : 'X'} · 처형 ${branches.finisher?.hit ? 'O' : 'X'}(처형 판정 ${branches.finisher?.finisher ? 'O' : 'X'})`,
+      )
+      check(
+        '🩸 **기습**도 출혈을 쌓는다 (누적은 가지를 안 가린다)',
+        branches.ambush?.hit === true && branches.ambush.after > branches.ambush.before,
+        `${branches.ambush?.before} → ${branches.ambush?.after}`,
+      )
+      check(
+        '🩸 **처형**도 출혈을 쌓는다 (잘 싸울수록 축이 죽으면 안 됩니다)',
+        branches.finisher?.hit === true &&
+          branches.finisher.finisher === true &&
+          branches.finisher.after > branches.finisher.before,
+        `${branches.finisher?.before} → ${branches.finisher?.after}`,
+      )
     }
 
     // ---------- 5. 공격 상태 기계 & 콤보 ----------

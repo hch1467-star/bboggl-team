@@ -3203,6 +3203,13 @@ class Game {
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
     bossBleedPeak: number
     bossBleedPops: number
+    /** 🩸 보스에게 **쌓은 총량** vs **식어서 날아간 총량** — 새는 곳을 가릅니다 */
+    bossBleedApplied: number
+    bossBleedDecayed: number
+    /** 🩸 출혈 타격 사이의 간격(초) — 유예 안에 이어진 비율까지 */
+    bossBleedGapAvg: number
+    bossBleedGapMax: number
+    bossBleedGapInsideRate: number
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3234,6 +3241,11 @@ class Game {
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
       bossBleedPops: readBleedPeak().bossPops,
+      bossBleedApplied: Number(readBleedPeak().bossApplied.toFixed(1)),
+      bossBleedDecayed: Number(readBleedPeak().bossDecayed.toFixed(1)),
+      bossBleedGapAvg: Number(readBleedPeak().bossGapAvg.toFixed(2)),
+      bossBleedGapMax: Number(readBleedPeak().bossGapMax.toFixed(2)),
+      bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
       chainsArmed: readChainsArmed(),
       chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),
