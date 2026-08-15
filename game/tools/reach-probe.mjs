@@ -122,8 +122,29 @@ try {
       const before = G.enemyInfo(e).hp
       const hits0 = G.state().hitsDealt
       await press(e)
+      /**
+       * ⚠️ **마지막 타까지 기다립니다.**
+       *
+       * 처음엔 *첫* 타가 들어오면 바로 체력을 읽었습니다. 그래서 다단히트
+       * 스킬이 전부 빨갛게 떴습니다 — 회오리(2타) 16 vs 32, 넓게베기(3타)
+       * 19 vs 57, 연격은 아예 "못 맞힘". 게임은 정확히 적힌 대로 때리고
+       * 있었고 **계측기가 도중에 자리를 뜬** 것입니다.
+       *
+       * 그래서 첫 타 뒤로 **새 타격이 0.4초 동안 없을 때까지** 셉니다.
+       * (`hits` 를 프로브가 세어 맞추지 않습니다 — 그러면 타수를 바꾸는 날
+       * 프로브만 옛 숫자를 압니다.)
+       */
       const t0 = G.state().elapsed
       while (G.state().elapsed - t0 < seconds && G.state().hitsDealt === hits0) await sleep2()
+      let lastHitAt = G.state().elapsed
+      let seen = G.state().hitsDealt
+      while (G.state().elapsed - lastHitAt < 0.4 && G.state().elapsed - t0 < seconds + 3) {
+        if (G.state().hitsDealt !== seen) {
+          seen = G.state().hitsDealt
+          lastHitAt = G.state().elapsed
+        }
+        await sleep2()
+      }
       const after = G.enemyInfo(e)?.hp ?? before
       return {
         dealt: Number((before - after).toFixed(2)),
@@ -229,11 +250,191 @@ try {
       }, 3)
       rows.push({ what: '구르기 공격', want: w.moves[1].damage, ...roll })
 
+      /**
+       * ⑥ **스킬** — 보스 피해의 71% 를 내는 통로인데, 지금까지 실측한
+       *    적이 없습니다. `npm run tripod` 은 표의 실효 수치를 **찍기만**
+       *    하고, 그 값이 실제 타격에 도달하는지는 아무도 안 봤습니다.
+       *
+       *    기대값은 `effectiveSkill(slot)` — 트라이포드까지 반영해 게임이
+       *    계산해 준 값입니다. 다단히트는 `damage × hits` 로 봅니다.
+       *
+       *    ⚠️ 무기 스킬(0~2)만 잽니다. 룬(3~4)은 무기가 아니라 진행에
+       *       따라 붙는 것이라, 판 시작 상태에서는 비어 있을 수 있습니다.
+       */
+      /** ⌨️ 키는 **게임의 표**에서 읽습니다 — 프로브가 베끼면 옛 키를 누릅니다. */
+      const keys = G.slotCooldowns().map((c) => c.key)
+      for (let slot = 0; slot < 3; slot++) {
+        const def = G.effectiveSkill(slot)
+        if (!def || typeof def.damage !== 'number' || def.damage <= 0) continue
+        const cast = await hitOnce(async (e) => {
+          const i = G.enemyInfo(e)
+          if (i) {
+            // 지점 지정 스킬을 위해 **적 위에** 겨눕니다.
+            G.aimAtWorld(i.x, i.z)
+          }
+          await sleep2()
+          G.press(keys[slot])
+          G.release(keys[slot])
+        }, 3)
+        const hits = typeof def.hits === 'number' && def.hits > 0 ? def.hits : 1
+        rows.push({
+          what: `스킬 ${slot + 1} (${def.id})`,
+          want: Number((def.damage * hits).toFixed(2)),
+          ...cast,
+        })
+      }
+
       out.weapons.push({ id: w.id, got, rows })
     }
     G.freezeEnemies(false)
     return out
   })
+
+  /**
+   * ── 🌿 **트라이포드가 실제 타격을 바꾸는가** ────────────────────────
+   *
+   * 트라이포드는 이 게임에서 스킬 하나를 여러 갈래로 만드는 시스템인데,
+   * **실측으로 확인한 적이 한 번도 없습니다.** `npm run tripod` 은 표의
+   * 실효 수치를 찍고 스크린샷을 남길 뿐입니다. 스킬이 보스 피해의 71% 를
+   * 내는 통로이고 트라이포드가 그 스킬을 바꾸는 것이니, 여기가 조용히
+   * 끊어져 있으면 성장의 절반이 장식이 됩니다.
+   *
+   * ⚠️ **바뀐다는 것만으로는 부족합니다.** 표가 바뀌었는데 타격이 안
+   *    바뀌는 것이 정확히 이 저장소가 두 번 만난 버그의 모양입니다.
+   *    그래서 두 가지를 같이 봅니다: 표가 바뀌었는가, **그리고** 그
+   *    바뀐 값이 실제로 들어왔는가.
+   */
+  const tri = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+    const runFor = async (sec) => {
+      const t = G.state().elapsed + sec
+      while (G.state().elapsed < t) await sleep2()
+    }
+    const idle = async (sec = 3) => {
+      const t = G.state().elapsed + sec
+      while (G.state().elapsed < t && G.state().player.state !== 0) await sleep2()
+    }
+    const keys = G.slotCooldowns().map((c) => c.key)
+    const cast = async (slot) => {
+      await idle()
+      G.clearEnemies()
+      await runFor(0.3)
+      const e = G.spawnEnemyKind('grunt', 6, 0)
+      await runFor(0.25)
+      const i = G.enemyInfo(e)
+      if (!i) return null
+      G.wakeEnemy(e)
+      G.freezeEnemies(true)
+      G.setHp(e, 1000000)
+      /**
+       * ⚠️ **거리도 게임에게 묻습니다.**
+       *
+       * 1.2m 로 못 박았더니 트라이포드를 켠 뒤 실측이 0 으로 나왔습니다.
+       * `shadow_step` 은 **돌진** 스킬이고, 돌진 거리를 늘리는 선택지를
+       * 켜면 그 거리에서는 적을 **지나쳐 버립니다.** 게임이 바뀌었는데
+       * 프로브가 옛 거리를 들고 있었던 것입니다 — 이 저장소가 반복해서
+       * 만난 모양입니다. 돌진이 있으면 그 거리의 8할에 섭니다.
+       */
+      const d0 = G.effectiveSkill(slot)
+      const dash = typeof d0?.dash === 'number' ? d0.dash : 0
+      const stand = dash > 1 ? dash * 0.8 : 1.2
+      G.teleportPlayer(i.x - stand, i.z)
+      G.aimAtWorld(i.x, i.z)
+      G.setStamina(1000)
+      await runFor(0.2)
+      /**
+       * ⚠️ **쿨다운이 돌아올 때까지 기다립니다.**
+       *
+       * 기준선을 한 번 시전하면 그 슬롯이 쿨다운에 들어갑니다. 그걸 안
+       * 기다리고 다시 눌렀더니 두 번째 측정이 **실측 0** 으로 나왔고,
+       * 하마터면 *"트라이포드가 실제 타격에 안 들어온다"* 는 큰 결론을
+       * 그대로 들고 갈 뻔했습니다. 표는 22 → 31.9 로 멀쩡히 바뀌어
+       * 있었으니 더 그럴듯했습니다. **누른 것이 나가기는 했는지**를
+       * 먼저 물어야 합니다.
+       */
+      const tCd = G.state().elapsed + 20
+      while (G.state().elapsed < tCd && (G.slotCooldowns()[slot]?.cd ?? 0) > 0) await sleep2()
+      const before = G.enemyInfo(e).hp
+      const h0 = G.state().hitsDealt
+      G.press(keys[slot])
+      G.release(keys[slot])
+      const t0 = G.state().elapsed
+      while (G.state().elapsed - t0 < 3 && G.state().hitsDealt === h0) await sleep2()
+      let last = G.state().elapsed
+      let seen = G.state().hitsDealt
+      while (G.state().elapsed - last < 0.4 && G.state().elapsed - t0 < 6) {
+        if (G.state().hitsDealt !== seen) {
+          seen = G.state().hitsDealt
+          last = G.state().elapsed
+        }
+        await sleep2()
+      }
+      return {
+        dealt: Number((before - (G.enemyInfo(e)?.hp ?? before)).toFixed(2)),
+        hit: G.state().hitsDealt > h0,
+        /**
+         * 🔎 0 이 나왔을 때 **왜인지** 말해 주는 값들 — 없으면 눈이 먼 채로
+         * 고칩니다. ⚠️ 이 쿨다운은 **시전이 끝난 뒤**의 값입니다(그래서
+         * 10 근처가 정상). 누르기 직전 값이 아니라는 것을 이름에 적어 둡니다 —
+         * 이 저장소가 이름 때문에 잘못 읽은 적이 있습니다.
+         */
+        cdAfterCast: G.slotCooldowns()[slot]?.cd ?? -1,
+        stateAfter: G.state().player.state,
+        stand: Number(stand.toFixed(2)),
+        dash,
+      }
+    }
+    const want = (slot) => {
+      const d = G.effectiveSkill(slot)
+      if (!d || typeof d.damage !== 'number') return -1
+      const hits = typeof d.hits === 'number' && d.hits > 0 ? d.hits : 1
+      return Number((d.damage * hits).toFixed(2))
+    }
+    // 첫 무기·첫 스킬로 잽니다. 트라이포드 점수를 넉넉히 줍니다.
+    G.grantTripod(9)
+    await runFor(0.2)
+    const skillId = G.effectiveSkill(0)?.id
+    const base = { want: want(0), ...(await cast(0)) }
+    // 1티어의 선택지를 훑어 **피해가 달라지는 것**을 찾습니다.
+    let picked = null
+    for (let opt = 0; opt < 3; opt++) {
+      if (!G.unlockTripod(skillId, 0, opt)) continue
+      await runFor(0.2)
+      if (want(0) !== base.want) {
+        picked = opt
+        break
+      }
+    }
+    if (picked === null) {
+      G.freezeEnemies(false)
+      return { skillId, base, picked: null }
+    }
+    const after = { want: want(0), ...(await cast(0)) }
+    G.freezeEnemies(false)
+    return { skillId, base, after, picked }
+  })
+  console.log('')
+  check(
+    tri?.base?.hit === true && tri.base.want > 0,
+    `🌿 트라이포드 기준선을 쟀다 (${tri?.skillId})`,
+    `실측 ${tri?.base?.dealt} vs 표 ${tri?.base?.want}`,
+  )
+  if (tri?.picked === null) {
+    check(false, '🌿 피해를 바꾸는 1티어 선택지를 찾지 못했다 (측정 불성립)', `${tri?.skillId}`)
+  } else if (tri?.after) {
+    check(
+      tri.after.want !== tri.base.want,
+      '🌿 **표가 실제로 바뀐다** (안 바뀌면 아래 검사가 헛돕니다)',
+      `${tri.base.want} → ${tri.after.want}`,
+    )
+    check(
+      tri.after.hit === true &&
+        Math.abs(tri.after.dealt - tri.after.want) <= Math.max(0.5, tri.after.want * 0.02),
+      '🌿 **바뀐 값이 실제 타격에 들어온다** (표만 바뀌고 손은 그대로면 장식입니다)',
+        `실측 ${tri.after.dealt} vs 표 ${tri.after.want} · 시전 뒤 쿨 ${tri.after.cdAfterCast} · 누른 뒤 상태 ${tri.after.stateAfter} · 선 거리 ${tri.after.stand}(돌진 ${tri.after.dash})`,
+    )
+  }
 
   for (const w of result.weapons) {
     console.log(`\n  [${w.id}]`)
