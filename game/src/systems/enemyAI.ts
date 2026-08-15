@@ -40,6 +40,7 @@ import {
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
   PLAYER,
+  BLEED,
   POISE,
   hearDistance,
 } from '../config/balance'
@@ -1023,6 +1024,21 @@ export function enemyAiSystem(
      * 결과가 같습니다. 회복이 있어야 "한 번에 몰아쳐야 무너뜨린다"가 됩니다.
      */
     if (Enemy.brokenT[e] > 0) Enemy.brokenT[e] = Math.max(0, Enemy.brokenT[e] - dt)
+    /**
+     * 🩸 **출혈은 시간이 지나면 식습니다.**
+     *
+     * 강인도 회복과 **같은 자리**에서 흐르게 둡니다 — 시간이 흐르는 값은
+     * 한 곳에서 다 흐르게 해야 나중에 "왜 이건 안 줄지?"를 찾으러 파일을
+     * 뒤지지 않습니다(playerControl 의 타이머 블록과 같은 규약).
+     *
+     * 식는다는 것이 이 축의 전부입니다 — **이어서 압박하면 유지되고
+     * 물러나면 사라집니다.** 안 식으면 "언젠가는 터진다"가 되어, 소울류의
+     * 출혈이 아니라 그냥 느린 피해가 됩니다.
+     */
+    Enemy.bleedIdleT[e] += dt
+    if (Enemy.bleedIdleT[e] >= BLEED.decayDelay && Enemy.bleed[e] > 0) {
+      Enemy.bleed[e] = Math.max(0, Enemy.bleed[e] - BLEED.decayPerSec * dt)
+    }
     Enemy.poiseIdleT[e] += dt
     if (Enemy.poiseIdleT[e] >= POISE.regenDelay && Enemy.poise[e] < cfg.poiseMax) {
       Enemy.poise[e] = Math.min(cfg.poiseMax, Enemy.poise[e] + POISE.regenPerSec * dt)

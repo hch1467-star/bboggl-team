@@ -184,6 +184,9 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.chainNext[e] = NO_CHAIN
   Enemy.chained[e] = 0
   Enemy.poise[e] = cfg.poiseMax
+  // 🩸 bitECS 는 엔티티를 재사용합니다 — 안 비우면 앞 판의 출혈을 물려받습니다.
+  Enemy.bleed[e] = 0
+  Enemy.bleedIdleT[e] = 0
   Enemy.poiseIdleT[e] = 0
   // ⏳ 차례표도 새로 시작합니다. bitECS 는 엔티티를 재사용하므로, 안 비우면
   //    죽은 적이 쌓아 둔 대기 시간을 새로 태어난 적이 물려받습니다.

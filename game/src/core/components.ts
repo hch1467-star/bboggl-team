@@ -303,6 +303,10 @@ export const Enemy = defineComponent({
   unawareT: 'f32',
   /** 마지막 피격 이후 지난 시간(초). POISE.regenDelay 를 넘기면 회복합니다. */
   poiseIdleT: 'f32',
+  /** 🩸 출혈 축적(0~BLEED.max). 가득 차면 터집니다. */
+  bleed: 'f32',
+  /** 🩸 마지막으로 쌓인 뒤 흐른 시간(초) — 이 값이 지연을 넘기면 식습니다. */
+  bleedIdleT: 'f32',
   /**
    * 🎟 **공격 차례를 기다린 시간(초).**
    *

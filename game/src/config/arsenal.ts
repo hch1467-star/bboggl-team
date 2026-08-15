@@ -701,6 +701,13 @@ export interface WeaponDef {
    */
   poiseScale: number
   /**
+   * 🩸 **출혈 축적 배율.** 강인도(`poiseScale`)와 **반대 방향**으로 잡습니다 —
+   * 무거운 무기는 무너뜨리고, 가벼운 무기는 터뜨립니다. 두 배율이 같은
+   * 방향이면 축이 하나 늘어난 게 아니라 강한 무기가 더 강해질 뿐입니다.
+   * 근거와 값의 계산은 balance.ts `BLEED` 주석.
+   */
+  bleedScale: number
+  /**
    * 회피 스태미나 배율 (1 = 기본 25).
    *
    * ── 왜 무기마다 회피 값이 다른가 ────────────────────────────────
@@ -770,6 +777,8 @@ export const WEAPONS: WeaponDef[] = [
     comboWindow: 0.42,
     // 만능형 — 어느 축에서도 1등이 아니지만 어느 축에서도 꼴찌가 아닙니다.
     poiseScale: 1,
+    // 균형 무기 — 두 축 다 기본값입니다. 3타 × 12 = 36/바퀴.
+    bleedScale: 1,
     skills: ['lunge_slash', 'whirlwind', 'blade_wave', 'cleave_helm'],
     combo: [
       { name: '1타', windup: 0.12, active: 0.08, recovery: 0.2, damage: 12, range: 2.3, arcDeg: 110, staminaCost: 10, hitstop: 0.055, trauma: 0.22, lunge: 1.5, knockback: 1.6 },
@@ -790,6 +799,12 @@ export const WEAPONS: WeaponDef[] = [
      * **한 번에 크게, 오래는 못 붙어 있는** 것이 이 무기의 거래입니다.
      */
     poiseScale: 1.7,
+    /**
+     * 대검은 **무너뜨리는 쪽**입니다. 2타 × 12 × 0.55 = 13.2/바퀴 —
+     * 여덟 바퀴가 걸려 사실상 이 축을 안 씁니다. 그게 의도입니다:
+     * 모든 무기가 모든 축을 쓰면 무기를 고르는 일이 사라집니다.
+     */
+    bleedScale: 0.55,
     // 대검은 기본값(1)입니다. 무거운 무기에 벌을 더 주면 "느리고 무겁다"가
     // 성격이 아니라 **불이익 두 겹**이 됩니다.
     skills: ['earthshatter', 'wide_cleave', 'leap_slam', 'shove'],
@@ -811,6 +826,12 @@ export const WEAPONS: WeaponDef[] = [
      * 아닙니다 — 등 뒤를 잡고 **오래 붙어 있는** 것이 답입니다.
      */
     poiseScale: 0.5,
+    /**
+     * 쌍단검은 **터뜨리는 쪽**입니다. 4타 × 12 × 1.6 = 76.8/바퀴 —
+     * 약 1.6바퀴면 터집니다. 이 무기가 존재할 이유가 지금까지 백어택
+     * 하나였는데, 이제 *"이어서 붙어 있으면 큰 것이 온다"* 가 생깁니다.
+     */
+    bleedScale: 1.6,
     /**
      * **회피가 25 → 19 로 쌉니다** (0.75).
      *

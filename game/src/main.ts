@@ -15,6 +15,7 @@ import {
 } from './config/arsenal'
 import {
   AWARE,
+  BLEED,
   hearDistance,
   BOSS_ARENA,
   COMBAT,
@@ -93,6 +94,7 @@ import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals } from './render/visuals'
 import {
   breakEvents,
+  bleedEvents,
   breakPoise,
   finisherEvents,
   counterEvents,
@@ -338,6 +340,8 @@ class Game {
   private counterCount = 0
   /** 🛡 이번 판에 성립한 저스트 가드 수 — 프로브가 "실제로 되는가"를 묻습니다. */
   private justGuards = 0
+  /** 🩸 이번 판에 출혈이 터진 횟수 — 넣어 두고 안 터지면 잴 수가 없습니다. */
+  private bleedPops = 0
   /**
    * 🧪 실험대에서 **붙들어 둔** 기력(null 이면 안 붙듦). 위 루프 주석 참고 —
    * 한 번 써 넣는 것과 매 프레임 유지하는 것은 다릅니다.
@@ -602,6 +606,7 @@ class Game {
     this.hurtLedger = []
     this.hurtWatch.clear()
     this.justGuards = 0
+    this.bleedPops = 0
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -1434,6 +1439,25 @@ class Game {
       }
     }
     breakEvents.length = 0
+
+    /**
+     * 🩸 **출혈이 터진 순간** — 화면과 귀에 한 번씩.
+     *
+     * 무너짐(붕괴)보다 **작게** 냅니다. 둘이 같은 크기로 터지면 플레이어는
+     * 두 축을 구분하지 못하고, 그러면 축이 둘인 뜻이 없어집니다:
+     *   · 붕괴  — 큰 흔들림 + 긴 히트스톱 + 사방 스파크 (무방비가 열립니다)
+     *   · 출혈  — 작은 흔들림 + 짧은 멎음 + **한 점**에서 터지는 스파크
+     */
+    for (const b of bleedEvents) {
+      this.bleedPops++
+      this.cam.addTrauma(0.22)
+      requestHitstop(0.06)
+      sfx.impact(true, false, b.x, b.z)
+      for (let i = 0; i < 4; i++) {
+        this.vfx.spawnHitSpark(b.x, b.y + 1.1 + i * 0.12, b.z, 0.9)
+      }
+    }
+    bleedEvents.length = 0
 
     /**
      * 👀 **들킨 순간** — 화면과 귀에 한 번씩.
@@ -3142,6 +3166,8 @@ class Game {
     skillCasts: number[]
     /** 기둥 1 — 스태미나로 낸 기본 공격 횟수 */
     lightSwings: number
+    /** 🩸 출혈이 터진 횟수 */
+    bleedPops: number
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3164,6 +3190,7 @@ class Game {
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
+      bleedPops: this.bleedPops,
       chainsArmed: readChainsArmed(),
       chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),
@@ -4231,6 +4258,21 @@ declare global {
         refund: number
         poise: number
       }
+      /** 🩸 출혈 규칙 — 문턱과 무기별 배율을 게임이 알려 줍니다 */
+      bleedInfo: () => {
+        max: number
+        perHit: number
+        decayDelay: number
+        decayPerSec: number
+        popDamagePct: number
+        weapons: {
+          id: string
+          bleedScale: number
+          poiseScale: number
+          hitsPerCombo: number
+          perCombo: number
+        }[]
+      }
       /** 🎛 슬롯 규약 — 검사가 숫자를 베끼지 않게 */
       slotInfo: () => { count: number; firstRuneSlot: number }
       /** 🌿 트라이포드 표의 크기 */
@@ -4807,6 +4849,8 @@ window.__game = {
       staggered: Actor.state[entity] === ActorState.Stagger,
       broken: Enemy.brokenT[entity] > 0,
       poise: Number(Enemy.poise[entity].toFixed(1)),
+      /** 🩸 지금 쌓인 출혈(0~max). 프로브가 축적을 눈으로 볼 수 있게 합니다. */
+      bleed: Number(Enemy.bleed[entity].toFixed(1)),
       poiseMax: enemyDef(Enemy.kind[entity]).poiseMax,
       attackId: attackAt(kind, Enemy.attackIndex[entity]).id,
       attackPhase: Actor.phase[entity],
@@ -4906,6 +4950,26 @@ window.__game = {
   guardInfo: () => game.debugGuardInfo(),
   dodgeInfo: () => game.debugDodgeInfo(),
   moveInfo: () => game.debugMoveInfo(),
+  /**
+   * 🩸 출혈 규칙 — 프로브가 문턱과 배율을 베끼지 않게 게임이 알려 줍니다.
+   * 무기별 배율까지 함께 냅니다(무기 하나로 통과시키면 나머지 둘을 든
+   * 사람에게는 없는 규칙이 됩니다 — punish.ts 가 적어 둔 문장).
+   */
+  bleedInfo: () => ({
+    max: BLEED.max,
+    perHit: BLEED.perHit,
+    decayDelay: BLEED.decayDelay,
+    decayPerSec: BLEED.decayPerSec,
+    popDamagePct: BLEED.popDamagePct,
+    weapons: WEAPONS.map((w) => ({
+      id: w.id,
+      bleedScale: w.bleedScale,
+      poiseScale: w.poiseScale,
+      hitsPerCombo: w.combo.length,
+      /** 콤보 한 바퀴가 쌓는 양 — "몇 바퀴면 터지는가"를 게임이 계산합니다. */
+      perCombo: Number((BLEED.perHit * w.bleedScale * w.combo.length).toFixed(1)),
+    })),
+  }),
   /**
    * 🎛 슬롯 규약 — **loadout.ts 가 정한 것을 그대로** 내보냅니다.
    * 검사가 "룬은 3·4번" 같은 숫자를 들고 있으면, 슬롯을 늘리는 날

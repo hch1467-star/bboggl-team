@@ -1,5 +1,5 @@
 import { FINISH_COMBO, HEAVY_COMBO, finisherStep, heavyStep, type SkillShape } from '../config/arsenal'
-import { COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE } from '../config/balance'
+import { BLEED, COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -121,6 +121,12 @@ export interface AttackSpec {
   /** 🥋 강타(집중 소모)인가 — 강인도를 크게 깎습니다. */
   heavyBlow?: boolean
   /**
+   * 🩸 **출혈 축적 배율.** 없으면 1 로 봅니다.
+   * 강인도와 **반대 방향**으로 잡습니다 — 무거운 것은 무너뜨리고 가벼운
+   * 것은 터뜨립니다(arsenal.ts `bleedScale`).
+   */
+  bleedScale?: number
+  /**
    * 🟡 **판정이 active 구간 내내 남는가.**
    *
    * ── 왜 필요해졌는가 ────────────────────────────────────────────
@@ -189,6 +195,8 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       heavy: true,
       heavyBlow: true,
       poiseScale: weapon.poiseScale,
+      // 🩸 강인도와 **반대 방향**의 배율 — arsenal.ts `bleedScale` 주석.
+      bleedScale: weapon.bleedScale,
       hits: 1,
       healSelf: 0,
     }
@@ -214,6 +222,8 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       noCrit: true,
       finisher: true,
       poiseScale: weapon.poiseScale,
+      // 🩸 강인도와 **반대 방향**의 배율 — arsenal.ts `bleedScale` 주석.
+      bleedScale: weapon.bleedScale,
       hits: 1,
       healSelf: 0,
     }
@@ -229,6 +239,9 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     trauma: c.trauma,
     heavy: comboIndex === weapon.combo.length - 1,
     poiseScale: weapon.poiseScale,
+    // 🩸 기본 콤보야말로 이 축의 주된 통로입니다 — 여기 빠뜨리면 무기별
+    //    차이가 통째로 사라집니다(실제로 쌍단검이 배율 1.0으로 재졌습니다).
+    bleedScale: weapon.bleedScale,
     hits: 1,
     healSelf: 0,
   }
@@ -249,6 +262,8 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
     heavy: def.damage >= 35,
     // 무기 스킬(0~2)은 그 무기의 성격을 따릅니다. 룬(3~4)은 무기가 아니라 1배.
     poiseScale: slot <= 2 ? weaponOf(e).poiseScale : 1,
+    // 무기 스킬은 그 무기의 출혈 성격도 따릅니다. 룬은 무기가 아니라 1배.
+    bleedScale: slot <= 2 ? weaponOf(e).bleedScale : 1,
     hits: Math.max(1, def.hits),
     originX: def.shape === 'point' ? Player.castX[e] : undefined,
     originZ: def.shape === 'point' ? Player.castZ[e] : undefined,
@@ -383,6 +398,44 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
 
   breakPoise(t)
 }
+
+/**
+ * 🩸 **출혈을 쌓고, 가득 차면 터뜨립니다.**
+ *
+ * ── 왜 강인도와 나란히 두는가 ──────────────────────────────────
+ * 같은 타격에서 갈라져야 두 축이 **같은 사건을 다르게 읽는다**는 것이
+ * 분명해집니다. 강인도는 `trauma`(한 방의 무게)로, 출혈은 **타수**로
+ * 오릅니다 — 그래서 대검은 무너뜨리고 단검은 터뜨립니다.
+ *
+ * ⚠️ **예고 중 배수·백어택 배수를 여기엔 안 겁니다.** 강인도는 *"언제
+ *    때렸는가"* 를 보상하고, 출혈은 *"얼마나 이어졌는가"* 를 보상합니다.
+ *    둘 다 같은 배수를 받으면 축이 둘이 아니라 하나가 됩니다.
+ *
+ * ⚠️ 터진 피해는 **최대 체력의 비율**입니다. 고정값이면 잡몹에게만 세거나
+ *    보스에게만 세집니다(balance.ts `BLEED.popDamagePct` 주석).
+ */
+function applyBleed(t: number, spec: AttackSpec): void {
+  const w = spec.bleedScale ?? 1
+  if (w <= 0) return
+  Enemy.bleedIdleT[t] = 0
+  Enemy.bleed[t] += BLEED.perHit * w
+  if (Enemy.bleed[t] < BLEED.max) return
+
+  Enemy.bleed[t] = 0
+  const dmg = Health.max[t] * BLEED.popDamagePct
+  Health.hp[t] = Math.max(0, Health.hp[t] - dmg)
+  bleedEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
+  /**
+   * 터질 때 강인도도 조금 깎습니다. 작게 두는 이유: 무너뜨리기는 강인도의
+   * 몫이고, 여기서 크게 주면 두 축이 같은 결과로 수렴합니다.
+   */
+  Enemy.poiseIdleT[t] = 0
+  Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t])
+  if (Enemy.poise[t] <= 0) breakPoise(t)
+}
+
+/** 🩸 출혈이 터진 순간 — 게임 루프가 읽고 비웁니다(연출은 시스템 밖에서). */
+export const bleedEvents: BreakEvent[] = []
 
 /**
  * 강인도를 즉시 깨뜨립니다.
@@ -971,6 +1024,7 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         // `back` 은 위에서 이미 계산했습니다(근접 부채꼴 + 등 뒤).
         // 강인도에도 같은 판정을 그대로 씁니다 — 두 번 계산하면 언젠가 어긋납니다.
         applyPoise(t, spec, back)
+        applyBleed(t, spec)
       }
     }
 

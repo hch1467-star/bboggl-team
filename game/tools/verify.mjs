@@ -397,6 +397,151 @@ async function main() {
     await page.evaluate(() => window.__game.reset())
     await sleep(300)
 
+    /**
+     * ── 🩸 **세 번째 축이 실제로 도는가** ────────────────────────────
+     *
+     * 적에게 쌓이는 것이 체력과 강인도 둘뿐이었고, 둘 다 *"한 방이 얼마나
+     * 센가"* 를 묻습니다. 참고 게임은 전부 세 번째를 갖고 있습니다 —
+     * 소울류의 출혈·독, 블러드본의 신속 독, 오공의 화상·빙결·감전,
+     * 로스트아크의 파괴·무력화. 공통점은 **한 방이 아니라 이어짐**이
+     * 보상받는다는 것입니다.
+     *
+     * ⚠️ 문턱과 배율을 프로브가 들고 있지 않습니다 — `bleedInfo()` 가
+     *    게임의 값을 그대로 줍니다. 값을 바꾸는 날 검사만 빨개지면
+     *    고쳐야 할 것은 게임이 아니라 검사입니다.
+     */
+    {
+      /**
+       * ⚠️ **인자 순서를 한 번 뒤집어 썼습니다** — `check(조건, '라벨')` 로.
+       *    그러면 라벨 자리에 `true` 가 들어가고 조건 자리에 문자열이
+       *    들어가서 **다섯 검사가 전부 무조건 통과**했습니다. 출력의
+       *    `PASS  true` 가 그 흔적입니다. 이 파일은 `check(라벨, 조건, 설명)`
+       *    입니다. 이 저장소가 제일 비싸게 치는 실패가 **아무 말도 안 하는
+       *    계측기**인데, 새 축을 넣으면서 그걸 다섯 개 만들 뻔했습니다.
+       */
+      await page.evaluate(() => window.__game.reset())
+      await sleep(300)
+      const rule = await page.evaluate(() => window.__game.bleedInfo())
+
+      /**
+       * ① **두 축이 반대 방향인가.** 같은 방향이면 축이 하나 늘어난 것이
+       *    아니라 강한 무기가 더 강해질 뿐입니다.
+       */
+      const heavy = rule.weapons.find((w) => w.id === 'greatsword')
+      const light = rule.weapons.find((w) => w.id === 'daggers')
+      check(
+        '강인도와 출혈이 **반대 방향**이다 (대검은 무너뜨리고 단검은 터뜨린다)',
+        !!heavy && !!light && heavy.poiseScale > light.poiseScale && heavy.bleedScale < light.bleedScale,
+        `대검 강인도 ${heavy?.poiseScale}·출혈 ${heavy?.bleedScale} vs 단검 ${light?.poiseScale}·${light?.bleedScale}`,
+      )
+      // ② 무기마다 "몇 바퀴면 터지는가"가 실제로 다른가.
+      const laps = (w) => rule.max / w.perCombo
+      check(
+        '무기마다 **터지기까지의 바퀴 수**가 크게 다르다 (선택이 되게)',
+        !!heavy && !!light && laps(heavy) > laps(light) * 2,
+        rule.weapons.map((w) => `${w.id} ${(rule.max / w.perCombo).toFixed(1)}바퀴`).join(' · '),
+      )
+
+      /**
+       * ③ **실제로 쌓이고 터지는가.** 허수아비를 세워 두고 단검으로
+       *    이어 칩니다. 판정은 게임의 `enemyInfo().bleed` 와 `bleedPops`
+       *    가 내립니다 — 봇이 타수를 세어 추정하지 않습니다.
+       */
+      const popped = await page.evaluate(async () => {
+        const G = window.__game
+        const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+        G.reset()
+        await new Promise((r) => setTimeout(r, 400))
+        G.clearEnemies()
+        await new Promise((r) => setTimeout(r, 200))
+        /**
+         * 3번 무기(쌍단검)로 바꿉니다 — 이 축을 파는 무기입니다.
+         *
+         * ⚠️ **바뀔 때까지 기다립니다.** 무기 교체는 동작이 끝난 뒤에
+         *    적용되므로(playerControl `bufferedWeapon`), 300ms 를 자고
+         *    넘어갔더니 롱소드로 재고 있었습니다 — 쌓인 값이 12(배율 1.0)
+         *    였던 것이 그 흔적입니다. 바뀐 것을 **확인**하고 갑니다.
+         */
+        G.press('Digit3')
+        G.release('Digit3')
+        const swapBy = G.state().elapsed + 2
+        while (
+          G.state().elapsed < swapBy &&
+          G.state().loadout.slots[0] !== 'shadow_step'
+        ) {
+          await sleep2()
+        }
+        const weaponOk = G.state().loadout.slots[0] === 'shadow_step'
+        const p = G.state().player
+        const e = G.spawnEnemyKind('grunt', p.x + 1.6, p.z)
+        // 죽으면 표본이 사라지므로 체력을 크게 잡아 둡니다.
+        G.setHp(e, 9999)
+        G.aimAtWorld(G.enemyInfo(e).x, G.enemyInfo(e).z)
+        const before = G.runStats().bleedPops
+        let peak = 0
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 14) {
+          const i = G.enemyInfo(e)
+          if (i) {
+            peak = Math.max(peak, i.bleed)
+            G.setHp(e, 9999)
+            /**
+             * ⚠️ **적이 아니라 플레이어를 붙입니다.**
+             *
+             * 처음엔 넉백으로 밀려난 적을 매 프레임 순간이동으로 되돌렸는데,
+             * 14초 동안 **한 대**만 들어갔습니다. 적을 옮기는 것이 그 적의
+             * 물리·상태를 방해했습니다 — 토큰 실험에서 이미 한 번 겪은
+             * 모양입니다(*"계측기가 재려는 것을 바꿔 버리면 그 숫자는
+             * 게임의 것이 아닙니다"*). 이번엔 **내 쪽**을 옮깁니다.
+             */
+            G.teleportPlayer(i.x - 1.4, i.z)
+            G.aimAtWorld(i.x, i.z)
+          }
+          G.press('Mouse0')
+          G.release('Mouse0')
+          await sleep2()
+        }
+        /**
+         * ④ **식는지도 같은 evaluate 안에서 잽니다.**
+         *
+         * 처음엔 따로 불러서 `G.enemies()` 로 적을 다시 찾으려 했는데,
+         * **그런 훅이 없습니다.** 그러면 빈 값이 들어와 검사가 조용히
+         * 통과했을 자리입니다 — 이 저장소가 빈 배열로 세 번 데인 모양
+         * 그대로입니다. 적을 쥐고 있는 여기서 이어서 잽니다.
+         */
+        // 마지막 타격 직후의 값을 잡고, 그 뒤로는 **아무것도 안 합니다**.
+        const coolStart = G.enemyInfo(e)?.bleed ?? -1
+        const t1 = G.state().elapsed
+        while (G.state().elapsed - t1 < 5) await sleep2()
+        const coolEnd = G.enemyInfo(e)?.bleed ?? -1
+        return {
+          weaponOk,
+          // 몇 대가 실제로 들어갔는가 — "안 쌓인다"와 "안 맞았다"를 가릅니다.
+          hits: G.state().hitsDealt,
+          peak,
+          pops: G.runStats().bleedPops - before,
+          coolStart,
+          coolEnd,
+        }
+      })
+      check(
+        '때리면 출혈이 **쌓인다** (측정이 성립했다 — 쌍단검으로 쟀다)',
+        popped.weaponOk && popped.peak > 0,
+        `무기 교체 ${popped.weaponOk ? 'O' : 'X'} · 때린 횟수 ${popped.hits} · 최고 ${popped.peak} / ${rule.max}`,
+      )
+      check('가득 차면 **터진다**', popped.pops > 0, `${popped.pops}회`)
+
+      /**
+       * ④ **식는가** — 이 줄이 없으면 "언젠가는 터진다"가 되어, 소울류의
+       *    출혈이 아니라 그냥 느린 피해입니다. **실패할 수 있는 짝**입니다.
+       */
+      check(
+        '때리지 않으면 **식는다** (이어진 압박만 보상받게)',
+        popped.coolStart > 0 && popped.coolEnd < popped.coolStart,
+        `${popped.coolStart} → ${popped.coolEnd}`,
+      )
+    }
+
     // ---------- 5. 공격 상태 기계 & 콤보 ----------
     await page.evaluate(() => window.__game.reset())
     await sleep(300)
