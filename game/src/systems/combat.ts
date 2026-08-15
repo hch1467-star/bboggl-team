@@ -419,9 +419,12 @@ function applyBleed(t: number, spec: AttackSpec): void {
   if (w <= 0) return
   Enemy.bleedIdleT[t] = 0
   Enemy.bleed[t] += BLEED.perHit * w
+  const onBoss = Enemy.kind[t] === EnemyKind.Boss
   if (Enemy.bleed[t] > bleedPeak) bleedPeak = Enemy.bleed[t]
+  if (onBoss && Enemy.bleed[t] > bossBleedPeak) bossBleedPeak = Enemy.bleed[t]
   if (Enemy.bleed[t] < BLEED.max) return
 
+  if (onBoss) bossBleedPops++
   Enemy.bleed[t] = 0
   const dmg = Health.max[t] * BLEED.popDamagePct
   Health.hp[t] = Math.max(0, Health.hp[t] - dmg)
@@ -450,11 +453,26 @@ export const bleedEvents: BreakEvent[] = []
  *    훑을 이유가 없습니다.
  */
 let bleedPeak = 0
-export function readBleedPeak(): number {
-  return bleedPeak
+/**
+ * 🩸 **보스에게만** 따로 셉니다.
+ *
+ * 소울류의 출혈은 잡몹에게는 원래 안 돕니다 — 두세 대에 죽으니까요.
+ * 값은 **오래 버티는 상대**에게서 나옵니다(그래서 피해가 비율입니다).
+ * 그러니 이 축이 사는지 죽는지를 가르는 자리는 존 전체가 아니라
+ * **보스전 하나**입니다. 존 합계로 보면 잡몹의 0이 보스의 값을 덮습니다.
+ *
+ * 이걸 안 나눠 놓으면 다음 라운드가 또 *"얇으니 올리자"* 가 되고, 그러면
+ * 잡몹까지 같이 세져서 앞 라운드에 되살린 난이도가 도로 무너집니다.
+ */
+let bossBleedPeak = 0
+let bossBleedPops = 0
+export function readBleedPeak(): { any: number; boss: number; bossPops: number } {
+  return { any: bleedPeak, boss: bossBleedPeak, bossPops: bossBleedPops }
 }
 export function resetBleedPeak(): void {
   bleedPeak = 0
+  bossBleedPeak = 0
+  bossBleedPops = 0
 }
 
 /**

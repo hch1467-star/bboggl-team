@@ -3173,6 +3173,9 @@ class Game {
     bleedPops: number
     /** 🩸 한 적에게 쌓였던 최고치 — "안 쌓임"과 "쌓였는데 안 터짐"을 가릅니다 */
     bleedPeak: number
+    /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
+    bossBleedPeak: number
+    bossBleedPops: number
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3196,7 +3199,10 @@ class Game {
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
       bleedPops: this.bleedPops,
-      bleedPeak: Number(readBleedPeak().toFixed(1)),
+      bleedPeak: Number(readBleedPeak().any.toFixed(1)),
+      // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
+      bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
+      bossBleedPops: readBleedPeak().bossPops,
       chainsArmed: readChainsArmed(),
       chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),
