@@ -768,6 +768,102 @@ async function main() {
         `${focusRun?.hits}대 / ${focusRun?.comboLength}타 = ${((focusRun?.hits ?? 0) / (focusRun?.comboLength ?? 1)).toFixed(2)}점 기대 · 실제 ${focusRun?.gained}점`,
       )
 
+      /**
+       * ── 🍶 **회복을 노리는 적이 있는가** ─────────────────────────
+       *
+       * 마시기에는 무적 프레임이 **일부러** 없습니다(components.ts). 그런데
+       * `enemyAI.ts` 전체에 플레이어의 상태를 읽는 줄이 하나도 없어서,
+       * 그 위험을 만들 주체가 아무도 없었습니다 — 설계 노트만 있고 실행이
+       * 없는 상태였습니다. 소울류에서 *"언제 마실까"* 가 어려운 이유가
+       * 정확히 이것이고, 안전한 회복은 체력을 자원이 아니라 시간으로
+       * 만듭니다.
+       *
+       * ⚠️ 검사할 것이 둘입니다:
+       *   ① 마시면 적이 **실제로 당겨서** 커밋하는가
+       *   ② 그러면서 **예고는 그대로인가** — 줄어들면 기둥 2가 깨집니다
+       */
+      const heal = await page.evaluate(async () => {
+        const G = window.__game
+        const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+        const runFor = async (sec) => {
+          const t = G.state().elapsed + sec
+          while (G.state().elapsed < t) await sleep2()
+        }
+        const p = G.playerEntity()
+        G.reset()
+        await runFor(0.4)
+        G.setPlayerInvulnerable(true)
+        const e = G.spawnEnemyKind('grunt', 6, 0)
+        await runFor(0.2)
+        if (!G.enemyInfo(e)) return null
+        G.wakeEnemy(e)
+        const pin = () => {
+          const i = G.enemyInfo(e)
+          if (i) G.teleportPlayer(i.x - 1.8, i.z)
+          return i
+        }
+        pin()
+        G.setHp(p, 40)
+        await runFor(0.3)
+        /**
+         * ⚠️ **쿨다운이 넉넉히 남은 순간을 잡습니다.**
+         *
+         * 처음엔 *"마신 뒤 예고가 뜨기까지 걸린 시간"* 을 쟀는데, 기준선이
+         * 판마다 1.15초와 "한 번도 못 봄" 사이를 오갔습니다. 재려는 것은
+         * **규칙이 바꾸는 값**(쿨다운)인데 그 값의 *결과*(언제 휘두르나)를
+         * 재고 있었으니, 사이에 낀 모든 것이 잡음으로 들어옵니다.
+         * 이 저장소가 반복해서 배운 것 그대로입니다 — **재는 대상을 고칩니다.**
+         */
+        let before = -99
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 12) {
+          const i = pin()
+          if (i && !i.attacking && i.cooldown > G.punishHealInfo().cutTo + 0.3) {
+            before = i.cooldown
+            break
+          }
+          await sleep2()
+        }
+        if (before === -99) return { ok: false }
+        const armedBefore = G.runStats().healPunished
+        G.press('KeyX')
+        G.release('KeyX')
+        await runFor(0.1)
+        const i2 = pin()
+        const after = i2 ? i2.cooldown : -99
+        const drinking = G.state().player.state === 6
+        G.setPlayerInvulnerable(false)
+        return {
+          ok: true,
+          before: Number(before.toFixed(2)),
+          after: Number(after.toFixed(2)),
+          drinking,
+          armed: G.runStats().healPunished - armedBefore,
+          cutTo: G.punishHealInfo().cutTo,
+          windup: i2?.windup ?? -1,
+          minBase: Math.min(
+            ...G.enemyRoster()
+              .find((r) => r.id === 'grunt')
+              .attacks.map((a) => a.windup),
+          ),
+        }
+      })
+      check(
+        '회복 노림 측정이 성립했다 (실제로 마셨고, 쿨다운이 남은 자리를 잡았다)',
+        heal?.ok === true && heal.drinking === true && heal.before > heal.cutTo,
+        `마시는 중 ${heal?.drinking} · 마시기 전 쿨다운 ${heal?.before}초`,
+      )
+      check(
+        '🍶 **마시면 적이 노린다** (회복이 안전하면 체력은 자원이 아니라 시간입니다)',
+        heal?.ok === true && heal.armed > 0 && heal.after <= heal.cutTo + 0.001,
+        `쿨다운 ${heal?.before}초 → ${heal?.after}초 (문턱 ${heal?.cutTo}) · 노린 횟수 ${heal?.armed}`,
+      )
+      check(
+        '🍶 그래도 **예고는 안 줄어든다** (당기는 것은 쿨다운뿐)',
+        heal?.ok === true && (heal.windup <= 0 || heal.windup >= heal.minBase - 0.001),
+        `설정 최소 ${heal?.minBase}초 · 지금 ${heal?.windup}초`,
+      )
+
       check(
         '🩸 **처형**도 출혈을 쌓는다 (잘 싸울수록 축이 죽으면 안 됩니다)',
         branches.finisher?.hit === true &&

@@ -42,6 +42,7 @@ import {
   PLAYER,
   BLEED,
   POISE,
+  PUNISH_HEAL,
   hearDistance,
 } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
@@ -158,6 +159,18 @@ let commitGapT = 0
 let chainsArmed = 0
 /** 예약이 **실제로 쓰인** 횟수 — 예약과 같은 줄에서 셉니다(위 설계 노트). */
 let chainsFired = 0
+/**
+ * 🍶 **회복을 노린 횟수** — 규칙이 실제로 도는지 재는 눈금.
+ * "안 노린다"와 "노렸는데 못 맞혔다"는 처방이 정반대입니다.
+ */
+let healPunishArmed = 0
+export function readHealPunish(): number {
+  return healPunishArmed
+}
+export function resetHealPunish(): void {
+  healPunishArmed = 0
+}
+
 export function readChainsArmed(): number {
   return chainsArmed
 }
@@ -930,6 +943,12 @@ export function enemyAiSystem(
    * 재면 언젠가 한쪽만 고쳐져서 "어떤 적은 뛰는 걸 못 듣는" 상태가 됩니다.
    */
   const playerSpeed = Math.hypot(Velocity.x[playerEntity], Velocity.z[playerEntity])
+  /**
+   * 🍶 지금 플레이어가 **회복 중인가.** 한 프레임에 한 번만 읽어 모든 적이
+   * 같은 값을 씁니다 — 위 `playerSpeed` 와 같은 규약입니다(적마다 따로
+   * 읽으면 언젠가 한쪽만 고쳐져서 "어떤 적은 못 알아채는" 상태가 됩니다).
+   */
+  const drinkingNow = playerAlive && Actor.state[playerEntity] === ActorState.Drink
   const ids = enemies.run()
 
   if (commitGapT > 0) commitGapT = Math.max(0, commitGapT - dt)
@@ -1469,6 +1488,32 @@ export function enemyAiSystem(
 
     const facingError = Math.abs(wrapAngle(toPlayer - Transform.rotY[e]))
     const inRange = dist <= cfg.attackRange
+
+    /**
+     * 🍶 **회복을 노립니다** — 적이 플레이어의 상태를 읽는 유일한 자리.
+     *
+     * 근거는 balance.ts `PUNISH_HEAL` 설계 노트에 적어 두었습니다.
+     * 요약하면: 마시기에 무적을 일부러 안 넣어 놓고(components.ts),
+     * 정작 그 위험을 만들 주체가 아무도 없었습니다.
+     *
+     * ⚠️ **예고는 하나도 안 줄입니다.** 당기는 것은 쿨다운뿐이고,
+     *    토큰도 그대로 지킵니다. 즉 *"읽으면 답이 있다"* 와
+     *    *"한 번에 한 명만 덤빈다"* 는 그대로입니다. 줄어드는 것은
+     *    **아무 일도 안 일어나는 시간**뿐입니다 — 바로 위 `impatient`
+     *    (노려보다 커밋)가 이미 쓴 것과 같은 논리입니다.
+     *
+     * 한 번 당기면 그걸로 끝입니다(이미 `cutTo` 아래면 안 건드림).
+     * 매 프레임 다시 당기면 마시는 내내 쿨다운이 0에 붙어 있어서,
+     * 마시기가 끝난 뒤까지 연타로 이어집니다.
+     */
+    if (
+      drinkingNow &&
+      dist <= cfg.attackRange * PUNISH_HEAL.rangeMult &&
+      Actor.cooldownT[e] > PUNISH_HEAL.cutTo
+    ) {
+      Actor.cooldownT[e] = PUNISH_HEAL.cutTo
+      healPunishArmed++
+    }
 
     // ---- 공격 개시: 거리에 맞는 패턴을 골라 예고를 띄웁니다 ----
     //

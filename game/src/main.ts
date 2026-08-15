@@ -36,6 +36,7 @@ import {
   LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
   POISE,
+  PUNISH_HEAL,
   reactionTime,
   TREASURE,
   VIAL,
@@ -122,6 +123,8 @@ import {
   encounterEvents,
   enemyAiSystem,
   readChainsArmed,
+  readHealPunish,
+  resetHealPunish,
   resetChainLedger,
   noteChainDeath,
   noteChainsWiped,
@@ -620,6 +623,7 @@ class Game {
     resetBleedPeak()
     resetPoiseDealt()
     resetFocusFlow()
+    resetHealPunish()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -3225,6 +3229,8 @@ class Game {
     bossDamageBySource: Record<string, number[]>
     /** 🥋 집중이 어디서 왔고 얼마나 흘렸고 얼마나 태웠는가 */
     focusFlow: { 평타: number; 완벽회피: number; 버림: number; 태움: number }
+    /** 🍶 적이 회복을 노린 횟수 — 규칙이 실제로 도는가 */
+    healPunished: number
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3262,6 +3268,7 @@ class Game {
       bossBleedGapMax: Number(readBleedPeak().bossGapMax.toFixed(2)),
       bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
       focusFlow: readFocusFlow(),
+      healPunished: readHealPunish(),
       bossDamageBySource: Object.fromEntries(
         Object.entries(readBossDamageBySource()).map(([k, v]) => [
           k,
@@ -4269,6 +4276,8 @@ declare global {
         windup: number
         /** ⏳ 그중 뜸 들인 몫(초). 0이면 평소 박자 */
         held: number
+        /** 🍶 다음 공격까지 남은 쿨다운(초). 음수 = 준비된 채로 기다린 시간 */
+        cooldown: number
         brokenT: number
         intent: number
         staggered: boolean
@@ -4626,6 +4635,8 @@ declare global {
         /** 누른 뒤 **무적이 시작되기까지의 지연** — 반응 예산 계산에 필요합니다. */
         iFrameStart: number
       }[]
+      /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
+      punishHealInfo: () => { rangeMult: number; cutTo: number }
       weaponTable: () => {
         id: string
         name: string
@@ -4951,6 +4962,15 @@ window.__game = {
       windup: Number(Enemy.windupLen[entity].toFixed(3)),
       /** ⏳ 그중 **뜸 들인 몫**(초). 0이면 평소 박자입니다. */
       held: Number(Enemy.heldT[entity].toFixed(3)),
+      /**
+       * 🍶 다음 공격까지 남은 쿨다운(초). 음수는 *"준비됐는데 못 때리고
+       * 있는 시간"*(인내심)입니다 — enemyAI 의 `impatient` 와 같은 값.
+       *
+       * 노출하는 이유: *"회복을 노려 쿨다운을 당겼는가"* 를 **시간을 재서**
+       * 확인하면 검사가 흔들립니다(실제로 기준선이 판마다 1.15초와 "못 봄"
+       * 사이를 오갔습니다). 규칙이 바꾸는 값을 직접 보면 흔들릴 것이 없습니다.
+       */
+      cooldown: Number(Actor.cooldownT[entity].toFixed(3)),
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       /**
@@ -5300,6 +5320,8 @@ window.__game = {
         (PLAYER_CFG.dodge.iFrameStart * (w.dodgeDurationScale ?? 1)).toFixed(3),
       ),
     })),
+  /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
+  punishHealInfo: () => ({ rangeMult: PUNISH_HEAL.rangeMult, cutTo: PUNISH_HEAL.cutTo }),
   weaponTable: () =>
     WEAPONS.map((w) => ({
       id: w.id,
