@@ -296,6 +296,126 @@ try {
    *    는 게임이 `plungeStep()` 으로 **계산해 준 결과**입니다. 프로브가
    *    식을 베끼면 배율을 바꾸는 날 프로브만 옛 값을 씁니다.
    */
+  /**
+   * ---- 2.55 🔬 **조리법이 아니라 요리를 잽니다** ------------------
+   *
+   * ── 왜 이 검사가 생겼는가 ────────────────────────────────────────
+   * 아래 2.6 의 검사들은 전부 `weaponTable().plungeMoves` 를 봅니다. 그건
+   * 게임이 `plungeStep()` **파생 함수**로 계산해 준 값입니다. 그런데 정작
+   * 판정을 만드는 `combat.comboSpec` 은 그 함수를 안 쓰고 있었습니다 —
+   * 표식 254 를 `Math.min` 이 조용히 마지막 콤보 타로 접었습니다.
+   *
+   * 그래서 **파생값은 완벽했고 실제 타격은 전혀 다른 기술이었습니다.**
+   * 검사 열 개가 전부 초록이었고요. 조리법만 검사하면 요리는 안 나옵니다.
+   *
+   * 여기서는 **실제로 맞은 적의 체력이 얼마나 줄었는지**만 봅니다.
+   * 배율(강화 단계)은 판 시작이라 1배이고, 치명타를 피하려고 **정면에서**
+   * 칩니다. 값이 아니라 *"파생값과 같은가"* 를 묻습니다.
+   */
+  const drop255 = findDrop(cfg.fallFreeSteps + 1, cfg.maxClimb)
+  const live = drop255
+    ? await page.evaluate(
+        async ([top, bottom, steps]) => {
+          const G = window.__game
+          const p = G.playerEntity()
+          const step = () => new Promise((r) => setTimeout(r, 8))
+          G.reset()
+          await window.__t.runFor(0.4)
+          const table = G.weaponTable()
+          const wid = G.state().loadout.weapon
+          const w = table.find((t) => t.id === wid) ?? table[0]
+          const want = w.plungeMoves.find((m) => m.steps === steps)
+
+          // 착지 지점에 허수아비를 세웁니다 — 죽지 않게 체력을 크게.
+          const e = G.spawnEnemyKind('grunt', bottom.x, bottom.z)
+          await window.__t.runFor(0.3)
+          if (!G.enemyInfo(e)) return { reason: '허수아비 소환 실패' }
+
+          G.setHp(p, 100)
+          G.teleportPlayer(top.x, top.z)
+          await window.__t.runFor(0.2)
+          const dx = bottom.x - top.x
+          const dz = bottom.z - top.z
+          const len = Math.hypot(dx, dz) || 1
+          G.pushEntity(p, (dx / len) * 26, (dz / len) * 26)
+
+          // 창이 열릴 때까지 기다립니다.
+          let opened = false
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 3) {
+            G.setHp(e, 100000)
+            if (G.moveInfo().plungeWindowT > 0) {
+              opened = true
+              break
+            }
+            await step()
+          }
+          if (!opened) return { reason: '창이 안 열림' }
+          const usedSteps = G.moveInfo().plungeSteps
+
+          /**
+           * 착지 경직이 풀릴 때까지 기다렸다가 칩니다. 창은 경직 동안
+           * 안 흐르므로(playerControl 규칙) 기다려도 안 닫힙니다.
+           */
+          const t1 = G.state().elapsed
+          while (G.state().elapsed - t1 < 2 && G.state().player.state === 3) {
+            G.setHp(e, 100000)
+            await step()
+          }
+          const i = G.enemyInfo(e)
+          if (!i) return { reason: '허수아비가 사라짐' }
+          // 정면에서 칩니다 — 등 뒤를 잡으면 치명타 배수가 섞입니다.
+          G.setHp(e, 100000)
+          G.aimAtWorld(i.x, i.z)
+          const swungAs = G.moveInfo().pending
+          const hpBefore = G.enemyInfo(e).hp
+          const hitsBefore = G.state().hitsDealt
+          G.press('Mouse0')
+          G.release('Mouse0')
+          const t2 = G.state().elapsed
+          while (G.state().elapsed - t2 < 2 && G.state().hitsDealt === hitsBefore) await step()
+          const hpAfter = G.enemyInfo(e)?.hp ?? hpBefore
+          return {
+            swungAs,
+            usedSteps,
+            want: want?.damage ?? -1,
+            got: Number((hpBefore - hpAfter).toFixed(1)),
+            hit: G.state().hitsDealt > hitsBefore,
+            // 견줄 짝 — 마지막 콤보 타. 예전 버그는 정확히 이 값으로 나갔습니다.
+            lastStep: w.lastStepDamage,
+          }
+        },
+        [
+          world(drop255.top.cx, drop255.top.cz),
+          world(drop255.bottom.cx, drop255.bottom.cz),
+          cfg.fallFreeSteps + 1,
+        ],
+      )
+    : { reason: '낙차 없음' }
+
+  check(
+    live?.hit === true && live.swungAs === '낙하 공격',
+    '실측이 성립했다 (낙하 공격으로 실제로 맞혔다)',
+    live?.reason ?? `"${live?.swungAs}" · 맞음 ${live?.hit ? 'O' : 'X'}`,
+  )
+  if (live?.hit) {
+    check(
+      Math.abs(live.got - live.want) < 1.5,
+      '🔬 **실제로 들어간 피해가 파생값과 같다** (조리법이 아니라 요리를 잽니다)',
+      `실측 ${live.got} vs 파생 ${live.want} (${live.usedSteps}단)`,
+    )
+    /**
+     * 짝이 되는 음성 검사. 예전 버그는 표식이 마지막 콤보 타로 접히는
+     * 것이었고, 그때 이 값이 정확히 `lastStep` 이었습니다. 둘이 우연히
+     * 같아지는 날 위 검사가 **아무것도 안 잡게** 되므로 따로 겁니다.
+     */
+    check(
+      live.want > live.lastStep + 1,
+      '낙하 공격이 마지막 콤보 타와 **구별되는 값**이다 (안 그러면 위 검사가 헛돕니다)',
+      `낙하 ${live.want} vs 마무리 ${live.lastStep}`,
+    )
+  }
+
   const wtbl = await page.evaluate(() => window.__game.weaponTable())
   check(wtbl.length >= 3, '무기표를 읽었다 (아래 비교가 헛돌지 않게)', `${wtbl.length}종`)
   if (wtbl.length >= 3) {

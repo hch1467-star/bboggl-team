@@ -706,6 +706,41 @@ export const RUN_COMBO = 252
 export const ROLL_COMBO = 253
 export const PLUNGE_COMBO = 254
 
+/**
+ * ⚔️ **표식 하나를 실제 제원 한 벌로 바꾸는 유일한 자리.**
+ *
+ * ── 여기 있던 버그 ──────────────────────────────────────────────
+ * 이 함수가 없어서 **같은 표식을 두 곳이 각자 풀고 있었습니다.**
+ *   · `playerControl.beginAttack` — 선행동작·파고들기·스태미나를 **파생값**으로
+ *   · `combat.comboSpec`         — 피해·사거리·각도·강인도를 `combo[min(idx, 끝)]`으로
+ *
+ * 250·251(강타·처형)은 combat 쪽에도 가지가 있었는데, 나중에 넣은
+ * 252·253·254(달리기·구르기·낙하)는 **없었습니다.** `Math.min` 이 조용히
+ * 마지막 콤보 타로 접어 버려서, 세 기술 모두 *"마무리 타의 판정"* 으로
+ * 나갔습니다. 낙하 공격의 1.4배 피해도, 2.2배 강인도도, 좁힌 파고들기도,
+ * 넓힌 각도도 **한 번도 게임에 들어간 적이 없습니다.**
+ *
+ * 예외를 던지지 않고 조용히 접혔기 때문에 아무도 소리를 안 냈습니다.
+ * 게다가 제가 붙인 검사들은 `weaponTable()` — 즉 **파생 함수의 출력**을
+ * 봤습니다. 요리가 아니라 **조리법**을 검사한 셈이라 통과했습니다.
+ *
+ * 그래서 규칙을 여기 한 곳으로 모읍니다. 표식이 하나 늘어나는 날,
+ * 고칠 자리도 하나입니다.
+ */
+export function stepFor(
+  w: WeaponDef,
+  index: number,
+  focusSpent: number,
+  plungeSteps: number,
+): ComboStep {
+  if (index === HEAVY_COMBO) return heavyStep(w, focusSpent)
+  if (index === FINISH_COMBO) return finisherStep(w)
+  if (index === RUN_COMBO) return runningStep(w)
+  if (index === ROLL_COMBO) return rollingStep(w)
+  if (index === PLUNGE_COMBO) return plungeStep(w, plungeSteps)
+  return w.combo[Math.min(Math.max(0, index), w.combo.length - 1)]
+}
+
 export interface WeaponDef {
   id: string
   name: string

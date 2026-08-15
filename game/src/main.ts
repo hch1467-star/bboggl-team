@@ -98,6 +98,7 @@ import {
   breakEvents,
   bleedEvents,
   readBleedPeak,
+  readBossDamageBySource,
   readPoiseDealt,
   resetPoiseDealt,
   resetBleedPeak,
@@ -3210,6 +3211,8 @@ class Game {
     bossBleedGapAvg: number
     bossBleedGapMax: number
     bossBleedGapInsideRate: number
+    /** 📊 보스가 받은 피해 — 출처 × 페이즈. 무엇이 보스를 녹이는지 가릅니다 */
+    bossDamageBySource: Record<string, number[]>
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3246,6 +3249,12 @@ class Game {
       bossBleedGapAvg: Number(readBleedPeak().bossGapAvg.toFixed(2)),
       bossBleedGapMax: Number(readBleedPeak().bossGapMax.toFixed(2)),
       bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
+      bossDamageBySource: Object.fromEntries(
+        Object.entries(readBossDamageBySource()).map(([k, v]) => [
+          k,
+          v.map((n) => Number(n.toFixed(1))),
+        ]),
+      ),
       chainsArmed: readChainsArmed(),
       chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),

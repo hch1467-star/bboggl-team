@@ -1,4 +1,12 @@
-import { FINISH_COMBO, HEAVY_COMBO, finisherStep, heavyStep, type SkillShape } from '../config/arsenal'
+import {
+  FINISH_COMBO,
+  HEAVY_COMBO,
+  PLUNGE_COMBO,
+  ROLL_COMBO,
+  RUN_COMBO,
+  stepFor,
+  type SkillShape,
+} from '../config/arsenal'
 import { BLEED, COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE } from '../config/balance'
 import {
   Actor,
@@ -167,6 +175,20 @@ export interface AttackSpec {
   snare?: number
   /** 🟣 맞은 대상을 공격자 쪽으로 끌어당기는 세기(m/s) */
   pull?: number
+  /**
+   * 📊 **이 한 방이 어디서 나온 것인가** — 계측 전용, 판정에는 안 씁니다.
+   *
+   * 지난 라운드에 보스 페이즈별 초당 피해를 재 놓고 이렇게 적었습니다:
+   * *"그 상승분이 어디서 오는지도 갈라야 처방이 정해진다 — 처형인가,
+   * 무방비 창인가, 그냥 익숙해진 것인가."* 그걸 안 갈라 놓고 체력을
+   * 두 번 올렸고, 두 번 다 다시 짧아졌습니다.
+   *
+   * 판정에 쓰지 않는 값을 스펙에 넣는 것이 마음에 걸리지만, 대안은
+   * 계측기가 *"이 피해는 스킬처럼 크니 스킬일 것"* 이라고 **추측**하는
+   * 것입니다. 이 저장소는 그런 추측으로 이미 여러 번 틀렸습니다.
+   * **쓴 쪽이 이름을 답니다.**
+   */
+  source?: '평타' | '강타' | '처형' | '스킬' | '상황'
 }
 
 /** 현재 프레임에 발생한 타격들. 게임 루프가 읽고 비웁니다. */
@@ -183,7 +205,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
   const weapon = weaponOf(e)
   // 🥋 강타 — 콤보 마무리에서 파생시키고, 태운 집중만큼 세집니다.
   if (comboIndex === HEAVY_COMBO) {
-    const h = heavyStep(weapon, Player.focusSpent[e])
+    const h = stepFor(weapon, HEAVY_COMBO, Player.focusSpent[e], 0)
     return {
       shape: 'cone',
       damage: h.damage * weaponDamageMult(e),
@@ -194,6 +216,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       trauma: h.trauma,
       heavy: true,
       heavyBlow: true,
+      source: '강타',
       poiseScale: weapon.poiseScale,
       // 🩸 강인도와 **반대 방향**의 배율 — arsenal.ts `bleedScale` 주석.
       bleedScale: weapon.bleedScale,
@@ -203,7 +226,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
   }
   // 처형 — 무방비인 적에게만 나가는 한 방.
   if (comboIndex === FINISH_COMBO) {
-    const f = finisherStep(weapon)
+    const f = stepFor(weapon, FINISH_COMBO, 0, 0)
     return {
       shape: 'cone',
       damage: f.damage * weaponDamageMult(e),
@@ -221,6 +244,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
        */
       noCrit: true,
       finisher: true,
+      source: '처형',
       poiseScale: weapon.poiseScale,
       // 🩸 강인도와 **반대 방향**의 배율 — arsenal.ts `bleedScale` 주석.
       bleedScale: weapon.bleedScale,
@@ -228,16 +252,31 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
       healSelf: 0,
     }
   }
-  const c = weapon.combo[Math.min(comboIndex, weapon.combo.length - 1)]
+  /**
+   * ⚔️ **여기가 이번 라운드에 실제로 빨갰던 자리입니다.**
+   *
+   * 예전 코드는 `weapon.combo[Math.min(comboIndex, 끝)]` 이었습니다.
+   * 달리기(252)·구르기(253)·낙하(254)가 전부 **마지막 콤보 타**로
+   * 접혔습니다 — 피해도 각도도 사거리도 강인도도 파고들기도 전부
+   * 그 기술의 것이 아니었습니다. `Math.min` 은 아무 소리도 안 냅니다.
+   *
+   * 이제 `stepFor` 가 표식을 풉니다. 상황 모션은 `평타`와 나눠서
+   * 세도록 이름도 따로 답니다(`상황`) — 안 그러면 다음에 페이즈별
+   * 피해를 갈라 볼 때 셋이 평타 안에 숨습니다.
+   */
+  const situational =
+    comboIndex === RUN_COMBO || comboIndex === ROLL_COMBO || comboIndex === PLUNGE_COMBO
+  const c = stepFor(weapon, comboIndex, Player.focusSpent[e], Player.plungeSteps[e])
   return {
     shape: 'cone',
+    source: situational ? '상황' : '평타',
     damage: c.damage * weaponDamageMult(e),
     range: c.range,
     arcDeg: c.arcDeg,
     knockback: c.knockback,
     hitstop: c.hitstop,
     trauma: c.trauma,
-    heavy: comboIndex === weapon.combo.length - 1,
+    heavy: situational ? c.trauma >= weapon.combo[weapon.combo.length - 1].trauma : comboIndex === weapon.combo.length - 1,
     poiseScale: weapon.poiseScale,
     // 🩸 기본 콤보야말로 이 축의 주된 통로입니다 — 여기 빠뜨리면 무기별
     //    차이가 통째로 사라집니다(실제로 쌍단검이 배율 1.0으로 재졌습니다).
@@ -260,6 +299,7 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
     hitstop: def.hitstop,
     trauma: def.trauma,
     heavy: def.damage >= 35,
+    source: '스킬',
     // 무기 스킬(0~2)은 그 무기의 성격을 따릅니다. 룬(3~4)은 무기가 아니라 1배.
     poiseScale: slot <= 2 ? weaponOf(e).poiseScale : 1,
     // 무기 스킬은 그 무기의 출혈 성격도 따릅니다. 룬은 무기가 아니라 1배.
@@ -467,6 +507,7 @@ function applyBleed(t: number, spec: AttackSpec): void {
   // ⚠️ 상한이 없으면 체력이 큰 상대가 출혈 하나로 삭제됩니다(balance.ts 주석).
   const dmg = Math.min(Health.max[t] * BLEED.popDamagePct, BLEED.popDamageCap)
   Health.hp[t] = Math.max(0, Health.hp[t] - dmg)
+  if (onBoss) noteBossDamage('출혈', Enemy.phase[t], dmg)
   bleedEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
   /**
    * 터질 때 강인도도 조금 깎습니다. 작게 두는 이유: 무너뜨리기는 강인도의
@@ -540,6 +581,27 @@ let bossBleedDecayed = 0
  * 재려는 것을 빼고 재면, 숫자는 늘 "문제 없음"이라고 말합니다.
  */
 let bossEverBled = false
+/**
+ * 📊 보스가 받은 피해를 **출처 × 페이즈**로. 합계가 보스 최대 체력과
+ * 얼추 같아야 정상입니다(회복이 없으므로). 크게 모자라면 세지 못한
+ * 경로가 있다는 뜻이고, 그것 자체가 다음에 봐야 할 자리입니다.
+ */
+const bossDamageBySource: Record<string, [number, number, number]> = {
+  평타: [0, 0, 0],
+  상황: [0, 0, 0],
+  강타: [0, 0, 0],
+  처형: [0, 0, 0],
+  스킬: [0, 0, 0],
+  출혈: [0, 0, 0],
+}
+/** 출혈 터짐은 위 경로를 안 지납니다 — 터뜨리는 쪽에서 직접 넣습니다. */
+function noteBossDamage(kind: string, phase: number, dmg: number): void {
+  const row = bossDamageBySource[kind]
+  if (row) row[Math.min(2, Math.max(0, phase))] += dmg
+}
+export function readBossDamageBySource(): Record<string, [number, number, number]> {
+  return bossDamageBySource
+}
 let bossGapSum = 0
 let bossGapCount = 0
 let bossGapInside = 0
@@ -580,6 +642,7 @@ export function resetBleedPeak(): void {
   bossGapInside = 0
   bossGapMax = 0
   bossEverBled = false
+  for (const k of Object.keys(bossDamageBySource)) bossDamageBySource[k] = [0, 0, 0]
 }
 
 /**
@@ -1056,6 +1119,23 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     }
 
     Health.hp[t] -= damage
+    /**
+     * 📊 **보스가 무엇에 녹는가** — 출처별로, 페이즈별로.
+     *
+     * 지난 라운드에 페이즈별 초당 피해를 재 놓고 *"상승분이 어디서
+     * 오는지도 갈라야 처방이 정해진다"* 고 적어 놓고는, 안 가른 채
+     * 체력을 두 번 올렸습니다. 두 번 다 다시 짧아졌습니다. 무딘 수단을
+     * 두 번 쓴 이유는 **어디를 깎아야 할지 몰랐기 때문**입니다.
+     *
+     * 여기서 세면 추측이 안 들어갑니다 — `spec.source` 는 스펙을 만든
+     * 쪽이 직접 단 이름이고, 페이즈는 지금 그 보스의 페이즈입니다.
+     * (출혈 터짐과 낙하는 이 경로를 안 지나므로 각자 자리에서 셉니다.)
+     */
+    if (Enemy.kind[t] === EnemyKind.Boss && spec.source) {
+      const ph = Math.min(2, Math.max(0, Enemy.phase[t]))
+      const row = bossDamageBySource[spec.source]
+      if (row) row[ph] += damage
+    }
     /**
      * ── 🟢 예고 중에는 **죽지 않습니다** (체력 1에서 멈춥니다) ──────────
      *

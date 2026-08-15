@@ -2535,6 +2535,7 @@ try {
       bossBleedGapAvg: G.runStats().bossBleedGapAvg ?? 0,
       bossBleedGapMax: G.runStats().bossBleedGapMax ?? 0,
       bossBleedGapInsideRate: G.runStats().bossBleedGapInsideRate ?? 0,
+      bossDamageBySource: G.runStats().bossDamageBySource ?? {},
       bossBleedPops: G.runStats().bossBleedPops ?? 0,
       breakHpAvg: G.runStats().breakHpAvg,
       brokenDeaths: G.runStats().brokenDeaths,
@@ -2951,6 +2952,11 @@ try {
     `              그중 **보스에게** — 터짐 ${log.bossBleedPops ?? 0}회 · 최고 ${log.bossBleedPeak ?? 0}/100\n` +
     `                 쌓은 총량 ${log.bossBleedApplied ?? 0} · 식어서 날아간 것 ${log.bossBleedDecayed ?? 0}\n` +
     `                 타격 간격 평균 ${log.bossBleedGapAvg ?? 0}초 · 최대 ${log.bossBleedGapMax ?? 0}초 · 유예 안에 이어진 비율 ${Math.round((log.bossBleedGapInsideRate ?? 0) * 100)}%\n` +
+    `              📊 보스를 녹인 것 (1/2/3단계) — ${Object.entries(log.bossDamageBySource ?? {})
+      .filter(([, v]) => v.reduce((a, b) => a + b, 0) > 0)
+      .sort((a, b) => b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0))
+      .map(([k, v]) => `${k} ${Math.round(v.reduce((a, b) => a + b, 0))} [${v.map((n) => Math.round(n)).join('/')}]`)
+      .join(' · ') || '없음'}\n` +
     `  강인도      무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
       `              무너진 순간의 평균 체력 ${Math.round(log.breakHpAvg * 100)}% · 무방비인 채로 죽은 적 ${log.brokenDeaths}마리\n` +
       `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 스태미나가 모자랐던 프레임 ${log.finisherNoStamina})`,

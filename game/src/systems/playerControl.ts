@@ -2,14 +2,10 @@ import {
   FINISH_COMBO,
   HEAVY_COMBO,
   SKILL_KEY_CODES,
-  finisherStep,
-  heavyStep,
-  runningStep,
-  rollingStep,
+  stepFor,
   RUN_COMBO,
   ROLL_COMBO,
   PLUNGE_COMBO,
-  plungeStep,
   type SkillDef,
 } from '../config/arsenal'
 import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
@@ -337,18 +333,15 @@ export function finisherTarget(p: number): number {
 
 function beginAttack(p: number, index: number, aimRot: number): void {
   noteLearned(index === HEAVY_COMBO ? 'heavy' : 'attack')
-  const c =
-    index === HEAVY_COMBO
-      ? heavyStep(weaponOf(p), Player.focusSpent[p])
-      : index === FINISH_COMBO
-        ? finisherStep(weaponOf(p))
-        : index === RUN_COMBO
-          ? runningStep(weaponOf(p))
-          : index === ROLL_COMBO
-            ? rollingStep(weaponOf(p))
-            : index === PLUNGE_COMBO
-              ? plungeStep(weaponOf(p), Player.plungeSteps[p])
-              : weaponOf(p).combo[index]
+  /**
+   * ⚠️ **여기서 직접 풀지 않습니다** — arsenal.ts `stepFor` 한 곳에서 풉니다.
+   *
+   * 예전엔 이 자리에 삼항 사슬이 있었고, combat.ts 에도 **다른** 사슬이
+   * 있었습니다. 그래서 표식을 셋 더 넣었을 때 이쪽만 고쳐졌고, 판정은
+   * 조용히 마지막 콤보 타로 나갔습니다. 같은 규칙을 두 곳에 적으면
+   * 언젠가 갈라집니다 — 이번엔 "언젠가"가 이미 지나가 있었습니다.
+   */
+  const c = stepFor(weaponOf(p), index, Player.focusSpent[p], Player.plungeSteps[p])
   // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
   // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
   const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
@@ -1222,12 +1215,18 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 상태마다 규칙이 갈립니다.
         moveScale = weapon.attackMoveScale
 
-        const combo =
-          Actor.comboIndex[p] === HEAVY_COMBO
-            ? heavyStep(weapon, Player.focusSpent[p])
-            : Actor.comboIndex[p] === FINISH_COMBO
-              ? finisherStep(weapon)
-              : weapon.combo[Math.min(Actor.comboIndex[p], weapon.combo.length - 1)]
+        /**
+         * ⚠️ **같은 사슬의 세 번째 사본이었습니다.** 여기는 판정·후딜 길이를
+         * 읽는 자리라, 상황 모션이 빠져 있으면 낙하 공격의 늘린 후딜
+         * (1.25배)도 구르기 공격의 줄인 선행동작도 실제로는 안 나옵니다.
+         * 이제 셋 다 `stepFor` 하나를 봅니다.
+         */
+        const combo = stepFor(
+          weapon,
+          Actor.comboIndex[p],
+          Player.focusSpent[p],
+          Player.plungeSteps[p],
+        )
         const phase = Actor.phase[p] as AttackPhase
 
         // 후딜에서만 스킬/구르기로 탈출할 수 있습니다.
