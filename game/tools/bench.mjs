@@ -742,8 +742,26 @@ console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
    *    따로 찍으므로, 양쪽에 다 넣어야 합니다.
    */
   console.log(
-    `                 ⚔️ 상황 모션 — 달리기 공격 ${fmt(pick((l) => l.runAttacks ?? 0), 0)}회 · ` +
-      `구르기 공격 ${fmt(pick((l) => l.rollAttacks ?? 0), 0)}회`,
+    `                 ⚔️ 상황 모션 — 달리기 ${fmt(pick((l) => l.runAttacks ?? 0), 0)}회 · ` +
+      `구르기 ${fmt(pick((l) => l.rollAttacks ?? 0), 0)}회 · ` +
+      `낙하 ${fmt(pick((l) => l.plungeAttacks ?? 0), 0)}회`,
+  )
+  /**
+   * 🩸 **보스 출혈이 어디서 새는가** — 중앙값으로.
+   *
+   * 한 판씩 보면 최고치가 57 · 63 · 96 · 96 으로 널뛰어서 무엇도 못
+   * 고릅니다. 이 축은 "터졌다/안 터졌다"가 전부인데 네 판 내리 0이었으니,
+   * 값을 만지려면 **중앙값**이 있어야 합니다.
+   */
+  console.log(
+    `                 🩸 보스 출혈 — 터짐 ${fmt(pick((l) => l.bossBleedPops ?? 0), 0)}회 · ` +
+      `최고 ${fmt(pick((l) => l.bossBleedPeak ?? 0), 0)}/100`,
+  )
+  console.log(
+    `                    쌓은 ${fmt(pick((l) => l.bossBleedApplied ?? 0), 0)} · ` +
+      `식은 ${fmt(pick((l) => l.bossBleedDecayed ?? 0), 0)} · ` +
+      `간격 평균 ${fmt(pick((l) => l.bossBleedGapAvg ?? 0), 2)}초 / 최대 ${fmt(pick((l) => l.bossBleedGapMax ?? 0), 2)}초 · ` +
+      `유예 안 ${fmt(pick((l) => (l.bossBleedGapInsideRate ?? 0) * 100), 0)}%`,
   )
 }
 
