@@ -895,6 +895,85 @@ try {
     worstGap > 0.25 ? `가장 크게 어긋난 곳 — ${worstLine}` : `가장 큰 어긋남 ${(worstGap * 100).toFixed(0)}%p`,
   )
 
+  /**
+   * ── ⏳ **같은 패턴이 두 가지 박자로 나오는가** ────────────────────
+   *
+   * 지금까지 모든 공격의 예고 길이가 **정확히 하나**였습니다. 그러면
+   * 패턴마다 정답이 하나가 아니라 **박자가 하나**이고, 한 번 외우면
+   * 화면을 안 봐도 됩니다. 엘든 링·세키로·오공이 공통으로 깨는 자리입니다.
+   *
+   * ⚠️ 검사할 것이 둘입니다. 하나만 보면 반쪽입니다:
+   *   ① 실제로 **두 박자가 나오는가** (안 나오면 지연은 죽은 설정)
+   *   ② **짧은 쪽이 여전히 읽을 수 있는가** (예고가 짧아지면 그건
+   *      난이도가 아니라 거짓말입니다 — 늘리기만 해야 합니다)
+   */
+  {
+    const seen = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+      G.clearEnemies()
+      await window.__t.runFor(0.3)
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 4, p.z)
+      /**
+       * ⚠️ **깨우고, 나를 무적으로 두고, 붙잡아 둡니다.**
+       * 이 파일이 이미 두 번 배운 자리입니다 — 안 깨우면 관측 0회이고,
+       * 죽으면 조우가 끝나 그 뒤가 통째로 빈 관측이 됩니다. 처음에
+       * 그냥 `reset()` 만 하고 쟀다가 90초에 **4회**밖에 못 봤습니다.
+       */
+      G.wakeEnemy(b)
+      G.setPlayerInvulnerable(true)
+      await window.__t.runFor(0.4)
+      const lens = []
+      const t0 = G.state().elapsed
+      /**
+       * ⚠️ **예고가 시작되는 그 순간(false→true)만 셉니다.**
+       *
+       * 처음엔 `intent:windup` 조합이 바뀔 때 적었습니다. 그러면 같은
+       * 패턴이 **같은 박자로 연달아** 나올 때 한 번만 세어져서, 60초에
+       * 4회밖에 안 잡혔습니다. 하필 그건 *"뜸을 안 들인 경우"* 를 골라
+       * 지우는 쪽이라, 검사가 재려던 것과 정반대로 편향됩니다.
+       * 상태의 **전이**를 세야지 값을 세면 안 됩니다.
+       */
+      let wasWinding = false
+      while (G.state().elapsed - t0 < 90) {
+        const i = G.enemyInfo(b)
+        if (i) {
+          if (i.winding && !wasWinding) {
+            lens.push({ intent: i.intent, windup: i.windup, held: i.held })
+          }
+          wasWinding = !!i.winding
+
+        }
+        await sleep2()
+      }
+      return lens
+    })
+    const rows = seen
+    const swings = rows.length
+    check(swings >= 10, '⏳ 예고를 충분히 봤다 (확률 0.35 를 볼 만큼)', `${swings}회`)
+    if (swings >= 10) {
+      const held = rows.filter((r) => r.held > 0)
+      const plain = rows.filter((r) => r.held === 0)
+      check(
+        held.length > 0 && plain.length > 0,
+        '⏳ **같은 보스가 두 가지 박자로 휘두른다** (리듬으로 구르기가 안 통하게)',
+        `뜸 들인 것 ${held.length}회 · 평소 ${plain.length}회`,
+      )
+      /**
+       * 짝이 되는 음성 검사. 지연은 **더하기만** 해야 합니다 — 빼기 시작하면
+       * 반응 시간 하한이 무너지고, 맞은 이유가 `예고가 짧음` 으로 찍힙니다.
+       */
+      const minPlain = plain.length ? Math.min(...plain.map((r) => r.windup)) : -1
+      const minHeld = held.length ? Math.min(...held.map((r) => r.windup)) : -1
+      check(
+        held.length === 0 || plain.length === 0 || minHeld > minPlain,
+        '⏳ 뜸은 **늘리기만 한다** (예고가 짧아지면 난이도가 아니라 거짓말입니다)',
+        `평소 최소 ${minPlain}초 · 뜸 최소 ${minHeld}초`,
+      )
+    }
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

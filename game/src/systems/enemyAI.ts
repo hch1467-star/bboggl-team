@@ -638,7 +638,26 @@ function commitAttack(
     }
     seen.add(String(atk.intent))
   }
-  Actor.timer[e] = atk.windup * windupScale
+  /**
+   * ⏳ **지연 공격** — 가끔 뜸을 들입니다(enemyAttacks.ts `hold` 설계 노트).
+   *
+   * `combatRng` 를 씁니다. `Math.random()` 은 이 저장소에서 금지입니다 —
+   * 같은 시드로 같은 판이 나와야 벤치의 중앙값에 뜻이 생기고, 버그도
+   * 재현됩니다(core/rng.ts). 전투 스트림을 쓰므로 지도 생성과 안 섞입니다.
+   *
+   * **더하기만 합니다.** 곱하지 않는 이유: 배율이면 페이즈 배율
+   * (`windupScale`)과 곱해져서 3단계에서 지연이 같이 줄어듭니다. 뜸은
+   * 페이즈와 무관하게 *"이번엔 늦게 온다"* 하나여야 읽는 사람이 배웁니다.
+   *
+   * 어느 패턴이 뜸을 들이는지는 **데이터에 적혀 있습니다**(`hold`).
+   * 여기서 종류를 분기하면 적을 하나 더 넣는 날 이 파일도 같이 고쳐야 합니다.
+   */
+  const hold = atk.hold
+  const holdT = hold && combatRng.chance(hold.chance) ? hold.add : 0
+  Actor.timer[e] = atk.windup * windupScale + holdT
+  Enemy.heldT[e] = holdT
+  // 🕐 **실제로 건 값**을 남깁니다 — 읽는 쪽이 설정값을 다시 계산하지 않게.
+  Enemy.windupLen[e] = Actor.timer[e]
   Actor.hitsLeft[e] = 1
   Actor.nextHitT[e] = 0
   Enemy.chained[e] = chained ? 1 : 0

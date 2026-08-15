@@ -4262,6 +4262,13 @@ declare global {
         recovering: boolean
         rotY: number
         timer: number
+        /**
+         * ⏳ **이번 공격에 실제로 건 예고 길이**(초) — 페이즈 배율과 지연이
+         * 이미 반영된 값입니다(components.ts `windupLen`).
+         */
+        windup: number
+        /** ⏳ 그중 뜸 들인 몫(초). 0이면 평소 박자 */
+        held: number
         brokenT: number
         intent: number
         staggered: boolean
@@ -4936,7 +4943,14 @@ window.__game = {
        * 없으니까요. 프로브가 예고 길이를 베껴 적는 순간 그 파일이 또 하나의
        * 진실이 되므로, 게임이 알려 줍니다.
        */
-      windup: attackAt(kind, Enemy.attackIndex[entity]).windup,
+      /**
+       * ⏳ 설정값이 아니라 **이번 공격에 실제로 건 길이**입니다.
+       * 페이즈 배율과 지연(`hold`)이 이미 반영돼 있습니다 — components.ts
+       * `windupLen` 주석 참고.
+       */
+      windup: Number(Enemy.windupLen[entity].toFixed(3)),
+      /** ⏳ 그중 **뜸 들인 몫**(초). 0이면 평소 박자입니다. */
+      held: Number(Enemy.heldT[entity].toFixed(3)),
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       /**
