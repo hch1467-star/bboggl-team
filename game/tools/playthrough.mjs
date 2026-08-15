@@ -2119,6 +2119,8 @@ try {
       if (fire && canUpgrade && (walletGrew || passingBy) && (passingBy || now() >= fireCooldownUntil)) {
         const straight = Math.hypot(fire.x - p.x, fire.z - p.z)
         const step = G.pathStep(fire.x, fire.z)
+        /** 🧭 이번 프레임에 보물이 더 가까운가 — **양보**이지 실패가 아닙니다. */
+        const yieldToTreasure = !passingBy && treasureClaims(step ? step.dist : Infinity)
         /**
          * **왕복 자체에 제한 시간을 겁니다.**
          *
@@ -2164,12 +2166,7 @@ try {
          */
           // 🧭 발길을 **돌리는** 경우에만 보물과 견줍니다. 밟고 지나가는
           //    것(`passingBy`)은 더 걷는 거리가 0 이라 견줄 것이 없습니다.
-        } else if (
-          step &&
-          step.dist < 45 &&
-          straight > 1.6 &&
-          (passingBy || !treasureClaims(step.dist))
-        ) {
+        } else if (step && step.dist < 45 && straight > 1.6 && !yieldToTreasure) {
           /**
            * **마지막 몇 미터는 직선으로 갑니다.**
            *
@@ -2200,6 +2197,22 @@ try {
            * 기능은 돌았지만, **눈금이 거짓말을 했습니다.** 이번 라운드
            * 내내 잡아 온 그 모양입니다. 여기서는 아무것도 하지 않고
            * 도착 블록으로 흘려보냅니다.
+           */
+        }
+        else if (yieldToTreasure) {
+          /**
+           * 🧭 **양보는 실패가 아닙니다 — 쿨다운을 걸지 않습니다.**
+           *
+           * 여기가 없을 때 벤치가 `가려다 접음 **98회**` 를 찍었습니다
+           * (실제로 닿은 것은 1회). *"지금은 보물이 더 가깝다"* 는
+           * **이번 프레임의 우선순위 판단**인데, 그게 아래 `else`(포기)로
+           * 떨어져서 **30초 쿨다운**까지 먹고 있었습니다. 보물은 거의 늘
+           * 더 가까우니 사실상 소비처가 계속 잠겨 있었던 셈입니다.
+           *
+           * 우선순위와 실패는 다릅니다. 이번 라운드에 세 번 같은 모양을
+           * 만났습니다 — 서로 다른 질문 두 개를 한 값·한 가지에 묶으면
+           * 한쪽을 고칠 때 다른 쪽이 조용히 망가집니다. 여기서는 아무것도
+           * 안 하고 보물 가지로 흘려보냅니다.
            */
         }
         else {
