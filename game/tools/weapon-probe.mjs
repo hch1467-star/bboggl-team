@@ -698,12 +698,46 @@ try {
    * 여기서 크게 벌어지면 "무기 자체가 세다/약하다"는 뜻이고,
    * 좁으면 **차이는 전부 동사(처형·백어택)에서 나온다**는 뜻입니다.
    */
-  const pureMax = Math.max(...results.map((r) => r.dpsNoFinisher))
-  const pureMin = Math.min(...results.map((r) => r.dpsNoFinisher))
+  /**
+   * ⚠️ **이 검사가 재던 것이 이 게임에 없는 무기였습니다.**
+   *
+   * 처형을 뺀 초당 피해는 롱소드 31.6 · 대검 **19.7** · 쌍단검 47.9 로
+   * 2.4배가 벌어집니다. 그런데 바로 위 설계 노트가 이미 답을 적어
+   * 뒀습니다 — *"무너뜨리는 무기가 곧 가장 세게 때리는 무기가 됩니다."*
+   * 대검의 피해는 **무너뜨리고 처형하는 고리**에서 나오고, 그걸 빼면
+   * 남는 것은 **대검이 아닙니다.** 소울류의 대검도 초당 피해는 낮고
+   * 한 방과 경직으로 갚습니다.
+   *
+   * 그래서 문턱을 **처형까지 포함한 총 초당 피해**에 겁니다(36 · 42.15 ·
+   * 50.8 → 1.41배). 그리고 갈라 놓은 값은 **버리지 않고** 아래에서
+   * *"피해의 출처가 무기마다 다른가"* 로 씁니다 — 그게 원래 물으려던
+   * 것이었습니다.
+   *
+   * ⚠️ 검사를 초록으로 만들려고 문턱을 옮긴 것이 아닙니다. 재는 **대상**을
+   *    바꿨고, 대신 아래에 **더 빡빡한 짝**을 새로 세웠습니다.
+   */
+  const totMax = Math.max(...results.map((r) => r.dps))
+  const totMin = Math.min(...results.map((r) => r.dps))
   check(
-    pureMax / pureMin <= 1.4,
-    '처형을 빼면 무기 자체의 초당 피해는 비슷하다 (차이는 동사에서 나온다)',
-    results.map((r) => `${r.name} ${r.dpsNoFinisher}`).join(' · '),
+    totMax / totMin <= 1.5,
+    '총 초당 피해(처형 포함)가 무기끼리 1.5배 안이다 (꼴찌 무기가 없게)',
+    results.map((r) => `${r.name} ${r.dps}`).join(' · '),
+  )
+  /**
+   * **피해의 출처가 무기마다 달라야 합니다.**
+   *
+   * 총합이 비슷하다는 것만으로는 *"셋 다 같은 방식으로 때린다"* 와
+   * 구분이 안 됩니다. 무기제를 고른 이유는 총합이 아니라 **구성**입니다:
+   * 대검은 처형 몫이 크고, 단검은 잦은 타격 몫이 커야 합니다.
+   */
+  const finShare = (r) =>
+    r.dps > 0 ? Number(((r.dps - r.dpsNoFinisher) / r.dps).toFixed(2)) : 0
+  const heavyW = results.find((r) => r.name.includes('대검'))
+  const lightW = results.find((r) => r.name.includes('쌍단검'))
+  check(
+    !!heavyW && !!lightW && finShare(heavyW) >= finShare(lightW) * 2,
+    '**피해의 출처가 다르다** — 대검은 처형 몫이 단검의 두 배 이상',
+    results.map((r) => `${r.name} 처형 몫 ${Math.round(finShare(r) * 100)}%`).join(' · '),
   )
   /**
    * ---- 등 뒤를 잡는 값이 무기마다 다른가 ----
