@@ -379,8 +379,18 @@ try {
         let burstDealt = 0
         let burstFin = 0
         let burstBrk = 0
-        let poiseDealt = 0
-        let lastPoise = G.enemyInfo(e).poise
+        /**
+         * ⚠️ **깎은 쪽에게 묻습니다.**
+         *
+         * 예전엔 `enemyInfo().poise` 를 훑어 *"줄어든 만큼"* 을 더했습니다.
+         * 그런데 무너지는 순간 강인도가 **최대치로 되돌아가서**, 무너뜨린
+         * 그 한 방이 *증가*로 보여 한 번도 안 세어졌습니다. 16초에 세 번
+         * 무너뜨리는 대검이 가장 많이 손해를 봤고, 이론상 3.18배인 격차가
+         * 실측 **1.30배**로 눌렸습니다 — 계측기가 하필 그 무기를 깎고
+         * 있었습니다. 이 저장소가 스태미나에서 이미 배운 것입니다:
+         * **쓴 쪽(깎은 쪽)이 세는 것이 정확합니다.**
+         */
+        const poiseStart = G.runStats().poiseDealt ?? 0
         // ⚠️ 스태미나는 **게임이 센 누적값**을 씁니다.
         // 프레임 사이에 "크게 쓰고 조금 회복"이 겹치면 관측으로는 놓칩니다 —
         // 한 번에 크게 쓰는 무기일수록 효율이 실제보다 좋아 보였습니다.
@@ -424,8 +434,6 @@ try {
           const info = G.enemyInfo(e)
           if (!info) break
           // 강인도는 회복도 하고 무너지면 가득 찹니다 — **줄어든 만큼만** 더합니다.
-          if (info.poise < lastPoise) poiseDealt += lastPoise - info.poise
-          lastPoise = info.poise
           if (info.broken && !wasBroken) breaks++
           wasBroken = info.broken
           // 위치가 밀릴 수 있으므로 매번 붙여 세웁니다 — 사거리 차이가 아니라
@@ -492,7 +500,7 @@ try {
             ((dealt - burstDealt) / Math.max(0.1, elapsed - burstSeconds)).toFixed(1),
           ),
           dps: Number((dealt / elapsed).toFixed(1)),
-          poisePerSec: Number((poiseDealt / elapsed).toFixed(1)),
+          poisePerSec: Number((((G.runStats().poiseDealt ?? 0) - poiseStart) / elapsed).toFixed(1)),
           // 지속력 = 스태미나 1당 피해. 소모가 적고 세면 오래 붙어 있습니다.
           perStamina: Number((dealt / Math.max(1, staminaUsed)).toFixed(2)),
           staminaUsed: Math.round(staminaUsed),

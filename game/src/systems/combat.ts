@@ -391,6 +391,19 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
         ? POISE.backMultiplier
         : POISE.basicMultiplier
   const dmg = poiseDamage(spec.trauma, spec.poiseScale ?? 1, multiplier, Enemy.kind[t], Enemy.phase[t])
+  /**
+   * 🔨 **깎은 쪽이 셉니다.**
+   *
+   * 프로브는 `enemyInfo().poise` 를 훑어서 *"줄어든 만큼"* 을 더하고
+   * 있었습니다. 그런데 무너지는 순간 강인도가 **최대치로 되돌아가므로**,
+   * 무너뜨린 그 마지막 한 방은 *증가*로 보여 **한 번도 안 세어집니다.**
+   * 16초에 세 번 무너뜨리는 대검이 가장 많이 손해를 봤고, 그래서
+   * 이론상 3.18배인 격차가 실측 **1.30배**로 눌려 있었습니다.
+   *
+   * 이 저장소가 스태미나에서 이미 똑같이 배웠습니다 — *"쓴 쪽이 세는
+   * 것이 정확합니다."* 관측은 프레임 사이에 일어난 일을 못 봅니다.
+   */
+  poiseDealt += dmg
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
@@ -437,6 +450,18 @@ function applyBleed(t: number, spec: AttackSpec): void {
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t])
   if (Enemy.poise[t] <= 0) breakPoise(t)
+}
+
+/**
+ * 🔨 **실제로 깎은 강인도의 누적**(무기 프로브가 읽습니다).
+ * 관측이 아니라 **깎은 쪽**이 셉니다 — 위 `applyPoise` 주석 참고.
+ */
+let poiseDealt = 0
+export function readPoiseDealt(): number {
+  return poiseDealt
+}
+export function resetPoiseDealt(): void {
+  poiseDealt = 0
 }
 
 /** 🩸 출혈이 터진 순간 — 게임 루프가 읽고 비웁니다(연출은 시스템 밖에서). */

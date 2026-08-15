@@ -96,6 +96,8 @@ import {
   breakEvents,
   bleedEvents,
   readBleedPeak,
+  readPoiseDealt,
+  resetPoiseDealt,
   resetBleedPeak,
   breakPoise,
   finisherEvents,
@@ -610,6 +612,7 @@ class Game {
     this.justGuards = 0
     this.bleedPops = 0
     resetBleedPeak()
+    resetPoiseDealt()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -3171,6 +3174,8 @@ class Game {
     lightSwings: number
     /** 🩸 출혈이 터진 횟수 */
     bleedPops: number
+    /** 🔨 실제로 깎은 강인도의 누적 (관측이 아니라 깎은 쪽이 셉니다) */
+    poiseDealt: number
     /** 🩸 한 적에게 쌓였던 최고치 — "안 쌓임"과 "쌓였는데 안 터짐"을 가릅니다 */
     bleedPeak: number
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
@@ -3199,6 +3204,8 @@ class Game {
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
       bleedPops: this.bleedPops,
+      // 🔨 깎은 쪽이 센 강인도 누적 — 관측은 무너지는 한 방을 놓칩니다.
+      poiseDealt: Number(readPoiseDealt().toFixed(1)),
       bleedPeak: Number(readBleedPeak().any.toFixed(1)),
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
