@@ -4284,6 +4284,7 @@ declare global {
         decayDelay: number
         decayPerSec: number
         popDamagePct: number
+        popDamageCap: number
         weapons: {
           id: string
           bleedScale: number
@@ -4981,6 +4982,7 @@ window.__game = {
     decayDelay: BLEED.decayDelay,
     decayPerSec: BLEED.decayPerSec,
     popDamagePct: BLEED.popDamagePct,
+    popDamageCap: BLEED.popDamageCap,
     weapons: WEAPONS.map((w) => ({
       id: w.id,
       bleedScale: w.bleedScale,

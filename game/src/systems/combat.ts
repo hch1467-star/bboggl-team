@@ -426,7 +426,8 @@ function applyBleed(t: number, spec: AttackSpec): void {
 
   if (onBoss) bossBleedPops++
   Enemy.bleed[t] = 0
-  const dmg = Health.max[t] * BLEED.popDamagePct
+  // ⚠️ 상한이 없으면 체력이 큰 상대가 출혈 하나로 삭제됩니다(balance.ts 주석).
+  const dmg = Math.min(Health.max[t] * BLEED.popDamagePct, BLEED.popDamageCap)
   Health.hp[t] = Math.max(0, Health.hp[t] - dmg)
   bleedEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
   /**

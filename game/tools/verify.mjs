@@ -310,8 +310,17 @@ async function main() {
           await step()
         }
         let closed = null
+        /**
+         * ⚠️ **4초를 줍니다(창은 0.35초).**
+         *
+         * 2초로 잡았다가 느린 판에서 한 번 빨개졌습니다. 창은 구르는
+         * **동안에는 안 줄어들고**(끝난 뒤에 여는 규칙), 선입력이 살아 있으면
+         * 한 번 더 구를 수 있습니다. 그러면 닫히는 시점이 창 길이가 아니라
+         * **구르기 하나만큼** 뒤로 밀립니다. 재려는 것은 *"언젠가 닫히는가"*
+         * 이지 *"몇 초에 닫히는가"* 가 아니므로 여유를 줍니다.
+         */
         const t1 = G.state().elapsed
-        while (G.state().elapsed - t1 < 2) {
+        while (G.state().elapsed - t1 < 4) {
           const m = G.moveInfo()
           if (m.rollWindowT === 0) {
             closed = m
@@ -540,6 +549,20 @@ async function main() {
         `무기 교체 ${popped.weaponOk ? 'O' : 'X'} · 때린 횟수 ${popped.hits} · 최고 ${popped.peak} / ${rule.max}`,
       )
       check('가득 차면 **터진다**', popped.pops > 0, `${popped.pops}회`)
+      /**
+       * ⚠️ **비율 피해에는 상한이 있어야 합니다.**
+       *
+       * 이 검사가 없어서 `npm run weapons` 가 먼저 죽었습니다 — 허수아비
+       * 체력을 1,000,000 으로 세우자 한 번 터질 때 **15만**이 들어갔고,
+       * 초당 피해가 18,764 로 찍혔습니다. 계측기 탓이 아니라 **규칙에
+       * 상한이 없다**는 뜻이고, 체력 큰 적이 나오는 날 그 적은 출혈 하나로
+       * 삭제됩니다. 값이 아니라 **위가 막혀 있는지**를 검사합니다.
+       */
+      check(
+        '터질 때 피해에 **상한이 있다** (체력 큰 적이 한 방에 삭제되지 않게)',
+        rule.popDamageCap > 0 && rule.popDamageCap < 1e6 * rule.popDamagePct,
+        `상한 ${rule.popDamageCap} · 비율 ${rule.popDamagePct} (체력 100만이면 상한 없이 ${1e6 * rule.popDamagePct})`,
+      )
 
       /**
        * ④ **식는가** — 이 줄이 없으면 "언젠가는 터진다"가 되어, 소울류의
