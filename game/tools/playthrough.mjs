@@ -234,6 +234,27 @@ try {
     /** 화톳불로 되돌아가는 것을 잠시 멈추는 시각 — 오가며 막히는 것을 막습니다. */
     // 곁길 예산 — 근거는 tools/policy.mjs. **인자로 받습니다**(아래 ⚠️).
     const TREASURE_DETOUR = DETOUR
+    /**
+     * 🧭 **"지나가다 들르는 것"의 값 — 거리가 아니라 돌아가는 비용으로.**
+     *
+     * ── 세 번의 측정이 각각 무엇을 가르쳤는가 ──────────────────────
+     * ① 관문을 **날 거리 12m** 로 뒀을 때: 봇이 소비처에 18~42m 까지밖에
+     *    못 가서 관문이 한 번도 안 열렸고, 무기 강화는 **판당 0회**였습니다
+     *    (정련석 6 · 불티 402 를 손에 쥔 채로).
+     * ② 관문을 **날 거리 40m**(보물 예산)로 넓혔더니 강화는 돌기 시작했지만
+     *    (0회 → 중앙값 1회 · 남은 불티 416 → 138) **존 클리어가 3/3 → 1/3**
+     *    로 무너졌습니다. 40m 짜리 왕복이 시간 예산을 다 먹었습니다.
+     * ③ 그래서 문턱이 아니라 **재는 대상**을 바꿉니다. 12 라는 숫자가
+     *    틀렸던 게 아니라, *"지나가다 들르는"* 을 **날 거리**로 재고 있던
+     *    것이 틀렸습니다. 실제로 묻고 싶은 것은 하나입니다 —
+     *    **"들르면 몇 m 를 더 걷는가."** 동선 위의 모루는 40m 앞에 있어도
+     *    더 걷는 거리가 0 이고, 뒤에 있는 화톳불은 10m 여도 20m 를 더
+     *    걷게 만듭니다.
+     *
+     * 이 저장소가 검사에서 이미 배운 것과 같은 자리입니다 — *"빨갈 때
+     * 고칠 수 있는 것은 셋: 게임 · 문턱 · **재는 대상**"*.
+     */
+    const PASSING_DETOUR = 12
     let treasureCooldownUntil = 0
     let treasureTripUntil = 0
     /** 지금 나가 있는 곁길 왕복(있으면). 주우면 닫고 detours 에 넣습니다. */
@@ -1824,6 +1845,12 @@ try {
       let fire = null
       /** 이 판의 소비처 목록 — 아래 "밟고 선 곳" 판정에서도 씁니다. */
       let spendPts = []
+      /**
+       * 🧭 **돌아가는 비용** — 고른 소비처에 들르면 몇 m 를 더 걷는가.
+       *   비용 = (나→소비처) + (소비처→목표) − (나→목표)
+       * 동선 위에 있으면 0 에 가깝고, 되돌아가야 하면 크게 뜁니다.
+       */
+      let fireDetour = Infinity
       {
         const pts = G.spendPoints?.() ?? []
         spendPts = pts
@@ -1840,13 +1867,19 @@ try {
         const d = obj ? G.distancesToward?.(obj.x, obj.z, pts) : null
         if (d && pts.length) {
           let bestLeft = -Infinity
+          let bestIdx = -1
           for (let i = 0; i < pts.length; i++) {
             const left = d.points[i]
             if (!Number.isFinite(left) || left >= d.player) continue // 뒤에 있거나 못 감
             if (left > bestLeft) {
               bestLeft = left
+              bestIdx = i
               fire = pts[i]
             }
+          }
+          if (bestIdx >= 0) {
+            const toSpot = G.pathStep(pts[bestIdx].x, pts[bestIdx].z)
+            if (toSpot) fireDetour = toSpot.dist + bestLeft - d.player
           }
         }
         // 앞에 아무것도 없으면(보스 직전) 예전처럼 **가장 가까운** 곳으로.
@@ -1989,7 +2022,7 @@ try {
        */
       const passingBy =
         !!passingStep &&
-        passingStep.dist <= TREASURE_DETOUR &&
+        fireDetour <= PASSING_DETOUR &&
         !treasureClaims(passingStep.dist)
       /**
        * ── 🧾 **지나친 소비처를 그 순간의 지갑과 함께 적습니다** ──────────
@@ -2021,6 +2054,9 @@ try {
           if (!cur || st2.dist < cur.dist) {
             spendBest[key] = {
               dist: Number(st2.dist.toFixed(1)),
+              // 🧭 그때 고른 소비처의 **돌아가는 비용** — 관문이 왜 안 열렸는지 보려면 필요합니다.
+              detour: Number.isFinite(fireDetour) ? Number(fireDetour.toFixed(1)) : -1,
+              chosen: fire ? `${Math.round(fire.x)},${Math.round(fire.z)}` : '-',
               at: Number(now().toFixed(1)),
               anvil: sp.anvil === true,
               embers: em.embers,
@@ -2924,7 +2960,7 @@ try {
     console.log('             🧭 소비처마다 가장 가까이 간 거리 (고르는 규칙과 무관하게)')
     for (const b of [...log.spendBest].sort((a, b2) => a.dist - b2.dist)) {
       console.log(
-        `                ${(b.anvil ? '모루' : '화톳불').padEnd(4)}(${b.where})  ${b.dist}m · ${b.at}초 · 불티 ${b.embers} · 정련석 ${b.stones} · ${b.canBuy ? '살 수 있었음' : '못 삼'}`,
+        `                ${(b.anvil ? '모루' : '화톳불').padEnd(4)}(${b.where})  ${b.dist}m · ${b.at}초 · 불티 ${b.embers} · 정련석 ${b.stones} · ${b.canBuy ? '살 수 있었음' : '못 삼'} · 그때 고른 곳 ${b.chosen} 돌아가는비용 ${b.detour}m`,
       )
     }
   }
