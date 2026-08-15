@@ -1541,6 +1541,26 @@ try {
          *    봇이 0.35 를 들고 있으면 값을 바꾸는 날 봇만 옛 규칙을 씁니다.
          */
         const mv = G.moveInfo()
+        /**
+         * 🪂 **떨어졌으면 그 값을 회수합니다 — 구르기보다 먼저.**
+         *
+         * 순서가 규칙입니다. 두 창이 겹칠 수 있고(절벽에서 굴러 떨어지면
+         * 둘 다 열립니다), 그때 무엇이 나가는지는 **게임이** 정합니다
+         * (`contextComboIndex` 가 낙하를 먼저 봅니다). 봇이 반대 순서로
+         * 물으면 봇만 다른 기술을 노리게 됩니다 — 같은 규칙을 두 곳에
+         * 적는 순간 둘은 갈라집니다.
+         *
+         * 낙하 공격은 파고들기가 **줄어든** 기술이라(제자리에서 내리찍기)
+         * 구르기 공격보다 짧은 거리에서만 닿습니다. 그래서 거리 문턱을
+         * 따로 두지 않고 **더 짧은 쪽**을 씁니다.
+         */
+        if (mv.plungeWindowT > 0 && near.dist <= 2.2) {
+          markAct('낙하공격')
+          G.aimAtWorld(near.x, near.z)
+          tap('Mouse0')
+          await sleep()
+          continue
+        }
         if (mv.rollWindowT > 0 && near.dist <= 2.6) {
           markAct('구르기공격')
           G.aimAtWorld(near.x, near.z)
@@ -2373,6 +2393,7 @@ try {
        */
       runAttacks: G.runStats().runAttacks ?? 0,
       rollAttacks: G.runStats().rollAttacks ?? 0,
+      plungeAttacks: G.runStats().plungeAttacks ?? 0,
       /** 시뮬레이션 1초당 봇이 판단한 횟수 — 판끼리 견줄 수 있는지 가릅니다. */
       botTicksPerSec: Number((botTicks / Math.max(1, now())).toFixed(1)),
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
@@ -2861,7 +2882,7 @@ try {
   )
   // ⚔️ 넣어 두고 안 쓰이면 "효과가 없다"와 "쓰이질 않았다"를 못 가립니다.
   console.log(
-    `             ⚔️ 상황 모션 — 달리기 공격 ${log.runAttacks ?? 0}회 · 구르기 공격 ${log.rollAttacks ?? 0}회`,
+    `             ⚔️ 상황 모션 — 달리기 ${log.runAttacks ?? 0}회 · 구르기 ${log.rollAttacks ?? 0}회 · 낙하 ${log.plungeAttacks ?? 0}회`,
   )
   const distTotal =
     log.boss.fought && log.boss.dist

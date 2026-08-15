@@ -197,6 +197,141 @@ try {
     check(actual > 0 && actual < hurt.before.maxHp, '한 번의 낙하로 죽지는 않는다', `${actual.toFixed(1)} / ${hurt.before.maxHp}`)
   }
 
+  /**
+   * ---- 2.5 🪂 **떨어진 값을 무기로 바꿀 수 있는가** ----------------
+   *
+   * 여기까지는 낙하가 **벌**이기만 했습니다. 소울류·세키로·오공에서
+   * 낙하 공격이 사랑받는 이유는 정반대입니다 — *"먼저 값을 치르고
+   * 높이를 위력으로 바꾼다"*. 우리는 체공 상태가 없지만(physics.ts 의
+   * 설계 노트: 쿼터뷰에서 체공은 조작감만 해칩니다) **값은 이미 치렀고**
+   * (바로 위 검사가 그 피해를 확인했습니다), 그 직후 짧은 창을 엽니다.
+   *
+   * ⚠️ **한 번의 evaluate 안에서 열림과 닫힘을 둘 다 잽니다.** 창은
+   *    0.28초이고, 브라우저 왕복은 그보다 길 수 있습니다. 구르기 창을
+   *    잴 때 정확히 이걸로 한 번 속았습니다 — 게임은 멀쩡한데 계측기가
+   *    창보다 느려서 빨개졌습니다. **재는 쪽이 창 안에 있어야 합니다.**
+   */
+  const drop25 = findDrop(cfg.fallFreeSteps + 1, cfg.maxClimb)
+  const plunge = drop25
+    ? await page.evaluate(
+        async ([top, bottom]) => {
+          const G = window.__game
+          const p = G.playerEntity()
+          G.setHp(p, 100)
+          G.teleportPlayer(top.x, top.z)
+          await window.__t.runFor(0.2)
+          const beforeFall = G.moveInfo()
+          const dx = bottom.x - top.x
+          const dz = bottom.z - top.z
+          const len = Math.hypot(dx, dz) || 1
+          G.pushEntity(p, (dx / len) * 26, (dz / len) * 26)
+
+          const step = () => new Promise((r) => setTimeout(r, 8))
+          // ① 창이 열리는 순간을 잡습니다.
+          let opened = null
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 3) {
+            const m = G.moveInfo()
+            if (m.plungeWindowT > 0) {
+              opened = m
+              break
+            }
+            await step()
+          }
+          /**
+           * ② 그리고 **닫히는지**. 이게 없으면 "낙하 공격이 상시 기술이
+           *    되어 버렸다"는 최악의 실패를 못 잡습니다. 창은 착지 경직
+           *    동안에는 안 흐르므로(playerControl 규칙) 경직 + 창만큼은
+           *    걸립니다 — 넉넉히 3초를 줍니다.
+           */
+          let closed = null
+          const t1 = G.state().elapsed
+          while (G.state().elapsed - t1 < 3) {
+            const m = G.moveInfo()
+            if (m.plungeWindowT === 0) {
+              closed = m
+              break
+            }
+            await step()
+          }
+          return { beforeFall, opened, closed, window: G.moveInfo().plungeWindow }
+        },
+        [world(drop25.top.cx, drop25.top.cz), world(drop25.bottom.cx, drop25.bottom.cz)],
+      )
+    : null
+
+  check(plunge !== null, '낙하 공격을 시험할 낙차가 지도에 있다')
+  if (plunge) {
+    // 짝이 되는 음성 검사 — 떨어지기 **전에는** 평범한 1타여야 합니다.
+    check(
+      plunge.beforeFall.pending === '1타' && plunge.beforeFall.plungeWindowT === 0,
+      '떨어지기 전에는 평범한 1타다 (창이 처음부터 열려 있지 않다)',
+      `"${plunge.beforeFall.pending}" · 창 ${plunge.beforeFall.plungeWindowT}초`,
+    )
+    check(
+      plunge.opened?.pending === '낙하 공격' && plunge.opened?.plungeWindowT > 0,
+      '떨어진 직후엔 **낙하 공격**이 열린다',
+      `"${plunge.opened?.pending}" · 창 ${plunge.opened?.plungeWindowT}/${plunge.window}초`,
+    )
+    check(
+      plunge.opened?.plungeSteps === cfg.fallFreeSteps + 1,
+      '**몇 단 떨어졌는지**가 기술에 남는다 (높이가 위력이 되려면 필요합니다)',
+      `${plunge.opened?.plungeSteps}단 (실제 ${cfg.fallFreeSteps + 1}단)`,
+    )
+    check(
+      plunge.closed?.pending === '1타',
+      '창이 지나면 도로 1타다 (상시 기술이 아니다)',
+      `"${plunge.closed?.pending}"`,
+    )
+  }
+
+  /**
+   * ---- 2.6 낙하 공격이 **값어치를 하는가** ------------------------
+   *
+   * 위 검사는 *"열리고 닫힌다"* 까지입니다. 열려도 세지 않으면 아무도
+   * 안 씁니다 — 게다가 이 기술은 **체력 36%를 먼저 낸 사람**이 쓰는
+   * 것이라, 평타보다 조금 센 정도로는 손해입니다.
+   *
+   * ⚠️ 배율을 프로브가 다시 곱하지 않습니다. `weaponTable().plungeMoves`
+   *    는 게임이 `plungeStep()` 으로 **계산해 준 결과**입니다. 프로브가
+   *    식을 베끼면 배율을 바꾸는 날 프로브만 옛 값을 씁니다.
+   */
+  const wtbl = await page.evaluate(() => window.__game.weaponTable())
+  check(wtbl.length >= 3, '무기표를 읽었다 (아래 비교가 헛돌지 않게)', `${wtbl.length}종`)
+  if (wtbl.length >= 3) {
+    const weakPlunge = wtbl.filter((w) => !(w.plungeMoves[0].damage > w.lastStepDamage))
+    check(
+      weakPlunge.length === 0,
+      '낙하 공격은 세 무기 모두 **마무리 타보다 세다** (값을 먼저 냈으니까)',
+      wtbl.map((w) => `${w.id} ${w.plungeMoves[0].damage}>${w.lastStepDamage}`).join(' · '),
+    )
+    const flat = wtbl.filter((w) => !(w.plungeMoves[1].damage > w.plungeMoves[0].damage))
+    check(
+      flat.length === 0,
+      '**높이가 곧 위력**이다 (5단이 3단보다 세다 — 안 그러면 높이는 벌일 뿐)',
+      wtbl.map((w) => `${w.id} 5단 ${w.plungeMoves[1].damage} > 3단 ${w.plungeMoves[0].damage}`).join(' · '),
+    )
+    const softPlunge = wtbl.filter((w) => !(w.plungeMoves[0].trauma > w.comboTrauma / w.comboLength))
+    check(
+      softPlunge.length === 0,
+      '낙하 공격은 **무너뜨린다** (위에서 내리찍는 것이 평타와 같으면 안 됩니다)',
+      wtbl
+        .map((w) => `${w.id} ${w.plungeMoves[0].trauma}>${(w.comboTrauma / w.comboLength).toFixed(2)}`)
+        .join(' · '),
+    )
+    /**
+     * 공짜가 되지 않게 — 파고들기는 **줄어야** 합니다. 낙하 공격이 평타처럼
+     * 달려들면 "절벽에서 뛰어내려 돌진"이 최적해가 되어, 낙하 피해를
+     * 감수할 이유가 아니라 **거리를 좁히는 싼 수단**이 됩니다.
+     */
+    const dashy = wtbl.filter((w) => !(w.plungeMoves[0].lunge < w.firstLunge))
+    check(
+      dashy.length === 0,
+      '낙하 공격으로 **거리를 벌지는 못한다** (제자리에서 내리찍는 기술)',
+      wtbl.map((w) => `${w.id} ${w.plungeMoves[0].lunge}<${w.firstLunge}`).join(' · '),
+    )
+  }
+
   // ---- 3. 밀어 떨어뜨린 적은 무방비로 착지해야 합니다 ----
   //
   // 이것이 이 시스템의 **본체**입니다. 피해 12%보다 무방비 착지가 큽니다.

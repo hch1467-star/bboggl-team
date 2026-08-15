@@ -215,6 +215,10 @@ export const Player = defineComponent({
    * 근거는 balance.ts `PLAYER.contextAttack.rollWindow`.
    */
   rollAttackT: 'f32',
+  /** 🪂 떨어진 직후 낙하 공격이 열려 있는 남은 시간(초) */
+  plungeT: 'f32',
+  /** 🪂 그때 떨어진 단수 — 피해·강인도가 여기에 비례합니다 */
+  plungeSteps: 'f32',
   /**
    * 이번 시전에서 반격 쿨다운 환급을 **이미 받았는가**(0/1).
    *

@@ -381,24 +381,33 @@ async function main() {
        * 곱하지 않고, 게임이 **계산해 준 결과**를 견줍니다.
        */
       const tbl = await page.evaluate(() => window.__game.weaponTable())
+      /**
+       * ⚠️ **여기 셋은 인자 순서가 뒤집혀 있었습니다** — `check(조건, '라벨')`.
+       *
+       * 서명은 `check(label, ok)` 인데 조건을 앞에 넣었으니, 라벨 자리에
+       * boolean 이 가고 **판정 자리에는 문자열(항상 참)** 이 갔습니다.
+       * 즉 세 검사 모두 무슨 값이 나오든 초록이었습니다 — 이 저장소에서
+       * 같은 실수가 이걸로 **다섯 번째**입니다(출혈 5개 · 여기 3개).
+       * 검사가 빨개질 수 없으면 검사가 아닙니다.
+       */
       const badLunge = tbl.filter((w) => !(w.moves[0].lunge > w.firstLunge))
       check(
-        tbl.length >= 3 && badLunge.length === 0,
         '달리기 공격은 세 무기 모두 **1타보다 더 파고든다** (거리를 좁히는 기술)',
+        tbl.length >= 3 && badLunge.length === 0,
         tbl.map((w) => `${w.id} ${w.moves[0].lunge}>${w.firstLunge}`).join(' · '),
       )
       const badFast = tbl.filter((w) => !(w.moves[1].windup < w.firstWindup))
       check(
-        tbl.length >= 3 && badFast.length === 0,
         '구르기 공격은 세 무기 모두 **1타보다 빠르다** (갚는 손이니까)',
+        tbl.length >= 3 && badFast.length === 0,
         tbl.map((w) => `${w.id} ${w.moves[1].windup}<${w.firstWindup}`).join(' · '),
       )
       /** 무기 성격이 살아 있는가 — 대검의 새 기술이 단검보다 느려야 합니다. */
       const gs = tbl.find((w) => w.id === 'greatsword')
       const dg = tbl.find((w) => w.id === 'daggers')
       check(
-        !!gs && !!dg && gs.moves[0].windup > dg.moves[0].windup,
         '새 기술에도 무기 성격이 따라온다 (대검이 단검보다 느리게 달려든다)',
+        !!gs && !!dg && gs.moves[0].windup > dg.moves[0].windup,
         `대검 ${gs?.moves[0].windup} vs 단검 ${dg?.moves[0].windup}`,
       )
     }

@@ -669,9 +669,42 @@ export function rollingStep(weapon: WeaponDef): ComboStep {
   return contextStep(weapon, '구르기 공격', PLAYER.contextAttack.rolling)
 }
 
+/**
+ * 🪂 **떨어진 직후의 내려찍기.**
+ *
+ * ⚠️ **마지막 타에서 파생시킵니다**(1타가 아니라). 달리기·구르기 공격은
+ *    콤보를 **여는** 기술이라 1타에서 파생했지만, 이건 그 자체로 **끝내는**
+ *    한 방입니다 — 높이를 값과 맞바꾼 결과가 잽이면 아무도 안 뜁니다.
+ *
+ * 낙하 단수가 배율로 들어옵니다. 근거는 balance.ts `contextAttack.plunge`.
+ */
+export function plungeStep(weapon: WeaponDef, steps: number): ComboStep {
+  const last = weapon.combo[weapon.combo.length - 1]
+  const m = PLAYER.contextAttack.plunge
+  // 무료 낙하(FALL.freeSteps)를 넘은 만큼만 셉니다 — 한 계단 내려선 것은 낙하가 아닙니다.
+  const extra = Math.max(0, steps - 2) * m.perStep
+  const scale = m.damageMult + extra
+  return {
+    name: '낙하 공격',
+    windup: last.windup * m.windupMult,
+    active: last.active,
+    recovery: last.recovery * m.recoveryMult,
+    damage: last.damage * scale,
+    range: last.range * m.rangeMult,
+    arcDeg: Math.max(20, last.arcDeg + m.arcAdd),
+    staminaCost: Math.round(last.staminaCost * m.staminaMult),
+    hitstop: last.hitstop,
+    // 🔨 이 기술의 값은 무너뜨림입니다 — 강인도에 더 크게 실립니다.
+    trauma: last.trauma * m.poiseMult * scale,
+    lunge: last.lunge * m.lungeMult,
+    knockback: last.knockback,
+  }
+}
+
 /** Actor.comboIndex 에 넣는 표식. 콤보 길이(최대 4)·강타·처형과 안 겹칩니다. */
 export const RUN_COMBO = 252
 export const ROLL_COMBO = 253
+export const PLUNGE_COMBO = 254
 
 export interface WeaponDef {
   id: string

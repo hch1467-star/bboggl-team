@@ -8,6 +8,8 @@ import {
   rollingStep,
   RUN_COMBO,
   ROLL_COMBO,
+  PLUNGE_COMBO,
+  plungeStep,
   type SkillDef,
 } from '../config/arsenal'
 import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
@@ -112,6 +114,7 @@ export function resetStaminaSpent(): void {
   lightSwings = 0
   runAttacks = 0
   rollAttacks = 0
+  plungeAttacks = 0
   inputFlow.used = 0
   inputFlow.expired = 0
   inputFlow.dropped = 0
@@ -145,13 +148,21 @@ let lightSwings = 0
  */
 let runAttacks = 0
 let rollAttacks = 0
+let plungeAttacks = 0
 export function readRhythm(): {
   skillCasts: number[]
   lightSwings: number
   runAttacks: number
   rollAttacks: number
+  plungeAttacks: number
 } {
-  return { skillCasts: skillCasts.slice(0, SLOT_COUNT), lightSwings, runAttacks, rollAttacks }
+  return {
+    skillCasts: skillCasts.slice(0, SLOT_COUNT),
+    lightSwings,
+    runAttacks,
+    rollAttacks,
+    plungeAttacks,
+  }
 }
 
 /**
@@ -335,7 +346,9 @@ function beginAttack(p: number, index: number, aimRot: number): void {
           ? runningStep(weaponOf(p))
           : index === ROLL_COMBO
             ? rollingStep(weaponOf(p))
-            : weaponOf(p).combo[index]
+            : index === PLUNGE_COMBO
+              ? plungeStep(weaponOf(p), Player.plungeSteps[p])
+              : weaponOf(p).combo[index]
   // 조준 보정 — 이미 대충 맞게 겨눴으면 마무리를 다듬어 줍니다(combat.ts 설계 노트).
   // 파고들기가 커서를 따라가므로, 보정 없이는 빗나간 조준이 위치까지 틀어 놓습니다.
   const aim = assistAim(Transform.x[p], Transform.z[p], aimRot, c.range)
@@ -366,8 +379,10 @@ function beginAttack(p: number, index: number, aimRot: number): void {
    * 2타까지 구르기 공격이 되어, 한 번 구른 것으로 두 번 갚게 됩니다.
    */
   if (index === ROLL_COMBO) Player.rollAttackT[p] = 0
+  if (index === PLUNGE_COMBO) Player.plungeT[p] = 0
   if (index === RUN_COMBO) runAttacks++
   else if (index === ROLL_COMBO) rollAttacks++
+  else if (index === PLUNGE_COMBO) plungeAttacks++
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
   // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
@@ -621,6 +636,12 @@ export function dodgeBlock(p: number): DodgeBlock {
  *    기대하는 것은 *"방금 굴러 넘겼으니 갚는다"* 이지 돌진이 아닙니다.
  */
 export function contextComboIndex(p: number, sprinting: boolean): number {
+  /**
+   * 🪂 **떨어진 직후가 가장 앞섭니다.** 창이 제일 짧고(0.28초) 가장
+   * 구체적인 상황입니다 — 구르며 떨어졌든 달리다 떨어졌든, 방금 뛰어내린
+   * 사람이 기대하는 것은 **내려찍기**입니다.
+   */
+  if (Player.plungeT[p] > 0) return PLUNGE_COMBO
   if (Player.rollAttackT[p] > 0) return ROLL_COMBO
   if (sprinting) return RUN_COMBO
   return 0
@@ -857,6 +878,17 @@ export function playerControlSystem(ctx: ControlContext): void {
       // 🤸 구르기 공격 창. 구르는 **동안**은 안 깎습니다 — 창은 끝난 뒤에 엽니다.
       if (Actor.state[p] !== ActorState.Dodge) {
         Player.rollAttackT[p] = Math.max(0, Player.rollAttackT[p] - dt)
+      }
+      /**
+       * 🪂 낙하 창도 **착지 경직 동안은 안 깎습니다.**
+       *
+       * 이게 없으면 창이 열려도 못 씁니다. 착지 경직(`hurtStagger` 0.28초)이
+       * 낙하 창(`plungeWindow` 0.28초)과 같은 길이라, 손이 풀리는 순간
+       * 창도 같이 닫힙니다 — 열어 두고 못 쓰게 만드는 셈입니다.
+       * 구르기 창과 **같은 규칙**을 씁니다: 창은 몸이 자유로울 때만 흐른다.
+       */
+      if (Actor.state[p] !== ActorState.Stagger) {
+        Player.plungeT[p] = Math.max(0, Player.plungeT[p] - dt)
       }
       if (Stamina.regenDelayT[p] > 0) {
         Stamina.regenDelayT[p] = Math.max(0, Stamina.regenDelayT[p] - dt)
@@ -1604,6 +1636,17 @@ function endAttack(p: number, aimRot: number): void {
    */
   if (Actor.comboIndex[p] === RUN_COMBO || Actor.comboIndex[p] === ROLL_COMBO) {
     Actor.comboIndex[p] = 0
+  }
+  /**
+   * 🪂 낙하 공격은 **끝내는 한 방**입니다 — 강타·처형과 같은 편입니다.
+   * 뒤로 콤보가 이어지면 "높이를 값과 맞바꾼 한 방"의 무게가 사라집니다.
+   */
+  if (Actor.comboIndex[p] === PLUNGE_COMBO) {
+    Actor.state[p] = ActorState.Idle
+    Actor.comboIndex[p] = 0
+    Actor.bufferedAttack[p] = 0
+    Actor.comboWindowT[p] = 0
+    return
   }
   // 강타와 처형은 **마무리**입니다. 뒤로 콤보가 이어지면 그 한 방의 무게가 사라집니다.
   if (Actor.comboIndex[p] === HEAVY_COMBO || Actor.comboIndex[p] === FINISH_COMBO) {

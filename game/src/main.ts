@@ -7,8 +7,10 @@ import {
   WEAPONS,
   runningStep,
   rollingStep,
+  plungeStep,
   RUN_COMBO,
   ROLL_COMBO,
+  PLUNGE_COMBO,
   HEAVY_COMBO,
   FINISH_COMBO,
   SKILL_KEY_CODES,
@@ -1286,6 +1288,26 @@ class Game {
         Actor.timer[p] = PLAYER_CFG.hurtStagger
         this.cam.addTrauma(FALL.trauma)
         requestHitstop(FALL.hitstop)
+        /**
+         * 🪂 **낙하 공격 창을 여는 곳은 여기 하나입니다.**
+         *
+         * 소울류·세키로·오공의 낙하 공격이 파는 것은 "체공"이 아니라
+         * **"높이를 무기로 바꾸되 값을 먼저 치른다"** 입니다. 우리는 체공
+         * 상태가 없지만(physics.ts 설계 노트 참고 — 쿼터뷰에서 체공은
+         * 조작감만 해칩니다), **값은 이미 치렀습니다** — 바로 윗줄에서
+         * 체력이 깎이고 경직이 걸렸습니다. 그러니 이 자리가 정확합니다:
+         * *떨어져서 아팠다*는 사실이 확정된 직후에만 창이 열립니다.
+         *
+         * 적에게는 안 엽니다. 적은 낙하로 **무너지고**(위 `breakPoise`),
+         * 그 틈이 플레이어의 보상입니다. 양쪽 다 주면 절벽이 서로에게
+         * 같은 도구가 되어 "절벽으로 유인하기"의 값어치가 사라집니다.
+         *
+         * `steps` 를 그대로 넘기는 이유: 높이가 곧 위력이어야 합니다.
+         * 2단은 값싼 마무리, 5단은 큰 한 방 — 대신 5단은 체력 36%를
+         * 먼저 냅니다. 위험과 보상이 **같은 숫자**에 묶여 있습니다.
+         */
+        Player.plungeT[p] = PLAYER_CFG.contextAttack.plungeWindow
+        Player.plungeSteps[p] = f.steps
       } else if (FALL.breaksPoise && hasComponent(Enemy, f.entity)) {
         breakPoise(f.entity)
       }
@@ -3184,6 +3206,8 @@ class Game {
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
+    /** 🪂 낙하 공격 — 떨어진 값을 위력으로 바꾼 횟수 */
+    plungeAttacks: number
     /** 이어짐 눈금 — 선입력이 실제로 일했는가 (playerControl.ts readInputFlow) */
     inputUsed: number
     inputExpired: number
@@ -3221,6 +3245,7 @@ class Game {
       lightSwings: readRhythm().lightSwings,
       runAttacks: readRhythm().runAttacks,
       rollAttacks: readRhythm().rollAttacks,
+      plungeAttacks: readRhythm().plungeAttacks,
       inputUsed: readInputFlow().used,
       inputExpired: readInputFlow().expired,
       inputDropped: readInputFlow().dropped,
@@ -3954,6 +3979,12 @@ class Game {
      * 봇만 옛 값을 쓰므로 게임이 알려 줍니다.
      */
     runReach: number
+    /** 🪂 낙하 공격 창의 남은 시간(초) */
+    plungeWindowT: number
+    /** 🪂 이번 낙하가 몇 단이었는가(창이 닫히면 의미 없음) */
+    plungeSteps: number
+    /** 규칙값 — 프로브가 베끼지 않게 */
+    plungeWindow: number
   } {
     const p = this.playerEntity
     const w = weaponOf(p)
@@ -3962,11 +3993,13 @@ class Game {
         ? runningStep(w).name
         : idx === ROLL_COMBO
           ? rollingStep(w).name
-          : idx === HEAVY_COMBO
-            ? '강타'
-            : idx === FINISH_COMBO
-              ? '처형'
-              : w.combo[Math.min(idx, w.combo.length - 1)].name
+          : idx === PLUNGE_COMBO
+            ? plungeStep(w, Player.plungeSteps[p]).name
+            : idx === HEAVY_COMBO
+              ? '강타'
+              : idx === FINISH_COMBO
+                ? '처형'
+                : w.combo[Math.min(idx, w.combo.length - 1)].name
     const st = Actor.state[p] as ActorState
     return {
       pending: nameOf(contextComboIndex(p, isSprinting(p))),
@@ -3975,6 +4008,9 @@ class Game {
       sprinting: isSprinting(p),
       rollWindow: PLAYER_CFG.contextAttack.rollWindow,
       runReach: Number((runningStep(w).range + runningStep(w).lunge).toFixed(2)),
+      plungeWindowT: Number(Player.plungeT[p].toFixed(3)),
+      plungeSteps: Player.plungeSteps[p],
+      plungeWindow: PLAYER_CFG.contextAttack.plungeWindow,
     }
   }
 
@@ -4312,6 +4348,9 @@ declare global {
         sprinting: boolean
         rollWindow: number
         runReach: number
+        plungeWindowT: number
+        plungeSteps: number
+        plungeWindow: number
       }
       /** 🤸 구르기 규칙 — 프로브·봇이 문턱과 키를 베끼지 않게 */
       dodgeInfo: () => {
@@ -4565,6 +4604,15 @@ declare global {
           lunge: number
           windup: number
           recovery: number
+          staminaCost: number
+        }[]
+        /** 🪂 낙하 공격의 제원 — [낮은 낙하, 높은 낙하] 두 벌 */
+        plungeMoves: {
+          steps: number
+          name: string
+          damage: number
+          trauma: number
+          lunge: number
           staminaCost: number
         }[]
         firstWindup: number
@@ -5242,6 +5290,25 @@ window.__game = {
         recovery: Number(c.recovery.toFixed(3)),
         staminaCost: c.staminaCost,
       })),
+      /**
+       * 🪂 **높이가 위력이 되는지**를 프로브가 곱셈 없이 볼 수 있게 두 벌 냅니다.
+       *
+       * 낙하 공격만 `steps` 를 인자로 받습니다 — 달리기·구르기는 상황이
+       * 켜졌는가(예/아니오)뿐이지만, 낙하는 **얼마나 높았는가**가 남습니다.
+       * 3단은 공짜 2단 바로 위(제일 싼 낙하), 5단은 체력 36%를 낸 낙하.
+       * 둘의 피해가 같게 나오면 높이가 아무 의미도 없다는 뜻입니다.
+       */
+      plungeMoves: [3, 5].map((steps) => {
+        const c = plungeStep(w, steps)
+        return {
+          steps,
+          name: c.name,
+          damage: Number(c.damage.toFixed(1)),
+          trauma: Number(c.trauma.toFixed(2)),
+          lunge: Number(c.lunge.toFixed(2)),
+          staminaCost: c.staminaCost,
+        }
+      }),
       firstWindup: w.combo[0].windup,
       firstLunge: w.combo[0].lunge,
       dodgeCost: PLAYER_CFG.dodge.staminaCost * (w.dodgeCostScale ?? 1),
