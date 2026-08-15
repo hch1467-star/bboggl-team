@@ -2507,6 +2507,7 @@ try {
        * 판에서 성립하는지가 이 두 숫자의 비율입니다.
        */
       bleedPops: G.runStats().bleedPops ?? 0,
+      bleedPeak: G.runStats().bleedPeak ?? 0,
       breakHpAvg: G.runStats().breakHpAvg,
       brokenDeaths: G.runStats().brokenDeaths,
       finisherReady: finisherReadySamples,
@@ -2918,7 +2919,7 @@ try {
   console.log(
     `  백어택      ${log.backHits}/${log.hitsDealt}회 (${Math.round((log.backHits / Math.max(1, log.hitsDealt)) * 100)}%)` +
       ` — 때릴 거리에서 등 뒤를 잡고 있던 시간 ${Math.round((log.behindOk / Math.max(1, log.behindSamples)) * 100)}%\n` +
-    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회\n` +
+    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0}/100)\n` +
     `  강인도      무방비인 적 곁에서 실제로 때린 시간 ${log.brokenUseRatio}%\n` +
       `              무너진 순간의 평균 체력 ${Math.round(log.breakHpAvg * 100)}% · 무방비인 채로 죽은 적 ${log.brokenDeaths}마리\n` +
       `              처형 안내가 떠 있던 프레임 ${log.finisherReady} (그중 스태미나가 모자랐던 프레임 ${log.finisherNoStamina})`,

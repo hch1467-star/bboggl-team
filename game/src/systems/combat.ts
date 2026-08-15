@@ -419,6 +419,7 @@ function applyBleed(t: number, spec: AttackSpec): void {
   if (w <= 0) return
   Enemy.bleedIdleT[t] = 0
   Enemy.bleed[t] += BLEED.perHit * w
+  if (Enemy.bleed[t] > bleedPeak) bleedPeak = Enemy.bleed[t]
   if (Enemy.bleed[t] < BLEED.max) return
 
   Enemy.bleed[t] = 0
@@ -436,6 +437,25 @@ function applyBleed(t: number, spec: AttackSpec): void {
 
 /** 🩸 출혈이 터진 순간 — 게임 루프가 읽고 비웁니다(연출은 시스템 밖에서). */
 export const bleedEvents: BreakEvent[] = []
+
+/**
+ * 🩸 **한 적에게 쌓였던 최고치.**
+ *
+ * `터짐 0회` 만으로는 *"5까지밖에 안 찼다"* 와 *"99까지 찼는데 식었다"* 를
+ * **똑같이** 말합니다 — 처방이 정반대인데요(전자면 이 축은 잡몹에게 원래
+ * 안 도는 것이고, 후자면 식는 값이 틀린 것입니다).
+ *
+ * ⚠️ **때린 직후에만 셉니다.** 출혈은 타격으로만 오르고 그 사이에는 식기만
+ *    하므로, 최고치는 언제나 증가 직후입니다. 매 프레임 살아 있는 적을
+ *    훑을 이유가 없습니다.
+ */
+let bleedPeak = 0
+export function readBleedPeak(): number {
+  return bleedPeak
+}
+export function resetBleedPeak(): void {
+  bleedPeak = 0
+}
 
 /**
  * 강인도를 즉시 깨뜨립니다.

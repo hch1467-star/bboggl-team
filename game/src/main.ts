@@ -95,6 +95,8 @@ import { KIND_TREASURE, Visuals } from './render/visuals'
 import {
   breakEvents,
   bleedEvents,
+  readBleedPeak,
+  resetBleedPeak,
   breakPoise,
   finisherEvents,
   counterEvents,
@@ -607,6 +609,7 @@ class Game {
     this.hurtWatch.clear()
     this.justGuards = 0
     this.bleedPops = 0
+    resetBleedPeak()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -3168,6 +3171,8 @@ class Game {
     lightSwings: number
     /** 🩸 출혈이 터진 횟수 */
     bleedPops: number
+    /** 🩸 한 적에게 쌓였던 최고치 — "안 쌓임"과 "쌓였는데 안 터짐"을 가릅니다 */
+    bleedPeak: number
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3191,6 +3196,7 @@ class Game {
       finishers: this.finishers,
       bossFinishers: this.bossFinishers,
       bleedPops: this.bleedPops,
+      bleedPeak: Number(readBleedPeak().toFixed(1)),
       chainsArmed: readChainsArmed(),
       chainsFired: readChainsFired(),
       chainsDropped: readChainsDropped(),
