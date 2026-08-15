@@ -820,16 +820,30 @@ console.log(`  무기 강화      ${fmt(pick((l) => l.weaponUps ?? 0), 1)}회`)
     for (const t of l.untakenTreasures ?? []) {
       const k = `(${t.x}, ${t.z})`
       if (!bySpot.has(k)) bySpot.set(k, [])
-      bySpot.get(k).push(t.best)
+      bySpot.get(k).push({ best: t.best, block: t.block ?? '?' })
     }
   }
   if (bySpot.size) {
-    console.log('  못 주운 보물   (가장 가까이 간 거리 — 예산 40m)')
-    for (const [k, ds] of [...bySpot.entries()].sort((a, b) => b[1].length - a[1].length)) {
-      const seen = ds.filter((d) => d >= 0)
+    console.log('  못 주운 보물   (가장 가까이 간 거리 · 그때 막고 있던 것 — 예산 40m)')
+    for (const [k, rows] of [...bySpot.entries()].sort((a, b) => b[1].length - a[1].length)) {
+      const seen = rows.map((r) => r.best).filter((d) => d >= 0)
+      /**
+       * 🧭 **가장 가까이 간 그 순간 무엇이 막고 있었는가.**
+       *
+       * 거리만으로는 처방이 안 정해집니다 — 10m 까지 갔는데 못 주운
+       * 보물이 있었고, 그건 "멀어서"가 아닙니다. 판마다 이유가 다를 수
+       * 있으니 이유별 판수를 그대로 적습니다.
+       */
+      const why = {}
+      for (const r of rows) why[r.block] = (why[r.block] ?? 0) + 1
+      const whyStr = Object.entries(why)
+        .sort((a, b) => b[1] - a[1])
+        .map(([w, n]) => `${w} ${n}판`)
+        .join(' · ')
       console.log(
-        `    ${k.padEnd(12)} ${ds.length}/${logs.length}판에서 못 주움 · ` +
-          (seen.length ? `${fmt(seen, 0)}m` : '경로 자체를 못 찾음'),
+        `    ${k.padEnd(12)} ${rows.length}/${logs.length}판에서 못 주움 · ` +
+          (seen.length ? `${fmt(seen, 0)}m` : '경로 자체를 못 찾음') +
+          ` · ${whyStr}`,
       )
     }
   }

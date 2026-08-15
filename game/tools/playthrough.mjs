@@ -253,6 +253,26 @@ try {
      */
     const treasureBest = {}
     /**
+     * 🧭 **가장 가까이 갔던 그 순간, 무엇이 막고 있었는가.**
+     *
+     * 3판 모두 못 주운 보물 중 하나는 **10m** 까지 갔습니다. 40m 예산
+     * 안이고, 걸어서 2~3초 거리입니다. 그런데 안 주웠습니다. "멀어서"가
+     * 아니라는 뜻이고, 거리만 적어 두면 그 다음 질문에 답할 수가 없습니다.
+     *
+     * 불티 경제에서 `막힌 곳`(못삼·지갑안늘어·쿨다운·열림)을 나눠 적자마자
+     * 처방이 정해졌던 것과 같은 방식입니다. 여기서도 **이유별로** 적습니다:
+     *   · 싸우는중 — 12m 안에 적이 있어 곁길 가지에 아예 안 들어감
+     *   · 왕복쿨다운 — 직전 왕복이 실패해 45초 잠김
+     *   · 예산초과 — 걸어야 하는 거리가 예산보다 멂
+     *   · 더가까운게있음 — 이 보물이 `best` 로 안 뽑힘(다른 보물을 향하는 중)
+     *   · 가는중 — 이 보물을 향해 실제로 걷고 있었음
+     */
+    const treasureBlock = {}
+    const noteTreasureBlock = (key, dist, why) => {
+      const cur = treasureBlock[key]
+      if (!cur || dist < cur.dist) treasureBlock[key] = { dist, why }
+    }
+    /**
      * 화톳불에 **닿은 순간의 지갑**을 그대로 남깁니다.
      *
      * 판마다 "무기 강화 0회 [0/0/0]" 이 찍히는데 불티는 316이 남습니다.
@@ -960,6 +980,40 @@ try {
       if (vi.vials < lastVials) vialsUsed += lastVials - vi.vials
       lastVials = vi.vials
       const near = st.nearestEnemy
+      /**
+       * 🧭 **곁길끼리는 가까운 쪽이 이깁니다.**
+       *
+       * ── 무엇이 잘못돼 있었는가 ────────────────────────────────────
+       * 봇에는 곁길이 셋(보물·지름길·모루) 있고, 셋이 **고정된 if 순서**로
+       * 놓여 있었습니다. 위에 있는 것이 무조건 이깁니다. 그래서 이런 판이
+       * 나왔습니다:
+       *
+       *     (27, -43)  가장 가까이 **10m** · 그때 막던 것: **가는중**
+       *
+       * 보물을 향해 걷고 있었는데, 32m 밖 사다리가 위 가지에 있다는
+       * 이유만으로 봇이 방향을 틀었습니다. **10m 앞의 상자를 두고
+       * 32m 를 걸어간 것**입니다. 사람은 그러지 않습니다.
+       *
+       * 이건 밸런스가 아니라 **계측기의 정직함** 문제입니다. 기둥 4가 묻는
+       * 것은 *"곁길에 갈지 말지의 선택이 좋은 선택인가"* 인데, 봇이 자기
+       * if 순서를 재고 있으면 그 질문에 답할 수가 없습니다.
+       *
+       * 그래서 프레임마다 한 번 **가장 가까운 미획득 보물**을 구해 두고,
+       * 다른 곁길 가지들이 그보다 멀면 물러나게 합니다. 규칙은 하나뿐이고
+       * 사람의 규칙과 같습니다 — **눈앞의 것부터.**
+       */
+      let nearTreasure = null
+      for (const t of G.treasurePositions()) {
+        if (t.taken) continue
+        const ts = G.pathStep(t.x, t.z)
+        if (!ts) continue
+        if (nearTreasure === null || ts.dist < nearTreasure.dist) {
+          nearTreasure = { goal: t, step: ts, dist: ts.dist, key: `${Math.round(t.x)},${Math.round(t.z)}` }
+        }
+      }
+      /** 예산 안에 있는 보물만 다른 곁길을 밀어낼 자격이 있습니다. */
+      const treasureClaims = (otherDist) =>
+        nearTreasure !== null && nearTreasure.dist <= TREASURE_DETOUR && nearTreasure.dist < otherDist
       if (p.hp < 50 && vi.vials > 0) {
         if (!near || near.dist > 7) {
           markAct('성수병')
@@ -1679,7 +1733,8 @@ try {
       const closedShortcut = G.shortcutInfo().find((s) => !s.open && (s.saving ?? 0) > 20)
       if (closedShortcut && now() >= shortcutCooldownUntil) {
         const toTop = G.pathStep(closedShortcut.hiWorldX, closedShortcut.hiWorldZ)
-        if (toTop && toTop.dist <= 40) {
+        // 🧭 눈앞의 보물이 더 가까우면 사다리는 다음에 — 위 `treasureClaims` 주석.
+        if (toTop && toTop.dist <= 40 && !treasureClaims(toTop.dist)) {
           // 왕복에 제한을 겁니다 — 화톳불에서 배운 것과 같은 이유입니다.
           // 도착 판정이 어긋나면 목표와 사다리 사이를 무한히 오갑니다.
           if (shortcutTripUntil === 0) shortcutTripUntil = now() + 30
@@ -1988,7 +2043,7 @@ try {
          * ⚠️ 이 값을 다시 늘리고 싶어지면, 그건 소비처가 또 엉뚱한 곳에
          * 있다는 신호입니다. 봇의 예산이 아니라 **지도**를 보십시오.
          */
-        } else if (step && step.dist < 45 && straight > 1.6) {
+        } else if (step && step.dist < 45 && straight > 1.6 && !treasureClaims(step.dist)) {
           /**
            * **마지막 몇 미터는 직선으로 갑니다.**
            *
@@ -2284,17 +2339,51 @@ try {
        *      사이를 영원히 오갑니다.
        */
       const fighting = near && reachable && near.dist < 12
-      if (!fighting && now() >= treasureCooldownUntil) {
-        let best = null
+      /**
+       * 🧭 곁길 가지에 **못 들어간 경우도** 거리와 이유를 남깁니다.
+       *
+       * 이게 없으면 `treasureBest` 는 *"곁길을 볼 수 있었던 프레임"* 에서만
+       * 갱신됩니다. 즉 싸우는 동안 보물 옆을 스쳐 지나가면 그 근접은
+       * 장부에 아예 안 남고, 나중에 *"40m 까지밖에 못 갔다"* 는 잘못된
+       * 그림이 그려집니다. 재는 것은 **실제 거리**여야 합니다.
+       */
+      if (fighting || now() < treasureCooldownUntil) {
+        const why = fighting ? '싸우는중' : '왕복쿨다운'
         for (const t of G.treasurePositions()) {
           if (t.taken) continue
           const step = G.pathStep(t.x, t.z)
           if (!step) continue
           const key = `${Math.round(t.x)},${Math.round(t.z)}`
           if (!(key in treasureBest) || step.dist < treasureBest[key]) treasureBest[key] = step.dist
-          // ⚠️ step 은 **다음 한 걸음**이고 t 는 **목적지**입니다. 두 좌표를
-          // 한 객체에 펼쳐 담으면 목적지가 조용히 덮어써집니다.
-          if (best === null || step.dist < best.dist) best = { goal: t, step, dist: step.dist }
+          noteTreasureBlock(key, step.dist, why)
+        }
+      }
+      if (!fighting && now() >= treasureCooldownUntil) {
+        /**
+         * ⚠️ **위에서 이미 구한 것을 다시 구하지 않습니다.**
+         *
+         * 예전엔 여기서 `pathStep` 을 보물마다 한 번 더 돌렸습니다. 값이
+         * 같으리라는 보장이 없고(같은 프레임이어도 코드가 갈리면 언젠가
+         * 갈라집니다), 무엇보다 *"가장 가까운 보물"* 이라는 **같은 규칙이
+         * 두 곳**에 있게 됩니다. 이 저장소가 그것으로 이미 여러 번 데였고,
+         * 바로 이번 라운드에도 상황 모션이 그래서 접혔습니다.
+         */
+        const best = nearTreasure
+        const seen = []
+        for (const t of G.treasurePositions()) {
+          if (t.taken) continue
+          const step = G.pathStep(t.x, t.z)
+          if (!step) continue
+          const key = `${Math.round(t.x)},${Math.round(t.z)}`
+          if (!(key in treasureBest) || step.dist < treasureBest[key]) treasureBest[key] = step.dist
+          seen.push({ key, dist: step.dist })
+        }
+        for (const sObj of seen) {
+          if (best && sObj.key === best.key) {
+            noteTreasureBlock(sObj.key, sObj.dist, best.dist <= TREASURE_DETOUR ? '가는중' : '예산초과')
+          } else {
+            noteTreasureBlock(sObj.key, sObj.dist, '더가까운게있음')
+          }
         }
         if (best && best.dist <= TREASURE_DETOUR) {
           if (treasureTripUntil === 0) {
@@ -2630,12 +2719,14 @@ try {
       fireVisits,
       fireSkips,
       /** 끝까지 안 주운 보물과, 그동안 **가장 가까이 갔던 거리** */
+      detourBudget: TREASURE_DETOUR,
       untakenTreasures: G.treasurePositions()
         .filter((t) => !t.taken)
         .map((t) => ({
           x: Math.round(t.x),
           z: Math.round(t.z),
           best: treasureBest[`${Math.round(t.x)},${Math.round(t.z)}`] ?? -1,
+          block: treasureBlock[`${Math.round(t.x)},${Math.round(t.z)}`]?.why ?? '?',
         })),
       affordableAt,
       lastSpendChanceAt,
@@ -2782,6 +2873,22 @@ try {
         ? `\n             왕복 1회 평균 — 걸린 시간 ${(got.reduce((a, d) => a + d.took, 0) / got.length).toFixed(1)}초 · 받은 피해 ${Math.round(got.reduce((a, d) => a + d.damage, 0) / got.length)} · 나선 지점에서 ${(got.reduce((a, d) => a + d.dist, 0) / got.length).toFixed(0)}m`
         : ''),
   )
+  /**
+   * 🧭 못 주운 보물 — **거리와 그때 막고 있던 것**을 한 판에서도 봅니다.
+   *
+   * 지금까지 이 줄은 벤치에만 있었습니다. 그래서 보물 쪽을 고칠 때마다
+   * 3판(30분)을 돌려야 했고, 한 번 고쳐 보고 확인하는 데 그만큼이
+   * 들었습니다. 한 판으로 볼 수 있으면 시도 횟수가 세 배가 됩니다.
+   */
+  const untaken = log.untakenTreasures ?? []
+  if (untaken.length) {
+    console.log(`  🧭 못 주운 보물 ${untaken.length}개 (예산 ${log.detourBudget ?? 40}m)`)
+    for (const t of untaken) {
+      console.log(
+        `              (${t.x}, ${t.z})  가장 가까이 ${t.best >= 0 ? `${Math.round(t.best)}m` : '경로 못 찾음'} · 그때 막던 것: ${t.block ?? '?'}`,
+      )
+    }
+  }
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
   /**
    * 🥋 **집중이 어디서 왔는가.**
