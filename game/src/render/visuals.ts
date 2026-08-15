@@ -1,7 +1,18 @@
 import * as THREE from 'three'
 import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
 import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
-import { AWARE, BOSS, COMBAT, FOCUS, GRUNT, GUARD, PLAYER, TREASURE, hearDistance } from '../config/balance'
+import {
+  AWARE,
+  BLEED,
+  BOSS,
+  COMBAT,
+  FOCUS,
+  GRUNT,
+  GUARD,
+  PLAYER,
+  TREASURE,
+  hearDistance,
+} from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { isTimingAnswer } from '../config/punish'
 import { ENEMY_DEFS, enemyDef } from '../config/enemies'
@@ -87,6 +98,9 @@ interface Visual {
   hpFill?: THREE.Mesh
   /** 강인도 게이지 (적 전용) */
   poiseFill?: THREE.Mesh
+  /** 🩸 출혈 게이지 — 강인도 바 아래의 가는 선 */
+  bleedFill?: THREE.Mesh
+  bleedBg?: THREE.Mesh
   /** 🥋 "여기까지 깎으면 강타 한 방" 눈금 — 무기를 바꾸면 자리가 움직입니다. */
   poiseMark?: THREE.Mesh
   /** 등 뒤(백어택) 구역 표시 */
@@ -700,9 +714,44 @@ export class Visuals {
       poiseMark.scale.set(0.045, isBoss ? 0.16 : 0.11, 1)
       poiseMark.position.set(-barW / 2, isBoss ? -0.17 : -0.12, 0.002)
       poiseMark.renderOrder = 12
+      /**
+       * 🩸 **출혈 게이지** — 강인도 바 **아래**의 가는 선.
+       *
+       * ── 왜 필요한가 ────────────────────────────────────────────────
+       * 축을 넣고 터질 때만 스파크를 튀겼습니다. 그러면 플레이어가 겪는
+       * 것은 규칙이 아니라 *"가끔 피가 크게 깎인다"* 입니다. 원인이 안
+       * 보이면 배울 것이 없고, 배울 것이 없으면 무기를 고르는 이유도
+       * 안 생깁니다 — 이 저장소가 인지 규칙에서 이미 배운 그대로입니다.
+       * 소울류가 축적 게이지를 띄우는 이유도 같습니다.
+       *
+       * ── 왜 이렇게 생겼나 ───────────────────────────────────────────
+       * · **더 얇게**(강인도의 절반) — 셋째 정보이므로 셋째로 눈에 들어와야
+       *   합니다. 체력 > 강인도 > 출혈 순서를 굵기가 말해 줍니다.
+       * · **0일 때 배경도 숨깁니다** — 대검처럼 이 축을 안 쓰는 무기로
+       *   싸울 때 빈 칸이 늘 떠 있으면, 있지도 않은 축을 보고 있게 됩니다.
+       * · 붉은 계열 — 4색 예고(빨강 직격)와 헷갈릴 위험이 있지만, 예고는
+       *   **바닥 도형**이고 이것은 **머리 위 바**라 자리가 다릅니다.
+       */
+      const bleedBg = new THREE.Mesh(
+        this.hpBarGeo,
+        new THREE.MeshBasicMaterial({ color: 0x180d0d, depthTest: false, transparent: true, opacity: 0.7 }),
+      )
+      bleedBg.scale.set(barW, isBoss ? 0.055 : 0.04, 1)
+      bleedBg.position.set(-barW / 2, isBoss ? -0.245 : -0.175, 0)
+      bleedBg.renderOrder = 10
+      const bleedFill = new THREE.Mesh(
+        this.hpBarGeo,
+        new THREE.MeshBasicMaterial({ color: 0xd9455a, depthTest: false, transparent: true }),
+      )
+      bleedFill.scale.set(0, isBoss ? 0.04 : 0.028, 1)
+      bleedFill.position.set(-barW / 2, isBoss ? -0.245 : -0.175, 0.001)
+      bleedFill.renderOrder = 11
+      hpBar.add(bleedBg, bleedFill)
       hpBar.add(poiseBg, poiseFill, poiseMark)
       visual.poiseFill = poiseFill
       visual.poiseMark = poiseMark
+      visual.bleedFill = bleedFill
+      visual.bleedBg = bleedBg
 
       hpBar.add(bg, fill)
 
@@ -1020,6 +1069,26 @@ export class Visuals {
         if (near) v.backZoneMat.opacity = 0.42 * (1 - d / COMBAT.backIndicatorRange)
       }
 
+      if (v.bleedFill && v.bleedBg && hasComponent(Enemy, e)) {
+        const t = BLEED.max > 0 ? Math.min(1, Enemy.bleed[e] / BLEED.max) : 0
+        const barW = v.group.userData.barWidth as number
+        // 0이면 통째로 숨깁니다 — 안 쓰는 축의 빈 칸은 정보가 아니라 소음입니다.
+        const on = t > 0.001 && Actor.state[e] !== ActorState.Dead
+        v.bleedBg.visible = on
+        v.bleedFill.visible = on
+        if (on) {
+          v.bleedFill.scale.x = barW * t
+          v.bleedFill.position.x = -barW / 2
+          const bm = v.bleedFill.material as THREE.MeshBasicMaterial
+          /**
+           * 가득에 가까워질수록 **밝아집니다.** 색만으로는 "얼마나 남았나"가
+           * 안 읽히고, 이 축의 값은 **터지기 직전**에 몰려 있습니다.
+           */
+          bm.opacity = 0.55 + 0.45 * t
+          bm.color.setHex(t > 0.8 ? 0xff6b7d : 0xd9455a)
+        }
+      }
+
       if (v.poiseFill && hasComponent(Enemy, e)) {
         const cfg = enemyDef(Enemy.kind[e])
         const t = cfg.poiseMax > 0 ? Math.max(0, Enemy.poise[e]) / cfg.poiseMax : 1
@@ -1099,6 +1168,29 @@ export class Visuals {
    * ⚠️ 판단(`timing`)은 게임이 합니다 — 프로브가 색 번호를 베껴 두면
    *    색을 하나 더 넣는 날 조용히 틀립니다.
    */
+  /**
+   * 🩸 **출혈 게이지가 지금 화면에 어떻게 그려져 있는가.**
+   *
+   * 값이 아니라 **그려진 것**을 냅니다. 게임 안의 숫자가 맞아도 화면에
+   * 안 뜨면 없는 것이고, 이 저장소는 그 실패를 여러 번 겪었습니다
+   * (인지 규칙 · 처형 안내 · 초록 예고).
+   */
+  debugBleedBars(): { entity: number; visible: boolean; fill: number; bleed: number }[] {
+    const out: { entity: number; visible: boolean; fill: number; bleed: number }[] = []
+    for (const [e, v] of this.items.entries()) {
+      if (!v.bleedFill) continue
+      const barW = (v.group.userData.barWidth as number) || 1
+      out.push({
+        entity: e,
+        visible: v.bleedFill.visible === true,
+        // 0~1 로 정규화 — 프로브가 바 너비를 알 필요가 없게.
+        fill: Number((v.bleedFill.scale.x / barW).toFixed(3)),
+        bleed: Number((Enemy.bleed[e] ?? 0).toFixed(1)),
+      })
+    }
+    return out
+  }
+
   debugTelegraphs(): {
     entity: number
     attackId: string

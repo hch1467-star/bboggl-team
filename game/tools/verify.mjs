@@ -509,6 +509,15 @@ async function main() {
          * 통과했을 자리입니다 — 이 저장소가 빈 배열로 세 번 데인 모양
          * 그대로입니다. 적을 쥐고 있는 여기서 이어서 잽니다.
          */
+        /**
+         * ⑤ **그려진 게이지를 여기서 잡습니다** — 아직 쌓여 있을 때.
+         *
+         * 처음엔 이 evaluate 가 끝난 **뒤에** 읽었는데, 그 사이 5초를
+         * 기다리며 식혀 놓고 *"게이지가 안 뜬다"* 고 적었습니다. 게임은
+         * 멀쩡했고 **읽는 시점이 틀렸습니다.** 창보다 짧은 것을 재려면
+         * 재는 쪽이 그 안에 있어야 한다는, 이 세션에서 이미 두 번 배운 것.
+         */
+        const bars = G.bleedBars()
         // 마지막 타격 직후의 값을 잡고, 그 뒤로는 **아무것도 안 합니다**.
         const coolStart = G.enemyInfo(e)?.bleed ?? -1
         const t1 = G.state().elapsed
@@ -516,6 +525,7 @@ async function main() {
         const coolEnd = G.enemyInfo(e)?.bleed ?? -1
         return {
           weaponOk,
+          bars,
           // 몇 대가 실제로 들어갔는가 — "안 쌓인다"와 "안 맞았다"를 가릅니다.
           hits: G.state().hitsDealt,
           peak,
@@ -539,6 +549,36 @@ async function main() {
         '때리지 않으면 **식는다** (이어진 압박만 보상받게)',
         popped.coolStart > 0 && popped.coolEnd < popped.coolStart,
         `${popped.coolStart} → ${popped.coolEnd}`,
+      )
+
+      /**
+       * ⑤ **화면에 실제로 그려지는가.**
+       *
+       * 값이 맞아도 안 보이면 없는 것입니다 — 이 저장소가 인지 규칙·처형
+       * 안내·초록 예고에서 세 번 겪은 실패입니다. 게임 안의 숫자를 다시
+       * 묻지 않고 **그려진 것**(`bleedBars`)을 읽습니다.
+       *
+       * 짝을 맞춥니다: 쌓였을 땐 보이고, **0일 땐 안 보입니다** — 안 쓰는
+       * 축의 빈 칸이 늘 떠 있으면 있지도 않은 축을 보게 됩니다.
+       */
+      const shown = (popped.bars ?? []).filter((b) => b.visible)
+      check(
+        '쌓이면 게이지가 **화면에 뜬다** (안 보이면 없는 것입니다)',
+        shown.length > 0 && shown.every((b) => b.fill > 0),
+        (popped.bars ?? [])
+          .map((b) => `${b.bleed}→${b.visible ? `${(b.fill * 100) | 0}%` : '안 뜸'}`)
+          .join(' · ') || '적 없음',
+      )
+      /**
+       * ⚠️ **표본이 있는지 먼저 묻습니다.** 처음엔 `every` 만 봤더니
+       *    바가 하나도 없을 때 *"표본 없음"* 으로 **조용히 통과**했습니다.
+       *    이 저장소가 빈 배열로 네 번째 데인 자리입니다.
+       */
+      check(
+        '차 있는 만큼만 **길이가 맞는다** (숫자와 그림이 같은 것을 말한다)',
+        shown.length > 0 &&
+          shown.every((b) => Math.abs(b.fill - b.bleed / rule.max) < 0.05),
+        shown.map((b) => `${b.bleed}/${rule.max} vs ${(b.fill * 100) | 0}%`).join(' · ') || '**표본 없음**',
       )
     }
 

@@ -3834,6 +3834,11 @@ class Game {
   }
 
   /** ⏱ 예고 도형이 지금 화면에 어떻게 그려져 있는가 (visuals `debugTelegraphs`). */
+  /** 🩸 출혈 게이지가 실제로 그려져 있는가 (visuals `debugBleedBars`). */
+  debugBleedBars(): ReturnType<Visuals['debugBleedBars']> {
+    return this.visuals.debugBleedBars()
+  }
+
   debugTelegraphs(): ReturnType<Visuals['debugTelegraphs']> {
     return this.visuals.debugTelegraphs()
   }
@@ -4258,6 +4263,8 @@ declare global {
         refund: number
         poise: number
       }
+      /** 🩸 출혈 게이지가 화면에 그려진 상태 */
+      bleedBars: () => { entity: number; visible: boolean; fill: number; bleed: number }[]
       /** 🩸 출혈 규칙 — 문턱과 무기별 배율을 게임이 알려 줍니다 */
       bleedInfo: () => {
         max: number
@@ -4955,6 +4962,7 @@ window.__game = {
    * 무기별 배율까지 함께 냅니다(무기 하나로 통과시키면 나머지 둘을 든
    * 사람에게는 없는 규칙이 됩니다 — punish.ts 가 적어 둔 문장).
    */
+  bleedBars: () => game.debugBleedBars(),
   bleedInfo: () => ({
     max: BLEED.max,
     perHit: BLEED.perHit,
