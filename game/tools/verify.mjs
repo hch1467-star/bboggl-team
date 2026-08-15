@@ -680,6 +680,94 @@ async function main() {
         branches.ambush?.hit === true && branches.ambush.after > branches.ambush.before,
         `${branches.ambush?.before} → ${branches.ambush?.after}`,
       )
+      /**
+       * ── 🥋 **집중은 실제로 평타에서 오는가** ─────────────────────
+       *
+       * 설계 노트가 오공을 인용해 *"집중을 쌓는 것은 가벼운 공격 —
+       * 위험한 근접 거리에 머문 대가"* 라고 적어 뒀습니다. 그런데 그
+       * 문장이 참인지 재는 검사는 **하나도 없었습니다.**
+       *
+       * 실제로 이번에 계측기를 붙이다가 배선이 빠진 채로 돌렸고, 화면에
+       * *"평타 0점 (0%)"* 이 찍혔습니다. 게임은 멀쩡했고 **재는 쪽이
+       * 안 붙어 있었을 뿐**인데, 하마터면 "평타가 자원을 못 번다"는 큰
+       * 결론을 그대로 들고 갈 뻔했습니다. 그래서 라이브로 못 박습니다.
+       */
+      const focusRun = await page.evaluate(async () => {
+        const G = window.__game
+        const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+        G.reset()
+        const runFor = async (sec) => {
+          const t = G.state().elapsed + sec
+          while (G.state().elapsed < t) await sleep2()
+        }
+        await runFor(0.4)
+        const e = G.spawnEnemyKind('grunt', 6, 0)
+        await runFor(0.3)
+        const i0 = G.enemyInfo(e)
+        if (!i0) return null
+        G.teleportPlayer(i0.x - 1.2, i0.z)
+        G.aimAtWorld(i0.x, i0.z)
+        await runFor(0.2)
+        /**
+         * ⚠️ **집중을 0으로 놓고 시작합니다.**
+         *
+         * 이걸 안 했더니 *"5대 → 0점"* 으로 빨개졌습니다. 게임은 멀쩡했고
+         * (따로 재보니 7대 → 2.33점, 7/3 정확) **앞 검사들이 집중을 3/3
+         * 까지 채워 놓은 것**이 원인이었습니다. 가득 찬 뒤에 들어온 몫은
+         * 전부 `버림` 으로 가니 `평타` 는 0 입니다.
+         *
+         * 이 저장소가 이미 한 번 데인 모양 그대로입니다 — *"앞 검사가 뒤
+         * 검사를 오염시킨"*(달리던 속도가 구르기 거리에 얹혔던 그 자리).
+         * 앞에서 무엇이 돌았든 같은 답이 나와야 검사입니다.
+         */
+        G.setFocus(0)
+        const startFocus = G.focusInfo().focus
+        const before = G.runStats().focusFlow['평타']
+        const hitsBefore = G.state().hitsDealt
+        // 콤보 한 바퀴가 돌 만큼만 칩니다.
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 3) {
+          const i = G.enemyInfo(e)
+          if (i) {
+            G.setHp(e, 9999)
+            G.teleportPlayer(i.x - 1.2, i.z)
+            G.aimAtWorld(i.x, i.z)
+          }
+          G.press('Mouse0')
+          G.release('Mouse0')
+          await sleep2()
+        }
+        return {
+          hits: G.state().hitsDealt - hitsBefore,
+          gained: Number((G.runStats().focusFlow['평타'] - before).toFixed(2)),
+          focus: G.focusInfo().focus,
+          comboLength: G.state().loadout.comboLength,
+          startFocus,
+          wasted: Number((G.runStats().focusFlow['버림'] ?? 0).toFixed(2)),
+        }
+      })
+      check(
+        '집중 측정이 성립했다 (실제로 평타를 맞혔다)',
+        (focusRun?.hits ?? 0) > 0,
+        `${focusRun?.hits ?? 0}대`,
+      )
+      check(
+        '🥋 **평타가 집중을 번다** (설계가 말하는 자원의 출처)',
+        (focusRun?.hits ?? 0) > 0 && (focusRun?.gained ?? 0) > 0,
+        `${focusRun?.hits}대 → ${focusRun?.gained}점 (시작 집중 ${focusRun?.startFocus} · 넘쳐 흘린 것 ${focusRun?.wasted})`,
+      )
+      /**
+       * 짝이 되는 음성 검사. "콤보 한 바퀴 = 1점"이 약속이므로, 맞은 대수를
+       * 콤보 길이로 나눈 값과 얼추 같아야 합니다. 이게 없으면 한 대만
+       * 들어가도 위 검사가 초록입니다.
+       */
+      check(
+        '한 바퀴가 **1점**이라는 약속이 지켜진다 (무기 길이와 무관하게)',
+        (focusRun?.hits ?? 0) >= 3 &&
+          Math.abs((focusRun?.gained ?? 0) - (focusRun?.hits ?? 0) / focusRun.comboLength) < 0.35,
+        `${focusRun?.hits}대 / ${focusRun?.comboLength}타 = ${((focusRun?.hits ?? 0) / (focusRun?.comboLength ?? 1)).toFixed(2)}점 기대 · 실제 ${focusRun?.gained}점`,
+      )
+
       check(
         '🩸 **처형**도 출혈을 쌓는다 (잘 싸울수록 축이 죽으면 안 됩니다)',
         branches.finisher?.hit === true &&

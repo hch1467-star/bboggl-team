@@ -2536,6 +2536,7 @@ try {
       bossBleedGapMax: G.runStats().bossBleedGapMax ?? 0,
       bossBleedGapInsideRate: G.runStats().bossBleedGapInsideRate ?? 0,
       bossDamageBySource: G.runStats().bossDamageBySource ?? {},
+      focusFlow: G.runStats().focusFlow ?? {},
       bossBleedPops: G.runStats().bossBleedPops ?? 0,
       breakHpAvg: G.runStats().breakHpAvg,
       brokenDeaths: G.runStats().brokenDeaths,
@@ -2782,6 +2783,23 @@ try {
         : ''),
   )
   console.log(`  반격       ${log.counters}회 성공 · 남은 집중 ${log.focusLeft}`)
+  /**
+   * 🥋 **집중이 어디서 왔는가.**
+   *
+   * 설계는 "가벼운 공격이 집중을 번다"고 적어 뒀습니다(오공의 이유를
+   * 그대로 인용해서). 그런데 벤치에서 평타가 보스 피해 중앙값 0이었으니,
+   * 그 문장이 실제로 도는지 봐야 합니다. `버림`은 가득 찬 채로 흘린 몫 —
+   * "못 벌었다"와 "벌었는데 흘렸다"는 처방이 정반대입니다.
+   */
+  const ff = log.focusFlow ?? {}
+  const earned = (ff['평타'] ?? 0) + (ff['완벽회피'] ?? 0)
+  console.log(
+    `  🥋 집중     번 것 ${earned.toFixed(1)}점 — 평타 ${(ff['평타'] ?? 0).toFixed(1)} (${Math.round(((ff['평타'] ?? 0) / Math.max(0.01, earned)) * 100)}%) · ` +
+      `완벽회피 ${(ff['완벽회피'] ?? 0).toFixed(1)} (${Math.round(((ff['완벽회피'] ?? 0) / Math.max(0.01, earned)) * 100)}%)`,
+  )
+  console.log(
+    `              태운 것 ${(ff['태움'] ?? 0).toFixed(1)}점 · 가득 차서 흘린 것 ${(ff['버림'] ?? 0).toFixed(1)}점`,
+  )
   console.log(`  체력       ${log.hp} (최저 ${log.minHp} · 총 피해 ${log.damageTaken})`)
   {
     /**

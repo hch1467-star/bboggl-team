@@ -519,6 +519,39 @@ function applyBleed(t: number, spec: AttackSpec): void {
 }
 
 /**
+ * 🥋 집중의 출처별 누적 · 흘린 양 · 태운 양.
+ *
+ * 설계 노트는 *"집중을 쌓는 것은 가벼운 공격"* 이라고 적어 뒀는데,
+ * 벤치에서 평타가 보스 피해 중앙값 0으로 나왔습니다. 안 누르는 버튼이
+ * 자원을 벌 수는 없으니, 그 문장이 참인지 여기서 잽니다.
+ */
+export const focusGain = { 평타: 0, 완벽회피: 0 }
+let focusWasted = 0
+let focusBurned = 0
+/** 완벽 회피 쪽은 main.ts 가, 태우는 쪽은 playerControl 이 넣습니다 — 쓰는 쪽이 셉니다. */
+export function noteFocusDodge(gained: number, wasted: number): void {
+  focusGain.완벽회피 += gained
+  focusWasted += wasted
+}
+export function noteFocusBurn(points: number): void {
+  focusBurned += points
+}
+export function readFocusFlow(): { 평타: number; 완벽회피: number; 버림: number; 태움: number } {
+  return {
+    평타: Number(focusGain.평타.toFixed(2)),
+    완벽회피: Number(focusGain.완벽회피.toFixed(2)),
+    버림: Number(focusWasted.toFixed(2)),
+    태움: Number(focusBurned.toFixed(2)),
+  }
+}
+export function resetFocusFlow(): void {
+  focusGain.평타 = 0
+  focusGain.완벽회피 = 0
+  focusWasted = 0
+  focusBurned = 0
+}
+
+/**
  * 🔨 **실제로 깎은 강인도의 누적**(무기 프로브가 읽습니다).
  * 관측이 아니라 **깎은 쪽**이 셉니다 — 위 `applyPoise` 주석 참고.
  */
@@ -1312,7 +1345,12 @@ function applyHit(a: number, spec: AttackSpec): boolean {
        * `perLightHit` 은 이제 **3타 기준선**으로만 남습니다.
        */
       const steps = weaponOf(a).combo.length
-      Player.focus[a] = Math.min(FOCUS.max, Player.focus[a] + 1 / Math.max(1, steps))
+      const gain = 1 / Math.max(1, steps)
+      const had = Player.focus[a]
+      Player.focus[a] = Math.min(FOCUS.max, had + gain)
+      // 🥋 들어온 만큼과 흘린 만큼을 나눠 셉니다 — 위 `focusGain` 주석.
+      focusGain.평타 += Player.focus[a] - had
+      focusWasted += gain - (Player.focus[a] - had)
     }
 
     /**

@@ -99,6 +99,9 @@ import {
   bleedEvents,
   readBleedPeak,
   readBossDamageBySource,
+  readFocusFlow,
+  resetFocusFlow,
+  noteFocusDodge,
   readPoiseDealt,
   resetPoiseDealt,
   resetBleedPeak,
@@ -616,6 +619,7 @@ class Game {
     this.bleedPops = 0
     resetBleedPeak()
     resetPoiseDealt()
+    resetFocusFlow()
     this.regions = []
     this.currentRegion = ''
     this.guide.visible = false
@@ -1339,7 +1343,13 @@ class Game {
      * 플레이어가 인과를 배울 수 있습니다.
      */
     for (const d of perfectDodgeEvents) {
-      Player.focus[p] = Math.min(FOCUS.max, Player.focus[p] + FOCUS.perPerfectDodge)
+      // 🥋 들어온 만큼과 흘린 만큼을 나눠 셉니다 — combat.ts `focusGain` 주석.
+      const focusBefore = Player.focus[p]
+      Player.focus[p] = Math.min(FOCUS.max, focusBefore + FOCUS.perPerfectDodge)
+      noteFocusDodge(
+        Player.focus[p] - focusBefore,
+        FOCUS.perPerfectDodge - (Player.focus[p] - focusBefore),
+      )
       Player.perfectCritT[p] = FOCUS.perfectDodgeCritWindow
       this.cam.addTrauma(0.18)
       sfx.pickup()
@@ -3213,6 +3223,8 @@ class Game {
     bossBleedGapInsideRate: number
     /** 📊 보스가 받은 피해 — 출처 × 페이즈. 무엇이 보스를 녹이는지 가릅니다 */
     bossDamageBySource: Record<string, number[]>
+    /** 🥋 집중이 어디서 왔고 얼마나 흘렸고 얼마나 태웠는가 */
+    focusFlow: { 평타: number; 완벽회피: number; 버림: number; 태움: number }
     /** ⚔️ 상황 모션이 실제로 나간 횟수 */
     runAttacks: number
     rollAttacks: number
@@ -3249,6 +3261,7 @@ class Game {
       bossBleedGapAvg: Number(readBleedPeak().bossGapAvg.toFixed(2)),
       bossBleedGapMax: Number(readBleedPeak().bossGapMax.toFixed(2)),
       bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
+      focusFlow: readFocusFlow(),
       bossDamageBySource: Object.fromEntries(
         Object.entries(readBossDamageBySource()).map(([k, v]) => [
           k,

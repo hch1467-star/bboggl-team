@@ -28,7 +28,7 @@ import { defineQuery } from '../core/ecs'
 import { consumePress, isDown } from '../core/input'
 import { time } from '../core/time'
 import { WEAPONS } from '../config/arsenal'
-import { assistAim } from './combat'
+import { assistAim, noteFocusBurn } from './combat'
 import {
   cooldownOf,
   cycleRune,
@@ -305,6 +305,8 @@ function clampMag(value: number, max: number): number {
 function beginHeavy(p: number, aimRot: number): void {
   Player.focusSpent[p] = Math.floor(Player.focus[p])
   Player.focus[p] -= Player.focusSpent[p]
+  // 🥋 **태운 쪽이 셉니다** — 관측은 프레임 사이의 소모를 놓칩니다.
+  noteFocusBurn(Player.focusSpent[p])
   beginAttack(p, HEAVY_COMBO, aimRot)
 }
 
