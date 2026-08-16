@@ -529,9 +529,33 @@ try {
         G.press('Mouse0')
         await sleep2()
         G.release('Mouse0')
+        /**
+         * ⚠️ **맞는 순간의 거리**를 잡습니다 — 시작 거리가 아니라.
+         *
+         * 처음엔 서 있던 거리로만 쟀고 *"그린 선보다 0.9m 더 닿는다"* 고
+         * 적었습니다. 그런데 파고들기(lunge)로 **내가 앞으로 미끄러지고**,
+         * 범위 표시는 내 몸에 붙어 있어 **같이 따라갑니다.** 즉 그 0.9m
+         * 안에는 "그림이 틀린 양"과 "내가 이동한 양"이 섞여 있었습니다.
+         * 그림이 틀린 양만 보려면 **닿는 그 순간** 둘이 얼마나 떨어져
+         * 있었는지를 봐야 합니다.
+         */
+        let hitDist = -1
         const t2 = G.state().elapsed
-        while (G.state().elapsed - t2 < 2 && G.enemyInfo(e).hp === hp0) await sleep2()
-        return { d: Number(d.toFixed(2)), landed: G.enemyInfo(e).hp < hp0 }
+        while (G.state().elapsed - t2 < 2) {
+          const s2 = G.state().player
+          const ei = G.enemyInfo(e)
+          if (!ei) break
+          if (ei.hp < hp0) {
+            hitDist = Math.hypot(s2.x - ei.x, s2.z - ei.z)
+            break
+          }
+          await sleep2()
+        }
+        return {
+          d: Number(d.toFixed(2)),
+          landed: hitDist >= 0,
+          hitDist: hitDist >= 0 ? Number(hitDist.toFixed(2)) : -1,
+        }
       }
 
       /**
@@ -588,16 +612,18 @@ try {
      * 그래서 지킬 약속은 *"넓게 그리지 않는다"* 입니다. 좁은 쪽은 숫자로
      * 찍어 두되 빨갛게 하지 않습니다 — **알고 남기는 여유**입니다.
      */
-    const gap = landed.length ? Math.max(...landed.map((r) => r.d)) - edge.drawn : 0
+    // 맞는 순간의 거리 중 **가장 먼 것** — 이게 그림이 틀린 양의 진짜 크기입니다.
+    const farHit = landed.length ? Math.max(...landed.map((r) => r.hitDist)) : 0
+    const gap = farHit - edge.drawn
     check(
-      landed.length > 0 && Math.max(...landed.map((r) => r.d)) >= edge.drawn - 0.25,
+      landed.length > 0 && farHit >= edge.drawn - 0.35,
       '📏 **그린 선을 넘겨 그리지 않았다** (없는 사거리를 약속하면 헛치게 됩니다)',
-      `그린 선 ${edge.drawn}m · 실제 명중 끝 ${landed.length ? Math.max(...landed.map((r) => r.d)) : 0}m` +
-        ` · 상한(사거리+파고들기) ${edge.upper}m`,
+      `그린 선 ${edge.drawn}m · **맞는 순간** 가장 먼 거리 ${farHit.toFixed(2)}m` +
+        ` · (서 있던 거리로는 ${landed.length ? Math.max(...landed.map((r) => r.d)) : 0}m · 상한 ${edge.upper}m)`,
     )
     console.log(
-      `     [관찰] 그린 선보다 **${gap.toFixed(2)}m 더 닿습니다** (적 굵기 ${edge.radius}m + 적응형 파고들기).` +
-        ' 넓게 그리면 헛치므로 좁은 쪽으로 남겨 둔 여유입니다.',
+      `     [관찰] 맞는 순간 기준으로 그린 선보다 **${gap.toFixed(2)}m 더 닿습니다**` +
+        ` (적 굵기 ${edge.radius}m 몫). 파고들기는 그림이 함께 따라가므로 여기 안 섞입니다.`,
     )
   }
 

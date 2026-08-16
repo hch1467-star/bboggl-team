@@ -6,6 +6,7 @@ import {
   finisherStep,
   heavyStep,
   longestPlayerReach,
+  swingRadius,
 } from '../config/arsenal'
 import {
   AttackIntent,
@@ -508,13 +509,13 @@ export class Visuals {
       // 채우기 vs 선은 색보다 강한 구분이고, "내 사거리가 여기서 끝난다"는
       // 정보 자체도 면적이 아니라 **가장자리**에 있습니다.
       /**
-       * 📏 `step.range` 로 그립니다 — **넓게 그렸다가 되돌린 자리**입니다.
-       * 근거와 실측은 arsenal.ts `swingRadiusUpperBound` 주석에.
-       * 요약: `range + lunge` 로 그리면 3.8m 인데 실제 끝은 3.3m 이라
-       * **없는 사거리를 약속**하게 됩니다. 좁은 거짓말보다 넓은 거짓말이
-       * 나쁩니다 — 헛치게 만드니까요.
+       * 📏 **실제로 닿는 데까지** 그립니다 — 근거는 arsenal.ts `swingRadius`.
+       * 요약: 판정이 `사거리 + 대상 굵기` 라 그림이 0.28m 좁았고,
+       * 가장 얇은 적 기준으로만 넓혀 **없는 사거리는 약속하지 않습니다.**
+       * (`range + lunge` 로 넓혔다가 되돌린 기록도 그 주석에 있습니다.)
        */
-      geo = makeSectorGeometry(Math.max(0.3, step.range - 0.22), step.range, step.arcDeg)
+      const shown = swingRadius(step)
+      geo = makeSectorGeometry(Math.max(0.3, shown - 0.22), shown, step.arcDeg)
       this.rangeGeos.set(key, geo)
     }
     return geo

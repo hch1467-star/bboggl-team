@@ -10,6 +10,7 @@ import {
   plungeStep,
   heavyStep,
   finisherStep,
+  swingRadius,
   swingRadiusUpperBound,
   RUN_COMBO,
   ROLL_COMBO,
@@ -5948,7 +5949,7 @@ window.__game = {
          * (적 예고의 `drawnReach` 와 같은 규약 — 그리는 규칙을 바꾸는 날
          * 검사가 저절로 따라옵니다).
          */
-        drawnRange: c.range,
+        drawnRange: Number(swingRadius(c).toFixed(3)),
         /** 📏 파고들기까지 더한 **상한**(m). 적응형이라 실제 이동은 이보다 짧습니다. */
         reachUpperBound: Number(swingRadiusUpperBound(c).toFixed(3)),
       })),

@@ -1,4 +1,5 @@
 import { FINISHER, FOCUS, PLAYER } from './balance'
+import { slimmestFoeRadius } from './enemies'
 
 /**
  * 무기와 스킬 데이터.
@@ -782,7 +783,24 @@ export function swingRadiusUpperBound(step: { range: number; lunge: number }): n
  * 가장 비싼 행동입니다.
  */
 export function swingRadius(step: { range: number; lunge: number }): number {
-  return step.range
+  /**
+   * ── ✅ **다시 넓힙니다 — 이번엔 파고들기가 아니라 굵기만** ────────────
+   *
+   * 앞서 `range + lunge` 로 넓혔다가 되돌린 이유가 위에 적혀 있습니다.
+   * 그 뒤에 **재는 자리를 고쳐** 다시 쟀습니다: 서 있던 거리가 아니라
+   * **맞는 순간의 거리**로. 범위 표시는 내 몸에 붙어 파고들기를 **따라
+   * 움직이므로**, 그림이 틀린 양에 이동 거리를 섞으면 안 됩니다.
+   *
+   *     서 있던 거리로 —  그린 선보다 0.90m 더 닿음  ← 이동이 섞인 값
+   *     **맞는 순간으로 — 0.28m**                    ← 그림이 틀린 양
+   *
+   * 0.28m 은 `대상의 굵기` 몫이고(판정이 `range + Body.radius[대상]`),
+   * 적 예고에서 고친 것과 **정확히 같은 부류**입니다. 다만 대상은 매번
+   * 다르므로 **가장 얇은 적**을 기준으로 넓힙니다 — 그보다 굵은 적은
+   * 더 관대하게 맞으니, 이 값은 **누구에게도 없는 사거리를 약속하지
+   * 않습니다.** 넓히되 아래로만 넓히는 것입니다.
+   */
+  return step.range + slimmestFoeRadius()
 }
 
 export function longestPlayerReach(): number {

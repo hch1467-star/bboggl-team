@@ -244,6 +244,25 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   },
 }
 
+/**
+ * 📏 **가장 얇은 적의 몸 반지름**(m).
+ *
+ * 판정은 `사거리 + 대상의 굵기` 로 관대합니다(combat.ts `shapeDist`).
+ * 그래서 내 공격 범위를 `range` 로만 그리면 **실제로는 그보다 더 닿습니다.**
+ * 재 보니 맞는 순간 기준으로 그린 선보다 **0.28m** 더 나갔습니다
+ * (`npm run reach`).
+ *
+ * 그림을 넓힐 때 **가장 얇은 적**을 기준으로 잡는 이유: 그보다 굵은 적은
+ * 더 관대하게 맞으므로, 이 값으로 그리면 **어떤 적에게도 없는 사거리를
+ * 약속하지 않습니다.** 넓게 그리는 거짓말은 헛치게 만들고, 헛친 뒤딜은
+ * 이 게임에서 가장 비싼 실수입니다 — 그래서 넓히되 **아래로만** 넓힙니다.
+ */
+export function slimmestFoeRadius(): number {
+  let m = Infinity
+  for (const d of Object.values(ENEMY_DEFS)) if (d.radius < m) m = d.radius
+  return Number.isFinite(m) ? m : 0
+}
+
 export function enemyDef(kind: number): EnemyDef {
   return ENEMY_DEFS[kind as EnemyKind] ?? ENEMY_DEFS[EnemyKind.Grunt]
 }
