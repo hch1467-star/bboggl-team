@@ -353,8 +353,23 @@ async function main() {
        * 뒤 검사에 손을 얹은** 것입니다 — 바로 위 4절이 같은 사고를 적어
        * 두었는데도 같은 자리에서 또 했습니다.
        */
+      /**
+       * ⚠️ **갚는 창이 닫힐 때까지 기다립니다 — 고정 시간이 아니라.**
+       *
+       * 처음엔 `waitIdle` + 300ms 였는데, 소프트웨어 렌더링에서는 그
+       * 300ms 가 시뮬레이션으로 0.1초쯤이라 **구르기 공격 창(0.28초)이
+       * 아직 열려 있었습니다.** 그래서 다음 절의 *"가만히 서서 치면 평소
+       * 1타"* 가 `구르기 공격` 으로 빨개졌습니다. 벽시계로 기다리면 안
+       * 된다는, 이 저장소가 프로브마다 적어 둔 바로 그것입니다.
+       */
       await waitIdle(3000)
       await page.evaluate(() => window.__game.setStamina(1000))
+      await waitUntil((st) => st.player.state === 0, 2000)
+      await page.waitForFunction(
+        () => (window.__game.moveInfo()?.rollWindowT ?? 0) <= 0,
+        null,
+        { timeout: 8000 },
+      )
     }
     await page.evaluate(() => window.__game.reset())
     await sleep(300)
@@ -634,6 +649,38 @@ async function main() {
          * 멀쩡했고 **읽는 시점이 틀렸습니다.** 창보다 짧은 것을 재려면
          * 재는 쪽이 그 안에 있어야 한다는, 이 세션에서 이미 두 번 배운 것.
          */
+        /**
+         * ⚠️ **앞 검사가 남긴 상태를 물려받지 않습니다.**
+         *
+         * 위 14초 루프는 아무 자리에서나 끝납니다. 마지막 타격이 게이지를
+         * **터뜨린 직후**면 출혈이 0이고, 그러면 아래 세 검사가 한꺼번에
+         * 빨개집니다 — 실제로 그렇게 났습니다(`0 → 0` · `표본 없음`).
+         * 게임은 멀쩡했고 **잴 것을 안 세워 두고 재기 시작한** 것입니다.
+         *
+         * 그래서 잴 수 있는 상태를 **직접 만듭니다**: 게이지에 뭔가 남을
+         * 때까지 몇 대 더 칩니다. 앞 검사의 끝자락에 기대는 검사는
+         * 언젠가 반드시 흔들립니다 — 이 세션에서 이미 두 번 고친 모양입니다.
+         */
+        let topUp = 0
+        while ((G.enemyInfo(e)?.bleed ?? 0) <= 0 && topUp++ < 80) {
+          const i = G.enemyInfo(e)
+          if (i) {
+            G.setHp(e, 9999)
+            /**
+             * ⚠️ **기력을 채웁니다.** 안 채웠더니 81대를 "쳤는데" 출혈이
+             *    0이었습니다 — 한 대도 안 나간 것입니다. 이 세션에서 넣은
+             *    구르기 유보분(playerControl `canAffordAttack`) 때문에
+             *    기력이 마르면 공격이 **아예 안 나갑니다.** 재려는 것은
+             *    출혈이지 기력 경제가 아닙니다.
+             */
+            G.setStamina(1000)
+            G.teleportPlayer(i.x - 1.4, i.z)
+            G.aimAtWorld(i.x, i.z)
+          }
+          G.press('Mouse0')
+          G.release('Mouse0')
+          await sleep2()
+        }
         const bars = G.bleedBars()
         // 마지막 타격 직후의 값을 잡고, 그 뒤로는 **아무것도 안 합니다**.
         const coolStart = G.enemyInfo(e)?.bleed ?? -1
@@ -649,6 +696,8 @@ async function main() {
           pops: G.runStats().bleedPops - before,
           coolStart,
           coolEnd,
+          // 채워 넣느라 몇 대 더 쳤는지 — 0이 아니면 앞 타격이 터뜨렸다는 뜻입니다.
+          topUp,
         }
       })
       check(
@@ -679,7 +728,7 @@ async function main() {
       check(
         '때리지 않으면 **식는다** (이어진 압박만 보상받게)',
         popped.coolStart > 0 && popped.coolEnd < popped.coolStart,
-        `${popped.coolStart} → ${popped.coolEnd}`,
+        `${popped.coolStart} → ${popped.coolEnd}${popped.topUp ? ` (앞 타격이 터뜨려서 ${popped.topUp}대 더 쳐 세움)` : ''}`,
       )
 
       /**

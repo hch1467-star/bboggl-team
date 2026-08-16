@@ -336,10 +336,14 @@ class Game {
        * 잰 값과 나란히 두면 *"계측기가 예고를 합쳤는가"* 를 검사할 수 있습니다.
        */
       expected: number
+      /** 마지막 시도가 향했던 적(그 순간 가장 임박했던 예고의 주인). -1 = 없음. */
+      tryTarget: number
     }
   >()
   /** 🎯 마지막으로 **구르기가 시작된** 시각(초). -1 = 아직 한 번도. */
   private answerStartT = -1
+  /** 그 구르기가 향했던 적 — 구른 순간 가장 임박했던 예고의 주인. -1 = 없음. */
+  private answerTarget = -1
   /** 그 모서리를 잡기 위한 직전 프레임의 구르기 여부. */
   private wasRolling = false
   /**
@@ -358,7 +362,7 @@ class Game {
     free: number
     damage: number
     /**
-     * fair:안누름 · fair:일찍 · fair:늦게 · fair:못막는공격 ·
+     * fair:안누름 · fair:다른적 · fair:일찍 · fair:늦게 · fair:못막는공격 ·
      * unseen · locked:* · tooFast · unknown
      */
     verdict: string
@@ -2695,7 +2699,7 @@ class Game {
      * 저장소가 연계 장부에서 이미 배운 것입니다.
      */
     const rolling = Actor.state[p] === ActorState.Dodge
-    if (rolling && !this.wasRolling) this.answerStartT = time.simElapsed
+    const rollEdge = rolling && !this.wasRolling
     this.wasRolling = rolling
     const ids = enemyQuery.run()
     const live = new Set<number>()
@@ -2741,6 +2745,7 @@ class Game {
           lastTryT: -1,
           tries: 0,
           expected: Enemy.windupLen[e] > 0 ? Enemy.windupLen[e] : Actor.timer[e],
+          tryTarget: -1,
         }
         this.hurtWatch.set(e, rec)
       }
@@ -2758,7 +2763,33 @@ class Game {
       if (this.answerStartT > rec.start && this.answerStartT > rec.lastTryT) {
         rec.lastTryT = this.answerStartT
         rec.tries++
+        // 그 구르기가 **누구를 향한 것이었는지**도 같이 물려받습니다.
+        rec.tryTarget = this.answerTarget
       }
+    }
+    /**
+     * 🎯 **구른 순간, 그것이 누구를 향한 것이었는가.**
+     *
+     * 다대일에서 판정을 가르는 사실입니다. 봇이든 사람이든 **가장 먼저
+     * 떨어지는 한 대**에 맞춰 구르는데, 그 사이 다른 적의 한 대가 뒤이어
+     * 닿으면 같은 구르기로는 못 넘깁니다. 그걸 *"일찍 굴렀다"* 로 적으면
+     * **무적 창이 짧다**는 결론이 나오는데 틀린 처방입니다 — 고칠 곳은
+     * 창이 아니라 **적들의 한 대가 겹쳐 오는 간격**입니다(공격 토큰의 몫).
+     *
+     * 의도를 짐작하지 않습니다. *"구른 그 순간 가장 임박했던 예고의
+     * 주인"* 은 짐작이 아니라 **사실**입니다.
+     */
+    if (rollEdge) {
+      this.answerStartT = time.simElapsed
+      let best = -1
+      let bestT = Infinity
+      for (const e of windingNow) {
+        if (Actor.timer[e] < bestT) {
+          bestT = Actor.timer[e]
+          best = e
+        }
+      }
+      this.answerTarget = best
     }
     // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
     for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
@@ -2865,12 +2896,15 @@ class Game {
     const missed =
       rec.tries === 0
         ? 'fair:안누름'
-        : sinceTry > iTo
-          ? 'fair:일찍'
-          : sinceTry < iFrom
-            ? 'fair:늦게'
-            : // 무적 창 안인데 맞았다면 그건 회피로 막을 수 없는 한 대입니다.
-              'fair:못막는공격'
+        : // 다른 적의 한 대에 맞춰 구른 것이라면 이건 창 이야기가 아닙니다.
+          rec.tryTarget >= 0 && rec.tryTarget !== attacker
+          ? 'fair:다른적'
+          : sinceTry > iTo
+            ? 'fair:일찍'
+            : sinceTry < iFrom
+              ? 'fair:늦게'
+              : // 무적 창 안인데 맞았다면 그건 회피로 막을 수 없는 한 대입니다.
+                'fair:못막는공격'
     const verdict =
       telegraph < budget
         ? 'tooFast'
@@ -2950,6 +2984,8 @@ class Game {
     const why =
       last.verdict === 'fair:안누름'
         ? `예고 ${tel}초를 다 봤는데 구르지 않았다`
+        : last.verdict === 'fair:다른적'
+          ? `다른 적의 한 대를 피하느라 이건 못 피했다 — 둘을 한 번에는 못 넘긴다`
         : last.verdict === 'fair:일찍'
           ? `${off}초 전에 굴러서 무적이 이미 끝나 있었다 — 조금 늦게`
           : last.verdict === 'fair:늦게'
