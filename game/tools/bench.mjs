@@ -280,9 +280,9 @@ console.log(
     if (rows.length) {
       console.log('                 🎨 색별 — 판정 · 색 · 그 색의 정답')
       for (const [k, v] of rows.slice(0, 8)) {
-        const [verdict, color, answer] = k.split('|')
+        const [verdict, color, answer, walk] = k.split('|')
         console.log(
-          `                    ${String(v).padStart(3)}대  ${verdict.padEnd(6)} ${color.padEnd(8)} 정답: ${answer}`,
+          `                    ${String(v).padStart(3)}대  ${verdict.padEnd(6)} ${color.padEnd(8)} 정답: ${String(answer).padEnd(10)} 발: ${walk ?? '?'}`,
         )
       }
     } else {

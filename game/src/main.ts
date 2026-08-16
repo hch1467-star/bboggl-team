@@ -338,6 +338,17 @@ class Game {
       expected: number
       /** 마지막 시도가 향했던 적(그 순간 가장 임박했던 예고의 주인). -1 = 없음. */
       tryTarget: number
+      /**
+       * 🚶 예고가 **뜬 순간** 그 적과의 거리(m).
+       *
+       * 맞은 순간의 거리와 견주면 *"걸어서 벗어나려 했는가"* 가 사실로
+       * 남습니다. `안누름` 이 지금은 **구르지 않았다**만 뜻해서,
+       * 🟡 광역처럼 **정답이 걸어서 이탈**인 색에서는 *"아무것도 안 했다"*
+       * 와 *"걸었는데 못 벗어났다"* 가 한 칸에 뭉칩니다. 처방은 정반대입니다
+       * — 앞은 예고의 뜻이 안 읽히는 것이고, 뒤는 **장판이 걸어서 벗어날
+       * 수 있는 크기가 아닌** 것입니다.
+       */
+      distStart: number
     }
   >()
   /** 🎯 마지막으로 **구르기가 시작된** 시각(초). -1 = 아직 한 번도. */
@@ -370,6 +381,8 @@ class Game {
     sinceTry: number
     /** 이 휘두름이 약속했던 예고 길이(초). 0 = 기록 없음(낙하 등). */
     expected: number
+    /** 🚶 예고 동안 적과의 거리 변화(m). 음수면 다가갔다는 뜻. */
+    moved: number
     /** 🎨 색 이름(이모지 포함) · 그 색이 요구한 답. 재는 쪽이 표를 안 들게. */
     color: string
     answer: string
@@ -1333,6 +1346,7 @@ class Game {
                   /** 낙하는 구르기로 답할 수 있는 종류가 아닙니다 — -1. */
           sinceTry: -1,
           expected: 0,
+          moved: 0,
           color: '낙하',
           answer: '발밑을 보기',
         })
@@ -2751,6 +2765,7 @@ class Game {
           tries: 0,
           expected: Enemy.windupLen[e] > 0 ? Enemy.windupLen[e] : Actor.timer[e],
           tryTarget: -1,
+          distStart: Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p]),
         }
         this.hurtWatch.set(e, rec)
       }
@@ -2861,6 +2876,7 @@ class Game {
               /** 예고 기록 자체가 없으니 잰 거리도 없습니다. */
         sinceTry: -1,
         expected: 0,
+        moved: 0,
         color: '?',
         answer: '?',
       })
@@ -2962,6 +2978,19 @@ class Game {
        * 재는 쪽이 색과 답을 다시 적지 않도록 **여기서 붙여 보냅니다** —
        * 색을 하나 늘리는 날 프로브만 옛 표를 들고 있지 않게.
        */
+      /**
+       * 🚶 예고가 뜬 뒤 **적과의 거리가 얼마나 벌어졌는가**(m). 음수면 다가감.
+       * 정답이 *"걸어서 이탈"*·*"거리 두기"* 인 색에서, 시도조차 안 한 것과
+       * 시도했는데 모자란 것을 가릅니다.
+       */
+      moved: Number(
+        (
+          Math.hypot(
+            Transform.x[attacker] - Transform.x[this.playerEntity],
+            Transform.z[attacker] - Transform.z[this.playerEntity],
+          ) - rec.distStart
+        ).toFixed(2),
+      ),
       color: rec.intent >= 0 ? `${INTENT_EMOJI[rec.intent as AttackIntent]}${INTENT_NAME[rec.intent as AttackIntent]}` : '?',
       answer: rec.intent >= 0 ? INTENT_ANSWER[rec.intent as AttackIntent] : '?',
     })
