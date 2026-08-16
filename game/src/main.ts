@@ -637,6 +637,8 @@ class Game {
     }
 
     this.kills = 0
+    // 💀 판이 바뀌면 사인 장부도 비웁니다 — 앞 판의 죽음이 다음 판에 얹히지 않게.
+    this.deathLog = []
     this.waveTimer = 0
     this.gameOver = false
     this.bossDefeated = false
@@ -2630,7 +2632,27 @@ class Game {
       revived = fresh.length
       resetAttackTokens()
     }
-    this.hud.showBanner('다시 일어섰다', `${this.deathLesson()} · 적 ${revived}마리 부활`, 3.6)
+    const lesson = this.deathLesson()
+    /**
+     * 💀 **무엇에 죽었는지를 장부에도 남깁니다.**
+     *
+     * 지금까지 이 문장은 **화면에만** 떴습니다. 그래서 벤치는 `사망 2.0회`
+     * 라고만 말하고 *"무엇에"* 는 한 번도 말한 적이 없습니다. 죽음은
+     * 이 게임에서 가장 비싼 사건인데(진행이 되감기고, 보스 구간 측정이
+     * 통째로 무너집니다) **가장 설명이 없는 사건**이었습니다.
+     *
+     * 이 저장소가 반복해서 배운 것: *"0이 나왔을 때 왜인지 말해 주지 않는
+     * 계측기는 눈이 먼 채로 고치게 만든다."* 죽음도 같습니다.
+     * 판정은 이미 `deathLesson` 이 내렸으니 여기서는 **모으기만** 합니다.
+     */
+    this.deathLog.push(lesson)
+    this.hud.showBanner('다시 일어섰다', `${lesson} · 적 ${revived}마리 부활`, 3.6)
+  }
+
+  /** 💀 이 판에서 죽은 순간마다의 사인. 벤치가 세어 줍니다. */
+  private deathLog: string[] = []
+  debugDeathLog(): string[] {
+    return this.deathLog
   }
 
   /** 실험대 전용 — 화면이 지금 그리고 있는 인지 신호(visuals.ts 설계 노트). */
@@ -3047,7 +3069,24 @@ class Game {
     const off = last.sinceTry >= 0 ? last.sinceTry.toFixed(2) : ''
     const why =
       last.verdict === 'fair:안누름'
-        ? `예고 ${tel}초를 다 봤는데 구르지 않았다`
+        ? /**
+           * ⚠️ **여기서 "구르기"라고 말하면 안 됩니다.**
+           *
+           * 판정을 색별로 가르고 나서 벤치에 이런 줄이 찍혔습니다:
+           *
+           *     🟡 광역에 쓰러졌다 — 예고 1.3초를 다 봤는데 **구르지 않았다**
+           *                        · 정답은 **걸어서 이탈**
+           *
+           * 한 문장 안에서 *"구르지 않았다"* 고 나무라고 *"정답은 걸어서
+           * 이탈"* 이라고 말합니다. **앞뒤가 모순입니다.** 죽음 화면은
+           * 초보자가 다음 판에 할 일을 배우는 자리인데, 여기서 틀린 동작을
+           * 지목하면 그 사람은 🟡 앞에서 계속 구르게 됩니다.
+           *
+           * `안누름` 은 원래 *"구르기를 안 눌렀다"* 를 뜻했지만, 그건
+           * **재는 쪽의 말**입니다. 플레이어에게는 *"이 색의 답을 안 냈다"*
+           * 가 맞고, 그 답이 무엇인지는 바로 뒤에 이미 붙습니다.
+           */
+          `예고 ${tel}초를 다 봤는데 답을 내지 않았다`
         : last.verdict === 'fair:다른적'
           ? `다른 적의 한 대를 피하느라 이건 못 피했다 — 둘을 한 번에는 못 넘긴다`
         : last.verdict === 'fair:일찍'
@@ -4898,6 +4937,8 @@ declare global {
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
       /** 🎯 가장 멀리 닿는 한 대의 사거리(m). `threats()` 에 넣을 값을 게임이 줍니다. */
       threatRange: () => number
+      /** 💀 이 판에서 죽은 순간마다의 사인(무엇에 · 왜 못 막았는지). */
+      deathLog: () => string[]
       threats: (range?: number) => {
         entity: number
         x: number
@@ -5671,6 +5712,7 @@ window.__game = {
   poiseBars: () => game.debugPoiseBars(),
   threats: (range) => game.debugThreats(range),
   threatRange: () => game.debugThreatRange(),
+  deathLog: () => game.debugDeathLog(),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
   objective: () => game.debugObjective(),

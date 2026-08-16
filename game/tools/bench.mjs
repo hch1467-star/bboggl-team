@@ -299,6 +299,29 @@ console.log(
   }
   if (total === 0) console.log('                 ⚠️ 장부가 비었습니다 — 계측기를 먼저 의심하십시오')
 }
+/**
+ * 💀 **무엇에 죽었는가.**
+ *
+ * 벤치는 지금까지 `사망 2.0회` 라고만 말했습니다. 죽음은 이 게임에서 가장
+ * 비싼 사건입니다 — 진행이 되감기고, **보스 구간 측정이 통째로 무너집니다**
+ * (실제로 지난 벤치의 1단계 시간이 4.1~15.3초로 벌어져 계측기가 스스로
+ * *"이 수치로 배분을 계산하지 마세요"* 라고 막았습니다). 그런데 그 비싼
+ * 사건에 **설명이 한 줄도 없었습니다.**
+ *
+ * 문장은 게임이 이미 만들고 있었습니다(main.ts `deathLesson`) — 화면에만
+ * 띄우고 장부에는 안 남겼을 뿐입니다. 세는 것은 여기서 합니다.
+ */
+{
+  const causes = {}
+  for (const l of logs) for (const d of l.deathLog ?? []) causes[d] = (causes[d] ?? 0) + 1
+  const rows = Object.entries(causes).sort((a, b) => b[1] - a[1])
+  if (rows.length) {
+    console.log('  💀 무엇에 죽었나')
+    for (const [why, n] of rows.slice(0, 6)) console.log(`       ${String(n).padStart(2)}회  ${why}`)
+  } else {
+    console.log('  💀 무엇에 죽었나  — 죽지 않았습니다')
+  }
+}
 console.log(`  쓴 무기        ${[...new Set(pick((l) => l.weaponId))].join(', ')}`)
 console.log(
   `  백어택         ${fmt(pick((l) => l.backHits ?? 0), 0)}회 / 총 타격 ${fmt(pick((l) => l.hitsDealt ?? 0), 0)}회` +
