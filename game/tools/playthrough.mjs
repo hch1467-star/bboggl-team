@@ -2877,6 +2877,23 @@ try {
        * 확인한 것이라, 화면 밖에서 오는 한 대(🏹 궁수 12m · 🟣 끄는 자 12m)가
        * 실제로 있는지는 **존을 다 돈 이 판**에서만 보입니다.
        */
+      /**
+       * 🎨 **못 피한 한 대를 색별로도 셉니다.**
+       *
+       * 4색은 답이 서로 다릅니다. 🟡 광역을 *"안 굴렀다"* 고 세는 것은
+       * 애초에 틀린 질문입니다 — 그 색의 정답은 **걸어서 이탈**입니다.
+       * 색을 안 보면 `안누름 30` 을 보고 구르기를 손보게 되는데, 정작
+       * 고칠 곳이 *"어디로 빠져나가야 하는지가 안 보인다"* 일 수 있습니다.
+       */
+      hurtByColor: (() => {
+        const t = {}
+        for (const r of G.hurtLedger()) {
+          if (!String(r.verdict).startsWith('fair')) continue
+          const k = `${r.verdict.slice(5) || '갈라지기전'}|${r.color}|${r.answer}`
+          t[k] = (t[k] ?? 0) + 1
+        }
+        return t
+      })(),
       hurt: (() => {
         const t = { fair: 0, unseen: 0, tooFast: 0, unknown: 0 }
         // 'locked:stamina' 처럼 **이유가 붙어** 옵니다. 앞머리로 뭉치지 않고

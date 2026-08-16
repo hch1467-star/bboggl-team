@@ -260,6 +260,35 @@ console.log(
   )
   console.log(`                 그중 — ${split || '갈라진 기록 없음'}`)
   console.log(`                 손이 묶임 — ${locks || '없음'}`)
+  /**
+   * 🎨 **색별로 다시 봅니다 — 색마다 답이 다르기 때문입니다.**
+   *
+   * `안누름 30` 만 보면 *"구르기를 안 쓴다"* 로 읽히지만, 🟡 광역의 정답은
+   * **걸어서 이탈**이고 🟣 끌어당김의 정답은 **거리 두기**입니다. 그 색을
+   * 안 구른 것은 틀린 게 아니라 **정답**이고, 그런데도 맞았다면 고칠 곳은
+   * 구르기가 아니라 *"어디로 빠져나가야 하는지가 안 보인다"* 입니다.
+   * 로스트아크가 바닥에 장판 모양을 그리는 이유가 정확히 이것입니다.
+   *
+   * 색을 안 보고 값을 만지면 **엉뚱한 손잡이**를 잡습니다.
+   */
+  {
+    const byColor = {}
+    for (const l of logs) {
+      for (const [k, v] of Object.entries(l.hurtByColor ?? {})) byColor[k] = (byColor[k] ?? 0) + v
+    }
+    const rows = Object.entries(byColor).sort((a, b) => b[1] - a[1])
+    if (rows.length) {
+      console.log('                 🎨 색별 — 판정 · 색 · 그 색의 정답')
+      for (const [k, v] of rows.slice(0, 8)) {
+        const [verdict, color, answer] = k.split('|')
+        console.log(
+          `                    ${String(v).padStart(3)}대  ${verdict.padEnd(6)} ${color.padEnd(8)} 정답: ${answer}`,
+        )
+      }
+    } else {
+      console.log('                 🎨 색별 — 기록 없음 ⚠️ 계측기를 먼저 의심하십시오')
+    }
+  }
   // 억울한 한 대는 **정체를 찍습니다** — 숫자만으로는 어디를 고칠지 못 정합니다.
   const bad = logs.flatMap((l) => l.unfairHits ?? []).slice(0, 8)
   for (const u of bad) {

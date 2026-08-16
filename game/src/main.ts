@@ -370,6 +370,9 @@ class Game {
     sinceTry: number
     /** 이 휘두름이 약속했던 예고 길이(초). 0 = 기록 없음(낙하 등). */
     expected: number
+    /** 🎨 색 이름(이모지 포함) · 그 색이 요구한 답. 재는 쪽이 표를 안 들게. */
+    color: string
+    answer: string
   }[] = []
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
@@ -1330,6 +1333,8 @@ class Game {
                   /** 낙하는 구르기로 답할 수 있는 종류가 아닙니다 — -1. */
           sinceTry: -1,
           expected: 0,
+          color: '낙하',
+          answer: '발밑을 보기',
         })
         // 플레이어는 강인도가 없어 늘 비틀거립니다. 착지도 같은 규칙을 씁니다.
         Actor.state[p] = ActorState.Stagger
@@ -2856,6 +2861,8 @@ class Game {
               /** 예고 기록 자체가 없으니 잰 거리도 없습니다. */
         sinceTry: -1,
         expected: 0,
+        color: '?',
+        answer: '?',
       })
       return
     }
@@ -2943,6 +2950,20 @@ class Game {
       sinceTry: Number(sinceTry.toFixed(3)),
       /** 이 휘두름이 약속했던 예고 길이(초). `telegraph` 와 크게 벌어지면 계측기 고장. */
       expected: Number(rec.expected.toFixed(3)),
+      /**
+       * 🎨 **이 색이 요구한 답** — 게임이 적어 보냅니다.
+       *
+       * 4색은 답이 서로 다릅니다(🔴 구르기 · 🟡 걸어서 이탈 · 🔵 무적
+       * 프레임 · 🟣 거리 두기 · 🟢 정면에서 때려라). 그런데 장부는
+       * *"굴렀는가"* 만 물었습니다. 🟡 광역을 안 구른 것은 **틀린 게
+       * 아니라 정답**일 수 있고, 그런데도 맞았다면 고칠 곳은 구르기가
+       * 아니라 *"어디로 빠져나가야 하는지가 안 보인다"* 입니다.
+       *
+       * 재는 쪽이 색과 답을 다시 적지 않도록 **여기서 붙여 보냅니다** —
+       * 색을 하나 늘리는 날 프로브만 옛 표를 들고 있지 않게.
+       */
+      color: rec.intent >= 0 ? `${INTENT_EMOJI[rec.intent as AttackIntent]}${INTENT_NAME[rec.intent as AttackIntent]}` : '?',
+      answer: rec.intent >= 0 ? INTENT_ANSWER[rec.intent as AttackIntent] : '?',
     })
   }
 
