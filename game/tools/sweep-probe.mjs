@@ -76,6 +76,110 @@ try {
        *
        * `escape` 가 참이면 구르기 전에 먼저 범위 밖으로 걸어 나갑니다.
        */
+      /**
+       * 🚶 **정말 걸어서 벗어날 수 있는가.**
+       *
+       * ── 왜 이게 따로 필요한가 ──────────────────────────────────
+       * 아래 `trial(escape=true)` 는 범위 밖으로 **순간이동**시킵니다.
+       * 주석에는 *"'걸어서 이탈'과 같은 결과입니다"* 라고 적혀 있는데,
+       * 그 등호가 한 번도 검사된 적이 없습니다. 그리고 자동 플레이
+       * 벤치가 정확히 그 등호를 반증했습니다:
+       *
+       *     4대  다른적  🟡광역  정답: 걸어서 이탈  **발: 걸었지만**
+       *     4대  일찍   🟡광역  정답: 걸어서 이탈  **발: 걸었지만**
+       *
+       * 정답대로 **걸어서 빠져나가려 했는데 맞았습니다.** 순간이동은
+       * *"밖에 있으면 안 맞는다"* 만 증명하지, *"예고 안에 밖으로 나갈 수
+       * 있다"* 는 증명하지 않습니다. **조리법이 아니라 요리를 잽니다.**
+       *
+       * 그래서 예고가 뜬 그 순간부터 **키를 눌러 실제로 걸어** 나갑니다.
+       * 맞았는지, 그리고 판정이 나갈 때 얼마나 벗어나 있었는지를 함께
+       * 돌려줍니다 — 아슬아슬하게 실패한 것과 한참 모자란 것은 처방이
+       * 다릅니다(속도 · 예고 길이 · 반경).
+       */
+      walkOut: async (kind, wantId) => {
+        const G = window.__game
+        G.reset()
+        await window.__t.runFor(0.4)
+        G.clearEnemies()
+        await window.__t.runFor(0.2)
+        const p0 = G.state().player
+        const e = G.spawnEnemyKind(kind, p0.x + 12, p0.z)
+        await window.__t.runFor(0.2)
+        G.setHp(e, 100000)
+        /** 카메라 축으로 "적 반대쪽" 을 누릅니다 — 쿼터뷰라 W가 북쪽이 아닙니다. */
+        const walkAway = (ex, ez) => {
+          const s = G.state().player
+          const cam = G.cameraAxes()
+          const dx = s.x - ex
+          const dz = s.z - ez
+          const fwd = dx * cam.forwardX + dz * cam.forwardZ
+          const right = dx * cam.rightX + dz * cam.rightZ
+          const dead = 0.25
+          for (const [k, v] of [
+            ['KeyW', fwd > dead],
+            ['KeyS', fwd < -dead],
+            ['KeyD', right > dead],
+            ['KeyA', right < -dead],
+          ]) {
+            if (v) G.press(k)
+            else G.release(k)
+          }
+        }
+        const stop = () => ['KeyW', 'KeyA', 'KeyS', 'KeyD'].forEach((k) => G.release(k))
+        for (let attempt = 0; attempt < 14; attempt++) {
+          const es = G.entityState(e)
+          stop()
+          // 사거리 **안쪽 가장자리**에서 시작합니다 — 코앞이면 너무 쉽고,
+          // 밖이면 애초에 맞을 일이 없어 아무것도 안 재는 검사가 됩니다.
+          G.teleportPlayer(es.x, es.z - 1.6)
+          G.setHp(G.playerEntity(), 100)
+          await window.__t.runFor(0.25)
+          const got = await window.__t.until(() => {
+            const info = G.enemyInfo(e)
+            return info?.winding === true && info.attackId === wantId
+          }, 6)
+          if (!got) continue
+          const before = G.state().player.hp
+          const startInfo = G.enemyInfo(e)
+          const tele = startInfo.timer
+          // 예고가 뜬 **그 순간부터** 걷습니다. 사람이 낼 수 있는 최선입니다.
+          /**
+           * ⚠️ **판정이 나가는 순간의 거리**를 잡습니다.
+           *
+           * 처음엔 반복문이 끝난 뒤의 거리를 적었는데, 그 반복문은 후딜이
+           * 끝날 때까지 돕니다. 그래서 22.18m 같은 값이 나왔습니다 —
+           * 예고 1.9초 동안 걸을 수 있는 거리(약 11m)의 두 배입니다.
+           * **맞았는지**는 맞았지만 *"얼마나 여유였나"* 는 거짓말이었고,
+           * 이 숫자는 바로 그 여유를 재라고 있는 것입니다.
+           */
+          let far = 0
+          let farAtHit = -1
+          const deadline = Date.now() + 30000
+          while (Date.now() < deadline) {
+            const info = G.enemyInfo(e)
+            if (!info) break
+            walkAway(info.x, info.z)
+            const s = G.state().player
+            far = Math.hypot(s.x - info.x, s.z - info.z)
+            // 예고가 끝나는 그 프레임 = 판정이 나가는 순간.
+            if (!info.winding && farAtHit < 0) farAtHit = far
+            if (!info.winding && info.state !== 1) break
+            await new Promise((r) => setTimeout(r, 8))
+          }
+          stop()
+          await window.__t.runFor(0.3)
+          return {
+            hp: G.state().player.hp,
+            before,
+            /** 예고 길이(초) — 얼마나 걸을 시간이 있었나 */
+            telegraph: Number(tele.toFixed(2)),
+            /** 판정이 **나가는 순간** 적과의 거리(m) — 여유가 얼마였나 */
+            far: Number((farAtHit >= 0 ? farAtHit : far).toFixed(2)),
+          }
+        }
+        return null
+      },
       trial: async (kind, wantId, escape) => {
         const G = window.__game
         G.reset()
@@ -177,6 +281,43 @@ try {
       '🟡 범위 밖으로 나가면 안 맞는다 (읽을 이유가 있는 색으로 남음)',
       `체력 ${escaped.before} → ${escaped.hp}`,
     )
+  }
+
+  /**
+   * ---- 3.5 🚶 **순간이동 말고 진짜 걸어서** 벗어날 수 있는가 ----
+   *
+   * 위 3번은 순간이동으로 *"밖에 있으면 안 맞는다"* 를 증명합니다. 그건
+   * 이 색의 **정답이 성립하는지**를 증명하지 않습니다. 벤치가 그 차이를
+   * 찍었습니다 — 봇이 정답대로 걸었는데 9대를 맞았습니다.
+   *
+   * ⚠️ 세 번 시도해 **한 번이라도 벗어나면** 통과입니다. 위 1번과 같은
+   *    이유입니다 — GPU 없는 이 컨테이너의 프레임 흔들림까지 재면
+   *    게임이 아니라 기계 운을 재게 됩니다.
+   *
+   * 사거리 밖으로 나갔는지는 **거리로도 함께 찍습니다.** 아슬아슬하게
+   * 실패한 것(속도·예고를 조금 손볼 일)과 한참 모자란 것(반경이 잘못된
+   * 일)은 처방이 다릅니다.
+   */
+  {
+    const tries = []
+    let walked = null
+    for (let i = 0; i < 3; i++) {
+      const r = await page.evaluate(() => window.__t.walkOut('boss', 'boss_quake'))
+      if (!r) continue
+      walked = r
+      tries.push(r)
+      if (r.hp === r.before) break
+    }
+    check(walked !== null, '🚶 광역 예고를 관측하고 실제로 걸어 봤다')
+    if (walked) {
+      check(
+        tries.some((r) => r.hp === r.before),
+        '🚶 **예고가 뜬 순간부터 걸으면 벗어난다** (이 색의 정답이 실제로 성립한다)',
+        tries
+          .map((r) => `예고 ${r.telegraph}초 · 끝났을 때 ${r.far}m · ${r.hp === r.before ? '안 맞음' : `${r.before}→${r.hp}`}`)
+          .join(' | '),
+      )
+    }
   }
 
   /**
