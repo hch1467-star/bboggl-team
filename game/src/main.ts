@@ -1931,6 +1931,8 @@ class Game {
       this.sideHintT = 0.75
       const side = this.findSideHint(px, pz)
       this.sideHintText = side ? `${side.dir} ${side.dist.toFixed(0)}m — 보물` : ''
+      // 어느 보물을 가리켰는지도 남깁니다 — 프로브가 "몇 개가 알려지는가"를 셀 수 있게.
+      this.sideHintAt = side ? { x: side.x, z: side.z } : null
       if (objective && this.terrain) this.terrain.buildFlowField(objective.x, objective.z)
     }
     this.hud.setNavigation(
@@ -1962,42 +1964,71 @@ class Game {
    */
   /** 지금 HUD 에 올라간 곁길 한 줄(없으면 빈 문자열). 실험대가 읽습니다. */
   private sideHintText = ''
+  private sideHintAt: { x: number; z: number } | null = null
   /** 곁길 알림을 다시 재기까지 남은 시간(초) — 위 설계 노트 참고. */
   private sideHintT = 0
   debugSideHintText(): string {
     return this.sideHintText
   }
 
-  private findSideHint(px: number, pz: number): { dir: string; dist: number } | null {
+  /** 지금 알림이 가리키는 보물의 자리(없으면 null). */
+  debugSideHintAt(): { x: number; z: number } | null {
+    return this.sideHintAt
+  }
+
+  private findSideHint(
+    px: number,
+    pz: number,
+  ): { dir: string; dist: number; x: number; z: number } | null {
     const ids = pickups.run()
-    let best: { x: number; z: number; dist: number } | null = null
+    /**
+     * ⚠️ **규칙에 맞는 것 중 가장 가까운 것**을 고릅니다.
+     *
+     * 처음엔 *가장 가까운 보물 하나*를 고른 뒤 규칙(예산·눈앞)으로
+     * 걸렀습니다. 그러면 가장 가까운 것이 규칙에 안 맞을 때 **다른
+     * 보물이 예산 안에 있어도 통째로 포기**합니다. 실제로 동선을 걸어
+     * 보니 다섯 중 **하나만** 알려졌습니다. 고르고 나서 거르면 안 되고,
+     * **거르고 나서 골라야** 합니다.
+     *
+     * ⚠️ 직선거리로 먼저 추립니다 — 걸어야 하는 거리는 직선보다 짧을 수
+     *    없으므로, 직선이 예산 밖이면 볼 것도 없습니다. 흐름장(6336칸
+     *    BFS)을 보물마다 돌리는 값을 이걸로 아낍니다.
+     */
+    const cands: { x: number; z: number }[] = []
     for (let i = 0; i < pickups.count; i++) {
       const e = ids[i]
       if (Pickup.taken[e] === 1) continue
-      const d = Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
-      if (!best || d < best.dist) best = { x: Transform.x[e], z: Transform.z[e], dist: d }
+      const x = Transform.x[e]
+      const z = Transform.z[e]
+      if (Math.hypot(x - px, z - pz) > NAV.sideHintRange) continue
+      cands.push({ x, z })
+    }
+    if (cands.length === 0) return null
+    let best: { x: number; z: number; walk: number } | null = null
+    for (const c of cands) {
+      /**
+       * ⚠️ **걸어야 하는 거리로 거릅니다.** 직선으로 재면 벽 너머 18m 짜리
+       *    보물을 "가깝다"고 알려 주게 됩니다 — 이 저장소가 직선거리로 네 번
+       *    데인 자리입니다(secret 프로브 주석).
+       */
+      let walk = Math.hypot(c.x - px, c.z - pz)
+      if (this.terrain) {
+        this.terrain.buildFlowField(c.x, c.z)
+        const d = this.terrain.pathDistance(px, pz)
+        if (d === null) continue
+        walk = d
+      }
+      if (walk > NAV.sideHintRange) continue
+      // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
+      if (walk < NAV.sideHintNear) continue
+      if (!best || walk < best.walk) best = { x: c.x, z: c.z, walk }
     }
     if (!best) return null
-    /**
-     * ⚠️ **걸어야 하는 거리로 거릅니다.** 직선으로 재면 벽 너머 18m 짜리
-     *    보물을 "가깝다"고 알려 주게 됩니다 — 이 저장소가 직선거리로 네 번
-     *    데인 자리입니다(secret 프로브 주석).
-     */
-    let walk = best.dist
-    if (this.terrain) {
-      this.terrain.buildFlowField(best.x, best.z)
-      const d = this.terrain.pathDistance(px, pz)
-      if (d === null) return null
-      walk = d
-    }
-    if (walk > NAV.sideHintRange) return null
-    // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
-    if (walk < NAV.sideHintNear) return null
     const DIRS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서']
     // 화면 위쪽이 −z 입니다(쿼터뷰). 그 축을 '북'으로 부릅니다.
     const a = Math.atan2(best.x - px, -(best.z - pz))
     const idx = ((Math.round((a / (Math.PI * 2)) * 8) % 8) + 8) % 8
-    return { dir: DIRS[idx], dist: walk }
+    return { dir: DIRS[idx], dist: best.walk, x: best.x, z: best.z }
   }
 
   private findObjective(px: number, pz: number): { x: number; z: number; label: string; dist: number } | null {
@@ -5458,6 +5489,7 @@ window.__game = {
   /** 🧭 지금 화면에 뜬 곁길 한 줄 — 규칙이 아니라 **도달한 것**을 봅니다. */
   sideHint: () => ({
     text: game.debugSideHintText(),
+    at: game.debugSideHintAt(),
     range: NAV.sideHintRange,
     near: NAV.sideHintNear,
   }),

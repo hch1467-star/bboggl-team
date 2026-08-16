@@ -342,6 +342,77 @@ try {
     '멀면 **안 알려 준다** (갈 수 없는 것을 알려 주는 것은 놀리는 것입니다)',
     `시작 지점에서 "${hint.far}"`,
   )
+  /**
+   * ── 🧭 **주 동선을 걷는 동안 실제로 뜨는가** ──────────────────────
+   *
+   * 위 검사는 *"조건이 맞으면 뜬다"* 까지입니다. 그건 규칙이 도는지를
+   * 말할 뿐, **플레이어가 그 알림을 보게 되는지**는 말하지 않습니다.
+   * 이 저장소가 반복해서 배운 것 그대로입니다 — 규칙이 아니라 **도달한
+   * 것**을 봅니다. 그래서 동선을 그대로 따라 걸으며 알림을 모읍니다.
+   *
+   * 여기가 빨간 채로 남으면 처방은 둘 중 하나입니다: 알림 반경을 넓히거나
+   * (그러면 갈 수 없는 것을 알려 주게 됩니다), **동선이 곁길 입구를
+   * 스치게** 지도를 고치거나. 어느 쪽인지는 이 숫자가 정합니다.
+   */
+  const along = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+    G.reset()
+    await sleep2()
+    G.freezeEnemies(true)
+    await sleep2()
+    const seen = new Set()
+    let guard = 0
+    /**
+     * ⚠️ **걸음마다 시간을 흘려 줍니다.**
+     *
+     * 알림은 0.75초에 한 번만 다시 계산됩니다(main.ts — 매 프레임 흐름장을
+     * 만들었다가 프레임을 느리게 만들어 출혈 검사를 깨뜨린 적이 있습니다).
+     * 그런데 이 순회는 순간이동이라 시뮬레이션 시간이 거의 안 흐릅니다.
+     * 그대로 두면 96걸음 동안 알림이 서너 번만 갱신되고, 그러면 이 검사는
+     * 게임이 아니라 **제 스로틀**을 재게 됩니다.
+     */
+    const settle = async () => {
+      const t = G.state().elapsed + 0.85
+      while (G.state().elapsed < t) await sleep2()
+    }
+    while (guard++ < 4000) {
+      const obj = G.objective()
+      if (!obj) break
+      // ⚠️ 네 걸음에 한 번만 시간을 흘립니다 — 96걸음마다 0.85초씩 주면
+      //    이 검사 하나가 시뮬레이션 80초를 먹고, 느린 기계에서는 끝나질
+      //    않습니다(실제로 한 번 멈춰 세웠습니다). 알림은 걸음이 아니라
+      //    **자리**에 달린 값이라 몇 걸음 건너뛰어도 답이 같습니다.
+      if (guard % 4 === 0) await settle()
+      const h = G.sideHint()
+      if (h.text && h.at) seen.add(`${Math.round(h.at.x)},${Math.round(h.at.z)}`)
+      if (obj.walkDist <= 1.5) {
+        G.teleportPlayer(obj.x, obj.z)
+        await sleep2()
+        const next = G.objective()
+        if (!next || (Math.abs(next.x - obj.x) < 0.01 && Math.abs(next.z - obj.z) < 0.01)) break
+        continue
+      }
+      const step = G.pathStep(obj.x, obj.z)
+      if (!step) break
+      G.teleportPlayer(step.x, step.z)
+      await sleep2()
+    }
+    G.freezeEnemies(false)
+    return { told: [...seen], total: G.treasurePositions().length }
+  })
+  /**
+   * ⚠️ *"한 번이라도 떴는가"* 로 물으면 **헐겁습니다.** 처음 그렇게 물었더니
+   *    남동쪽 하나가 떠서 초록이었고, 정작 문제인 북쪽 둘은 그대로 묻혀
+   *    있었습니다. 이 저장소가 빈 표본으로 다섯 번 데인 것과 같은 모양입니다 —
+   *    **몇 개가 알려지는가**로 물어야 합니다.
+   */
+  check(
+    along.told.length === along.total,
+    '🧭 **동선을 걷는 동안 모든 보물이 한 번은 알려진다** (규칙이 아니라 도달한 것)',
+    `${along.told.length}/${along.total}개 — 알려진 자리 ${along.told.join(' · ') || '없음'}`,
+  )
+
   check(
     hint.near.includes('보물'),
     '🧭 **곁길 예산 안에 들면 알려 준다** (길 위에서 "저쪽에 있다"를 알 수 있게)',
