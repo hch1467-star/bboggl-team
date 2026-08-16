@@ -37,6 +37,7 @@ import {
   LEVEL_AGGRO_MAX,
   LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
+  NAV,
   POISE,
   PUNISH_HEAL,
   reactionTime,
@@ -1878,9 +1879,64 @@ class Game {
       if (walk !== null) shownDist = walk
     }
 
+    /**
+     * ── 🧭 **곁길이 있다는 것을 길 위에서 알려 줍니다** ────────────────
+     *
+     * ── 무엇이 없었는가 (재고 나서 알았습니다) ─────────────────────
+     * `npm run secret` 이 *"보물 둘이 걸어서 58m·50m 라 예산 밖"* 이라고
+     * 빨갛게 떴습니다. 자리를 옮기려다 먼저 쟀더니 진단이 뒤집혔습니다:
+     *
+     *   · 주 동선은 z=1 보다 북쪽으로 **한 번도 안 갑니다**
+     *   · 그런데 그 북쪽(「북쪽 단상」)에는 **지름길 사다리**와 적 셋과
+     *     보물 둘이 있습니다 — 빈 땅이 아니라 내용이 있는 곁길입니다
+     *   · 카메라는 22m 까지만 담으므로 빛기둥도 그 밖에서는 안 보입니다
+     *
+     * 그리고 결정적으로, **길안내는 보스가 살아 있는 한 항상 보스만
+     * 가리킵니다**(`findObjective`). 보물이 목표가 되는 것은 보스를 잡은
+     * 뒤인데, 보스를 잡으면 존이 끝납니다. 즉 정련석이 나오는 유일한
+     * 곳을 게임이 **한 번도 가리킨 적이 없습니다.**
+     *
+     * ── 참고 게임 ─────────────────────────────────────────────────
+     * 엘든 링은 화살표 없이 **세계가 보여 줍니다**(아이템 광채·유적
+     * 실루엣). 우리 카메라 각도와 22m 시야에서는 그 방법이 안 통합니다.
+     * 우리와 시점이 같은 **로스트아크·NRFTW 는 화면 표시로** 풉니다 —
+     * 근처에 뭔가 있으면 알려 주고, 갈지 말지는 플레이어가 정합니다.
+     *
+     * ⚠️ **목표를 바꾸지 않습니다.** 화살표는 그대로 보스를 가리킵니다.
+     *    여기서 더하는 것은 *"저쪽에 곁길이 있다"* 한 줄뿐이고, 데려다
+     *    주지 않습니다. 곁길의 값어치는 **가기로 정하는 것**에 있습니다.
+     *
+     * ⚠️ 반경은 **곁길 예산과 같은 값**을 씁니다(`SPEND_BUDGET` 과 같은
+     *    45m). 안 보이는 것을 알려 줘 봐야 갈 수 없으면 놀리는 것입니다.
+     */
+    /**
+     * ⚠️ **매 프레임 다시 계산하지 않습니다 — 그리고 흐름장을 되돌립니다.**
+     *
+     * 처음엔 이 줄을 매 프레임 돌렸습니다. `findSideHint` 안에서
+     * `buildFlowField` 를 부르는데, 그건 지도 6336칸을 훑는 BFS 이고
+     * **모두가 함께 쓰는 상태**입니다. 두 가지가 한꺼번에 깨졌습니다:
+     *
+     *   · 프레임이 느려져 `npm run verify` 의 출혈 검사 셋이 빨개졌습니다
+     *     (0 → 0 · 게이지 안 뜸 · 표본 없음). 게임의 출혈은 멀쩡했고,
+     *     **시뮬레이션 1초당 봇이 덜 때린** 것입니다.
+     *   · 화살표가 쓰는 흐름장을 보물 쪽으로 덮어써서, 안내가 가리키는
+     *     방향이 프레임마다 흔들릴 수 있었습니다.
+     *
+     * 그래서 0.75초에 한 번만 재고, 잰 뒤에는 **목표 쪽 흐름장을 도로
+     * 세워 둡니다.** 한 줄짜리 안내가 게임의 공용 상태를 바꿔 놓으면
+     * 안 됩니다.
+     */
+    this.sideHintT -= time.dt
+    if (this.sideHintT <= 0) {
+      this.sideHintT = 0.75
+      const side = this.findSideHint(px, pz)
+      this.sideHintText = side ? `${side.dir} ${side.dist.toFixed(0)}m — 보물` : ''
+      if (objective && this.terrain) this.terrain.buildFlowField(objective.x, objective.z)
+    }
     this.hud.setNavigation(
       this.currentRegion,
       objective ? `목표: ${objective.label} (${shownDist.toFixed(0)}m)` : '목표: 완료',
+      this.sideHintText,
     )
 
     // --- 지면 화살표: 목표가 멀 때만. 가까우면 눈으로 보이므로 방해만 됩니다. ---
@@ -1895,6 +1951,53 @@ class Game {
         this.guideMaterials[i].opacity = 0.16 + 0.55 * Math.max(0, Math.sin(t * Math.PI))
       }
     }
+  }
+
+  /**
+   * 🧭 **가까운 곁길 하나** — 지금 걸어서 갈 만한 거리에 있는 미획득 보물.
+   *
+   * 방향은 여덟 갈래 이름으로 줍니다. 각도를 숫자로 주면 읽는 데 시간이
+   * 걸리고, 화면 가장자리 화살표를 새로 만들면 배울 것이 하나 늘어납니다 —
+   * 이 게임은 이미 조작표를 줄이는 쪽으로 손봐 왔습니다(hints 프로브).
+   */
+  /** 지금 HUD 에 올라간 곁길 한 줄(없으면 빈 문자열). 실험대가 읽습니다. */
+  private sideHintText = ''
+  /** 곁길 알림을 다시 재기까지 남은 시간(초) — 위 설계 노트 참고. */
+  private sideHintT = 0
+  debugSideHintText(): string {
+    return this.sideHintText
+  }
+
+  private findSideHint(px: number, pz: number): { dir: string; dist: number } | null {
+    const ids = pickups.run()
+    let best: { x: number; z: number; dist: number } | null = null
+    for (let i = 0; i < pickups.count; i++) {
+      const e = ids[i]
+      if (Pickup.taken[e] === 1) continue
+      const d = Math.hypot(Transform.x[e] - px, Transform.z[e] - pz)
+      if (!best || d < best.dist) best = { x: Transform.x[e], z: Transform.z[e], dist: d }
+    }
+    if (!best) return null
+    /**
+     * ⚠️ **걸어야 하는 거리로 거릅니다.** 직선으로 재면 벽 너머 18m 짜리
+     *    보물을 "가깝다"고 알려 주게 됩니다 — 이 저장소가 직선거리로 네 번
+     *    데인 자리입니다(secret 프로브 주석).
+     */
+    let walk = best.dist
+    if (this.terrain) {
+      this.terrain.buildFlowField(best.x, best.z)
+      const d = this.terrain.pathDistance(px, pz)
+      if (d === null) return null
+      walk = d
+    }
+    if (walk > NAV.sideHintRange) return null
+    // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
+    if (walk < NAV.sideHintNear) return null
+    const DIRS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서']
+    // 화면 위쪽이 −z 입니다(쿼터뷰). 그 축을 '북'으로 부릅니다.
+    const a = Math.atan2(best.x - px, -(best.z - pz))
+    const idx = ((Math.round((a / (Math.PI * 2)) * 8) % 8) + 8) % 8
+    return { dir: DIRS[idx], dist: walk }
   }
 
   private findObjective(px: number, pz: number): { x: number; z: number; label: string; dist: number } | null {
@@ -4653,6 +4756,14 @@ declare global {
         /** 누른 뒤 **무적이 시작되기까지의 지연** — 반응 예산 계산에 필요합니다. */
         iFrameStart: number
       }[]
+      /**
+   * 🧭 지금 화면에 뜬 **곁길 한 줄** — 규칙값까지 같이.
+   *
+   * 프로브가 DOM 을 긁지 않게 게임이 내줍니다. 화면에 실제로 그려진 것과
+   * 같은 문자열이어야 하므로 HUD 가 받은 값을 그대로 돌려줍니다 —
+   * 이 저장소가 지연 공격에서 배운 것: **규칙이 아니라 도달한 것**을 봅니다.
+   */
+  sideHint: () => { text: string; range: number; near: number }
       /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
       punishHealInfo: () => { rangeMult: number; cutTo: number }
       weaponTable: () => {
@@ -5344,6 +5455,12 @@ window.__game = {
       ),
     })),
   /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
+  /** 🧭 지금 화면에 뜬 곁길 한 줄 — 규칙이 아니라 **도달한 것**을 봅니다. */
+  sideHint: () => ({
+    text: game.debugSideHintText(),
+    range: NAV.sideHintRange,
+    near: NAV.sideHintNear,
+  }),
   punishHealInfo: () => ({ rangeMult: PUNISH_HEAL.rangeMult, cutTo: PUNISH_HEAL.cutTo }),
   weaponTable: () =>
     WEAPONS.map((w) => ({

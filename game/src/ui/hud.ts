@@ -25,6 +25,7 @@ export class Hud {
   private readonly treasureText = el<HTMLElement>('treasureText')
   private readonly regionText = el<HTMLElement>('regionText')
   private readonly objectiveText = el<HTMLElement>('objectiveText')
+  private readonly sideHintText = el<HTMLElement>('sideHintText')
   private readonly waveText = el<HTMLElement>('waveText')
   private readonly enemyText = el<HTMLElement>('enemyText')
   private readonly killText = el<HTMLElement>('killText')
@@ -327,9 +328,17 @@ export class Hud {
    * 플레이 테스트 피드백: "어디로 가야 하고 어디에 뭐가 있는지 목표가 없으니
    * 그냥 눈앞의 적만 잡게 된다." 미니맵 대신 **한 줄 목표**로 답합니다.
    */
-  setNavigation(region: string, objective: string): void {
+  setNavigation(region: string, objective: string, sideHint = ''): void {
     if (this.regionText.textContent !== region) this.regionText.textContent = region
     if (this.objectiveText.textContent !== objective) this.objectiveText.textContent = objective
+    /**
+     * 🧭 **곁길 한 줄** — 있으면 뜨고 없으면 사라집니다.
+     *
+     * 목표와 달리 *"가라"* 가 아니라 *"저쪽에 있다"* 입니다. 데려다 주지
+     * 않는 것이 핵심이고(가기로 정하는 것이 곁길의 값어치), 그래서 지면
+     * 화살표는 여전히 목표만 가리킵니다.
+     */
+    if (this.sideHintText.textContent !== sideHint) this.sideHintText.textContent = sideHint
   }
 
   /**

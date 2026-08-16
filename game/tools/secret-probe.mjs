@@ -276,6 +276,78 @@ try {
     `길 위 ${tooClose.length}개 / 전체 ${seen.length}개`,
   )
 
+  /**
+   * ── 🧭 **곁길이 있다는 것을 길 위에서 알 수 있는가** ─────────────────
+   *
+   * 위 검사들이 말하는 것은 *"보물이 멀고 안 보인다"* 입니다. 그런데 그
+   * 깊은 북쪽에는 지름길 사다리와 적 셋이 함께 있어서, 보물만 앞으로
+   * 끌어내는 것은 **곁길의 보상만 입구에 놓고 안쪽을 비우는** 처방이었습니다.
+   *
+   * 그래서 지도가 아니라 **알림**을 고쳤습니다(balance.ts `NAV`). 여기서는
+   * 그 알림이 실제로 화면에 도달하는지 봅니다 — 규칙이 아니라 HUD 가 받은
+   * 문자열 그대로입니다.
+   */
+  const hint = await page.evaluate(async ([tx, tz]) => {
+    const G = window.__game
+    const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+    const runFor = async (s2) => {
+      const t = G.state().elapsed + s2
+      while (G.state().elapsed < t) await sleep2()
+    }
+    G.reset()
+    await runFor(0.4)
+    const rule = G.sideHint()
+    // ① 시작 지점 — 보물이 저 멀리 있으니 알림이 없어야 정상입니다.
+    const far = G.sideHint().text
+    /**
+     * ② **조건에 맞는 자리를 프로브가 고릅니다.**
+     *
+     * 처음엔 (17,−21) 을 손으로 찍었는데 거기서는 알림이 안 떴습니다.
+     * 다른 보물이 **8m 앞**이라 「눈앞이면 안 알려 준다」 규칙에 걸린
+     * 것이었습니다 — 게임은 규칙대로였고 **자리를 잘못 골랐습니다.**
+     * 그래서 보물 둘레를 훑어 *"가장 가까운 보물이 눈앞보다는 멀고
+     * 예산 안"* 인 자리를 찾습니다. 자리를 손으로 찍지 않는 편이
+     * 지도를 고치는 날에도 검사가 따라옵니다.
+     */
+    const spots = G.treasurePositions().filter((t) => !t.taken)
+    let near = ''
+    let at = null
+    outer: for (const t of spots) {
+      for (const r of [26, 32, 38]) {
+        for (const a of [0, 1, 2, 3, 4, 5, 6, 7]) {
+          const x = t.x + Math.cos((a / 8) * Math.PI * 2) * r
+          const z = t.z + Math.sin((a / 8) * Math.PI * 2) * r
+          G.teleportPlayer(x, z)
+          await runFor(0.25)
+          const here = G.state().player
+          if (Math.hypot(here.x - x, here.z - z) > 3) continue // 못 서는 칸
+          const txt = G.sideHint().text
+          if (txt) {
+            near = txt
+            at = { x: Math.round(here.x), z: Math.round(here.z) }
+            break outer
+          }
+        }
+      }
+    }
+    return { rule, far, near, at }
+  }, [0, 0])
+  check(
+    hint.rule.range > 0 && hint.rule.near > 0,
+    '곁길 알림의 규칙값을 게임에서 읽었다 (프로브가 문턱을 안 베낍니다)',
+    `예산 ${hint.rule.range}m · 눈앞 ${hint.rule.near}m`,
+  )
+  check(
+    hint.far === '',
+    '멀면 **안 알려 준다** (갈 수 없는 것을 알려 주는 것은 놀리는 것입니다)',
+    `시작 지점에서 "${hint.far}"`,
+  )
+  check(
+    hint.near.includes('보물'),
+    '🧭 **곁길 예산 안에 들면 알려 준다** (길 위에서 "저쪽에 있다"를 알 수 있게)',
+    `"${hint.near}" (선 자리 ${hint.at ? `${hint.at.x},${hint.at.z}` : '못 찾음'})`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
