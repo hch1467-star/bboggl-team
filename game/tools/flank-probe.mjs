@@ -408,6 +408,218 @@ try {
   )
 
   console.log('')
+  /**
+   * ── 📏 **등 뒤 표시가 사실을 말하는가** ─────────────────────────────
+   *
+   * 앞 라운드에서 예고 부채꼴이 **그린 선 밖 0.45m 에서 맞는다**는 것을
+   * 재서 고쳤습니다. 같은 부류를 찾다가 이 자리를 봤고, 게임이 준 숫자로만
+   * 봐도 어긋납니다:
+   *
+   *     그리는 쪽 — 고리 바깥 `backZoneOuter()` ≈ 1.6m
+   *     판정 쪽   — `isBehindPoint` … **각도만**. 거리 제한 **없음**
+   *     닿는 끝   — 1타 사거리 + 대상 굵기 ≈ 2.75m
+   *
+   * ⚠️ **한 번 되돌린 검사입니다.** 지난 라운드에 네 번 헛짚었고 넷 다
+   *    같은 부류였습니다 — **전제가 서기 전에 재기 시작함**. 그래서 이번엔
+   *    전제를 **게임에게 확인받고** 나서야 때립니다:
+   *
+   *      · 손이 비었는가        → `player.state === 0`
+   *      · 몸이 다 돌았는가      → `threats()[0].facing` (게임의 판단)
+   *      · 정말 등 뒤인가        → `threats()[0].inFront === false`
+   *
+   *    제 삼각함수로 각도를 계산하다 1.12m 마저 빨개졌던 것이 지난번입니다.
+   *    **재는 쪽이 규칙을 다시 쓰면 그 순간 두 번째 진실이 됩니다.**
+   */
+  {
+    const zone = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      const runFor = async (sec) => {
+        const t = G.state().elapsed + sec
+        while (G.state().elapsed < t) await sleep()
+      }
+      G.reset()
+      await runFor(0.5)
+      G.clearEnemies()
+      await runFor(0.3)
+      const p0 = G.state().player
+      const e = G.spawnEnemyKind('grunt', p0.x + 6, p0.z)
+      await runFor(0.4)
+      G.setHp(e, 100000)
+      G.freezeEnemies(true)
+      const info = G.enemyInfo(e)
+      const outer = G.backZoneOuter(0)
+      const wid = G.state().loadout.weapon
+      const w = G.weaponTable().find((x) => x.id === wid)
+      const hitMax = w.comboSteps[0].range
+      const foe = G.enemyRoster().find((r) => r.id === 'grunt')
+      const reachEdge = hitMax + foe.radius
+
+      /** `side` = -1 이면 등 뒤, +1 이면 정면(같은 축, 반대쪽). */
+      const at = async (d, side) => {
+        // 1) 손이 빌 때까지.
+        {
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 3 && G.state().player.state !== 0) await sleep()
+        }
+        /**
+         * ⚠️ **적의 자리를 매번 되돌리고, 좌표도 새로 읽습니다.**
+         *
+         * 처음엔 시작할 때 한 번 읽은 `info` 를 계속 썼습니다. 그런데 앞
+         * 측정에서 아홉 대를 때리면 **넉백으로 적이 밀려납니다.** 그래서
+         * 뒤이어 등 뒤라고 계산한 좌표가 이미 엉뚱한 자리였고, 등 뒤 훑기가
+         * **전부 헛쳤습니다.** 정면을 대조로 넣지 않았다면 저는 그걸
+         * *"등 뒤라서 안 맞는다"* 로 읽었을 것입니다.
+         *
+         * 계측기가 재려는 대상을 움직여 놓고 그 값을 믿는 것 — 이 저장소가
+         * 출혈 프로브에서 이미 적어 둔 실패입니다.
+         */
+        G.teleportEnemy(e, info.x, info.z)
+        await sleep()
+        const cur = G.enemyInfo(e)
+        const bx = cur.x + side * Math.sin(cur.rotY) * d
+        const bz = cur.z + side * Math.cos(cur.rotY) * d
+        G.teleportPlayer(bx, bz)
+        G.aimAtWorld(cur.x, cur.z)
+        G.setStamina(1000)
+        /**
+         * 2) **게임이** "적이 내 앞에 있다"(`facing`) 고 말할 때까지.
+         *
+         * ⚠️ `aimAtWorld` 만으로는 **몸이 안 돕니다.** 조준은 마우스 쪽
+         *    값이고, 판정 부채꼴은 **몸의 방향**을 씁니다. 그래서 등 뒤로
+         *    순간이동만 하고 때리면 부채꼴이 딴 데를 봅니다 — 가까운
+         *    0.9~1.15m 만 맞았는데, 그건 가까울수록 각도 여유(`atan(r/d)`)가
+         *    커서 어긋난 채로도 몸이 걸린 것입니다. 1.4m 부터는 전부 헛쳤고,
+         *    게이트(`조준 5/9`)가 그 자리를 정확히 짚어 줬습니다.
+         *
+         * 사람은 걸으면서 몸을 돌립니다. 그래서 **이동 키를 잠깐 눌러**
+         * 몸을 돌린 뒤, 움직인 만큼을 되돌려 놓고 잽니다.
+         */
+        let aimed = false
+        for (let tries = 0; tries < 3 && !aimed; tries++) {
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 0.5) {
+            const t = G.threats(20).find((x) => x.entity === e)
+            if (t?.facing) {
+              aimed = true
+              break
+            }
+            // 적 쪽으로 한 걸음 — 몸이 그 방향으로 돕니다.
+            const s2 = G.state().player
+            const cam = G.cameraAxes()
+            const dx = cur.x - s2.x
+            const dz = cur.z - s2.z
+            const fwd = dx * cam.forwardX + dz * cam.forwardZ
+            const right = dx * cam.rightX + dz * cam.rightZ
+            for (const [k, v] of [
+              ['KeyW', fwd > 0.25],
+              ['KeyS', fwd < -0.25],
+              ['KeyD', right > 0.25],
+              ['KeyA', right < -0.25],
+            ]) {
+              if (v) G.press(k)
+              else G.release(k)
+            }
+            await sleep()
+          }
+          for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) G.release(k)
+          // 걸으면서 가까워진 만큼 **정확히 그 자리로** 되돌립니다.
+          G.teleportPlayer(bx, bz)
+          G.aimAtWorld(cur.x, cur.z)
+          await sleep()
+        }
+        const t = G.threats(20).find((x) => x.entity === e)
+        const behind = t ? t.inFront === false : false
+        const hp0 = G.enemyInfo(e).hp
+        const backs0 = G.state().backHits
+        G.press('Mouse0')
+        await sleep()
+        G.release('Mouse0')
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 2 && G.enemyInfo(e).hp === hp0) await sleep()
+        const landed = G.enemyInfo(e).hp < hp0
+        return {
+          d: Number(d.toFixed(2)),
+          aimed,
+          behind,
+          landed,
+          back: G.state().backHits > backs0,
+        }
+      }
+
+      /**
+       * ⚠️ **정면에서도 같은 거리를 잽니다.**
+       *
+       * 등 뒤에서 1.4m 부터 전부 헛쳤습니다. 원인이 *"등 뒤라서"* 인지
+       * *"이 사거리가 실제로는 짧아서"* 인지 갈라야 합니다. 정면이 같은
+       * 거리에서 맞으면 등 뒤 문제이고, **정면도 못 맞히면 사거리 문제**
+       * 입니다 — 그건 등 뒤 표시와 무관한, 훨씬 큰 이야기가 됩니다.
+       * 가설이 둘일 때는 **가르는 실험**부터 합니다.
+       */
+      const front = []
+      for (let d = 0.9; d <= reachEdge + 0.3; d += 0.25) front.push(await at(d, +1))
+      const scan = []
+      for (let d = 0.9; d <= reachEdge + 0.3; d += 0.25) scan.push(await at(d, -1))
+      G.freezeEnemies(false)
+      return {
+        outer: Number(outer.toFixed(2)),
+        hitMax: Number(hitMax.toFixed(2)),
+        reachEdge: Number(reachEdge.toFixed(2)),
+        scan,
+        front,
+      }
+    })
+    console.log(
+      `     [정면] ${zone.front
+        .map((r) => `${r.d}m ${r.landed ? (r.back ? '백' : '앞') : '못맞힘'}`)
+        .join(' · ')}`,
+    )
+    console.log(
+      `     [등 뒤] ${zone.scan
+        .map((r) => `${r.d}m ${r.landed ? (r.back ? '백' : '앞') : '못맞힘'}`)
+        .join(' · ')}`,
+    )
+    const landed = zone.scan.filter((r) => r.landed)
+    const outside = landed.filter((r) => r.d > zone.outer)
+    check(
+      Number.isFinite(zone.reachEdge) &&
+        zone.hitMax > 0 &&
+        zone.scan.length > 0 &&
+        zone.scan.every((r) => r.aimed),
+      '📏 잰 값이 수이고, **모든 자리에서 몸이 다 돌았다** (전제부터 확인)',
+      `1타 ${zone.hitMax}m · 닿는 끝 ${zone.reachEdge}m · 조준 ${zone.scan.filter((r) => r.aimed).length}/${zone.scan.length}`,
+    )
+    const backs = landed.filter((r) => r.back)
+    const fronts = zone.front.filter((r) => r.landed)
+    /**
+     * ⚠️ **약속을 제대로 씁니다.**
+     *
+     * 처음엔 *"고리 밖에서 맞은 곳 중 백어택이 없다"* 로 썼습니다. 그런데
+     * 고치고 나니 고리가 잰 자리를 전부 덮어서 **"고리 밖에서 맞은 곳"이
+     * 0** 이 되고, 그 검사는 구조적으로 만족할 수 없게 됐습니다.
+     * 재려던 약속은 반대 방향으로 써야 합니다 —
+     * **맞은 백어택은 전부 표시 안에 있어야 한다.**
+     */
+    check(
+      landed.length >= 4 && backs.length >= 2 && fronts.length >= 2,
+      '📏 등 뒤·정면 양쪽에서 충분히 맞혔다 (비교의 게이트)',
+      `맞음 ${landed.length}곳 (백 ${backs.length}) · 정면 대조군 ${fronts.length}곳` +
+        ` · 백어택 사거리 ${backs.length ? Math.max(...backs.map((r) => r.d)) : 0}m 까지`,
+    )
+    check(
+      fronts.length > 0 && fronts.every((r) => !r.back),
+      '📏 정면은 백어택이 아니다 (대조군이 살아 있다 — 아무 데나 백으로 세지 않는다)',
+      `정면 ${fronts.length}곳 중 백어택 ${fronts.filter((r) => r.back).length}곳`,
+    )
+    check(
+      backs.length > 0 && backs.every((r) => r.d <= zone.outer + 0.01),
+      '📏 **백어택이 되는 자리는 전부 표시 안이다** (표시가 사실을 말한다)',
+      `그린 고리 ${zone.outer}m · 백어택 ${backs.map((r) => r.d).join('/')}m` +
+        ` · 표시 밖 ${backs.filter((r) => r.d > zone.outer + 0.01).length}곳`,
+    )
+  }
+
+  console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**

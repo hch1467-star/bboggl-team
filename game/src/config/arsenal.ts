@@ -727,6 +727,19 @@ export const PLUNGE_COMBO = 254
  * 그래서 규칙을 여기 한 곳으로 모읍니다. 표식이 하나 늘어나는 날,
  * 고칠 자리도 하나입니다.
  */
+/**
+ * 📏 **플레이어가 낼 수 있는 가장 먼 기본 타의 사거리**(m).
+ *
+ * 등 뒤 표시(visuals `backZoneOuter`)가 씁니다. 무기를 하나 더 넣는 날
+ * 표시가 저절로 따라오게 하려고 표에서 계산합니다 — 숫자를 그리는 쪽에
+ * 적어 두면 언젠가 갈라집니다.
+ */
+export function longestPlayerReach(): number {
+  let m = 0
+  for (const w of WEAPONS) for (const c of w.combo) if (c.range > m) m = c.range
+  return m
+}
+
 export function stepFor(
   w: WeaponDef,
   index: number,

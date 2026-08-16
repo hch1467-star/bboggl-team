@@ -1,5 +1,12 @@
 import * as THREE from 'three'
-import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
+import {
+  FINISH_COMBO,
+  HEAVY_COMBO,
+  WEAPONS,
+  finisherStep,
+  heavyStep,
+  longestPlayerReach,
+} from '../config/arsenal'
 import {
   AttackIntent,
   INTENT_COLOR,
@@ -168,7 +175,29 @@ interface Visual {
  *    예고에서와 같은 이유로, 관대함 자체는 옳기 때문입니다.
  */
 export function backZoneOuter(kind: EnemyKind): number {
-  return enemyDef(kind).radius + (kind === EnemyKind.Boss ? 1.5 : 1.15)
+  /**
+   * ── ✅ **고쳤습니다 — 1.15m 를 사거리로 바꿉니다** ─────────────────
+   *
+   * 위 ⚠️ 에 적어 둔 어긋남을 살아 있는 타격으로 확인했습니다
+   * (`npm run flank`, 정면을 대조군으로 두고 같은 거리를 훑음):
+   *
+   *     [정면] 0.9 ~ 2.9m — 전부 `앞`   (대조군 정상)
+   *     [등 뒤] 0.9 ~ 2.9m — **전부 `백`**
+   *     그린 고리 1.6m 밖에서 맞은 6곳 중 **백어택 6곳**
+   *
+   * 판정에는 거리 제한이 없으므로 **표시가 거짓말이었습니다.**
+   *
+   * ── 왜 "사거리"인가 ────────────────────────────────────────────
+   * 이 고리가 답하는 질문은 *"내가 등 뒤인가"* 이지 *"닿는가"* 가
+   * 아닙니다 — 사거리는 플레이어 자신의 공격 표시가 이미 말합니다.
+   * 그러니 **등 뒤가 의미를 갖는 범위 전체**를 덮어야 하고, 그건 낼 수
+   * 있는 가장 먼 기본 타까지입니다. 무기를 하나 더 넣는 날 표시가
+   * 저절로 따라오도록 표에서 계산합니다(arsenal `longestPlayerReach`).
+   *
+   * 보스가 조금 더 넓던 것(1.5 vs 1.15)은 몸이 커서였는데, 이제 몸
+   * 반지름이 이미 더해지므로 그 보정은 필요 없어졌습니다.
+   */
+  return enemyDef(kind).radius + longestPlayerReach()
 }
 
 function makeSectorGeometry(inner: number, outer: number, arcDeg: number): THREE.BufferGeometry {
