@@ -197,16 +197,33 @@ console.log(
     .sort((a, b) => sum(b) - sum(a))
     .map((k) => `${k.slice(7)} ${sum(k)}`)
     .join(' · ')
+  /**
+   * 🎯 **"못 피함" 안을 갈라 봅니다** (main.ts `noteHurt`).
+   *
+   * 이 칸이 하나였을 때 40대가 통째로 들어 있었고, 저는 그걸 보고
+   * *"봇이 욕심을 부린다"* 고 믿었습니다. **근거는 없었습니다.**
+   * 안 눌러서 맞은 것과, 눌렀는데 일찍/늦어서 맞은 것은 고칠 곳이
+   * 각각 다릅니다 — 보상 · 무적 창 · 반응 예산.
+   */
+  const fairKeys = [...keys].filter((k) => k === 'fair' || k.startsWith('fair:'))
+  const fairTotal = fairKeys.reduce((a, k) => a + sum(k), 0)
+  const split = fairKeys
+    .filter((k) => sum(k) > 0)
+    .sort((a, b) => sum(b) - sum(a))
+    .map((k) => `${k === 'fair' ? '갈라지기 전' : k.slice(5)} ${sum(k)}`)
+    .join(' · ')
   console.log(
-    `  맞은 이유      ${total}대(전 판 합) · 못 피함 ${sum('fair')}(${pct(sum('fair'))}%)` +
+    `  맞은 이유      ${total}대(전 판 합) · 못 피함 ${fairTotal}(${pct(fairTotal)}%)` +
       ` · 못 봄 ${sum('unseen')} · 예고가 짧음 ${sum('tooFast')} · 출처불명 ${sum('unknown')}`,
   )
+  console.log(`                 그중 — ${split || '갈라진 기록 없음'}`)
   console.log(`                 손이 묶임 — ${locks || '없음'}`)
   // 억울한 한 대는 **정체를 찍습니다** — 숫자만으로는 어디를 고칠지 못 정합니다.
   const bad = logs.flatMap((l) => l.unfairHits ?? []).slice(0, 8)
   for (const u of bad) {
     console.log(
-      `                 ${u.id.padEnd(14)} ${u.why.padEnd(7)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초`,
+      `                 ${u.id.padEnd(14)} ${u.why.padEnd(12)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초` +
+        (u.since >= 0 ? ` · 구른 뒤 ${u.since}초` : ''),
     )
   }
   if (total === 0) console.log('                 ⚠️ 장부가 비었습니다 — 계측기를 먼저 의심하십시오')

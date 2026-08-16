@@ -324,8 +324,19 @@ class Game {
       free: number
       /** 손이 묶여 있던 **이유별** 시간. 처방이 갈리므로 칸을 나눕니다. */
       blocked: Record<string, number>
+      /**
+       * 🎯 이 예고가 뜬 **뒤에** 답을 시도한 마지막 시각(초). -1 이면 한 번도
+       * 안 눌렀다는 뜻입니다. 아래 `noteHurt` 가 `fair` 를 쪼개는 데 씁니다.
+       */
+      lastTryT: number
+      /** 이 예고 동안 답을 시도한 횟수 — "한 번도 안 눌렀다"와 구분하려고. */
+      tries: number
     }
   >()
+  /** 🎯 마지막으로 **구르기가 시작된** 시각(초). -1 = 아직 한 번도. */
+  private answerStartT = -1
+  /** 그 모서리를 잡기 위한 직전 프레임의 구르기 여부. */
+  private wasRolling = false
   private hurtLedger: {
     attackId: string
     intent: number
@@ -336,8 +347,13 @@ class Game {
     /** 그중 플레이어가 **답할 수 있던**(구르기를 시작할 수 있던) 시간 */
     free: number
     damage: number
-    /** fair · unseen · locked · tooFast · unknown */
+    /**
+     * fair:안누름 · fair:일찍 · fair:늦게 · fair:못막는공격 ·
+     * unseen · locked:* · tooFast · unknown
+     */
     verdict: string
+    /** 구르기를 시작한 지 얼마 만에 맞았는가(초). -1 = 안 굴렀음. */
+    sinceTry: number
   }[] = []
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
@@ -1295,6 +1311,8 @@ class Game {
           free: 0,
           damage: dmg,
           verdict: 'fall',
+                  /** 낙하는 구르기로 답할 수 있는 종류가 아닙니다 — -1. */
+          sinceTry: -1,
         })
         // 플레이어는 강인도가 없어 늘 비틀거립니다. 착지도 같은 규칙을 씁니다.
         Actor.state[p] = ActorState.Stagger
@@ -2655,6 +2673,17 @@ class Game {
    */
   private watchTelegraphs(p: number): void {
     const dt = time.dt
+    /**
+     * 🎯 **구르기가 시작된 순간**을 한 프레임에 한 번만 잡습니다.
+     *
+     * 상태가 Dodge 로 **올라서는 모서리**를 봅니다. 상태만 보면 구르는
+     * 0.42초 동안 매 프레임이 "시도"가 되어, 한 번 구른 것이 스무 번으로
+     * 세어집니다. **상태의 전이를 세야지 값을 세면 안 됩니다** — 이
+     * 저장소가 연계 장부에서 이미 배운 것입니다.
+     */
+    const rolling = Actor.state[p] === ActorState.Dodge
+    if (rolling && !this.wasRolling) this.answerStartT = time.simElapsed
+    this.wasRolling = rolling
     const ids = enemyQuery.run()
     const live = new Set<number>()
     for (let i = 0; i < enemyQuery.count; i++) {
@@ -2677,6 +2706,8 @@ class Game {
           seen: 0,
           free: 0,
           blocked: {},
+          lastTryT: -1,
+          tries: 0,
         }
         this.hurtWatch.set(e, rec)
       }
@@ -2684,6 +2715,17 @@ class Game {
       const why = this.answerBlock(p)
       if (why === '') rec.free += dt
       else rec.blocked[why] = (rec.blocked[why] ?? 0) + dt
+      /**
+       * 🎯 **답을 눌렀는가**를 예고마다 따로 셉니다.
+       *
+       * `this.answerStartT` 는 한 프레임에 한 번만 갱신되는 **전역 사실**
+       * (구르기가 시작된 순간)이고, 여기서는 *"그 순간이 이 예고 뒤였나"*
+       * 만 봅니다. 적마다 따로 감지하면 같은 구르기를 다섯 번 세게 됩니다.
+       */
+      if (this.answerStartT > rec.start && this.answerStartT > rec.lastTryT) {
+        rec.lastTryT = this.answerStartT
+        rec.tries++
+      }
     }
     // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
     for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
@@ -2746,12 +2788,54 @@ class Game {
         free: 0,
         damage,
         verdict: 'unknown',
+              /** 예고 기록 자체가 없으니 잰 거리도 없습니다. */
+        sinceTry: -1,
       })
       return
     }
     const telegraph = time.simElapsed - rec.start
     // 묶여 있던 이유 중 **가장 오래 묶은 것**을 붙입니다.
     const worst = Object.entries(rec.blocked).sort((x, y) => y[1] - x[1])[0]
+    /**
+     * ── 🎯 **"못 피함"을 쪼갭니다 — 처방이 셋으로 갈립니다** ────────────
+     *
+     * `fair` 는 *"예고도 길었고, 봤고, 손도 비어 있었는데 맞았다"* 입니다.
+     * 이 게임의 합격 기준(*"내가 못 봤네"가 아니라 "내가 못 피했네"*)에서
+     * 목표로 하는 바로 그 한 대입니다. 그래서 지금까지 더 안 캤습니다.
+     *
+     * 그런데 벤치가 이렇게 찍었습니다:
+     *
+     *     맞은 이유 50대 · 못 피함 40(80%) · 손이 묶임 stamina 10
+     *
+     * 40대가 **한 칸에 뭉쳐** 있습니다. 그 안에는 완전히 다른 세 가지가
+     * 섞여 있고, 고칠 곳이 각각 다릅니다:
+     *
+     *   · **안 눌렀다**   → 위험을 못 읽은 것. 예고의 *의미*가 안 읽히거나,
+     *                      욕심낼 값이 너무 싼 것 (보상 설계 문제)
+     *   · **일찍 굴렀다** → 무적이 이미 끝난 뒤 맞음. 예고 길이 대비
+     *                      무적 창(0.06~0.3초)이 짧은 것 (창 문제)
+     *   · **늦게 굴렀다** → 무적이 켜지기 전에 맞음. 반응 예산이나
+     *                      선입력이 부족한 것 (입력 문제)
+     *
+     * 소울류가 이 셋을 절대 같이 다루지 않습니다. 세키로에서 "안 눌렀다"는
+     * 패턴을 외우게 하는 문제이고, "타이밍이 어긋났다"는 창을 손보는
+     * 문제입니다. 뭉쳐 두면 창을 넓혀야 할 때 보상을 만지게 됩니다.
+     *
+     * ⚠️ 이 칸을 만들기 전까지는 40대 전부를 *"봇이 욕심을 부린다"* 고
+     *    믿고 있었습니다. **근거는 없었습니다.** 숫자가 한 칸뿐이었으니까요.
+     */
+    const iFrom = PLAYER_CFG.dodge.iFrameStart
+    const iTo = PLAYER_CFG.dodge.iFrameEnd
+    const sinceTry = rec.tries > 0 ? time.simElapsed - rec.lastTryT : -1
+    const missed =
+      rec.tries === 0
+        ? 'fair:안누름'
+        : sinceTry > iTo
+          ? 'fair:일찍'
+          : sinceTry < iFrom
+            ? 'fair:늦게'
+            : // 무적 창 안인데 맞았다면 그건 회피로 막을 수 없는 한 대입니다.
+              'fair:못막는공격'
     const verdict =
       telegraph < budget
         ? 'tooFast'
@@ -2759,7 +2843,7 @@ class Game {
           ? 'unseen'
           : rec.free < budget
             ? `locked:${worst ? worst[0] : '?'}`
-            : 'fair'
+            : missed
     this.hurtLedger.push({
       attackId: rec.id,
       intent: rec.intent,
@@ -2768,6 +2852,13 @@ class Game {
       free: Number(rec.free.toFixed(3)),
       damage,
       verdict,
+      /**
+       * 🎯 구른 지 얼마 만에 맞았는가(초). -1 = 한 번도 안 굴렀음.
+       * 무적 창(iFrameStart~End)과 나란히 놓고 보면 *"얼마나 빗나갔는지"*
+       * 가 바로 보입니다 — 판정만 내고 거리를 안 주면 얼마나 손볼지를
+       * 다시 짐작하게 됩니다.
+       */
+      sinceTry: Number(sinceTry.toFixed(3)),
     })
   }
 
@@ -2810,10 +2901,27 @@ class Game {
      * 판정마다 **다음 판에 바꿀 행동**이 다릅니다. 그래서 문장도 다릅니다 —
      * 같은 말을 돌려 쓰면 죽음이 가르치는 것이 없어집니다.
      */
+    /**
+     * 🎯 **갈라진 판정이 여기서도 다른 문장이 됩니다.**
+     *
+     * 장부를 셋으로 쪼개 놓고 죽음 화면만 *"예고를 다 봤다"* 로 두면,
+     * 안에서만 아는 사실이 됩니다. 플레이어가 다음 판에 바꿀 행동은
+     * 셋이 서로 다릅니다 — 누를지 말지 / 조금 늦게 / 조금 빨리.
+     * 소울류가 죽음에서 가르치는 것이 정확히 이 한 문장입니다.
+     */
+    const off = last.sinceTry >= 0 ? last.sinceTry.toFixed(2) : ''
     const why =
-      last.verdict === 'fair'
-        ? `예고 ${tel}초를 다 봤다`
-        : last.verdict === 'locked:stamina'
+      last.verdict === 'fair:안누름'
+        ? `예고 ${tel}초를 다 봤는데 구르지 않았다`
+        : last.verdict === 'fair:일찍'
+          ? `${off}초 전에 굴러서 무적이 이미 끝나 있었다 — 조금 늦게`
+          : last.verdict === 'fair:늦게'
+            ? `구르는 순간 이미 맞았다 — 조금 빨리`
+            : last.verdict === 'fair:못막는공격'
+              ? `구르기로는 넘길 수 없는 한 대였다`
+              : last.verdict === 'fair'
+                ? `예고 ${tel}초를 다 봤다`
+                : last.verdict === 'locked:stamina'
           ? `예고는 봤지만 기력이 없어 구르지 못했다`
           : last.verdict === 'locked:stagger'
             ? `앞의 한 대에 굳어 있었다`

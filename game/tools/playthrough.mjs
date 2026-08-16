@@ -2822,10 +2822,22 @@ try {
         return t
       })(),
       /** 억울한 한 대의 **정체** — 무엇이, 얼마나 보였는지. 처방이 갈리는 곳입니다. */
+      /**
+       * ⚠️ `fair:안누름` 은 **일부러 뺍니다.** 위 집계 줄이 이미 개수를
+       *    말해 주고, 여기 여섯 줄을 채우면 정작 손볼 거리가 있는
+       *    `일찍`·`늦게`·`locked:` 가 밀려납니다. 뺀 것은 세어져 있습니다.
+       */
       unfairHits: G.hurtLedger()
-        .filter((r) => r.verdict !== 'fair')
+        .filter((r) => r.verdict !== 'fair' && r.verdict !== 'fair:안누름')
         .slice(0, 6)
-        .map((r) => ({ id: r.attackId, why: r.verdict, tel: r.telegraph, seen: r.seen, free: r.free })),
+        .map((r) => ({
+          id: r.attackId,
+          why: r.verdict,
+          tel: r.telegraph,
+          seen: r.seen,
+          free: r.free,
+          since: r.sinceTry ?? -1,
+        })),
       maxAggro,
       avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
       multiRatio: Number(((multiSamples / Math.max(1, aggroSamples)) * 100).toFixed(0)),
@@ -3056,14 +3068,36 @@ try {
       .sort((a, b) => b[1] - a[1])
       .map(([k, v]) => `${k.slice(7)} ${v}`)
       .join(' · ')
+    /**
+     * 🎯 **"못 피함" 안을 들여다봅니다.**
+     *
+     * 예전에는 이 40대가 한 칸이었습니다. 그래서 *"봇이 욕심을 부린다"* 고
+     * 믿고 있었는데 **근거는 없었습니다** — 숫자가 한 칸뿐이었으니까요.
+     * 이제 게임이 세 가지로 갈라 줍니다(main.ts `noteHurt`):
+     *
+     *   안 눌렀다 → 위험을 못 읽음 (예고의 *의미* · 욕심의 값)
+     *   일찍     → 무적이 끝난 뒤 맞음 (무적 창)
+     *   늦게     → 무적이 켜지기 전에 맞음 (반응 예산 · 선입력)
+     *
+     * 고칠 곳이 각각 다릅니다. 뭉쳐 두면 창을 넓혀야 할 때 보상을 만집니다.
+     */
+    const fairs = Object.entries(h)
+      .filter(([k, v]) => k.startsWith('fair:') && v > 0)
+      .sort((a, b) => b[1] - a[1])
+    const fairTotal = fairs.reduce((a, [, v]) => a + v, 0) + (h.fair ?? 0)
     console.log(
-      `  맞은 이유   ${total}대 · 못 피함 ${h.fair ?? 0}(${pct(h.fair ?? 0)}%)` +
+      `  맞은 이유   ${total}대 · 못 피함 ${fairTotal}(${pct(fairTotal)}%)` +
         ` · 못 봄 ${h.unseen ?? 0} · 예고가 짧음 ${h.tooFast ?? 0} · 출처불명 ${h.unknown ?? 0}`,
+    )
+    console.log(
+      `              그중 — ${fairs.length ? fairs.map(([k, v]) => `${k.slice(5)} ${v}`).join(' · ') : '갈라진 기록 없음'}`,
     )
     console.log(`              손이 묶임 — ${locks || '없음'}`)
     for (const u of log.unfairHits ?? []) {
       console.log(
-        `              ${u.id.padEnd(14)} ${u.why.padEnd(7)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초`,
+        `              ${u.id.padEnd(14)} ${u.why.padEnd(12)} 예고 ${u.tel}초 · 보인 ${u.seen}초 · 자유 ${u.free}초` +
+          // 구른 지 얼마 만에 맞았는지 — 얼마나 빗나갔는지가 여기서 보입니다.
+          (u.since >= 0 ? ` · 구른 뒤 ${u.since}초` : ''),
       )
     }
   }

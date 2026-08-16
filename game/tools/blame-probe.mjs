@@ -93,9 +93,9 @@ try {
    * @param cripple 참이면 매 순간 기력을 0으로 눌러 **구르기를 못 하게** 합니다.
    *   싸움 자체는 위 판과 똑같습니다 — 달라지는 것은 답할 수 있느냐뿐입니다.
    */
-  const round = async (cripple) =>
+  const round = async (cripple, mode = 'idle') =>
     page.evaluate(
-      async ([kill]) => {
+      async ([kill, how]) => {
         const G = window.__game
         const sleep = () => new Promise((r) => setTimeout(r, 8))
         const now = () => G.state().simElapsed
@@ -128,25 +128,47 @@ try {
          */
         if (kill) G.pinStamina(0)
         const t1 = now()
+        let wasWinding = false
         while (now() - t1 < 22) {
           // 죽으면 그 뒤로는 맞을 일이 없으니 체력만 채워 둡니다.
           if (G.state().player.hp < 40) G.setHp(G.playerEntity(), 100)
+          /**
+           * 🎯 **예고가 뜨는 순간 굴러 버리는 판.**
+           *
+           * 사람이 겁먹고 미리 굴렀을 때와 같은 모양입니다 — 무적은
+           * 0.06~0.3초뿐인데 실제 타격은 예고 1초 뒤에 오니, 구른 것이
+           * **아무 소용이 없습니다.** 장부가 이걸 `fair:일찍` 로 적어야
+           * "안 눌렀다"와 구분됩니다.
+           */
+          if (how === 'eager') {
+            G.setStamina(100)
+            const winding = G.telegraphs().length > 0
+            if (winding && !wasWinding) {
+              G.press('Space')
+              await sleep()
+              G.release('Space')
+            }
+            wasWinding = winding
+          }
           await sleep()
         }
         return G.hurtLedger()
       },
-      [cripple],
+      [cripple, mode],
     )
 
   const free = await round(false)
   const bound = await round(true)
+  const eager = await round(false, 'eager')
 
   const tFree = heads(free)
   const tBound = heads(bound)
   const dFree = tally(free)
   const dBound = tally(bound)
+  const dEager = tally(eager)
   console.log(`  [자유롭게 서 있기] ${free.length}대 맞음 — ${show(dFree)}`)
-  console.log(`  [기력 0 으로 묶음] ${bound.length}대 맞음 — ${show(dBound)}\n`)
+  console.log(`  [기력 0 으로 묶음] ${bound.length}대 맞음 — ${show(dBound)}`)
+  console.log(`  [예고 뜨자마자 구름] ${eager.length}대 맞음 — ${show(dEager)}\n`)
 
   check(free.length > 0 && bound.length > 0, '두 판 모두 실제로 맞았다 (빈 장부로 통과하지 않게)', `${free.length}대 · ${bound.length}대`)
 
@@ -191,6 +213,45 @@ try {
     unfair.length
       ? unfair.slice(0, 3).map((r) => `${r.attackId} ${r.verdict}(예고 ${r.telegraph}초/보인 ${r.seen}초)`).join(' · ')
       : `${free.length}대 전부`,
+  )
+
+  /**
+   * ---- 3.5 **"못 피함"이 정말 갈라지는가** ----
+   *
+   * `fair` 한 칸에 40대가 뭉쳐 있던 것을 셋으로 쪼갰습니다(main.ts
+   * `noteHurt`). 쪼갠 것이 **실제로 다른 것을 가리키는지**를 여기서
+   * 확인합니다 — 안 그러면 칸만 늘고 뜻은 그대로입니다.
+   *
+   * 두 판이 정반대여야 합니다:
+   *   · 가만히 선 판  — 한 번도 안 굴렀으니 전부 `안누름`
+   *   · 뜨자마자 구른 판 — 굴렀지만 무적(0.06~0.3초)이 타격 전에 끝나므로 `일찍`
+   *
+   * 두 판이 같은 칸으로 나오면 장부는 **구르기를 보고 있지 않은** 것입니다.
+   */
+  const idleFair = free.filter((r) => r.verdict.startsWith('fair'))
+  const eagerFair = eager.filter((r) => r.verdict.startsWith('fair'))
+  check(
+    idleFair.length > 0 && eagerFair.length > 0,
+    '🎯 두 판 모두 "못 피함"이 실제로 나왔다 (빈 장부로 비교하지 않게)',
+    `가만히 ${idleFair.length}대 · 뜨자마자 ${eagerFair.length}대`,
+  )
+  check(
+    idleFair.length > 0 && idleFair.every((r) => r.verdict === 'fair:안누름'),
+    '🎯 **가만히 선 판은 전부 `안누름`** (구른 적이 없으니 다른 칸이 나오면 안 됩니다)',
+    show(tally(idleFair)),
+  )
+  check(
+    (dEager['fair:일찍'] ?? 0) > 0 && (dEager['fair:일찍'] ?? 0) > (dEager['fair:안누름'] ?? 0),
+    '🎯 **뜨자마자 구른 판은 `일찍`으로 적힌다** (같은 한 대를 다르게 적는다)',
+    `일찍 ${dEager['fair:일찍'] ?? 0}대 · 안누름 ${dEager['fair:안누름'] ?? 0}대` +
+      ` · 구른 뒤 평균 ${
+        eagerFair.filter((r) => r.sinceTry >= 0).length
+          ? (
+              eagerFair.filter((r) => r.sinceTry >= 0).reduce((a, r) => a + r.sinceTry, 0) /
+              eagerFair.filter((r) => r.sinceTry >= 0).length
+            ).toFixed(2)
+          : '?'
+      }초에 맞음 (무적은 0.3초까지)`,
   )
 
   /**
