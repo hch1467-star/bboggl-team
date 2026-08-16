@@ -343,6 +343,10 @@ class Game {
       /** 마지막 시도가 향했던 적(그 순간 가장 임박했던 예고의 주인). -1 = 없음. */
       tryTarget: number
       /**
+      /** 🚶 예고가 뜬 순간 **내가 서 있던 자리**. 내 발이 한 일만 따로 재려고. */
+      startX: number
+      startZ: number
+      /**
        * 🚶 예고가 **뜬 순간** 그 적과의 거리(m).
        *
        * 맞은 순간의 거리와 견주면 *"걸어서 벗어나려 했는가"* 가 사실로
@@ -385,6 +389,8 @@ class Game {
     sinceTry: number
     /** 이 휘두름이 약속했던 예고 길이(초). 0 = 기록 없음(낙하 등). */
     expected: number
+    /** 🚶 예고 동안 **내가 움직인 거리**(m). 기준점이 안 움직이는 값. */
+    walked: number
     /** 🚶 예고 동안 적과의 거리 변화(m). 음수면 다가갔다는 뜻. */
     moved: number
     /** 🎨 색 이름(이모지 포함) · 그 색이 요구한 답. 재는 쪽이 표를 안 들게. */
@@ -1352,6 +1358,7 @@ class Game {
                   /** 낙하는 구르기로 답할 수 있는 종류가 아닙니다 — -1. */
           sinceTry: -1,
           expected: 0,
+          walked: 0,
           moved: 0,
           color: '낙하',
           answer: '발밑을 보기',
@@ -2800,6 +2807,8 @@ class Game {
           tries: 0,
           expected: Enemy.windupLen[e] > 0 ? Enemy.windupLen[e] : Actor.timer[e],
           tryTarget: -1,
+          startX: Transform.x[p],
+          startZ: Transform.z[p],
           distStart: Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p]),
         }
         this.hurtWatch.set(e, rec)
@@ -2911,6 +2920,7 @@ class Game {
               /** 예고 기록 자체가 없으니 잰 거리도 없습니다. */
         sinceTry: -1,
         expected: 0,
+        walked: 0,
         moved: 0,
         color: '?',
         answer: '?',
@@ -3014,9 +3024,30 @@ class Game {
        * 색을 하나 늘리는 날 프로브만 옛 표를 들고 있지 않게.
        */
       /**
+       * 🚶 예고가 뜬 뒤 **내가 실제로 움직인 거리**(m).
+       *
+       * ── 왜 따로 재는가 (제가 쓰던 눈금이 두 가지를 더하고 있었습니다) ──
+       * 아래 `moved` 는 **적과의 거리 변화**입니다. 그런데 **적도 움직입니다.**
+       * 내가 열심히 걸어 나가도 적이 따라오면 거리가 그대로라
+       * `제자리` 로 찍히고, 그러면 *"안 걸었다 → 예고의 뜻이 안 읽힌다"*
+       * 라는 **정반대 처방**이 나옵니다. 🟡 광역을 두 라운드 동안 그
+       * 눈금 위에서 판단했습니다.
+       *
+       * 바로 앞 라운드에서 배운 것 그대로입니다:
+       * **재는 기준점이 움직이면 그 값은 두 가지를 더한 값입니다.**
+       * 그래서 움직이지 않는 기준(내가 서 있던 자리)에서 **내 발이 한
+       * 일만** 따로 잽니다. 둘을 나란히 놓아야 *"걸었는데 적이 따라왔다"* 와
+       * *"아예 안 걸었다"* 가 갈립니다.
+       */
+      walked: Number(
+        Math.hypot(
+          Transform.x[this.playerEntity] - rec.startX,
+          Transform.z[this.playerEntity] - rec.startZ,
+        ).toFixed(2),
+      ),
+      /**
        * 🚶 예고가 뜬 뒤 **적과의 거리가 얼마나 벌어졌는가**(m). 음수면 다가감.
-       * 정답이 *"걸어서 이탈"*·*"거리 두기"* 인 색에서, 시도조차 안 한 것과
-       * 시도했는데 모자란 것을 가릅니다.
+       * `walked` 와 나란히 봐야 뜻이 생깁니다(위 설계 노트).
        */
       moved: Number(
         (
