@@ -350,12 +350,41 @@ try {
       await window.__t.runFor(0.5)
       G.clearEnemies()
       await window.__t.runFor(0.3)
-      // 기력을 통제합니다 — 값을 못 내는 상태를 만들어야 반대쪽이 재집니다.
-      G.setStamina(rich ? 100 : 5)
-      // 좌클릭으로 휘두르는 중(커밋)에 V 를 누릅니다.
+      /**
+       * 기력을 통제합니다 — 값을 못 내는 상태를 만들어야 반대쪽이 재집니다.
+       *
+       * ⚠️ **붙들어야 합니다.** 예전엔 `setStamina(5)` 한 번이었는데, 바로
+       *    아래에서 최대 1초를 기다리는 동안 회복(34/초)이 5 → 39 로
+       *    올려놓습니다. 그러면 *"기력이 없으면 안 열린다"* 를 재려던
+       *    순간에 **기력이 있습니다.** 게임은 멀쩡한데 검사가 빨개지는,
+       *    이 저장소가 blame 프로브에서 이미 한 번 배운 모양입니다
+       *    (*"재려는 조건은 게임이 지켜 줘야 합니다"*).
+       */
+      /**
+       * ⚠️ **먼저 휘두르게 하고, 휘두르는 중에 기력을 뺍니다.**
+       *
+       * 예전엔 기력을 5로 **먼저** 낮추고 좌클릭했습니다. 그런데 이제
+       * 기력 5에서는 **공격이 아예 안 나갑니다**(playerControl
+       * `canAffordAttack` — 공격은 구르기 한 번 분을 남깁니다).
+       * 그러면 플레이어는 휘두르는 중이 아니라 **서 있는** 상태이고,
+       * 거기서 가드를 누르면 평범한 가드가 열립니다. 재려던 것은
+       * *"커밋을 뚫는 자리"* 인데 **다른 자리를 재고 있었습니다.**
+       *
+       * 검사는 빨갛게 떴고 저는 처음에 회복 탓인 줄 알았습니다. 회복을
+       * 붙들어도 그대로였습니다 — 상황 자체가 성립하지 않았던 것입니다.
+       */
+      G.pinStamina(null)
+      G.setStamina(100)
       G.press('Mouse0')
       G.release('Mouse0')
-      await window.__t.until(() => window.__game.guardInfo().canGuard === rich, 1)
+      // 실제로 **휘두르는 중**이 될 때까지 기다립니다(후딜은 커밋이 아닙니다).
+      const swinging = await window.__t.until(
+        () => G.state().player.state === 1 && G.state().player.phase !== 2,
+        1.2,
+      )
+      // 그 다음에 기력을 뺍니다 — 이러면 "커밋 중 + 기력 없음"이 성립합니다.
+      if (!rich) G.pinStamina(5)
+      await window.__t.until(() => window.__game.guardInfo().canGuard === rich, 0.6)
       const before = G.state().player.stamina
       const can = G.guardInfo().canGuard
       G.press(G.guardInfo().key)
@@ -364,9 +393,13 @@ try {
       out[rich ? 'rich' : 'poor'] = {
         can,
         opened,
+        // 🚪 게이트 — 정말 휘두르는 중이었나. 아니면 아래 판정은 뜻이 없습니다.
+        swinging,
         spent: Number((before - G.state().player.stamina).toFixed(0)),
       }
     }
+    // 붙들어 둔 것을 풉니다 — 뒤 검사가 마른 기력을 물려받지 않게.
+    G.pinStamina(null)
     return out
   })
   check(
@@ -379,7 +412,16 @@ try {
     '   그리고 공짜가 아니다 (커밋을 뚫는 값)',
     `순감소 -${midSwing.rich.spent} (회복분이 상쇄된 값)`,
   )
-  check(!midSwing.poor.opened, '   **기력이 없으면 안 열린다** (그래야 값이 값입니다)')
+  check(
+    midSwing.rich.swinging && midSwing.poor.swinging,
+    '   🚪 두 판 모두 **정말 휘두르는 중**이었다 (비교 앞의 게이트)',
+    `기력 있음 ${midSwing.rich.swinging ? 'O' : 'X'} · 없음 ${midSwing.poor.swinging ? 'O' : 'X'}`,
+  )
+  check(
+    !midSwing.poor.opened,
+    '   **기력이 없으면 안 열린다** (그래야 값이 값입니다)',
+    `기력 ${midSwing.poor.can ? '있다고 나옴' : '없음'} · 열림 ${midSwing.poor.opened ? 'O' : 'X'}`,
+  )
 
   /**
    * ── ③-4 ⏱ **「지금」 신호** — 언제는 박자가, 무엇은 색이 ──────────
@@ -471,12 +513,12 @@ try {
    *    「지금」 신호만 끝까지 밉니다.
    */
   check(
-    timing.every((b) => b.inWindow >= 0.999),
+    timing.length > 0 && timing.every((b) => b.inWindow >= 0.999),
     '   타이밍 색은 창 안에서 **끝까지 밝아진다** (「지금」이 보인다)',
     timing.map((b) => `${b.atk} ${b.outWindow}→${b.inWindow}`).join(' · '),
   )
   check(
-    nonTiming.every((b) => b.inWindow < 0.999),
+    nonTiming.length > 0 && nonTiming.every((b) => b.inWindow < 0.999),
     '   아닌 색은 끝까지 안 갑니다 (걸어 나가는 색에 마지막 순간 신호는 **거짓말**입니다)',
     nonTiming.map((b) => `${b.atk} 최대 ${b.inWindow}`).join(' · '),
   )
@@ -555,12 +597,12 @@ try {
       .join(' · '),
   )
   check(
-    bTiming.every((v) => v.late > v.early),
+    bTiming.length > 0 && bTiming.every((v) => v.late > v.early),
     '   타이밍 색은 창에 들어설 때 **소리가 한 번 더** 난다',
     bTiming.map((v) => `${v.early} → ${v.late}`).join(' · '),
   )
   check(
-    bOther.every((v) => v.late <= v.early),
+    bOther.length > 0 && bOther.every((v) => v.late <= v.early),
     '   아닌 색은 안 납니다 (걸어 나가는 색에 마지막 박자는 **거짓말**입니다)',
     bOther.map((v) => `${v.early} → ${v.late}`).join(' · '),
   )
@@ -602,7 +644,7 @@ try {
     console.log(`    ${c.mark} ${c.atk} — 가드 성립 ${c.gained}회 · 피해 ${c.hurt}`)
   }
   check(
-    colors.every((c) => c.gained === 0),
+    colors.length > 0 && colors.every((c) => c.gained === 0),
     '④ **🔴 말고는 안 막힌다** (가드가 만능 정답이 되지 않게)',
     colors
       .filter((c) => c.gained > 0)

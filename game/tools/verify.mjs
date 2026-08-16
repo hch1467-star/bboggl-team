@@ -1117,10 +1117,13 @@ async function main() {
     check('시작 무기 = 롱소드', s.loadout.weapon === 'longsword', s.loadout.weaponName)
     check(
       '슬롯 4개(무기2 + 룬2)가 모두 채워짐',
-      s.loadout.slots.every((x) => x !== null),
+      s.loadout.slots.length > 0 && s.loadout.slots.every((x) => x !== null),
       JSON.stringify(s.loadout.slots),
     )
-    check('시작 쿨다운은 모두 0', s.loadout.cooldowns.every((c) => c === 0))
+    check(
+      '시작 쿨다운은 모두 0',
+      s.loadout.cooldowns.length > 0 && s.loadout.cooldowns.every((c) => c === 0),
+    )
 
     await tap('KeyQ')
     const casting = await waitUntil((st) => st.player.state === 5, 3000)
@@ -1667,7 +1670,7 @@ async function main() {
     const arm = await state()
     check(
       '무기 스킬이 3개(Q/E/R)로 늘어남',
-      arm.loadout.slots.slice(0, 3).every(Boolean),
+      arm.loadout.slots.length > 0 && arm.loadout.slots.slice(0, 3).every(Boolean),
       arm.loadout.slots.slice(0, 3).join(', '),
     )
     // 시험장은 룬 2개를 미리 쥐여줍니다(전투 검증용). 레벨 모드에서는 비어 있고,

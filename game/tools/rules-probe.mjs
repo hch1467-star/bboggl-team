@@ -217,14 +217,14 @@ try {
   )
   if (snareChains.length) {
     check(
-      snareChains.every((c) => c.walkFree > c.need),
+      snareChains.length > 0 && snareChains.every((c) => c.walkFree > c.need),
       '   ↳ 안 묶였으면 그 🟡 을 걸어서 빠져나온다 (🟡 의 정답이 여기서도 산다)',
       snareChains
         .map((c) => `${c.to} ${c.need.toFixed(1)}m 필요 / 자유 ${c.walkFree.toFixed(1)}m`)
         .join(' · '),
     )
     check(
-      snareChains.every((c) => c.walkBound < c.need),
+      snareChains.length > 0 && snareChains.every((c) => c.walkBound < c.need),
       '   ↳ **묶이면** 그 🟡 을 걸어서 못 빠져나온다 (🔵 이 색인 이유)',
       snareChains
         .map(
@@ -605,7 +605,7 @@ try {
   const shortest = cfgCounter.normalBrokenTime
   const worst = twoHits.reduce((a, b) => (b.secondAt > a.secondAt ? b : a), twoHits[0])
   check(
-    twoHits.every((x) => x.secondAt > 0 && x.secondAt <= shortest),
+    twoHits.length > 0 && twoHits.every((x) => x.secondAt > 0 && x.secondAt <= shortest),
     `모든 무기가 가장 짧은 무너짐 창 안에 **두 대**를 넣는다 (처벌이 무기를 안 가린다)`,
     `창 ${shortest}초 · ` + twoHits.map((x) => `${x.name} ${x.secondAt}초`).join(' · ') +
       ` (가장 느린 것 ${worst.name})`,
@@ -720,7 +720,8 @@ try {
     return out
   }, [t.actorStates])
   check(
-    focusPerCombo.every((w) => w.swings === w.steps && w.focus >= 0.95 && w.focus <= 1.15),
+    focusPerCombo.length > 0 &&
+      focusPerCombo.every((w) => w.swings === w.steps && w.focus >= 0.95 && w.focus <= 1.15),
     '**모든 무기가** 콤보 한 바퀴에 집중 1점을 채운다',
     focusPerCombo.map((w) => `${w.name} ${w.steps}타 → ${w.focus}점`).join(' · '),
   )

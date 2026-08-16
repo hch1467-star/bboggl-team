@@ -222,7 +222,8 @@ try {
   console.log(`  [2단계] ${fmt(chains.p2.seen)}`)
   console.log(`  [3단계] ${fmt(chains.p3.seen)}`)
   check(
-    Object.values(chains.p1.seen).every((v) => v === ''),
+    Object.values(chains.p1.seen).length > 0 &&
+      Object.values(chains.p1.seen).every((v) => v === ''),
     '1단계에는 연계가 없음',
   )
   check(chains.p2.seen.boss_bind === 'boss_cleave', '2단계: 🔵 속박 → 🔴 직격')

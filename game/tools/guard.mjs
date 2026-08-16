@@ -331,5 +331,71 @@ check(
   )
 }
 
+/**
+ * ── 🕳 **표본이 비면 저절로 초록이 되는 검사** ────────────────────────
+ *
+ * `[].every(...)` 는 **참**입니다. 그래서
+ *
+ *     check(rows.every((r) => r.ok), '전부 통과했다')
+ *
+ * 는 `rows` 가 비어 있으면 **아무것도 안 재고 초록**입니다. 측정이 실패한
+ * 판(적이 안 나왔다 · 예고를 못 봤다 · 훅이 빈 배열을 줬다)이 정확히
+ * *"완벽하게 통과"* 로 보입니다.
+ *
+ * 이 저장소가 이미 세 번 데인 모양입니다 — 그때마다 *"빈 장부로 통과하지
+ * 않게"* 라는 짝 검사를 손으로 붙여서 막았습니다. 손으로 붙이는 것은
+ * 붙이는 것을 잊는 날 뚫립니다. **기계가 봅니다.**
+ *
+ * 규칙: 프로브의 `.every(` 는 같은 판정 안에서 **표본이 비지 않았음**을
+ * 함께 확인해야 합니다(`xs.length > 0 && xs.every(...)` 또는 바로 앞
+ * 줄에서 길이를 검사). 완벽한 파서가 아니라 **이미 데인 모양**을 막습니다.
+ *
+ * ⚠️ 게임 코드(`src/`)는 보지 않습니다. 거기서 `.every` 는 판정이 아니라
+ *    보통 로직이고, *"비면 참"* 이 옳은 경우가 많습니다. 이 규칙이 말하는
+ *    것은 **검사는 증거 없이 통과하면 안 된다**는 것뿐입니다.
+ */
+{
+  const probes = readdirSync(HERE).filter((f) => f.endsWith('.mjs') && f !== 'guard.mjs')
+  const holes = []
+  for (const f of probes) {
+    const src = readFileSync(path.join(HERE, f), 'utf8')
+    const lines = src.split('\n')
+    /**
+     * ⚠️ **`check(` 안에 있는 것만 봅니다.**
+     *
+     * 처음엔 파일의 모든 `.every(` 를 봤더니 `PLAN.filter((k) => band.every(...))`
+     * 같은 **평범한 로직**까지 잡혔습니다. 거기서는 *"비면 참"* 이 옳습니다.
+     * 이 규칙이 말하는 것은 하나뿐입니다 — **검사는 증거 없이 통과하면 안 된다.**
+     * 그러니 판정문 안에 있는 것만 봅니다.
+     */
+    lines.forEach((line, i) => {
+      if (!/\.every\(/.test(line)) return
+      // 배열 **리터럴**은 빌 수가 없습니다 — `[A, B, C].every(...)` 는 규칙 밖입니다.
+      if (/\]\s*\.every\(/.test(line)) return
+      // 이 줄이 어떤 `check(` 의 인자인가 — 위로 최대 6줄까지 거슬러 봅니다.
+      let inCheck = false
+      for (let k = i; k >= Math.max(0, i - 6); k--) {
+        if (/^\s*check\(/.test(lines[k])) {
+          inCheck = true
+          break
+        }
+        // 다른 문장이 시작됐으면 그 위는 이 판정과 무관합니다.
+        if (k < i && /^\s*(const|let|for|if|return|\})/.test(lines[k])) break
+      }
+      if (!inCheck) return
+      // 판정 안에서 표본의 크기를 함께 확인했는가 (같은 줄 · 앞 세 줄).
+      const around = [lines[i - 3] ?? '', lines[i - 2] ?? '', lines[i - 1] ?? '', line].join(' ')
+      if (!/\.length\s*(>|>=|===|!==)/.test(around)) {
+        holes.push(`${f}:${i + 1} ${line.trim().slice(0, 68)}`)
+      }
+    })
+  }
+  check(
+    holes.length === 0,
+    '🕳 프로브의 `.every(` 가 **빈 표본으로 통과하지 않는다** (증거 없는 초록 금지)',
+    holes.length ? `${holes.length}곳 — ${holes.slice(0, 4).join(' | ')}` : `${probes.length}개 파일 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

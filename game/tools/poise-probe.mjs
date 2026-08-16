@@ -379,7 +379,7 @@ try {
       mark.perWeapon.map((w) => `${w.name} ${(w.ratio * 100).toFixed(0)}%`).join(' · '),
   )
   check(
-    mark.perWeapon.every((w) => w.visible),
+    mark.perWeapon.length > 0 && mark.perWeapon.every((w) => w.visible),
     '강타 눈금이 실제로 그려진다 (규칙이 아니라 화면)',
     mark.perWeapon.map((w) => `${w.name} ${w.visible ? '보임' : '**없음**'}`).join(' · '),
   )
