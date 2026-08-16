@@ -56,6 +56,7 @@ import {
   SNARE_MOVE_SCALE,
   attackAt,
   attacksFor,
+  longestReach,
 } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
@@ -4186,6 +4187,16 @@ class Game {
    * 무조건 굴렀는데, 그러면 초록의 정답(앞으로 나가 스킬)을 **영영 못 배웁니다.**
    * 사람은 화면에서 색과 자기 위치를 봅니다 — 봇에게도 같은 정보를 줍니다.
    */
+  /**
+   * 🎯 **가장 멀리 닿는 한 대의 사거리**(m) — 재는 쪽이 자기 숫자를 안 들게.
+   *
+   * 봇이 `threats(9)` 로 물어보고 있었는데 갈고리·화살은 12m 입니다.
+   * 자세한 사연은 enemyAttacks.ts `longestReach` 주석에 한 번만 적어 뒀습니다.
+   */
+  debugThreatRange(): number {
+    return Number((longestReach() + Body.radius[this.playerEntity]).toFixed(2))
+  }
+
   debugThreats(range = 14): {
     entity: number
     x: number
@@ -4885,6 +4896,8 @@ declare global {
         fill: [number, number, number]
       }[]
       /** 주변 적의 위협 상태 — 봇이 색과 방향을 읽습니다. */
+      /** 🎯 가장 멀리 닿는 한 대의 사거리(m). `threats()` 에 넣을 값을 게임이 줍니다. */
+      threatRange: () => number
       threats: (range?: number) => {
         entity: number
         x: number
@@ -5657,6 +5670,7 @@ window.__game = {
   },
   poiseBars: () => game.debugPoiseBars(),
   threats: (range) => game.debugThreats(range),
+  threatRange: () => game.debugThreatRange(),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
   objective: () => game.debugObjective(),

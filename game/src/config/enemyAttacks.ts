@@ -955,6 +955,34 @@ export function attacksFor(kind: number): EnemyAttackDef[] {
   return ATTACKS_BY_KIND[kind] ?? GRUNT_ATTACKS
 }
 
+/**
+ * 🎯 **이 게임에서 가장 멀리 닿는 한 대**(m).
+ *
+ * ── 왜 함수로 있어야 하는가 ────────────────────────────────────────
+ * 자동 플레이 봇이 위협 목록을 `G.threats(9)` 로 받고 있었습니다.
+ * 그런데 끄는 자의 갈고리와 궁수의 화살은 **12m** 입니다. 즉 봇은 그
+ * 예고를 **볼 기회조차 없었고**, 목록에 없으니 아무 대응도 안 한 채
+ * 다른 가지(추격·접근)를 따라 **오히려 다가갔습니다.** 벤치가 그 장면을
+ * 그대로 찍었습니다:
+ *
+ *     6대  안누름  🟣끌어당김  정답: 거리 두기  **발: 다가감**
+ *     2대  다른적  🟣끌어당김  정답: 거리 두기  **발: 다가감**
+ *
+ * 앞 회차에 넣은 `willReach`("이 한 대가 나에게 닿는가")도 소용없었습니다
+ * — 목록에 들어오지도 못한 적에게는 물어볼 수가 없으니까요.
+ *
+ * `9` 는 재는 쪽이 들고 있던 숫자입니다. **표가 답을 알고 있으므로**
+ * 표에게 묻습니다. 사거리 12m 짜리를 새로 넣는 날 봇이 저절로 따라옵니다
+ * — 이 저장소가 같은 모양으로 네 번 데인 뒤에 만든 함수입니다.
+ */
+export function longestReach(): number {
+  let m = 0
+  for (const list of Object.values(ATTACKS_BY_KIND)) {
+    for (const a of list) if (a.reach > m) m = a.reach
+  }
+  return m
+}
+
 /** 패턴을 인덱스로 저장하기 위한 조회 — ECS는 숫자만 담을 수 있습니다. */
 export function attackAt(kind: number, index: number): EnemyAttackDef {
   const list = attacksFor(kind)
