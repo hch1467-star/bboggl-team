@@ -4232,6 +4232,9 @@ class Game {
     /** 규칙값 — 프로브가 문턱을 들고 있지 않게 게임이 알려 줍니다 */
     cost: number
     cancelExtraCost: number
+    /** 🛡 무적 구간(초) — 재는 쪽이 창 안에 들어올 수 있도록 게임이 알려 줍니다. */
+    iFrameStart: number
+    iFrameEnd: number
     /**
      * 🛡 공격이 **남겨 두어야 하는** 구르기 몫 (playerControl `canAffordAttack`).
      * 프로브가 `18 * 1` 을 다시 계산하지 않도록 게임이 내보냅니다.
@@ -4251,6 +4254,13 @@ class Game {
       stamina: Number(Stamina.value[p].toFixed(2)),
       cost: PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1),
       cancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
+      /**
+       * 🛡 무적이 켜져 있는 구간(초, 구르기 시작 기준).
+       * **봇·프로브가 0.06/0.3 을 베껴 적지 않도록** 게임이 내보냅니다 —
+       * 이 값을 옮기는 날 재는 쪽만 옛 창을 들고 헛굴게 됩니다.
+       */
+      iFrameStart: PLAYER_CFG.dodge.iFrameStart,
+      iFrameEnd: PLAYER_CFG.dodge.iFrameEnd,
       attackReserve:
         PLAYER_CFG.dodge.staminaCost *
         (weaponOf(p).dodgeCostScale ?? 1) *
@@ -4683,6 +4693,8 @@ declare global {
         stamina: number
         cost: number
         cancelExtraCost: number
+        iFrameStart: number
+        iFrameEnd: number
         attackReserve: number
         canAttack: boolean
         regenDelay: number
