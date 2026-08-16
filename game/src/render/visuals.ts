@@ -944,6 +944,22 @@ export class Visuals {
    * @param playerX,playerZ 등 뒤 표시·빛기둥 감쇠 판단에 쓰는 플레이어 위치
    */
   sync(playerX: number, playerZ: number, player: number): void {
+    /**
+     * 🎯 **가장 가까운 적** — 등 뒤 표시를 하나에게만 주기 위해 먼저 고릅니다.
+     * (자세한 이유는 아래 `backZone` 자리의 설계 노트에.)
+     */
+    let nearestFoe = -1
+    {
+      let best = Infinity
+      for (const [e, v] of this.items.entries()) {
+        if (!v.backZone || Actor.state[e] === ActorState.Dead) continue
+        const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
+        if (d < best) {
+          best = d
+          nearestFoe = e
+        }
+      }
+    }
     this.syncBonfires()
     /**
      * 🥋 이번 강타가 깎을 강인도를 **한 번만** 구합니다.
@@ -1179,10 +1195,26 @@ export class Visuals {
         if (show) v.unawareMat.opacity = 0.85 * (1 - (d / AWARE.markRange) * 0.45)
       }
 
-      // 등 뒤 구역: 가까이 갈수록 진해집니다. 멀면 아예 안 보입니다.
+      /**
+       * ── 등 뒤 구역: **가장 가까운 하나에게만** 그립니다 ────────────────
+       *
+       * 예전엔 표시 사거리(5.5m) 안의 **모든 적**에게 그렸습니다. 고리가
+       * 좁을 때(1.6m)는 티가 안 났는데, 판정과 맞추느라 3.95m 로 넓히자
+       * 면적이 2.4배가 되어 **바닥이 고리로 덮이기 시작했습니다.**
+       * `npm run contrast` 에 대조군(적 있을 때 / 없을 때 같은 자리)을
+       * 붙여서 재 보니 지면이 **ΔE 26.2** 만큼 바뀌었습니다 — 예고가
+       * 바탕과 구분되는 문턱(25)을 넘는 값입니다. 즉 위험을 알리는 색을
+       * **내가 만든 힌트가 덮기 시작한** 것입니다.
+       *
+       * 흐리게 만드는 것은 문턱 언저리를 만지는 미봉책입니다. 이 표시가
+       * 답하는 질문은 *"내가 지금 누구의 등 뒤를 잡을 수 있나"* 이고,
+       * 그 답은 **하나면 충분합니다.** 여럿에게 동시에 그리는 것은
+       * 안내가 아니라 소음입니다 — 이 저장소가 곁길 알림에서 이미 배운 것.
+       */
       if (v.backZone && v.backZoneMat) {
         const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
-        const near = d < COMBAT.backIndicatorRange && Actor.state[e] !== ActorState.Dead
+        const near =
+          e === nearestFoe && d < COMBAT.backIndicatorRange && Actor.state[e] !== ActorState.Dead
         v.backZone.visible = near
         if (near) v.backZoneMat.opacity = 0.42 * (1 - d / COMBAT.backIndicatorRange)
       }

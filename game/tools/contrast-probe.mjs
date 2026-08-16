@@ -428,6 +428,129 @@ try {
   }
 
   console.log('')
+  /**
+   * ── 🔵 **예고가 깔고 앉은 바탕이 진짜 "맨 지면"인가** ─────────────────
+   *
+   * 위 검사들은 예고를 **밟고 선 지면**과 견줍니다. 그런데 그 전제가
+   * 방금 흔들렸습니다: 등 뒤 표시 고리를 1.6m → 3.95m 로 넓혔거든요
+   * (visuals `backZoneOuter` — 판정에 거리 제한이 없어서 표시가 좁았던 것을
+   * 고친 것입니다). 고리는 `backIndicatorRange`(5.5m) 안의 **모든 적**에게
+   * 그려지므로, 실제 전투의 지면은 맨 흙이 아니라 **겹친 고리들**입니다.
+   *
+   * 즉 이 프로브가 재던 바탕은 **전투 중에 존재하지 않는 바탕**일 수
+   * 있습니다. 넓힌 것이 예고를 못 읽게 만들었다면 그건 제가 만든 해악이고,
+   * 아무도 그걸 재고 있지 않았습니다.
+   *
+   * 그래서 같은 자리에서 **대조군**을 만듭니다 — 적 없이 한 장, 적을
+   * 둘러세우고 한 장. 문턱은 위와 **같은 값**(`MIN_DELTA_E`)을 씁니다.
+   * (대조군이 없어서 원인을 못 갈랐던 것이 바로 앞 라운드의 교훈입니다.)
+   */
+  console.log('')
+  {
+    const crowded = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 16))
+      G.reset()
+      await sleep()
+      G.clearEnemies()
+      await sleep()
+      const p = G.state().player
+      // 플레이어 둘레에 고리가 겹치도록 세웁니다 — 표시 사거리(5.5m) 안쪽.
+      const spots = [
+        [2.2, 0],
+        [-2.2, 0.6],
+        [0.4, 2.4],
+        [0.2, -2.3],
+      ]
+      const made = []
+      for (const [dx, dz] of spots) made.push(G.spawnEnemyKind('grunt', p.x + dx, p.z + dz))
+      for (const e of made) G.wakeEnemy(e)
+      G.freezeEnemies(true)
+      await new Promise((r) => setTimeout(r, 400))
+      /**
+       * ⚠️ **한 점만 찍지 않습니다.**
+       *
+       * 처음엔 발밑 앞 한 점만 봤고 `ΔE 0.0` 이 나왔습니다 — 픽셀이
+       * **완전히 동일**했습니다. 적 넷을 세웠는데 아무 변화가 없다는 건
+       * 고리가 그 한 점을 안 덮었다는 뜻일 뿐, *"고리가 지면을 안 바꾼다"* 는
+       * 뜻이 아닙니다. 고리는 뒤쪽 140° 부채꼴이라 어디 서느냐로 갈립니다.
+       * 바로 앞 라운드에서 한 자리만 찍고 결론 낼 뻔한 그 실수입니다.
+       *
+       * 그래서 플레이어 둘레를 **격자로 훑고 가장 크게 바뀐 곳**을 씁니다.
+       * 재려는 것은 *"어딘가에서 바탕이 바뀌는가"* 이므로 최댓값이 맞습니다.
+       */
+      const at = []
+      for (const dx of [-3, -2, -1, 0, 1, 2, 3]) {
+        for (const dz of [-3, -2, -1, 0, 1, 2, 3]) {
+          /**
+           * ⚠️ **적의 몸을 찍으면 안 됩니다.**
+           *
+           * 격자를 훑었더니 가장 크게 바뀐 곳이 `rgb(178,53,44)` — 붉은색,
+           * 즉 **적의 몸**이었습니다. 재려는 것은 *"고리가 지면을 바꾸는가"*
+           * 인데 *"거기 적이 서 있는가"* 를 재고 있었습니다. 적이 새로
+           * 생겼으니 당연히 바뀌고, 그 값은 아무 뜻이 없습니다.
+           *
+           * 그래서 적 둘레는 넉넉히 비웁니다. 지면만 남깁니다.
+           */
+          const nearBody = spots.some(([sx, sz]) => Math.hypot(dx - sx, dz - sz) < 1.4)
+          if (nearBody) continue
+          const q = G.screenPos(p.x + dx, 0.05, p.z + dz)
+          if (q) at.push(q)
+        }
+      }
+      return { at, count: made.length }
+    })
+    const withFoes = await page.screenshot()
+    await page.evaluate(async () => {
+      window.__game.freezeEnemies(false)
+      window.__game.clearEnemies()
+      await new Promise((r) => setTimeout(r, 300))
+    })
+    await page.waitForTimeout(300)
+    const bare = await page.screenshot()
+
+    const pick = (png, at) => {
+      const img = decodePng(png)
+      const x = Math.round(at.sx)
+      const y = Math.round(at.sy)
+      if (x < 0 || y < 0 || x >= img.width || y >= img.height) return null
+      const i = (y * img.width + x) * 4
+      return [img.data[i], img.data[i + 1], img.data[i + 2]]
+    }
+    let worst = null
+    for (const q of crowded.at ?? []) {
+      const a0 = pick(bare, q)
+      const b0 = pick(withFoes, q)
+      if (!a0 || !b0) continue
+      const d = deltaE(b0, a0)
+      if (!worst || d > worst.d) worst = { d, a: a0, b: b0 }
+    }
+    check(
+      crowded.count >= 3 && (crowded.at?.length ?? 0) >= 9 && worst !== null,
+      '🔵 같은 자리들을 적 있을 때와 없을 때 각각 찍었다 (대조군의 게이트)',
+      `적 ${crowded.count}마리 · 훑은 점 ${crowded.at?.length ?? 0}곳` +
+        (worst ? ` · 가장 크게 바뀐 곳 맨 지면 rgb(${worst.a}) → rgb(${worst.b})` : ''),
+    )
+    if (worst) {
+      const a = worst.a
+      const b = worst.b
+      const shift = worst.d
+      /**
+       * 고리가 바탕을 **문턱만큼** 바꿔 놓으면, 위 검사들이 통과시킨
+       * 예고도 실제 전투에서는 그만큼 덜 읽힙니다. 문턱을 새로 만들지
+       * 않고 같은 `MIN_DELTA_E` 를 씁니다 — *"색 하나를 구분할 수 있는
+       * 최소 차이"* 라는 뜻이 양쪽에서 같기 때문입니다.
+       */
+      check(
+        shift < MIN_DELTA_E,
+        '🔵 **등 뒤 고리가 지면을 덮어 예고의 바탕을 바꾸지 않는다** (넓힌 표시가 예고를 잡아먹지 않게)',
+        `가장 크게 바뀐 곳 ΔE ${shift.toFixed(1)} (문턱 ${MIN_DELTA_E} 미만)` +
+          ` · rgb(${a}) → rgb(${b}) · 적 ${crowded.count}마리를 5.5m 안에`,
+      )
+    }
+  }
+
+  console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
