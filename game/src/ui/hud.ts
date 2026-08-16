@@ -5,6 +5,7 @@
  * 훨씬 선명하고, 캔버스에 UI를 그리면 드로우콜과 폰트 처리로 프레임을 잡아먹습니다.
  * (Unity 이식 시에는 이 파일이 그대로 UI Toolkit / uGUI 로 대체됩니다.)
  */
+import { PLAYER } from '../config/balance'
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -286,7 +287,9 @@ export class Hud {
    * 도는데 게임은 히트스톱 중 멈추므로, 둘이 어긋나면 화면이 따로 놉니다.
    */
   setLowHp(ratio: number, pulse: number): void {
-    const t = ratio >= 0.4 ? 0 : 1 - ratio / 0.4
+    // 문턱은 balance.ts 한 곳에만 — 귀 채널(audio `heartbeat`)이 같은 값을 씁니다.
+    const warn = PLAYER.lowHpWarn
+    const t = ratio >= warn ? 0 : 1 - ratio / warn
     this.lowHp.style.opacity = t <= 0 ? '0' : String(0.25 + t * (0.5 + 0.25 * pulse))
   }
 

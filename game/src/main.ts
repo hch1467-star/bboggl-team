@@ -1839,10 +1839,19 @@ class Game {
     }
     // 맥동은 **실시간**(realDt) 축으로 돕니다 — 히트스톱 중에도 경고는 살아 있어야
     // 합니다. 화면이 멈춘 그 순간이 정확히 "위험하다"를 알려야 할 때입니다.
-    this.hud.setLowHp(
-      Health.hp[p] / Math.max(1, Health.max[p]),
-      0.5 + 0.5 * Math.sin(time.elapsed * 6.5),
-    )
+    const hpRatio = Health.hp[p] / Math.max(1, Health.max[p])
+    this.hud.setLowHp(hpRatio, 0.5 + 0.5 * Math.sin(time.elapsed * 6.5))
+    /**
+     * ❤️ **같은 경고를 귀에도 냅니다** (audio `heartbeat` 설계 노트).
+     *
+     * 죽음 장부가 세 번 다 *"예고를 다 봤는데 답을 내지 않았다"* 라고
+     * 적었습니다. 예고는 보였는데 죽습니다. 저체력 경고가 **눈 하나**
+     * 뿐이었고, 그 순간 눈은 화면 가장자리가 아니라 적에게 있습니다.
+     *
+     * 문턱은 위 `setLowHp` 와 **같은 값**을 넘깁니다 — 두 채널이 다른
+     * 순간에 말하기 시작하면 플레이어는 둘 중 하나를 못 믿게 됩니다.
+     */
+    sfx.heartbeat(time.realDt, hpRatio, PLAYER_CFG.lowHpWarn)
     if (this.levelMode) {
       this.hud.setLevelProgress(this.levelName, enemiesLeft, this.treasuresFound, this.treasureTotal)
     } else {
@@ -4939,6 +4948,8 @@ declare global {
       threatRange: () => number
       /** 💀 이 판에서 죽은 순간마다의 사인(무엇에 · 왜 못 막았는지). */
       deathLog: () => string[]
+      /** ❤️ 저체력 심장 박동 — 뛴 횟수 · 세기(0~1) · 문턱 */
+      heartbeatInfo: () => { beats: number; intensity: number; warn: number }
       threats: (range?: number) => {
         entity: number
         x: number
@@ -5713,6 +5724,8 @@ window.__game = {
   threats: (range) => game.debugThreats(range),
   threatRange: () => game.debugThreatRange(),
   deathLog: () => game.debugDeathLog(),
+  /** ❤️ 저체력 심장 박동 — 문턱은 게임이 알려 줍니다(프로브가 베끼지 않게). */
+  heartbeatInfo: () => ({ ...sfx.debugHeartbeat(), warn: PLAYER_CFG.lowHpWarn }),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
   objective: () => game.debugObjective(),

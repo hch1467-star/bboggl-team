@@ -335,6 +335,80 @@ class Sfx {
     }
   }
 
+  /**
+   * ── ❤️ **심장 박동 — 저체력 경고를 귀에도 냅니다** ──────────────────
+   *
+   * ── 왜 필요했는가 (벤치가 사인을 말해 주기 시작하고 나서) ────────────
+   * 죽음의 사인을 장부에 남기게 하자 세 번 다 이렇게 나왔습니다:
+   *
+   *     🟡 광역에 쓰러졌다 — 예고 1.3초를 **다 봤는데** 답을 내지 않았다
+   *     🟣 끌어당김에 쓰러졌다 — 예고 1.1초를 **다 봤는데** …
+   *     🔴 직격에 쓰러졌다 — 예고 0.6초를 **다 봤는데** …
+   *
+   * 예고는 보였습니다. 그런데도 죽습니다. 저체력 경고는 있었지만
+   * **화면 가장자리 비네트 하나뿐**이었습니다 — 그리고 그 순간 플레이어의
+   * 눈은 화면 가장자리가 아니라 **적**에게 가 있습니다.
+   *
+   * 참고 게임 셋이 전부 같은 자리에서 **귀**를 씁니다 — 세키로의 위험
+   * 경고음, 엘든 링의 저체력 심장 박동, 몬스터 헌터의 체력 경보.
+   * 공통 원리: **눈이 바쁠 때 쓰라고 있는 채널이 귀입니다.**
+   * 이 저장소도 *"귀 채널 채우기"* 를 원칙으로 적어 뒀는데, 정작 가장
+   * 급한 신호가 귀에 없었습니다.
+   *
+   * ── 왜 한 방이 아니라 박동인가 ──────────────────────────────────
+   * 한 번 울리는 소리는 **사건**이고, 되풀이되는 소리는 **상태**입니다.
+   * "위험하다"는 상태이므로 되풀이되어야 하고, 체력이 낮을수록 빨라져야
+   * *"더 위험해졌다"* 가 숫자를 안 보고도 들립니다.
+   *
+   * ⚠️ 문턱은 balance.ts `lowHpWarn` 한 곳에서 옵니다 — 눈(hud `setLowHp`)과
+   *    **같은 값**이어야 합니다. 두 채널이 다른 순간에 말하기 시작하면
+   *    플레이어는 둘 중 하나를 못 믿게 됩니다.
+   *
+   * ⚠️ 실시간(realDt)으로 돕니다. 히트스톱 중에도 경고는 살아 있어야
+   *    합니다 — 화면이 멈춘 그 순간이 정확히 "위험하다"를 말할 때입니다.
+   */
+  heartbeat(realDt: number, ratio: number, warn: number): void {
+    if (ratio > 0 && ratio < warn) {
+      // 0(문턱) → 1(죽기 직전). 이 값이 빠르기와 크기를 같이 끌어올립니다.
+      const t = Math.min(1, Math.max(0, 1 - ratio / warn))
+      this.beatVisible = t
+      // 1.05초(문턱) → 0.42초(직전). 사람 맥박이 빨라지는 폭과 비슷하게.
+      const period = 1.05 - 0.63 * t
+      this.heartT -= realDt
+      if (this.heartT > 0) return
+      this.heartT = period
+      this.heartbeats++
+      /**
+       * **두 번 칩니다** (쿵-쿵). 한 번이면 다른 타격음과 헷갈립니다 —
+       * 이 게임에는 이미 낮은 북(음악)과 피격음이 저음대에 있습니다.
+       * 심장은 *"둘씩 짝지어 온다"* 로 구분됩니다.
+       */
+      const gain = 0.16 + 0.2 * t
+      this.toneVoice({ type: 'sine', duration: 0.16, startHz: 96, endHz: 44, gain })
+      this.toneVoice({
+        type: 'sine',
+        duration: 0.14,
+        startHz: 86,
+        endHz: 40,
+        gain: gain * 0.72,
+        delay: 0.15,
+      })
+      return
+    }
+    // 문턱 위로 올라오면 즉시 조용해집니다 — 다음 하강에서 첫 박이 바로 오게.
+    this.beatVisible = 0
+    this.heartT = 0
+  }
+
+  private heartT = 0
+  private heartbeats = 0
+  private beatVisible = 0
+
+  /** 자동 검증용 — 심장 박동이 실제로 뛰고 있는가. */
+  debugHeartbeat(): { beats: number; intensity: number } {
+    return { beats: this.heartbeats, intensity: Number(this.beatVisible.toFixed(3)) }
+  }
+
   /** 자동 검증용 — 음악 상태 */
   debugMusic(): { level: number; voices: number } {
     return { level: this.musicLevel, voices: this.musicVoices.length }

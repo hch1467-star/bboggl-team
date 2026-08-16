@@ -299,6 +299,84 @@ try {
     )
   }
 
+  /**
+   * ── ❤️ **저체력 경고가 귀에도 나는가** ─────────────────────────────
+   *
+   * 죽음 장부가 세 번 다 *"예고를 다 봤는데 답을 내지 않았다"* 라고
+   * 적었습니다. 저체력 경고는 있었지만 **화면 가장자리 하나뿐**이었고,
+   * 그 순간 눈은 가장자리가 아니라 적에게 가 있습니다.
+   *
+   * 여기서 재는 것은 세 가지입니다:
+   *   1) 문턱 위에서는 **안 뛴다** (항상 뛰면 배경이 되어 경고가 아닙니다)
+   *   2) 문턱 아래에서는 **뛴다**
+   *   3) 체력이 낮을수록 **빨라진다** ("더 위험해졌다"가 들려야 합니다)
+   *
+   * 3번이 없으면 이건 그냥 켜짐/꺼짐이고, 위험의 **정도**를 못 말합니다.
+   *
+   * ⚠️ 문턱을 여기 적지 않습니다 — `heartbeatInfo().warn` 이 게임에서
+   *    옵니다(balance.ts `lowHpWarn`). 눈과 귀가 같은 값을 쓰는지가
+   *    이 설계의 핵심인데, 프로브가 세 번째 사본을 만들면 안 됩니다.
+   */
+  console.log('')
+  {
+    const beat = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      /**
+       * `sec` 초 동안 놔두고 그동안 몇 번 뛰었는지 셉니다.
+       *
+       * ⚠️ **벽시계로 재면 안 됩니다.** 처음엔 `Date.now()` 로 2.5초를
+       *    쟀는데 두 판 다 1회씩만 나왔습니다. 심장 박동은 `time.realDt`
+       *    축으로 도는데, 그 값은 프레임당 0.05초로 잘립니다(time.ts
+       *    `MAX_FRAME_DT`). GPU 없는 이 컨테이너는 10fps 안팎이라
+       *    **벽시계 1초가 게임의 연출 시계로는 0.5초**입니다. 즉 재는
+       *    시간이 절반이라 차이가 안 드러났습니다 — 게임은 멀쩡했고
+       *    재는 쪽이 다른 시계를 보고 있었습니다.
+       *
+       *    `state().elapsed` 가 바로 그 축(연출용 실시간 누적)입니다.
+       */
+      const countFor = async (hpRatio, sec) => {
+        const p = G.playerEntity()
+        G.setHp(p, Math.max(1, Math.round(100 * hpRatio)))
+        const t0 = G.state().elapsed
+        const from = G.heartbeatInfo().beats
+        while (G.state().elapsed - t0 < sec) {
+          // 회복이나 피격으로 비율이 흔들리지 않게 계속 붙들어 둡니다.
+          G.setHp(p, Math.max(1, Math.round(100 * hpRatio)))
+          await sleep()
+        }
+        const info = G.heartbeatInfo()
+        return { beats: info.beats - from, intensity: info.intensity, warn: info.warn }
+      }
+      G.reset()
+      await new Promise((r) => setTimeout(r, 400))
+      G.clearEnemies()
+      await new Promise((r) => setTimeout(r, 200))
+      const warn = G.heartbeatInfo().warn
+      // 문턱 한참 위 · 문턱 바로 아래 · 죽기 직전
+      const safe = await countFor(Math.min(0.95, warn + 0.4), 2.5)
+      const low = await countFor(warn * 0.75, 2.5)
+      const dire = await countFor(warn * 0.2, 2.5)
+      return { warn, safe, low, dire }
+    })
+    check(
+      beat.safe.beats === 0,
+      `❤️ 문턱 위에서는 **안 뛴다** (항상 뛰면 경고가 아니라 배경입니다) — 문턱 ${beat.warn}`,
+      `${beat.safe.beats}회`,
+    )
+    check(
+      beat.low.beats > 0 && beat.dire.beats > 0,
+      '❤️ 문턱 아래에서는 **뛴다** (귀에도 경고가 온다)',
+      `문턱 아래 ${beat.low.beats}회 · 직전 ${beat.dire.beats}회`,
+    )
+    check(
+      beat.dire.beats > beat.low.beats,
+      '❤️ 체력이 낮을수록 **빨라진다** (켜짐/꺼짐이 아니라 위험의 정도를 말한다)',
+      `문턱 아래 ${beat.low.beats}회 → 직전 ${beat.dire.beats}회 (같은 시간)` +
+        ` · 세기 ${beat.low.intensity} → ${beat.dire.intensity}`,
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
