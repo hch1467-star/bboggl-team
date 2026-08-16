@@ -618,6 +618,52 @@ export function dodgeBlock(p: number): DodgeBlock {
 }
 
 /**
+ * ── 🛡 **공격은 구르기 한 번 분을 남기고 멈춥니다** ───────────────────
+ *
+ * ── 벤치가 찍은 것 ──────────────────────────────────────────────────
+ *     맞은 이유  109대 · 못 피함 78(72%) · 손이 묶임 — stamina 28
+ *     grunt_sweep  예고 1.816초 · **보인 1.283초** · 자유 0.033초
+ *     charger_rush 예고 1.45초  · 보인 1.45초   · 자유 0초
+ *     회피 못 낼 때 48%
+ *
+ * 예고를 1.28초나 **보고도** 답할 자유가 0.03초입니다. 못 본 게 아니라
+ * **손이 묶인** 것입니다. 교전 시간의 절반에서 구를 수가 없었습니다.
+ *
+ * ── 왜 이 손잡이인가 (앞의 둘은 이미 해 봤습니다) ────────────────────
+ * 이 자리에서 두 번 싸웠고 둘 다 **방어를 싸게 만드는 쪽**이었습니다:
+ *   · 구르기 값 25 → 18 (balance.ts) — 나아졌지만 28대가 남았습니다
+ *   · 문턱을 *"0보다 크면"* 으로 (엘든 링의 실제 규칙) — 봇이 판당 42회를
+ *     빚내며 파산, 받은 피해 162 → 280 으로 **더 나빠져 되돌렸습니다**
+ *
+ * 반대편은 한 번도 안 건드렸습니다: **공격이 회피 몫까지 다 써 버리는 것.**
+ * 롱소드 콤보는 10 · 11 · 17, 구르기는 18입니다. 기력 20에서 11짜리를
+ * 내면 9가 남아 **구를 수 없고**, 18까지 돌아오는 데 0.81초(딜레이 0.55 +
+ * 회복 34/초)가 걸립니다. 잡몹 예고가 0.6~2초이니 **공격 한 번이 답할
+ * 창을 통째로 먹습니다.** 위 세 줄이 정확히 그 장면입니다.
+ *
+ * 참고한 게임 셋이 전부 같은 방향입니다 — 세키로는 쳐내기에 자원을 안
+ * 걸고, 로스트아크는 회피를 **별도 쿨다운**으로 빼 두었고, 엘든 링은
+ * 기력이 0보다 크기만 하면 구르게 합니다. 방식은 다르지만 약속은 하나입니다:
+ * **탈출 수단이 공격 때문에 막히지는 않는다.**
+ *
+ * 앞의 두 시도와 다른 점: 저 둘은 **방어를 무제한으로** 만들어 파산을
+ * 불렀습니다. 이건 방어의 몫을 그대로 두고 **공격이 그 몫을 못 건드리게**
+ * 합니다. 빚이 생길 수 없습니다 — 못 내면 그냥 안 나갑니다.
+ *
+ * ⚠️ 구르기 자신은 이 유보분을 **씁니다.** 안 그러면 남겨 둔 몫을 아무도
+ *    못 쓰는 죽은 숫자가 되고, 최대 기력만 18 줄인 것과 같아집니다.
+ *
+ * ⚠️ **한 곳에서만 판단합니다.** 공격이 기력을 확인하던 자리가 여섯
+ *    군데였습니다(평타·강타·처형·콤보 연결·스킬 후딜 탈출 둘). 오늘
+ *    같은 모양으로 두 번 당했습니다 — 출혈이 배율을 비켜 갔고, 콤보
+ *    해석이 세 곳에 흩어져 있었습니다. 조건을 베끼지 않고 부릅니다.
+ */
+export function canAffordAttack(p: number, cost: number): boolean {
+  const reserve = PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
+  return Stamina.value[p] >= cost + reserve * PLAYER.dodge.reserveMult
+}
+
+/**
  * ⚔️ **지금 기본 공격을 누르면 무엇이 나가는가.**
  *
  * ── 왜 함수로 빼는가 ────────────────────────────────────────────────
@@ -1139,7 +1185,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         }
         if (heavyPressed) {
           // 집중이 없으면 거절음. 조용히 무시하면 "키가 씹혔나"와 구분이 안 됩니다.
-          if (Player.focus[p] >= 1 && Stamina.value[p] >= FOCUS.heavy.staminaCost) {
+          if (Player.focus[p] >= 1 && canAffordAttack(p, FOCUS.heavy.staminaCost)) {
             beginHeavy(p, aimRot)
           } else {
             sfx.deny()
@@ -1156,12 +1202,12 @@ export function playerControlSystem(ctx: ControlContext): void {
            * 뜨므로 **무엇이 달라지는지는 보입니다.**
            */
           const fin = finisherTarget(p)
-          if (fin >= 0 && Stamina.value[p] >= FINISHER.staminaCost) {
+          if (fin >= 0 && canAffordAttack(p, FINISHER.staminaCost)) {
             takeBufferedAttack()
             beginAttack(p, FINISH_COMBO, aimRot)
             break
           }
-          if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
+          if (canAffordAttack(p, weapon.combo[0].staminaCost)) {
             takeBufferedAttack()
             // ⚔️ 상황이 모션을 고릅니다 — 판단은 `contextComboIndex` 한 곳에만.
             beginAttack(p, contextComboIndex(p, isSprinting(p)), aimRot)
@@ -1318,7 +1364,7 @@ export function playerControlSystem(ctx: ControlContext): void {
            */
           const hasNext = Actor.comboIndex[p] + 1 < weapon.combo.length
           const canFinish =
-            Stamina.value[p] >= FINISHER.staminaCost && finisherTarget(p) >= 0
+            canAffordAttack(p, FINISHER.staminaCost) && finisherTarget(p) >= 0
           if (
             (hasNext || canFinish) &&
             Actor.timer[p] <= combo.recovery * TEMPO * PLAYER.tempo.comboCancel
@@ -1367,11 +1413,11 @@ export function playerControlSystem(ctx: ControlContext): void {
            * "무너뜨렸으면 마무리할 수 있다"는 약속은 **무엇을 쓰던 중이었든**
            * 지켜져야 합니다.
            */
-          if (Stamina.value[p] >= FINISHER.staminaCost && finisherTarget(p) >= 0) {
+          if (canAffordAttack(p, FINISHER.staminaCost) && finisherTarget(p) >= 0) {
             beginAttack(p, FINISH_COMBO, aimRot)
             break
           }
-          if (Stamina.value[p] >= weapon.combo[0].staminaCost) {
+          if (canAffordAttack(p, weapon.combo[0].staminaCost)) {
             // 후딜에서 빠져나오며 치는 자리 — 여기서도 같은 규칙을 씁니다.
             beginAttack(p, contextComboIndex(p, isSprinting(p)), aimRot)
             break
@@ -1682,7 +1728,7 @@ function endAttack(p: number, aimRot: number): void {
    */
   if (
     Actor.bufferedAttack[p] === 1 &&
-    Stamina.value[p] >= FINISHER.staminaCost &&
+    canAffordAttack(p, FINISHER.staminaCost) &&
     finisherTarget(p) >= 0
   ) {
     beginAttack(p, FINISH_COMBO, aimRot)
@@ -1692,7 +1738,7 @@ function endAttack(p: number, aimRot: number): void {
   const canChain =
     Actor.bufferedAttack[p] === 1 &&
     next < weapon.combo.length &&
-    Stamina.value[p] >= weapon.combo[next].staminaCost
+    canAffordAttack(p, weapon.combo[next].staminaCost)
   if (canChain) {
     beginAttack(p, next, aimRot)
   } else {

@@ -261,6 +261,105 @@ async function main() {
     check('스태미나 자동 회복', staminaBack.ok, `${staminaBack.state.player.stamina}`)
 
     /**
+     * ── 🛡 **공격은 구르기 한 번 분을 남긴다** ───────────────────────
+     *
+     * 근거는 playerControl `canAffordAttack` 주석(벤치가 찍은 `손이 묶임
+     * — stamina 28` · `회피 못 낼 때 48%`). 여기서 재는 것은 **약속**입니다:
+     *
+     *     아무리 두들겨도, 끝나고 나면 한 번은 구를 수 있다.
+     *
+     * ⚠️ **문턱을 여기 적지 않습니다.** `dodgeInfo()` 가 유보분을 내보내므로
+     *    그대로 씁니다 — 값을 옮기는 날 이 줄만 옛 숫자를 들고 빨개지는
+     *    사본이 되지 않게. (회피 값 25 → 18 때 실제로 겪은 모양입니다.)
+     *
+     * ⚠️ 재는 것은 **기력 숫자가 아니라 구르기가 실제로 나갔는가**입니다.
+     *    "규칙이 아니라 도달한 것을 본다" — 숫자만 보면 다른 이유(경직·
+     *    쿨다운)로 못 구르는 경우를 놓칩니다.
+     */
+    await page.evaluate(() => window.__game.reset())
+    await sleep(300)
+    {
+      /**
+       * ⚠️ **처음엔 그냥 두들겨서 지치게 하려 했습니다 — 안 지쳤습니다.**
+       *    14대를 치고도 기력이 47.8이라 유보분이 **한 번도 안 물렸고**,
+       *    그런데도 검사는 초록이었습니다. 회복(34/초)이 소모보다 빨랐던
+       *    것뿐입니다. 재려던 자리에 가 보지도 않고 통과한 검사입니다.
+       *
+       * 그래서 **그 자리를 직접 만듭니다**: 가장 싼 공격은 낼 수 있지만
+       * (10) 유보분까지 더하면 못 내는(28) 딱 그 사이의 기력 — 20.
+       * 여기서 두 가지가 동시에 참이어야 약속이 지켜진 것입니다:
+       *
+       *     · 공격은 **안 나간다** (유보분을 건드리려 하므로)
+       *     · 구르기는 **나간다**  (그 유보분이 바로 구르기 몫이므로)
+       *
+       * 하나만 재면 안 됩니다. 공격만 막히고 구르기도 막히면 그건 약속이
+       * 아니라 그냥 최대 기력을 깎은 것입니다.
+       */
+      const gate = await page.evaluate(() => window.__game.dodgeInfo())
+      // 지금 든 무기의 1타 값 — 게임이 말한 것을 그대로 씁니다(베끼지 않습니다).
+      const cheapest = await page.evaluate(() => {
+        const G = window.__game
+        const id = G.state().loadout.weapon
+        return G.weaponTable().find((w) => w.id === id).comboSteps[0].staminaCost
+      })
+      // 유보분이 물리는 자리 — 공격값보다는 크고, 공격값+유보분보다는 작게.
+      const between = cheapest + gate.attackReserve / 2
+      /**
+       * ⚠️ 한 번의 evaluate 안에서 **채우고 곧바로 누릅니다.** 나눠 부르면
+       *    그 사이에 회복(34/초)이 문턱을 넘겨 버려서, 재려던 상태가
+       *    사라진 채로 통과합니다.
+       */
+      const tired = await page.evaluate(async (hp) => {
+        const G = window.__game
+        G.setStamina(hp)
+        const info = G.dodgeInfo()
+        G.press('Mouse0')
+        await new Promise((r) => setTimeout(r, 40))
+        G.release('Mouse0')
+        await new Promise((r) => setTimeout(r, 120))
+        const afterAttack = G.state().player.state
+        return { info, afterAttack }
+      }, between)
+      check(
+        `🛡 유보분이 물리는 자리에서 **공격이 안 나간다** (기력 ${between} · 공격값 ${cheapest} + 몫 ${gate.attackReserve})`,
+        tired.info.canAttack === false && tired.afterAttack !== 1,
+        `게임이 말한 공격 가능 ${tired.info.canAttack} · 누른 뒤 상태 ${tired.afterAttack} (1이면 공격 중)`,
+      )
+      const rolledTired = await page.evaluate(async (hp) => {
+        const G = window.__game
+        G.setStamina(hp)
+        G.press('Space')
+        await new Promise((r) => setTimeout(r, 40))
+        G.release('Space')
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 0.6) {
+          if (G.state().player.state === 2) return { rolled: true, block: '' }
+          await new Promise((r) => setTimeout(r, 8))
+        }
+        return { rolled: false, block: G.dodgeInfo().block }
+      }, between)
+      check(
+        '🛡 **바로 그 자리에서 구르기는 나간다** (남겨 둔 몫이 죽은 숫자가 아니다)',
+        rolledTired.rolled,
+        rolledTired.rolled ? `기력 ${between}에서 구름` : `막힘 — ${rolledTired.block || '알 수 없음'}`,
+      )
+      /**
+       * ⚠️ **구르기가 끝나기를 기다린 뒤에 나갑니다.**
+       *
+       * 위 검사는 상태가 2가 되는 **순간** 돌아옵니다 — 즉 구르는 중입니다.
+       * 그대로 reset 하고 나갔더니 바로 다음 절의 *"창이 지나면 도로 1타"*
+       * 가 `구르기 공격` 으로 빨개졌습니다. 구르기가 리셋 뒤에 끝나면서
+       * 갚는 창을 그때 열어 놓은 것입니다. 게임은 멀쩡했고 **앞 검사가
+       * 뒤 검사에 손을 얹은** 것입니다 — 바로 위 4절이 같은 사고를 적어
+       * 두었는데도 같은 자리에서 또 했습니다.
+       */
+      await waitIdle(3000)
+      await page.evaluate(() => window.__game.setStamina(1000))
+    }
+    await page.evaluate(() => window.__game.reset())
+    await sleep(300)
+
+    /**
      * ⚠️ **앞뒤를 리셋으로 격리합니다.** 이 절은 달리고 구르므로, 격리하지
      *    않으면 남은 속도가 다음 검사에 얹힙니다 — 실제로 *"회피 이동거리
      *    4.2m"* 가 5.63m → 9.37m 으로 두 번 빨개졌고, 두 번 다 게임이 아니라

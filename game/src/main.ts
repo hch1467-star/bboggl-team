@@ -185,6 +185,7 @@ import {
   readStaminaSpent,
   resetStaminaSpent,
   dodgeBlock,
+  canAffordAttack,
   contextComboIndex,
   isSprinting,
   type ControlContext,
@@ -4123,6 +4124,13 @@ class Game {
     /** 규칙값 — 프로브가 문턱을 들고 있지 않게 게임이 알려 줍니다 */
     cost: number
     cancelExtraCost: number
+    /**
+     * 🛡 공격이 **남겨 두어야 하는** 구르기 몫 (playerControl `canAffordAttack`).
+     * 프로브가 `18 * 1` 을 다시 계산하지 않도록 게임이 내보냅니다.
+     */
+    attackReserve: number
+    /** 지금 가장 싼 기본 공격이 나가는가 — 유보분까지 따진 뒤의 답. */
+    canAttack: boolean
     regenDelay: number
     /** 회복이 시작되기까지 남은 시간(초) */
     regenDelayT: number
@@ -4135,6 +4143,11 @@ class Game {
       stamina: Number(Stamina.value[p].toFixed(2)),
       cost: PLAYER_CFG.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1),
       cancelExtraCost: PLAYER_CFG.dodge.cancelExtraCost,
+      attackReserve:
+        PLAYER_CFG.dodge.staminaCost *
+        (weaponOf(p).dodgeCostScale ?? 1) *
+        PLAYER_CFG.dodge.reserveMult,
+      canAttack: canAffordAttack(p, weaponOf(p).combo[0].staminaCost),
       regenDelay: PLAYER_CFG.staminaRegenDelay,
       regenDelayT: Number(Stamina.regenDelayT[p].toFixed(3)),
       key: PLAYER_CFG.dodge.key,
@@ -4562,6 +4575,8 @@ declare global {
         stamina: number
         cost: number
         cancelExtraCost: number
+        attackReserve: number
+        canAttack: boolean
         regenDelay: number
         regenDelayT: number
         key: string
