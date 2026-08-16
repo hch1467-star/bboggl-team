@@ -321,6 +321,123 @@ try {
   }
 
   /**
+   * ---- 3.6 📏 **그린 선이 진실인가** ────────────────────────────────
+   *
+   * ── 왜 의심하게 됐는가 ──────────────────────────────────────────
+   * 예고 부채꼴은 실제 `reach`·`arcDeg` 로 그립니다(visuals.ts
+   * `makeSectorGeometry(0.35, def.reach, def.arcDeg)`). 모양은 맞습니다.
+   * 그런데 **판정**은 이렇습니다(combat.ts `shapeDist`):
+   *
+   *     if (dist > spec.range + Body.radius[t]) return -1
+   *
+   * 대상의 굵기를 **더해 줍니다.** 플레이어 반지름이 0.45m 이니,
+   * **그린 선 밖 0.45m 까지도 맞습니다.**
+   *
+   * 그 관대함은 원래 플레이어를 위한 것이었습니다 — 주석에 *"덩치 큰 적을
+   * 코앞에서 때려도 빗나가는 것처럼 느껴진다"* 고 적혀 있습니다. 격투
+   * 게임과 액션 게임의 관례도 같습니다: **때리는 판정은 넉넉하게, 맞는
+   * 판정은 인색하게.** 둘 다 플레이어에게 유리한 방향입니다.
+   *
+   * 그런데 여기서는 **같은 한 줄이 양쪽에 다 적용**됩니다. 적이 때릴 때는
+   * 그 관대함이 플레이어를 향하고, 그러면 *"선 밖에 있으면 안전하다"* 는
+   * 예고의 약속이 깨집니다. 🟡 광역의 정답이 **걸어서 이탈**인데,
+   * 어디까지 걸어야 하는지를 화면이 0.45m 틀리게 말하고 있는 셈입니다.
+   *
+   * 죽음 장부가 세 번 다 *"예고를 다 봤는데 답을 내지 않았다"* 라고 적은
+   * 그 자리에서, 이건 충분히 의심할 만합니다. **재 봅니다.**
+   */
+  {
+    const edge = await page.evaluate(async () => {
+      const G = window.__game
+      const roster = G.enemyRoster()
+      const def = roster
+        .flatMap((r) => r.attacks)
+        .find((a) => a.id === 'boss_quake')
+      const probeAt = async (at) => {
+        G.reset()
+        await window.__t.runFor(0.4)
+        G.clearEnemies()
+        await window.__t.runFor(0.2)
+        const p0 = G.state().player
+        const e = G.spawnEnemyKind('boss', p0.x + 12, p0.z)
+        await window.__t.runFor(0.2)
+        G.setHp(e, 100000)
+        for (let attempt = 0; attempt < 14; attempt++) {
+          const es = G.entityState(e)
+          // 그린 선을 기준으로 **정확히** 그 거리에 세웁니다.
+          G.teleportPlayer(es.x, es.z - at)
+          G.setHp(G.playerEntity(), 100)
+          await window.__t.runFor(0.2)
+          const got = await window.__t.until(() => {
+            const i = G.enemyInfo(e)
+            return i?.winding === true && i.attackId === 'boss_quake'
+          }, 6)
+          if (!got) continue
+          // 예고 내내 그 자리에 붙들어 둡니다 — 넉백·이동으로 거리가 변하지 않게.
+          const before = G.state().player.hp
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 3) {
+            const i = G.enemyInfo(e)
+            if (!i) break
+            G.teleportPlayer(i.x, i.z - at)
+            if (!i.winding && i.state !== 1) break
+            await new Promise((r) => setTimeout(r, 8))
+          }
+          await window.__t.runFor(0.3)
+          return { hp: G.state().player.hp, before, dist: Number(at.toFixed(2)) }
+        }
+        return null
+      }
+      /**
+       * ⚠️ **띠 안을 재야 합니다.**
+       *
+       * 처음엔 `reach * 1.06` 을 썼는데 7.5 × 1.06 = 7.95 이고, 그건
+       * `reach + 몸 반지름(0.45)` 과 **정확히 같은 값** — 관대한 띠의
+       * 바깥 끝입니다. 당연히 안 맞고, 검사는 주장하는 자리를 **재지도
+       * 않고** 통과했습니다. 이 세션에서 여러 번 겪은 모양입니다.
+       *
+       * 재려는 곳은 *"그린 선 밖이지만 몸 굵기 안"* — 그 한가운데입니다.
+       * 반지름은 게임에게 묻습니다(`playerInfo().radius`).
+       */
+      /**
+       * ⚠️ **"그린 선"은 게임에게 묻습니다.**
+       *
+       * 여기서 `def.reach` 를 선이라고 가정하면, 그리는 규칙을 고치는 날
+       * 프로브만 옛 선을 들고 빨개집니다. `drawnReach` 가 실제로 화면에
+       * 그려지는 반지름입니다(enemyAttacks.ts `telegraphRadius`).
+       */
+      const r = G.state().player.radius
+      const line = def.drawnReach
+      return {
+        reach: def.reach,
+        line,
+        radius: r,
+        inside: await probeAt(line * 0.8),
+        // 그린 선 **바깥**. 예전 규칙(reach 까지만 그림)에서 맞던 자리입니다.
+        outside: await probeAt(line + 0.2),
+      }
+    })
+    check(
+      edge.inside !== null && edge.outside !== null,
+      '📏 선 안팎에서 각각 예고를 관측했다 (비교의 게이트)',
+      `판정 반경 ${edge.reach}m · 그린 선 ${edge.line}m · 몸 반지름 ${edge.radius.toFixed(2)}m` +
+        ` · 안쪽 ${edge.inside?.dist}m · 선 밖 ${edge.outside?.dist}m`,
+    )
+    if (edge.inside && edge.outside) {
+      check(
+        edge.inside.hp < edge.inside.before,
+        '📏 선 **안**에 있으면 맞는다 (측정이 성립했다)',
+        `${edge.inside.dist}m 에서 ${edge.inside.before} → ${edge.inside.hp}`,
+      )
+      check(
+        edge.outside.hp === edge.outside.before,
+        '📏 **그린 선 밖에 있으면 안 맞는다** (예고가 말한 대로여야 걸어서 이탈이 성립합니다)',
+        `${edge.outside.dist}m — 그린 선 ${edge.line}m 밖 · ${edge.outside.before} → ${edge.outside.hp}`,
+      )
+    }
+  }
+
+  /**
    * ---- 4. 처음 보는 색이면 **정답을 한 번** 알려줬는가 ----
    *
    * 위 시험들은 🔴 과 🟡 예고를 실제로 띄웠습니다. 그러니 그 두 색의

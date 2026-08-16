@@ -57,6 +57,7 @@ import {
   attackAt,
   attacksFor,
   longestReach,
+  telegraphRadius,
 } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
@@ -4558,6 +4559,13 @@ class Game {
         hp: Number(Health.hp[p].toFixed(1)),
         stamina: Number(Stamina.value[p].toFixed(1)),
         state: Actor.state[p],
+        /**
+         * 📏 **내 몸 굵기.** 판정이 `range + Body.radius[대상]` 으로 관대하게
+         * 잡기 때문에(combat.ts `shapeDist`), *"그린 선 밖 어디까지 맞는가"*
+         * 를 재려면 이 값이 필요합니다. 프로브가 0.45 를 베껴 적지 않게
+         * 게임이 내보냅니다.
+         */
+        radius: Body.radius[p],
         comboIndex: Actor.comboIndex[p],
         // 0=선행동작 1=판정 2=후딜. 검증 도구가 "판정이 뜬 그 프레임"을 정확히
         // 집어낼 수 있어야 합니다. 벽시계로 기다리면 프레임률에 따라 어긋납니다.
@@ -4698,6 +4706,8 @@ declare global {
           intent: number
           color: string
           reach: number
+          /** 📏 화면에 그려지는 반지름(= 실제로 맞는 자리). `reach` 와 다릅니다. */
+          drawnReach: number
           /** 기본 가중치 — 페이즈 덮어쓰기(bossPhaseWeights)와 짝입니다. */
           weight: number
           lungeSpeed: number
@@ -5391,6 +5401,14 @@ window.__game = {
           color: INTENT_EMOJI[a.intent],
           /** 실제로 때리는 거리. 어그로 여유를 이 값으로 잽니다(attackRange 아님). */
           reach: a.reach,
+          /**
+           * 📏 **화면에 그려지는 반지름** — 실제로 맞는 자리까지
+           * (enemyAttacks.ts `telegraphRadius`). `reach` 와 다릅니다.
+           * 프로브가 *"선 밖에서 맞는가"* 를 물으려면 **그린 값**이
+           * 필요합니다. 여기서 계산해 주면 프로브가 `+0.45` 를 베끼지
+           * 않고, 규칙을 옮기는 날 검사가 저절로 따라옵니다.
+           */
+          drawnReach: Number(telegraphRadius(a).toFixed(3)),
           /**
            * **기본 가중치.** 페이즈 덮어쓰기가 없을 때 이 값이 쓰입니다
            * (bossPhaseWeights 와 짝입니다). 프로브가 *"가중치대로 고르는가"*

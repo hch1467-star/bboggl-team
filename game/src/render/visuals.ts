@@ -1,6 +1,12 @@
 import * as THREE from 'three'
 import { FINISH_COMBO, HEAVY_COMBO, WEAPONS, finisherStep, heavyStep } from '../config/arsenal'
-import { AttackIntent, INTENT_COLOR, attackAt, attacksFor } from '../config/enemyAttacks'
+import {
+  AttackIntent,
+  INTENT_COLOR,
+  attackAt,
+  attacksFor,
+  telegraphRadius,
+} from '../config/enemyAttacks'
 import {
   AWARE,
   BLEED,
@@ -397,7 +403,14 @@ export class Visuals {
       // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
       // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.
       for (const def of attacksFor(kind)) {
-        this.telegraphGeos.set(def.id, makeSectorGeometry(0.35, def.reach, def.arcDeg))
+        /**
+         * 📏 **실제로 맞는 자리까지 그립니다** — `reach` 가 아니라
+         * `telegraphRadius(def)`(= reach + 내 몸 굵기). 근거는
+         * enemyAttacks.ts 의 그 함수 주석에 한 번만 적어 뒀습니다.
+         * 요약: 판정은 몸이 겹치면 맞는데, 그림은 선까지만 그리고
+         * 있었습니다 — 선 밖 0.45m 에서 맞는 것을 재서 확인했습니다.
+         */
+        this.telegraphGeos.set(def.id, makeSectorGeometry(0.35, telegraphRadius(def), def.arcDeg))
       }
     }
     this.hpBarGeo = new THREE.PlaneGeometry(1, 1).translate(0.5, 0, 0)
