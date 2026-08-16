@@ -132,6 +132,45 @@ interface Visual {
 }
 
 /** 부채꼴 예고 지오메트리. 부채꼴 중심이 로컬 +Z를 향하도록 미리 눕혀 둡니다. */
+/**
+ * 📏 **등 뒤 표시의 바깥 반지름**(m).
+ *
+ * 값 자체는 예전 그대로입니다. 함수로 뺀 이유는 **재는 쪽이 물어볼 수
+ * 있어야** 하기 때문입니다 — 그린 것과 판정이 어긋나는지 검사하려면
+ * *"화면이 어디까지 그렸나"* 가 숫자로 나와야 합니다.
+ * (예고 부채꼴에서 정확히 같은 이유로 `telegraphRadius` 를 만들었습니다.)
+ *
+ * ── ⚠️ **여기에 아직 안 닫은 어긋남이 있습니다** ─────────────────────
+ * 예고 부채꼴의 거짓말(그린 선 밖 0.45m 에서 맞음)을 고치고 나서, 같은
+ * 부류가 또 있는지 찾다가 이 자리를 봤습니다. 게임이 준 숫자로만 봐도
+ * 두 값이 다릅니다:
+ *
+ *     그리는 쪽 — `backZoneOuter(grunt)` = **1.6m** 짜리 고리
+ *     판정 쪽   — `isBehindPoint` … **각도만** 봅니다. **거리 제한 없음**
+ *     실제로 닿는 끝 — 1타 사거리 2.3m + 대상 굵기 0.45m = **2.75m**
+ *
+ * 즉 **1.6m ~ 2.75m 구간(1.15m)** 에서는 등 뒤로 판정되고 타격도 닿는데
+ * **표시는 "여기 아님"이라고 말합니다.** 앞서 고친 예고의 거짓말(0.45m)
+ * 보다 넓습니다. 백어택은 단검의 정체성인데 자동 플레이에서 20% 밖에
+ * 안 나오는 것과 무관하지 않을 수 있습니다 — 표시가 필요 이상으로
+ * **붙으라고** 말하고 있으니까요.
+ *
+ * ⚠️ **아직 고치지 않았습니다.** 살아 있는 타격으로 확인하려고
+ *    `flank` 프로브에 검사를 붙였는데, 그 검사가 수렴하지 않았습니다
+ *    (등 뒤로 순간이동한 뒤 몸이 도는 0.2초, 앞 측정의 후딜, NaN 필드 —
+ *    같은 라운드에 네 번 헛짚었습니다). **이해 못 한 채로 빨간 검사를
+ *    남기지 않는다**는 규칙에 따라 그 검사는 되돌렸습니다.
+ *
+ *    다음 사람이 이어받을 조건: 등 뒤 좌표로 옮긴 뒤 **몸이 다 돌 때까지**
+ *    기다리고(회전 900°/s → 최대 0.2초), 앞 측정이 **손을 비울 때까지**
+ *    기다린 다음, 고리 밖 여러 거리를 훑어서 *"닿는데 백어택인가"* 를
+ *    받아 적을 것. 값이 확인되면 고칠 쪽은 판정이 아니라 **그림**입니다 —
+ *    예고에서와 같은 이유로, 관대함 자체는 옳기 때문입니다.
+ */
+export function backZoneOuter(kind: EnemyKind): number {
+  return enemyDef(kind).radius + (kind === EnemyKind.Boss ? 1.5 : 1.15)
+}
+
 function makeSectorGeometry(inner: number, outer: number, arcDeg: number): THREE.BufferGeometry {
   const arc = (arcDeg * Math.PI) / 180
   const geo = new THREE.RingGeometry(inner, outer, 44, 1, -arc / 2, arc)
@@ -397,8 +436,11 @@ export class Visuals {
       // 보스는 몸이 커서 등 뒤 구역도 조금 더 넓게 잡습니다(원래 값 유지).
       if (!this.backZoneGeos[rk]) {
         const cfg = enemyDef(kind)
-        const pad = kind === EnemyKind.Boss ? 1.5 : 1.15
-        this.backZoneGeos[rk] = makeSectorGeometry(cfg.radius + 0.1, cfg.radius + pad, COMBAT.backArcDeg)
+        this.backZoneGeos[rk] = makeSectorGeometry(
+          cfg.radius + 0.1,
+          backZoneOuter(kind),
+          COMBAT.backArcDeg,
+        )
       }
       // 예고 도형은 **패턴마다** 다릅니다. 색만 바꾸고 모양이 같으면
       // "노랑은 넓다"가 거짓말이 됩니다 — 색이 아니라 크기가 먼저 읽히기 때문입니다.

@@ -99,7 +99,7 @@ import { Terrain } from './level/terrain'
 import { QuarterViewCamera } from './render/camera'
 import { createScene } from './render/scene'
 import { Vfx } from './render/vfx'
-import { KIND_TREASURE, Visuals } from './render/visuals'
+import { KIND_TREASURE, Visuals, backZoneOuter } from './render/visuals'
 import {
   breakEvents,
   bleedEvents,
@@ -4958,6 +4958,8 @@ declare global {
       threatRange: () => number
       /** 💀 이 판에서 죽은 순간마다의 사인(무엇에 · 왜 못 막았는지). */
       deathLog: () => string[]
+      /** 📏 등 뒤 표시의 바깥 반지름(m). 판정에는 거리 제한이 없습니다. */
+      backZoneOuter: (kind: number) => number
       /** ❤️ 저체력 심장 박동 — 뛴 횟수 · 세기(0~1) · 문턱 */
       heartbeatInfo: () => { beats: number; intensity: number; warn: number }
       threats: (range?: number) => {
@@ -5175,7 +5177,7 @@ declare global {
           staminaCost: number
         }[]
         /** ⚔️ 콤보 각 타의 제원 — 실측과 대조하려면 필요합니다 */
-        comboSteps: { name: string; damage: number; staminaCost: number }[]
+        comboSteps: { name: string; damage: number; staminaCost: number; range: number }[]
         /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
         heavySteps: { spent: number; damage: number }[]
         finisherDamage: number
@@ -5742,6 +5744,12 @@ window.__game = {
   threats: (range) => game.debugThreats(range),
   threatRange: () => game.debugThreatRange(),
   deathLog: () => game.debugDeathLog(),
+  /**
+   * 📏 **등 뒤 표시가 그려지는 바깥 반지름**(m) — 판정(`testBehind`)에는
+   * 거리 제한이 없습니다. 둘을 나란히 놓아야 *"표시가 사실을 말하는가"* 를
+   * 물을 수 있습니다. 프로브가 `+1.15` 를 베끼지 않게 게임이 내보냅니다.
+   */
+  backZoneOuter: (kind) => backZoneOuter(kind),
   /** ❤️ 저체력 심장 박동 — 문턱은 게임이 알려 줍니다(프로브가 베끼지 않게). */
   heartbeatInfo: () => ({ ...sfx.debugHeartbeat(), warn: PLAYER_CFG.lowHpWarn }),
   slotCooldowns: () => game.debugSlotCooldowns(),
@@ -5924,6 +5932,8 @@ window.__game = {
         name: c.name,
         damage: Number((c.damage * 1).toFixed(2)),
         staminaCost: c.staminaCost,
+        /** 📏 이 타의 사거리(m). 판정은 여기에 **대상의 굵기**를 더합니다. */
+        range: c.range,
       })),
       /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
       heavySteps: [0, 1, 2, 3].map((n) => ({
