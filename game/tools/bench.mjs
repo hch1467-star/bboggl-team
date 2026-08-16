@@ -278,7 +278,9 @@ console.log(
     }
     const rows = Object.entries(byColor).sort((a, b) => b[1] - a[1])
     if (rows.length) {
-      console.log('                 🎨 색별 — 판정 · 색 · 그 색의 정답')
+      console.log(
+        '                 🎨 색별 — 판정 · 색 · 그 색의 정답 · 발(움직였나 — **정답을 냈나가 아닙니다**)',
+      )
       for (const [k, v] of rows.slice(0, 8)) {
         const [verdict, color, answer, walk] = k.split('|')
         console.log(
