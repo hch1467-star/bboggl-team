@@ -10,6 +10,7 @@ import {
   plungeStep,
   heavyStep,
   finisherStep,
+  swingRadiusUpperBound,
   RUN_COMBO,
   ROLL_COMBO,
   PLUNGE_COMBO,
@@ -5177,7 +5178,14 @@ declare global {
           staminaCost: number
         }[]
         /** ⚔️ 콤보 각 타의 제원 — 실측과 대조하려면 필요합니다 */
-        comboSteps: { name: string; damage: number; staminaCost: number; range: number }[]
+        comboSteps: {
+          name: string
+          damage: number
+          staminaCost: number
+          range: number
+          drawnRange: number
+          reachUpperBound: number
+        }[]
         /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
         heavySteps: { spent: number; damage: number }[]
         finisherDamage: number
@@ -5934,6 +5942,15 @@ window.__game = {
         staminaCost: c.staminaCost,
         /** 📏 이 타의 사거리(m). 판정은 여기에 **대상의 굵기**를 더합니다. */
         range: c.range,
+        /**
+         * 📏 **화면에 실제로 그려지는 반지름**(m). 지금은 `range` 와 같지만,
+         * 프로브가 그 사실을 **짐작하지 않도록** 게임이 답합니다
+         * (적 예고의 `drawnReach` 와 같은 규약 — 그리는 규칙을 바꾸는 날
+         * 검사가 저절로 따라옵니다).
+         */
+        drawnRange: c.range,
+        /** 📏 파고들기까지 더한 **상한**(m). 적응형이라 실제 이동은 이보다 짧습니다. */
+        reachUpperBound: Number(swingRadiusUpperBound(c).toFixed(3)),
       })),
       /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
       heavySteps: [0, 1, 2, 3].map((n) => ({

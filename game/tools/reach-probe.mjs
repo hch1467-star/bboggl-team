@@ -458,6 +458,149 @@ try {
     }
   }
 
+  /**
+   * ── 📏 **내 공격 표시가 사실을 말하는가** ───────────────────────────
+   *
+   * 적의 예고에서 같은 것을 두 번 찾아 고쳤습니다:
+   *   · 예고 부채꼴 — 그린 선 밖 0.45m 에서 맞음 → 그림을 넓힘
+   *   · 등 뒤 표시 — 고리 밖 1.3m 까지 백어택 → 고리를 사거리까지 넓힘
+   *
+   * 세 번째 자리가 여기입니다. `visuals.ts` 는 내 공격 범위를
+   * `step.range` 로 그리면서 주석에 이렇게 적어 뒀습니다:
+   *
+   *   > "예고는 좁은데 실제로는 넓다" 같은 **거짓말이 생기지 않습니다**
+   *
+   * 그런데 판정은 `spec.range + Body.radius[대상]` 입니다(combat.ts
+   * `shapeDist`). 대상이 점이 아닌 한 그 주장은 **참일 수 없습니다.**
+   * 방향만 반대일 뿐(이번엔 플레이어에게 유리) 같은 어긋남입니다.
+   *
+   * ⚠️ 재는 법은 `flank` 에서 검증된 것을 그대로 씁니다 — 적을 매번
+   *    제자리로 되돌리고, 자세를 새로 읽고, 손이 빌 때까지 기다립니다.
+   *    (넉백으로 밀려난 적의 옛 좌표를 쓰다 한 라운드를 통째로 날렸습니다.)
+   */
+  console.log('')
+  {
+    const edge = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+      const runFor = async (sec) => {
+        const t = G.state().elapsed + sec
+        while (G.state().elapsed < t) await sleep2()
+      }
+      await G.resetProgress()
+      await runFor(0.4)
+      G.clearEnemies()
+      await runFor(0.3)
+      const p0 = G.state().player
+      const e = G.spawnEnemyKind('grunt', p0.x + 8, p0.z)
+      await runFor(0.3)
+      G.wakeEnemy(e)
+      G.freezeEnemies(true)
+      G.setHp(e, 1000000)
+      const home = G.entityState(e)
+      const wid = G.state().loadout.weapon
+      const w = G.weaponTable().find((x) => x.id === wid)
+      // 그린 선은 **게임에게 묻습니다**(사거리 + 파고들기) — 짐작하지 않습니다.
+      const drawn = w.comboSteps[0].drawnRange
+      const foe = G.enemyRoster().find((r) => r.id === 'grunt')
+      const trueEdge = drawn + foe.radius
+
+      const hitAt = async (d) => {
+        // 손이 빌 때까지 — 후딜이 남으면 다음 입력이 선입력으로 먹힙니다.
+        const t0 = G.state().elapsed
+        while (G.state().elapsed - t0 < 3 && G.state().player.state !== 0) await sleep2()
+        // 적을 제자리로 — 앞 타격의 넉백을 지웁니다.
+        G.teleportEnemy(e, home.x, home.z)
+        await sleep2()
+        const cur = G.entityState(e)
+        G.teleportPlayer(cur.x - d, cur.z)
+        G.aimAtWorld(cur.x, cur.z)
+        G.setStamina(1000)
+        // 몸이 다 돌 때까지 — 게임이 "적이 내 앞에 있다"고 말할 때까지.
+        {
+          const t1 = G.state().elapsed
+          while (G.state().elapsed - t1 < 1.5) {
+            const t = G.threats(20).find((x) => x.entity === e)
+            if (t?.facing) break
+            await sleep2()
+          }
+        }
+        const hp0 = G.enemyInfo(e).hp
+        G.press('Mouse0')
+        await sleep2()
+        G.release('Mouse0')
+        const t2 = G.state().elapsed
+        while (G.state().elapsed - t2 < 2 && G.enemyInfo(e).hp === hp0) await sleep2()
+        return { d: Number(d.toFixed(2)), landed: G.enemyInfo(e).hp < hp0 }
+      }
+
+      /**
+       * ⚠️ **못 맞히는 자리가 나올 때까지 늘립니다.**
+       *
+       * 처음엔 `참 가장자리 + 0.4m`(3.15m)까지만 훑었는데 **전부 명중**
+       * 이었습니다. 그러면 "어디가 끝인가"를 못 정하고, 검사는 비교할
+       * 대상이 없습니다. 원인은 **파고들기(lunge)** 입니다 — 공격 시작에
+       * 플레이어가 앞으로 미끄러지므로 실효 사거리가 그만큼 더 깁니다.
+       *
+       * 계산으로 짐작하지 않고 **끝이 보일 때까지** 갑니다.
+       */
+      const scan = []
+      // ⚠️ 시작점을 `drawn` 에 매지 않습니다 — 그리는 규칙을 바꾸면 훑기가
+      //    이미 끝을 지난 자리에서 시작해 **양쪽을 다 못 봅니다**(한 번 겪음).
+      for (let d = 1.2; d <= drawn + 4; d += 0.2) {
+        scan.push(await hitAt(d))
+        // 연속 두 자리에서 못 맞히면 끝을 지난 것입니다.
+        const n = scan.length
+        if (n >= 2 && !scan[n - 1].landed && !scan[n - 2].landed) break
+      }
+      G.freezeEnemies(false)
+      return {
+        drawn: Number(drawn.toFixed(2)),
+        upper: Number(w.comboSteps[0].reachUpperBound.toFixed(2)),
+        trueEdge: Number(trueEdge.toFixed(2)),
+        radius: Number(foe.radius.toFixed(2)),
+        scan,
+      }
+    })
+    const landed = edge.scan.filter((r) => r.landed)
+    const past = landed.filter((r) => r.d > edge.drawn + 0.01)
+    console.log(
+      `     [훑기] ${edge.scan.map((r) => `${r.d}m ${r.landed ? 'O' : 'X'}`).join(' · ')}`,
+    )
+    check(
+      edge.scan.length >= 5 && landed.length >= 2 && edge.scan.some((r) => !r.landed),
+      '📏 닿는 자리와 안 닿는 자리를 **둘 다** 봤다 (비교의 게이트)',
+      `그린 선 ${edge.drawn}m · 참 가장자리 ${edge.trueEdge}m (+굵기 ${edge.radius}) · 맞음 ${landed.length}/${edge.scan.length}곳`,
+    )
+    /**
+     * ⚠️ **약속을 안전한 방향으로 씁니다.**
+     *
+     * 처음엔 *"그린 선 밖에서는 안 맞는다"* 로 썼습니다(적 예고에서 고친
+     * 것과 같은 모양). 그런데 재 보니 실제 끝이 **3.3m**, 그린 선이
+     * **2.3m** 이었고, `range + lunge`(3.8m)로 넓혀 그렸더니 이번엔
+     * **없는 사거리를 약속**했습니다 — 파고들기가 적응형이라 그 값은
+     * 상한일 뿐이었습니다.
+     *
+     * 두 거짓말은 값이 아니라 **성질**이 다릅니다:
+     *   · 좁게 그림 → 필요 이상으로 **붙게** 만듭니다 (손해지만 살아는 있음)
+     *   · 넓게 그림 → **헛치게** 만듭니다 (뒤딜이 이 게임에서 제일 비쌈)
+     *
+     * 그래서 지킬 약속은 *"넓게 그리지 않는다"* 입니다. 좁은 쪽은 숫자로
+     * 찍어 두되 빨갛게 하지 않습니다 — **알고 남기는 여유**입니다.
+     */
+    const gap = landed.length ? Math.max(...landed.map((r) => r.d)) - edge.drawn : 0
+    check(
+      landed.length > 0 && Math.max(...landed.map((r) => r.d)) >= edge.drawn - 0.25,
+      '📏 **그린 선을 넘겨 그리지 않았다** (없는 사거리를 약속하면 헛치게 됩니다)',
+      `그린 선 ${edge.drawn}m · 실제 명중 끝 ${landed.length ? Math.max(...landed.map((r) => r.d)) : 0}m` +
+        ` · 상한(사거리+파고들기) ${edge.upper}m`,
+    )
+    console.log(
+      `     [관찰] 그린 선보다 **${gap.toFixed(2)}m 더 닿습니다** (적 굵기 ${edge.radius}m + 적응형 파고들기).` +
+        ' 넓게 그리면 헛치므로 좁은 쪽으로 남겨 둔 여유입니다.',
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

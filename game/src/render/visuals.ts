@@ -507,6 +507,13 @@ export class Visuals {
       // 파랑 예고(속박)와 헷갈립니다 — 플레이어 캡슐도 파란색이라 더 그렇습니다.
       // 채우기 vs 선은 색보다 강한 구분이고, "내 사거리가 여기서 끝난다"는
       // 정보 자체도 면적이 아니라 **가장자리**에 있습니다.
+      /**
+       * 📏 `step.range` 로 그립니다 — **넓게 그렸다가 되돌린 자리**입니다.
+       * 근거와 실측은 arsenal.ts `swingRadiusUpperBound` 주석에.
+       * 요약: `range + lunge` 로 그리면 3.8m 인데 실제 끝은 3.3m 이라
+       * **없는 사거리를 약속**하게 됩니다. 좁은 거짓말보다 넓은 거짓말이
+       * 나쁩니다 — 헛치게 만드니까요.
+       */
       geo = makeSectorGeometry(Math.max(0.3, step.range - 0.22), step.range, step.arcDeg)
       this.rangeGeos.set(key, geo)
     }
