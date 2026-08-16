@@ -331,12 +331,22 @@ class Game {
       lastTryT: number
       /** 이 예고 동안 답을 시도한 횟수 — "한 번도 안 눌렀다"와 구분하려고. */
       tries: number
+      /**
+       * 이 휘두름이 **약속한** 예고 길이(초) — `Enemy.windupLen` 을 그대로.
+       * 잰 값과 나란히 두면 *"계측기가 예고를 합쳤는가"* 를 검사할 수 있습니다.
+       */
+      expected: number
     }
   >()
   /** 🎯 마지막으로 **구르기가 시작된** 시각(초). -1 = 아직 한 번도. */
   private answerStartT = -1
   /** 그 모서리를 잡기 위한 직전 프레임의 구르기 여부. */
   private wasRolling = false
+  /**
+   * 직전 프레임에 **휘두름을 시작하고 있던** 적들. 같은 패턴을 연달아 쓸 때
+   * 앞 예고의 시간이 뒤로 넘어가지 않게 하는 데 씁니다(아래 설계 노트).
+   */
+  private windingLast = new Set<number>()
   private hurtLedger: {
     attackId: string
     intent: number
@@ -354,6 +364,8 @@ class Game {
     verdict: string
     /** 구르기를 시작한 지 얼마 만에 맞았는가(초). -1 = 안 굴렀음. */
     sinceTry: number
+    /** 이 휘두름이 약속했던 예고 길이(초). 0 = 기록 없음(낙하 등). */
+    expected: number
   }[] = []
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
@@ -1313,6 +1325,7 @@ class Game {
           verdict: 'fall',
                   /** 낙하는 구르기로 답할 수 있는 종류가 아닙니다 — -1. */
           sinceTry: -1,
+          expected: 0,
         })
         // 플레이어는 강인도가 없어 늘 비틀거립니다. 착지도 같은 규칙을 씁니다.
         Actor.state[p] = ActorState.Stagger
@@ -2686,19 +2699,38 @@ class Game {
     this.wasRolling = rolling
     const ids = enemyQuery.run()
     const live = new Set<number>()
+    const windingNow = new Set<number>()
     for (let i = 0; i < enemyQuery.count; i++) {
       const e = ids[i]
       live.add(e)
       const winding =
         Actor.state[e] === ActorState.Attack && Actor.phase[e] === AttackPhase.Windup
       if (!winding) continue
+      windingNow.add(e)
       const id = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
       let rec = this.hurtWatch.get(e)
       /**
        * 패턴이 바뀌면 **새 예고**입니다. 같은 적이 연달아 휘두를 때 앞
        * 예고의 시간이 뒤로 넘어가면, 없던 여유를 있는 것처럼 적게 됩니다.
+       *
+       * ⚠️ **패턴이 안 바뀌어도 새 예고입니다.** 예전엔 `rec.id !== id` 만
+       *    봤습니다. 그래서 잡몹이 `grunt_sweep` 을 연달아 세 번 휘두르면
+       *    **첫 예고의 기록이 그대로 살아남아** 시간이 계속 쌓였습니다.
+       *    벤치가 그 결과를 그대로 찍었습니다:
+       *
+       *        dragger_hook 예고 **18.466초** · 구른 뒤 **9.867초**
+       *        grunt_sweep  예고 **10.733초**
+       *
+       *    잡몹 예고는 0.6~2초입니다. 18초짜리 예고는 없습니다. `seen`·`free`
+       *    도 같이 부풀어서, 사실은 촉박했던 한 대가 *"볼 시간도 답할 시간도
+       *    넉넉했다"* 로 적혔고, `구른 뒤 9.867초` 는 **몇 번 전 예고 때 구른
+       *    것**입니다. 그 위에서 `일찍` 을 세고 있었습니다.
+       *
+       *    그래서 **휘두름이 올라서는 모서리**를 함께 봅니다. 값이 아니라
+       *    전이를 세는 것 — 바로 위 구르기 감지와 같은 규칙입니다.
        */
-      if (!rec || rec.id !== id) {
+      const freshWind = !this.windingLast.has(e)
+      if (!rec || rec.id !== id || freshWind) {
         rec = {
           id,
           intent: attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent,
@@ -2708,6 +2740,7 @@ class Game {
           blocked: {},
           lastTryT: -1,
           tries: 0,
+          expected: Enemy.windupLen[e] > 0 ? Enemy.windupLen[e] : Actor.timer[e],
         }
         this.hurtWatch.set(e, rec)
       }
@@ -2729,6 +2762,7 @@ class Game {
     }
     // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
     for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
+    this.windingLast = windingNow
   }
 
   /** 그 적이 지금 화면 안에 있는가 (몸 가운데 높이 기준). */
@@ -2790,6 +2824,7 @@ class Game {
         verdict: 'unknown',
               /** 예고 기록 자체가 없으니 잰 거리도 없습니다. */
         sinceTry: -1,
+        expected: 0,
       })
       return
     }
@@ -2859,6 +2894,8 @@ class Game {
        * 다시 짐작하게 됩니다.
        */
       sinceTry: Number(sinceTry.toFixed(3)),
+      /** 이 휘두름이 약속했던 예고 길이(초). `telegraph` 와 크게 벌어지면 계측기 고장. */
+      expected: Number(rec.expected.toFixed(3)),
     })
   }
 
