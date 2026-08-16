@@ -391,6 +391,26 @@ export function poiseDamage(
   return dmg / (BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, phase)].poiseResist ?? 1)
 }
 
+/**
+ * 🛡 **보스가 이번 구간에서 받는 피해 배율** (bossPhases.ts `damageTakenScale`).
+ *
+ * 강인도가 이미 똑같은 모양을 하고 있습니다 — 바로 위 `poiseDamage` 가
+ * `poiseResist` 로 나눕니다. 체력 쪽에만 그 손잡이가 없었습니다.
+ *
+ * ⚠️ **함수로 뺀 이유가 전부입니다.** 처음에는 타격 처리 안쪽 한 줄에만
+ *    곱해 놓고 "한 곳에서만 곱한다"고 주석까지 적었는데, 체력을 깎는 자리는
+ *    거기 말고 **출혈이 터지는 자리**에도 있었습니다. 즉 적어 둔 다짐이
+ *    그대로 거짓이었습니다. 규칙을 한 곳에 두려면 주석이 아니라 **부르는
+ *    자리가 하나뿐인 함수**여야 합니다. (`bleedScale` 때 똑같이 당했습니다.)
+ *
+ * 낙하 피해(main.ts)는 일부러 뺐습니다. 그건 최대 체력의 퍼센트라
+ * 애초에 화력과 무관하고, 보스방에는 떨어질 단차가 없습니다.
+ */
+export function bossTakenScale(t: number): number {
+  if (Enemy.kind[t] !== EnemyKind.Boss) return 1
+  return BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, Enemy.phase[t])].damageTakenScale ?? 1
+}
+
 /** 🧪 실험대 전용 — 위 applyDamage 설계 노트 참고. 게임 코드는 켜지 않습니다. */
 let debugPlayerInvulnerable = false
 export function setPlayerInvulnerable(on: boolean): void {
@@ -505,7 +525,8 @@ function applyBleed(t: number, spec: AttackSpec): void {
   if (onBoss) bossBleedPops++
   Enemy.bleed[t] = 0
   // ⚠️ 상한이 없으면 체력이 큰 상대가 출혈 하나로 삭제됩니다(balance.ts 주석).
-  const dmg = Math.min(Health.max[t] * BLEED.popDamagePct, BLEED.popDamageCap)
+  const dmg =
+    Math.min(Health.max[t] * BLEED.popDamagePct, BLEED.popDamageCap) * bossTakenScale(t)
   Health.hp[t] = Math.max(0, Health.hp[t] - dmg)
   if (onBoss) noteBossDamage('출혈', Enemy.phase[t], dmg)
   bleedEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
@@ -1151,6 +1172,13 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       Enemy.counteredAt[t] = time.simElapsed
     }
 
+    /**
+     * 🛡 **보스는 뒤 구간에서 덜 맞습니다** — 배율의 근거는 `bossTakenScale`.
+     *
+     * 평타·강타·처형·스킬·반격이 전부 이 한 줄로 모이기 때문에, 새 공격
+     * 종류를 넣어도 여기를 지나갑니다. 출처별로 곱하지 않는 이유입니다.
+     */
+    damage *= bossTakenScale(t)
     Health.hp[t] -= damage
     /**
      * 📊 **보스가 무엇에 녹는가** — 출처별로, 페이즈별로.

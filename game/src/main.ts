@@ -4347,6 +4347,7 @@ declare global {
         name: string
         enterBelow: number
         cooldownScale: number
+        damageTakenScale: number
         windups: { id: string; seconds: number }[]
         chains: Record<string, string>
       }[]
@@ -5081,6 +5082,8 @@ window.__game = {
       name: ph.name,
       enterBelow: ph.enterBelow,
       cooldownScale: ph.cooldownScale,
+      /** 🛡 받는 피해 배율 — 프로브가 0.7 을 **베껴 적지 않도록** 내보냅니다. */
+      damageTakenScale: ph.damageTakenScale ?? 1,
       windups: attacksFor(EnemyKind.Boss).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
       /**
        * 이 페이즈의 **연계 표** — 프로브가 기대값을 베껴 적지 않도록 그대로 내보냅니다.

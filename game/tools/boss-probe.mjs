@@ -1028,6 +1028,166 @@ try {
     }
   }
 
+  /**
+   * ── 🛡 **뒤 구간의 보스는 정말 덜 아파하는가** ───────────────────
+   *
+   * ── 왜 이 손잡이를 달았는가 (숫자가 먼저 있었습니다) ──────────────
+   * `npm run bench` 3판 가운데값이 이렇게 나왔습니다:
+   *
+   *     1단계 7.6초 · 실효 화력 20.6/초
+   *     2단계 5.4초 · 실효 화력 55.0/초
+   *     3단계 5.3초 · 실효 화력 73.5/초   ← 1단계의 **3.6배**
+   *
+   * 마지막 구간이 가장 길어야 한다는 `bossPhases.ts` 의 약속이 깨져
+   * 있었고, 원인은 보스가 아니라 **플레이어**였습니다. 스킬 쿨다운·집중
+   * 3점·출혈 누적이 전부 뒤로 갈수록 터지기 때문에, 체력을 아무리 뒤에
+   * 몰아 줘도 그 이상으로 빨리 녹습니다. (실제로 체력을 두 번 올렸고
+   * 두 번 다 실패했습니다 — 값이 아니라 **모양**이 문제였습니다.)
+   *
+   * 참고한 게임들이 같은 자리에서 쓰는 손잡이:
+   *   · 엘든 링·로스트아크 — 뒤 페이즈에서 **받는 피해를 줄입니다**
+   *   · 세키로 — 체간 회복을 느리게 해 *"쌓아 둔 것"* 의 값을 깎습니다
+   * 공통 원리: 플레이어가 쌓아 온 화력을 **구간이 되받아쳐야** 합니다.
+   *
+   * ── 이 검사가 재는 것 ────────────────────────────────────────────
+   * `damageTakenScale` 이 설정에 적혀 있는지가 아니라, **같은 공격이
+   * 실제로 덜 깎는가**입니다. 이 저장소가 다섯 번 당한 고장이 전부
+   * *"파생값은 맞는데 판정까지 도달하지 않았다"* 였습니다.
+   * (규칙이 아니라 도달한 것을 봅니다.)
+   *
+   * ⚠️ 배수가 섞이지 않게: 얼려 두고(반격·완벽회피 차단), 정면에서 치고,
+   *    강화 0단계로, 매 타격 전에 체력을 같은 값으로 되돌립니다.
+   *    체력을 안 되돌리면 재는 도중에 페이즈가 넘어가 버립니다.
+   */
+  console.log('')
+  {
+    const taken = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep2 = () => new Promise((r) => setTimeout(r, 8))
+      const runFor = async (sec) => {
+        const t = G.state().elapsed + sec
+        while (G.state().elapsed < t) await sleep2()
+      }
+      /**
+       * ⚠️ **1단계 학습 잠금을 반드시 꺼야 합니다.**
+       *
+       * 파일 맨 위에서 한 번 껐지만 6번 항목이 다시 켜 놓고 끝납니다.
+       * 그대로 두고 재면 잠금이 매 프레임 보스 체력을 65%로 **되돌려 놔서**
+       * 페이즈가 영영 0 입니다. 처음 돌렸을 때 실제로 `phase 0→0` 이 나왔고,
+       * 그런데도 아래 비교는 **초록이었습니다**(62%로 줄었다고). 두 측정이
+       * 사실은 둘 다 1단계였고 콤보 단계·치명타 차이를 배율로 읽은 것입니다.
+       * 위의 게이트 한 줄이 없었으면 그 거짓말을 그대로 믿었을 것입니다.
+       */
+      G.setPhaseTeaching(false)
+      G.reset()
+      await runFor(0.4)
+      G.setPhaseTeaching(false) // reset 이 상태를 되돌릴 수 있으니 뒤에서 한 번 더.
+      G.clearEnemies()
+      await runFor(0.3)
+      const p = G.state().player
+      const b = G.spawnBoss(p.x + 5, p.z)
+      G.wakeEnemy(b)
+      await runFor(0.4)
+      const max = G.enemyInfo(b).max
+
+      /**
+       * 한 페이즈에서 **같은 평타를 N번** 때리고 깎인 총량을 돌려줍니다.
+       * 한 대만 재면 치명타 한 번에 판정이 뒤집힙니다 — 여러 대의 합으로
+       * 봐야 우연이 씻깁니다.
+       */
+      const swings = async (n) => {
+        let total = 0
+        let landed = 0
+        for (let i = 0; i < n; i++) {
+          // 매번 같은 조건: 붙어 서서, 정면에서, 기력 가득, 체력 되돌림.
+          const bi = G.enemyInfo(b)
+          G.teleportPlayer(bi.x - 1.2, bi.z)
+          G.aimAtWorld(bi.x, bi.z)
+          G.setStamina(1000)
+          G.setHp(b, max)
+          await runFor(0.15)
+          const before = G.enemyInfo(b).hp
+          const hits0 = G.state().hitsDealt
+          G.press('Mouse0')
+          await new Promise((r) => setTimeout(r, 30))
+          G.release('Mouse0')
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 1.2 && G.state().hitsDealt === hits0) await sleep2()
+          await runFor(0.25)
+          const dealt = before - G.enemyInfo(b).hp
+          if (dealt > 0) {
+            total += dealt
+            landed++
+          }
+        }
+        return { total, landed }
+      }
+
+      // ── 1단계 ── 얼려 두고 잽니다(맞으면 반격·완벽회피 배수가 섞입니다).
+      G.freezeEnemies(true)
+      G.setPlayerInvulnerable(true)
+      const one = await swings(10)
+      const phase1 = G.enemyInfo(b).phase
+
+      /**
+       * ── 3단계로 ── **AI 를 잠깐 풀어 줘야 합니다.**
+       * 페이즈를 올리는 코드가 `enemyAiSystem` 안에 있어서, 얼린 채로
+       * 체력만 깎으면 phase 가 영영 0 입니다. (이걸 모르고 짰다가
+       * "배율이 안 걸린다"는 가짜 실패를 볼 뻔했습니다.)
+       */
+      G.freezeEnemies(false)
+      G.setHp(b, max)
+      G.damageEntity(b, max * 0.75)
+      await window.__t.until(() => G.enemyInfo(b)?.phase >= 2, 6)
+      await window.__t.until(
+        () => G.enemyInfo(b)?.phase >= 2 && G.enemyInfo(b)?.transitionT === 0,
+        6,
+      )
+      const phase3 = G.enemyInfo(b).phase
+      G.freezeEnemies(true)
+      const three = await swings(10)
+
+      G.setPlayerInvulnerable(false)
+      G.freezeEnemies(false)
+      return { one, three, phase1, phase3 }
+    })
+
+    const want = await page.evaluate(() =>
+      window.__game.bossTuning().map((p) => p.damageTakenScale ?? 1),
+    )
+    const a = taken.one.total
+    const c = taken.three.total
+    const ratio = a > 0 ? c / a : -1
+    /**
+     * **게이트** — 두 측정이 정말 서로 다른 페이즈였는가, 그리고 때린
+     * 횟수가 같은가. 이게 아니면 아래 비율은 아무 뜻이 없습니다.
+     */
+    const gate =
+      taken.phase1 === 0 && taken.phase3 === 2 && taken.one.landed >= 8 && taken.three.landed >= 8
+    check(
+      gate,
+      '🛡 1단계·3단계에서 **같은 수만큼** 때렸다 (비교의 게이트)',
+      `1단계 ${taken.one.landed}/10타 · 3단계 ${taken.three.landed}/10타 (phase ${taken.phase1}→${taken.phase3})`,
+    )
+    /**
+     * ⚠️ **게이트를 조건에 넣습니다.** 처음엔 두 검사를 따로 뒀는데,
+     *    게이트가 빨간데 비교는 초록으로 떴습니다. 게이트가 **막지 않으면**
+     *    게이트가 아니라 그냥 옆에 적힌 메모입니다.
+     *
+     * 문턱을 설정값에 딱 맞추지 않습니다. 치명타·콤보 단계가 섞여 있어
+     * 열 대의 합이라도 흔들립니다. 재려는 것은 *"배율이 정확히 0.7인가"* 가
+     * 아니라 **"뒤 구간이 실제로 단단해졌는가"** 입니다. 배율을 그대로
+     * 베껴 적으면 그 순간 프로브가 두 번째 진실이 됩니다.
+     */
+    const wantRatio = (want[2] ?? 1) / (want[0] ?? 1)
+    check(
+      gate && ratio > 0 && ratio < 0.9,
+      '🛡 **3단계 보스는 같은 평타를 덜 아파한다** (설정이 아니라 줄어든 체력으로 확인)',
+      `1단계 ${a.toFixed(1)} → 3단계 ${c.toFixed(1)} (${(ratio * 100).toFixed(0)}%, 설정상 ${(wantRatio * 100).toFixed(0)}%)` +
+        (gate ? '' : ' ⚠️ 게이트가 빨개서 비교는 성립하지 않았습니다'),
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
