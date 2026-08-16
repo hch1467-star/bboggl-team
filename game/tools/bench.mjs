@@ -770,19 +770,51 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
  * 설계는 그럼에도 *"가장 길게"* 를 원합니다. 두 요구가 겹치는 폭이
  * 대략 1~2.5배입니다. 그보다 벌어지면 배율이 아니라 **스펀지**입니다.
  */
+/**
+ * ⚠️ **판정 앞에 게이트를 세웁니다 — 이 줄이 오염된 수치로 판정하고 있었습니다.**
+ *
+ * 바로 위에서 `cleanBoss`(보스전 중 초기화가 없던 판)를 이미 골라 놓고
+ * *"초기화 없는 판이 없습니다 — 아래 수치로 배분을 계산하지 마세요"* 라고
+ * 경고까지 찍습니다. 그런데 **이 판정은 오염된 `boss` 로** 하고 있었습니다.
+ * 경고를 띄우고 그 경고를 스스로 무시한 셈입니다.
+ *
+ * 죽으면 보스 체력이 되감기므로 구간 시간이 통째로 무너집니다. 실제로
+ * 그런 벤치에서 `1단계 9.7 (4.1~15.3)초` 가 나왔고, 그 위에서 이 줄은
+ * **빨간 줄을 띄우고 있었습니다.** 여러 회차 동안 저는 그 빨강을 보고
+ * 보스 배율을 만질 계산을 했습니다 — 사실 재고 있던 것은 **죽음**이었습니다.
+ *
+ * 죽지 않는 침대(`npm run boss`, 체력·기력을 매 틱 채우며 일정한 압력)에서
+ * 같은 것을 재면 세 판이 이렇게 나옵니다:
+ *
+ *     1판 1단계 5.5 · 2단계 3.5 · **3단계 6.6초**
+ *     2판 1단계 6.4 · 2단계 4.0 · 3단계 5.3초
+ *     3판 1단계 5.9 · 2단계 3.9 · **3단계 6.8초**
+ *
+ * **약속은 지켜지고 있었습니다.** 그래서 이 약속의 빨강/초록은 그 침대로
+ * 옮겼고(boss-probe), 여기서는 **판정할 수 있을 때만** 판정합니다.
+ */
 {
-  const t1 = median(boss.map((l) => l.boss.phaseTime?.[0] ?? 0))
-  const t3 = median(boss.map((l) => l.boss.phaseTime?.[2] ?? 0))
-  const longest = t1 > 0 && t3 >= t1
-  const notSponge = t1 > 0 && t3 <= t1 * 2.5
-  const ok = longest && notSponge
-  console.log(
-    `  ${ok ? '✅' : '❌'} 마지막 구간이 가장 길다 — **그리고 스펀지는 아니다** (bossPhases.ts 의 약속) — ` +
-      `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초` +
-      (t1 > 0 ? ` (${(t3 / t1).toFixed(1)}배 · 허용 1.0~2.5배)` : '') +
-      (longest ? '' : ' ← 마지막이 짧습니다') +
-      (notSponge ? '' : ' ← **너무 깁니다**: 단단한 게 아니라 안 죽는 것입니다'),
-  )
+  const t1 = median(phaseSrc.map((l) => l.boss.phaseTime?.[0] ?? 0))
+  const t3 = median(phaseSrc.map((l) => l.boss.phaseTime?.[2] ?? 0))
+  if (cleanBoss.length === 0) {
+    console.log(
+      '  ⏸ 마지막 구간이 가장 길다 (bossPhases.ts 의 약속) — **이 벤치로는 판정하지 않습니다**' +
+        `: 모든 판이 보스전 중에 죽어 구간이 되감겼습니다 (1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초는 죽음을 잰 값). ` +
+        '죽지 않는 침대는 `npm run boss` 입니다 — 판정은 거기 있습니다.',
+    )
+  } else {
+    const longest = t1 > 0 && t3 >= t1
+    const notSponge = t1 > 0 && t3 <= t1 * 2.5
+    const ok = longest && notSponge
+    console.log(
+      `  ${ok ? '✅' : '❌'} 마지막 구간이 가장 길다 — **그리고 스펀지는 아니다** (bossPhases.ts 의 약속) — ` +
+        `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초` +
+        (t1 > 0 ? ` (${(t3 / t1).toFixed(1)}배 · 허용 1.0~2.5배)` : '') +
+        (cleanBoss.length < boss.length ? ` [초기화 없는 ${cleanBoss.length}판만]` : '') +
+        (longest ? '' : ' ← 마지막이 짧습니다') +
+        (notSponge ? '' : ' ← **너무 깁니다**: 단단한 게 아니라 안 죽는 것입니다'),
+    )
+  }
 }
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
 /**
