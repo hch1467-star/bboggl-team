@@ -97,7 +97,11 @@ try {
        * 돌려줍니다 — 아슬아슬하게 실패한 것과 한참 모자란 것은 처방이
        * 다릅니다(속도 · 예고 길이 · 반경).
        */
-      walkOut: async (kind, wantId) => {
+      /**
+       * @param delay 예고가 뜬 뒤 **가만히 서 있는** 시간(시뮬레이션초).
+       *              0 이면 예전과 같습니다(사람이 낼 수 있는 최선).
+       */
+      walkOut: async (kind, wantId, delay = 0) => {
         const G = window.__game
         G.reset()
         await window.__t.runFor(0.4)
@@ -144,6 +148,23 @@ try {
           const startInfo = G.enemyInfo(e)
           const tele = startInfo.timer
           // 예고가 뜬 **그 순간부터** 걷습니다. 사람이 낼 수 있는 최선입니다.
+          /**
+           * ── ⏱ **늦게 출발해도 되는가** ────────────────────────────────
+           *
+           * `delay` 만큼 **가만히 서 있다가** 걷기 시작합니다. 0 이면 예전
+           * 그대로입니다.
+           *
+           * 왜 필요한가: 이 검사는 지금까지 *"예고가 뜬 순간부터 걸으면
+           * 벗어난다"* 만 말했습니다. 그건 **반응 시간이 0인 사람**의
+           * 이야기입니다. 사람은 색을 보고, 그게 구를 색이 아님을 알고,
+           * 방향을 정하고, 그다음에 손이 움직입니다.
+           *
+           * 참고 게임이 광역을 공정하게 만드는 방법이 정확히 이 여유입니다 —
+           * FF14·로스트아크의 장판은 **읽고 나서도 걸어 나갈 시간**이 남게
+           * 잡혀 있습니다. 여유가 반응 시간보다 짧으면 그 색은 "읽는 색"이
+           * 아니라 **미리 아는 색**이 됩니다(외워야 하는 것).
+           */
+          if (delay > 0) await window.__t.runFor(delay)
           /**
            * ⚠️ **판정이 나가는 순간의 거리**를 잡습니다.
            *
@@ -358,6 +379,70 @@ try {
               `예고 ${r.telegraph}초 · 판정 순간 ${r.far}m · ${r.hp === r.before ? '안 맞음' : `${r.before}→${r.hp}`}`,
           )
           .join(' | '),
+      )
+    }
+  }
+
+  /**
+   * ---- 3.6 ⏱ **얼마나 늦게 출발해도 되는가** — 이 색의 여유 ────────────
+   *
+   * 위 두 검사는 *"예고가 뜬 **순간부터** 걸으면 벗어난다"* 고 말합니다.
+   * 그건 **반응 시간이 0인 사람**의 이야기입니다. 사람은 색을 보고, 그게
+   * 구를 색이 아님을 알고, 방향을 정하고, 그다음에 손이 움직입니다.
+   *
+   * 참고 게임이 광역을 공정하게 만드는 방법이 정확히 이 여유입니다.
+   * FF14·로스트아크의 장판은 **읽고 나서도 걸어 나갈 시간**이 남게 잡혀
+   * 있습니다. 여유가 반응 시간보다 짧으면 그 색은 "읽는 색"이 아니라
+   * **미리 아는 색** — 즉 외워야 하는 것이 됩니다. 그건 이 게임의 기둥
+   * (*"내가 못 봤네"가 아니라 "내가 못 피했네"*)과 정면으로 어긋납니다.
+   *
+   * ⚠️ 문턱은 제가 안 정합니다. `reactionBudget()` 이 게임에서 옵니다 —
+   *    4색 중 하나를 고르는 **선택 반응**이라 `choice` 쪽을 씁니다.
+   *    (`simple` 은 "뭔가 오면 무조건 구른다" 일 때의 값입니다.)
+   *
+   * ⚠️ 늦은 쪽부터 재지 않고 **0.1초씩 늘려 가며** 마지막으로 성공한
+   *    지점을 찾습니다. 한 번의 실패로 끊으면 프레임 흔들림 한 번이
+   *    그대로 답이 됩니다 — 실패가 두 번 이어질 때 멈춥니다.
+   */
+  {
+    const budget = await page.evaluate(() => window.__game.reactionBudget())
+    const STEP = 0.1
+    const MAX = 1.2
+    let latest = -1
+    let misses = 0
+    const rows = []
+    for (let d = 0; d <= MAX + 1e-9; d += STEP) {
+      const delay = Number(d.toFixed(2))
+      let ok = false
+      for (let i = 0; i < 2; i++) {
+        const r = await page.evaluate(
+          ([k, id, dl]) => window.__t.walkOut(k, id, dl),
+          ['grunt', 'grunt_sweep', delay],
+        )
+        if (r && r.hp === r.before) {
+          ok = true
+          break
+        }
+      }
+      rows.push(`${delay.toFixed(1)}초${ok ? '○' : '×'}`)
+      if (ok) {
+        latest = delay
+        misses = 0
+      } else if (++misses >= 2) break
+    }
+    check(
+      latest >= 0,
+      '⏱ 늦게 출발하는 경우를 실제로 재 봤다 (여유가 있는지 묻는 게이트)',
+      rows.join(' '),
+    )
+    if (latest >= 0) {
+      check(
+        latest >= budget.choice,
+        '⏱ **읽고 나서 출발해도 늦지 않다** (🟡 이 외우는 색이 아니라 읽는 색으로 남는다)',
+        `늦어도 ${latest.toFixed(1)}초까지는 벗어납니다 · 4색 중 고르는 반응 예산 ${budget.choice.toFixed(2)}초` +
+          (latest >= budget.choice
+            ? ` — ${(latest - budget.choice).toFixed(2)}초 남습니다`
+            : ` — **${(budget.choice - latest).toFixed(2)}초 모자랍니다**`),
       )
     }
   }
