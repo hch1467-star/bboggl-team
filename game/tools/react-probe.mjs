@@ -85,6 +85,13 @@ try {
       return {
         ...a,
         from: r.name,
+        /**
+         * 소환에 쓰는 **종류 id**. `from`(표시 이름)과 나누는 이유는,
+         * 아래 늦은 구르기 실험이 `from` 을 그대로 `spawnEnemyKind` 에
+         * 넘겼다가 null 을 받고 죽었기 때문입니다. 사람에게 보여 줄
+         * 이름과 기계에 넘길 이름은 같은 칸에 두면 안 됩니다.
+         */
+        kindId: r.id,
         radius: r.radius,
         keepDistance: r.keepDistance,
         /** 실제로 가장 짧아지는 예고. 없으면(잡몹) 기본값 그대로. */
@@ -202,6 +209,154 @@ try {
       )
       .join(' · '),
   )
+
+  /**
+   * ---- 2.5 🔴 **산수 말고 실제로 늦게 굴러 봅니다** ────────────────────
+   *
+   * 바로 위 🔴 검사가 이렇게 통과했습니다:
+   *
+   *     예고가 0.54초 이상이어야 함 · 가장 짧은 🔴 **0.55초**
+   *
+   * **여유가 0.01초입니다.** 그리고 이건 산수지 실제로 굴러 본 값이
+   * 아닙니다. 프레임 하나가 이 컨테이너에서 0.05초, 60fps 에서도
+   * 0.0167초입니다 — **여유가 한 프레임보다 작습니다.** 종이 위에서는
+   * 통과하고 손에서는 동전 던지기입니다.
+   *
+   * 소울류가 가장 빠른 공격의 선행동작을 반응+무적시작보다 **넉넉히**
+   * 길게 잡는 이유가 이것입니다. 마진이 프레임 단위 아래로 내려가면
+   * 그 공격은 "읽고 답하는 공격"이 아니라 **외워서 미리 누르는 공격**이
+   * 됩니다 — 이 프로브의 0번 검사가 막으려던 바로 그것인데, 0번은
+   * 예고 길이만 보고 무적이 켜지는 시점은 안 봅니다.
+   *
+   * 그래서 실제로 눌러 봅니다: 예고가 뜬 뒤 **반응 예산만큼 기다렸다가**
+   * 구르고, 맞는지 봅니다. 이 저장소의 규칙 그대로입니다 —
+   * **규칙이 아니라 도달한 것을 본다.**
+   *
+   * ⚠️ 세 번 시도해 한 번이라도 넘기면 통과입니다. GPU 없는 이 컨테이너의
+   *    프레임 흔들림까지 재면 게임이 아니라 기계 운을 재게 됩니다.
+   *    (그래서 이 검사는 **여유가 없다**는 것을 증명하지는 못하고,
+   *     **여유가 있다**는 것만 증명합니다. 빨강이 뜨면 그건 세 번 다
+   *     실패했다는 뜻이라 훨씬 무거운 신호입니다.)
+   */
+  {
+    const fastest = of(STRIKE).sort((a, b) => a.windup - b.windup)[0]
+    if (!fastest) {
+      check(false, '🔴 가장 빠른 직격을 찾았다 (검사의 게이트)')
+    } else {
+      /**
+       * 한 번의 시도 = 예고를 잡고, `delay` 만큼 기다렸다가, 구르고, 맞았나.
+       * 함수로 뽑는 이유는 아래에서 **여러 delay 로 되풀이**하기 때문입니다.
+       */
+      const rollAfter = (delay) =>
+        page.evaluate(
+          async ([kindId, wantId, wait]) => {
+            const G = window.__game
+            const runFor = async (sec) => {
+              const target = G.state().elapsed + sec
+              const dl = Date.now() + 60000
+              while (G.state().elapsed < target && Date.now() < dl) {
+                await new Promise((r) => setTimeout(r, 8))
+              }
+            }
+            G.reset()
+            await runFor(0.4)
+            G.clearEnemies()
+            await runFor(0.2)
+            const p0 = G.state().player
+            const e = G.spawnEnemyKind(kindId, p0.x + 12, p0.z)
+            if (e == null || !G.entityState(e)) return { spawnFailed: kindId }
+            await runFor(0.2)
+            G.setHp(e, 100000)
+            for (let attempt = 0; attempt < 14; attempt++) {
+              const es = G.entityState(e)
+              // 사거리 **안**에 서야 예고가 나옵니다. 코앞이 아니라 안쪽 가장자리.
+              G.teleportPlayer(es.x, es.z - 1.6)
+              G.setHp(G.playerEntity(), 100)
+              await runFor(0.25)
+              const dl = Date.now() + 20000
+              let got = false
+              while (Date.now() < dl) {
+                const info = G.enemyInfo(e)
+                if (info?.winding === true && info.attackId === wantId) {
+                  got = true
+                  break
+                }
+                await new Promise((r) => setTimeout(r, 8))
+              }
+              if (!got) continue
+              const before = G.state().player.hp
+              const tele = G.enemyInfo(e)?.timer ?? 0
+              await runFor(wait)
+              G.press('Space')
+              await runFor(0.05)
+              G.release('Space')
+              await runFor(1.2)
+              return { telegraph: Number(tele.toFixed(3)), before, hp: G.state().player.hp }
+            }
+            return null
+          },
+          [fastest.kindId, fastest.id, delay],
+        )
+      /** 세 번 중 한 번이라도 넘기면 그 delay 는 "된다"입니다(프레임 흔들림 몫). */
+      const survives = async (delay) => {
+        for (let i = 0; i < 3; i++) {
+          const r = await rollAfter(delay)
+          if (!r) continue
+          if (r.spawnFailed) return { spawnFailed: r.spawnFailed }
+          if (r.hp === r.before) return { ok: true, r }
+          if (i === 2) return { ok: false, r }
+        }
+        return { ok: false, r: null }
+      }
+
+      const late = Number(budget.choice.toFixed(2))
+      const atBudget = await survives(late)
+      check(
+        !atBudget.spawnFailed,
+        '🔴 늦게 굴러 보는 실험이 성립했다 (적을 세우고 예고를 잡았다)',
+        atBudget.spawnFailed ? `적을 못 세웠습니다 — 종류 "${atBudget.spawnFailed}"` : '섰습니다',
+      )
+      if (!atBudget.spawnFailed) {
+        /**
+         * ── 📐 **못 넘겼으면 얼마가 필요한지까지 잽니다** ────────────────
+         *
+         * 이 프로브는 🟡 쪽에서 이미 그렇게 합니다(`wantWindup`). 판정만
+         * 내고 처방을 안 주면, 읽는 사람이 **짐작으로** 값을 고릅니다.
+         *
+         * 재는 법: 구르기를 조금씩 **앞당겨** 가며 마지막으로 넘기는
+         * 지점 D 를 찾습니다. 예고가 W 일 때 D 에 눌러야 넘어간다면,
+         * 반응 예산 B 에 눌러도 넘어가게 하려면 예고가 **W + (B − D)**
+         * 여야 합니다. 모자란 만큼 그대로 늘리는 것입니다.
+         */
+        let latest = atBudget.ok ? late : -1
+        const rows = [`${late.toFixed(2)}초${atBudget.ok ? '○' : '×'}`]
+        if (!atBudget.ok) {
+          for (let d = late - 0.08; d >= -1e-9; d -= 0.08) {
+            const delay = Math.max(0, Number(d.toFixed(2)))
+            const res = await survives(delay)
+            rows.push(`${delay.toFixed(2)}초${res.ok ? '○' : '×'}`)
+            if (res.ok) {
+              latest = delay
+              break
+            }
+            if (delay === 0) break
+          }
+        }
+        const need = latest >= 0 ? fastest.windup + (late - latest) : null
+        check(
+          atBudget.ok,
+          '🔴 **반응 예산만큼 늦게 굴러도 실제로 넘긴다** (산수가 아니라 눌러 본 값)',
+          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup}초 · ${rows.join(' ')}` +
+            (atBudget.ok
+              ? ''
+              : latest >= 0
+                ? ` ❗늦어도 ${latest.toFixed(2)}초까지만 됩니다` +
+                  ` — 예고 ${fastest.windup} → **${need.toFixed(2)}초** 필요`
+                : ' ❗0초에 굴러도 못 넘깁니다 — 예고가 아니라 무적 창을 보십시오'),
+        )
+      }
+    }
+  }
 
   /**
    * ---- 3. 🟣 — 반응하고 **뒤로 빠질 시간이 남는가** ----
