@@ -3607,6 +3607,11 @@ class Game {
    * 1.25초 동안 3m 를 걸어와서 선을 벗어납니다. `freezeEnemies` 는 전부
    * 얼려서 궁수까지 안 쏘게 되므로 쓸 수 없었습니다.
    */
+  /** 🌀 무기 축이 지금 놓인 각도 — 궤적이 단마다 다른지 재는 데 씁니다. */
+  debugSwingPose(e: number): { x: number; y: number } | null {
+    return this.visuals.debugSwingPose(e)
+  }
+
   debugTeleportEnemy(e: number, x: number, z: number): void {
     if (!isAlive(e)) return
     Transform.x[e] = x
@@ -5417,6 +5422,11 @@ declare global {
         levels: number[]
         atStation: boolean
       }
+      /**
+       * 🌀 **지금 무기 축이 놓인 각도**(라디안). `y` 가 좌우, `x` 가 위아래.
+       * 콤보 단마다 궤적이 실제로 갈라지는지를 여기서 봅니다.
+       */
+      swingPose: (entity: number) => { x: number; y: number } | null
       setStones: (n: number) => void
       treasurePositions: () => { x: number; z: number; taken: boolean }[]
       forceRespawnEnemies: () => void
@@ -6201,6 +6211,11 @@ window.__game = {
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
   weaponUpgradeInfo: () => game.debugWeaponUpgradeInfo(),
+  /**
+   * 🌀 **지금 무기 축이 놓인 각도**(라디안). `y` 가 좌우, `x` 가 위아래입니다.
+   * 콤보 단마다 궤적이 실제로 갈라지는지를 `npm run feel` 이 이걸로 봅니다.
+   */
+  swingPose: (entity: number) => game.debugSwingPose(entity),
   treasurePositions: () => game.debugTreasurePositions(),
   forceRespawnEnemies: () => game.debugForceRespawn(),
   setStones: (n) => {

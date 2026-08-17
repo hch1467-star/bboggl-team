@@ -6,6 +6,8 @@ import {
   finisherStep,
   heavyStep,
   longestPlayerReach,
+  swingDirection,
+  swingPower,
   swingRadius,
 } from '../config/arsenal'
 import {
@@ -1678,23 +1680,73 @@ export class Visuals {
     // 남은 시간 -> 진행도 0..1
     const t = total > 0 ? Math.min(1, Math.max(0, 1 - Actor.timer[e] / total)) : 1
 
+    /**
+     * ── 🌀 **단마다 궤적이 다릅니다** ──────────────────────────────
+     *
+     * `dir` — 좌→우와 우→좌를 번갈아 갑니다. 근거는 arsenal.ts
+     * `swingDirection` 에 적어 두었습니다(요약: 방향이 바뀌어야 "다음
+     * 단이 나갔다"가 눈에 보입니다).
+     *
+     * `power` — 무거운 단일수록 **위에서 내려옵니다.** 새 축을 안 만들고
+     * `swingPower`(히트스톱에서 나오는 무게)를 그대로 씁니다. 그래서
+     * 손끝이 무거운 단은 반드시 눈에도 무겁게 보입니다 — 둘이 갈라질
+     * 수가 없습니다. 대검 마무리(무게 1)는 머리 위에서 떨어지고,
+     * 쌍단검 1타(무게 0)는 예전 그대로 옆으로 훑습니다.
+     */
+    const dir = this.swingDirOf(e)
+    const power = this.swingPowerOf(e)
+    // 젖히는 높이·내려찍는 깊이. 0.55/0.75 는 원래 쓰던 값이고, 무게가
+    // 실리면 그 위로 더 들어 올렸다가 더 깊이 내립니다.
+    const lift = 0.55 + 0.85 * power
+    const drop = 0.75 + 0.7 * power
+    const startY = (-half - 0.35) * dir
+
     if (phase === AttackPhase.Windup) {
       // 뒤로 젖히기. 부채꼴이 넓은 무기일수록 더 크게 젖힙니다.
       const from = pivot.rotation.y
-      const to = -half - 0.35
-      pivot.rotation.y = from + (to - from) * Math.min(1, t * 1.8)
-      pivot.rotation.x = -0.55 * t + REST_TILT * (1 - t)
+      pivot.rotation.y = from + (startY - from) * Math.min(1, t * 1.8)
+      pivot.rotation.x = -lift * t + REST_TILT * (1 - t)
     } else if (phase === AttackPhase.Active) {
       // 단숨에 훑기 — 실제 판정 부채꼴과 같은 각도를 지나갑니다.
       const eased = t * t * (3 - 2 * t) // smoothstep: 시작과 끝이 부드럽게
-      pivot.rotation.y = -half - 0.35 + (arc + 0.35) * eased
-      pivot.rotation.x = -0.55 + 0.75 * eased
+      pivot.rotation.y = startY + (arc + 0.35) * eased * dir
+      pivot.rotation.x = -lift + (lift + drop) * eased
     } else {
       // 후딜 — 휘두른 자세에서 천천히 원위치
       const k = 1 - Math.exp(-7 * time.realDt)
       pivot.rotation.y += (REST_SWING - pivot.rotation.y) * k
       pivot.rotation.x += (REST_TILT - pivot.rotation.x) * k
     }
+  }
+
+  /**
+   * 🌀 **지금 무기 축이 실제로 놓인 각도**(라디안).
+   *
+   * 프로브가 *"단마다 궤적이 정말 다른가"* 를 **설정이 아니라 화면에
+   * 놓인 값으로** 재려고 씁니다. `swingDirection()` 을 프로브가 다시
+   * 부르면, 그 값을 여기까지 안 물려 놨어도 통과합니다 — 이 저장소가
+   * 여러 번 당한 모양입니다(규칙은 맞는데 배선이 끊김).
+   */
+  debugSwingPose(e: number): { x: number; y: number } | null {
+    const v = this.items.get(e)
+    if (!v?.swingPivot) return null
+    return { x: v.swingPivot.rotation.x, y: v.swingPivot.rotation.y }
+  }
+
+  /**
+   * 🌀 지금 단이 지나가는 방향. 적은 콤보가 없으므로 항상 같은 쪽입니다 —
+   * 적의 휘두름은 **읽어야 할 예고**라서, 매번 달라지면 오히려 방해입니다.
+   */
+  private swingDirOf(e: number): 1 | -1 {
+    return hasComponent(Loadout, e) ? swingDirection(Actor.comboIndex[e]) : 1
+  }
+
+  /** 🌀 지금 단의 무게(0..1). 규칙은 arsenal.ts `swingPower` 한 곳에만. */
+  private swingPowerOf(e: number): number {
+    if (!hasComponent(Loadout, e)) return 0
+    const weapon = WEAPONS[Math.min(Loadout.weapon[e], WEAPONS.length - 1)]
+    const step = weapon.combo[Math.min(Actor.comboIndex[e], weapon.combo.length - 1)]
+    return swingPower(weapon, step)
   }
 
   /** 지금 휘두르는 공격의 부채꼴 각도(라디안). */

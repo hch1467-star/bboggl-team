@@ -697,6 +697,142 @@ try {
     }
   }
 
+  console.log('')
+  /**
+   * ── 🌀 **콤보 단마다 궤적이 다른가** ───────────────────────────────
+   *
+   * 여기까지 재 온 것은 전부 **세기**였습니다 — 얼마나 멎는지, 얼마나
+   * 굵은지, 얼마나 오래 남는지. 그런데 3연타의 세 단은 **전부 같은
+   * 방향으로** 지나갔습니다. 각도와 길이만 다르고 **모양은 하나**였습니다.
+   * 손끝은 갈라 놨는데 눈은 여전히 한 덩어리였던 셈입니다.
+   *
+   * ── 무엇을 보는가 ──────────────────────────────────────────────
+   * 선행동작에서 무기 축이 **가장 크게 젖혀진 각도**의 **부호**입니다.
+   * 좌→우로 갈 단은 왼쪽(음수)까지 젖혀지고, 우→좌로 갈 단은 오른쪽
+   * (양수)까지 젖혀집니다. 부호가 갈리면 방향이 갈린 것입니다.
+   *
+   * ⚠️ 판정 구간(0.08~0.13초)이 이 컨테이너의 한 프레임(0.05초)보다
+   *    짧아서, 훑는 **도중**을 잡으려 하면 판마다 놓칩니다. 선행동작은
+   *    그보다 길어서(0.07~0.36초) 끝자락을 안정적으로 잡습니다.
+   *
+   * ⚠️ `swingDirection()` 을 프로브가 다시 부르지 않습니다. 그러면 규칙이
+   *    맞아도 화면까지 안 물려 있는 경우를 놓칩니다 — 이 저장소가 여러 번
+   *    당한 모양입니다. **축에 실제로 놓인 각도**만 봅니다.
+   */
+  {
+    console.log('🌀 콤보 궤적 — 단마다 다른 길로 지나가는가\n')
+    const arcs = await page.evaluate(async ([states]) => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 4))
+      const now = () => G.state().simElapsed
+      const wait = async (sec) => {
+        const t0 = now()
+        const dl = Date.now() + 20000
+        while (now() - t0 < sec && Date.now() < dl) await sleep()
+      }
+
+      G.reset()
+      await wait(0.6)
+      G.freezeEnemies(true)
+      G.clearEnemies()
+      await wait(0.2)
+      G.teleportPlayer(0, 0)
+      await wait(0.2)
+      const e = G.spawnEnemyKind('grunt', 0, 1.5)
+      if (e == null || e < 0) return null
+      G.setHp(e, 9999)
+      await wait(0.3)
+      G.aimAtWorld(0, 1.5)
+      G.setStamina(100)
+      await wait(0.6)
+
+      const p = G.playerEntity()
+      // 단별로 「선행동작에서 가장 크게 젖혀진 각」과 「가장 높이 든 각」.
+      const peakY = {}
+      const highX = {}
+      let prevFlash = 0
+      let pressed = 1
+      G.setStamina(100)
+      G.press('Mouse0')
+      G.release('Mouse0')
+
+      const t0 = now()
+      const dl = Date.now() + 25000
+      while (Date.now() < dl && now() - t0 < 3.2) {
+        const s = G.state()
+        const pose = G.swingPose(p)
+        if (pose && s.player.state === states.attack && s.player.phase === 0) {
+          const i = s.player.comboIndex
+          if (peakY[i] === undefined || Math.abs(pose.y) > Math.abs(peakY[i])) peakY[i] = pose.y
+          // 위로 들수록 rotation.x 가 작아집니다(음수). 무거운 단이
+          // 더 높이 들려야 「위에서 내려온다」가 성립합니다.
+          if (highX[i] === undefined || pose.x < highX[i]) highX[i] = pose.x
+        }
+        const info = G.enemyInfo(e)
+        if (!info) break
+        if (info.flashT > prevFlash + 1e-6 && pressed < 3) {
+          G.setStamina(100)
+          G.press('Mouse0')
+          G.release('Mouse0')
+          pressed++
+        }
+        prevFlash = info.flashT
+        await sleep()
+      }
+      G.freezeEnemies(false)
+      return {
+        steps: Object.keys(peakY)
+          .map(Number)
+          .sort((a, b) => a - b)
+          .map((i) => ({ i, y: peakY[i], x: highX[i] })),
+      }
+    }, [t.actorStates])
+
+    const steps = arcs?.steps ?? []
+    console.log('    [단]   젖힌 각(좌우)   든 높이(위아래)')
+    for (const s of steps) {
+      console.log(`    ${s.i + 1}타      ${s.y >= 0 ? '+' : ''}${s.y.toFixed(2)}          ${s.x.toFixed(2)}`)
+    }
+    console.log('')
+    check(
+      steps.length >= 2,
+      '🌀 두 단 이상을 **실제로 휘둘러서** 쟀다 (비교의 게이트)',
+      `${steps.length}단`,
+    )
+    if (steps.length >= 2) {
+      const flips = []
+      for (let i = 1; i < steps.length; i++) {
+        flips.push(Math.sign(steps[i].y) !== Math.sign(steps[i - 1].y))
+      }
+      check(
+        // 빈 표본이 통과하지 않게 길이를 같이 봅니다 — 위에서 이미
+        // 게이트를 걸었지만, 게이트가 옮겨 갔을 때 조용히 초록이 되지
+        // 않도록 이 줄이 스스로 지킵니다(`npm run guard` 가 봅니다).
+        flips.length > 0 && flips.every(Boolean),
+        '🌀 **이어지는 단이 반대쪽으로 지나간다** (다음 단이 나갔는지 화면으로 보입니다)',
+        steps.map((s) => `${s.i + 1}타 ${s.y >= 0 ? '오른쪽' : '왼쪽'}`).join(' → '),
+      )
+      /**
+       * 무게가 실린 단은 더 높이 들려야 「위에서 내려온다」가 성립합니다.
+       *
+       * ⚠️ **이 검사가 못 가르는 것**: 여기 찍히는 값은 선행동작 **도중에**
+       *    잡은 것이라, 젖히는 목표가 커서 높은 것인지 선행동작이 길어서
+       *    더 많이 진행된 것인지 **구분하지 못합니다**. 마무리는 둘 다
+       *    해당됩니다(목표 0.55 → 1.40 · 선행동작 0.12 → 0.22초).
+       *    눈에 보이는 것은 어차피 둘의 합이라 질문 자체는 맞지만, 이
+       *    숫자로 "궤적 규칙이 걸렸다"를 **혼자 증명하지는 못합니다.**
+       *    방향(위 검사)은 그런 혼선이 없어서 그쪽이 더 단단한 증거입니다.
+       */
+      const first = steps[0]
+      const last = steps[steps.length - 1]
+      check(
+        last.x < first.x,
+        '🌀 **무거운 단이 더 높이 들렸다가 내려온다** (무게가 궤적에도 실립니다)',
+        `${first.i + 1}타 ${first.x.toFixed(2)} → ${last.i + 1}타 ${last.x.toFixed(2)}`,
+      )
+    }
+  }
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
