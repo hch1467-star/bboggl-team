@@ -5776,8 +5776,27 @@ window.__game = {
         /**
          * **한 번 공격하는 데 걸리는 전체 시간**(초). 프로브가 네 값을
          * 따로 받아 더하다가 하나를 빠뜨리는 일이 없도록 여기서 냅니다.
+         *
+         * ⚠️ **적 정의의 windup/active/recovery 를 쓰면 안 됩니다.**
+         *    실제로 도는 것은 **패턴의 값**이고(`commitAttack`), 정의의
+         *    값은 기본값일 뿐입니다. 패턴이 하나일 때는 둘이 같아서 아무도
+         *    몰랐는데, 적마다 **두 번째 박자**를 주는 순간 이 값이 허구가
+         *    됩니다 — 예를 들어 쏘는 자는 저격(2.29초)과 큰 한 발(3.21초)을
+         *    번갈아 쓰는데, 정의 하나로는 그 둘 중 어느 것도 아닙니다.
+         *
+         *    그래서 **가중 평균**을 냅니다. `npm run map` 이 이 값으로
+         *    *"지나가는 동안 몇 발 쏘는가"* 를 계산하므로, 여기가 틀리면
+         *    그 판정이 통째로 틀립니다. 박자를 늘린 변경이 **계기의 가정을
+         *    깬 것**이고, 가정을 깼으면 계기도 같이 고쳐야 합니다.
          */
-        attackCycle: d.attackCooldown + d.windup + d.active + d.recovery,
+        attackCycle: (() => {
+          const list = attacksFor(k)
+          const total = list.reduce((n, a) => n + a.weight, 0)
+          if (total <= 0) return d.attackCooldown + d.windup + d.active + d.recovery
+          const avg =
+            list.reduce((n, a) => n + (a.windup + a.active + a.recovery) * a.weight, 0) / total
+          return d.attackCooldown + avg
+        })(),
         poiseMax: d.poiseMax,
         attacks: attacksFor(k).map((a) => ({
           id: a.id,
