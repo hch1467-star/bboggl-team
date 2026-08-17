@@ -2947,6 +2947,11 @@ try {
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
       tweaks: G.tweaks ? G.tweaks() : [],
       inputExpired: G.runStats().inputExpired,
+      // 버려진 것을 **종류별로** 나눠 적습니다 — 셋의 처방이 서로 다릅니다
+      // (근거: playerControl.ts `inputFlow`).
+      inputExpiredAttack: G.runStats().inputExpiredAttack,
+      inputExpiredDodge: G.runStats().inputExpiredDodge,
+      inputExpiredSkill: G.runStats().inputExpiredSkill,
       inputDropped: G.runStats().inputDropped,
       inputWaitAvg: G.runStats().inputWaitAvg,
       bossWeaponLevel,
@@ -3649,7 +3654,8 @@ try {
   console.log(
     `  이어짐      결말 ${settled}회 — 이어짐 ${log.inputUsed ?? 0}회` +
       ` (${Math.round(((log.inputUsed ?? 0) / Math.max(1, settled)) * 100)}%)` +
-      ` · 버려짐(만료) ${log.inputExpired ?? 0}회\n` +
+      ` · 버려짐(만료) ${log.inputExpired ?? 0}회` +
+      ` [공격 ${log.inputExpiredAttack ?? 0} · 구르기 ${log.inputExpiredDodge ?? 0} · 스킬 ${log.inputExpiredSkill ?? 0}]\n` +
       `             그중 누른 순간엔 못 냈던 것 ${log.inputDropped ?? 0}회 (겹침)` +
       ` · 평균 대기 ${(log.inputWaitAvg ?? 0).toFixed(2)}초`,
   )

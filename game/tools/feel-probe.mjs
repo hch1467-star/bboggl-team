@@ -833,6 +833,186 @@ try {
     }
   }
 
+  console.log('')
+  /**
+   * ── ⌨️ **무거운 동작 중에 눌러 둔 것이 살아남는가** ────────────────
+   *
+   * ── 왜 이걸 재게 됐나 ──────────────────────────────────────────
+   * 벤치가 *"선입력 … 버려짐(만료) 26%"* 를 찍고 있었습니다. 그런데 그
+   * 한 칸에 **스킬·공격·구르기 셋**이 전부 들어 있어서 처방이 안 나왔습니다
+   * (셋을 갈랐습니다 — playerControl.ts `inputFlow`).
+   *
+   * 그리고 갈라 놓고 보니 의심할 자리가 생겼습니다. 선입력 창 0.55초의
+   * **근거는 구르기**입니다 — *"구르기 0.42 + 쿨다운 0.12 = 0.54초"*
+   * (balance.ts). 즉 이 창은 **구르기 사슬에 맞춰 재단됐고, 공격 쪽
+   * 후딜은 한 번도 대 보지 않았습니다.** 그런데 실제 후딜은:
+   *
+   *     롱소드 마무리 0.42 · 대검 마무리 0.60 · 강타 1.12 · 스킬 0.60
+   *
+   * 창보다 긴 것이 셋입니다. 그러면 무거운 동작을 낸 **직후에 누른 다음
+   * 공격이 조용히 사라집니다** — 플레이어에게는 "씹혔다"로 옵니다.
+   * 무거운 무기일수록 더 씹히는 셈이라, 무기를 고를 이유를 깎습니다.
+   *
+   * ── 설정을 안 보고 **게임의 장부**를 봅니다 ───────────────────────
+   * 후딜과 창을 프로브가 비교하면 계산일 뿐입니다. 실제로는 콤보 취소가
+   * 후딜을 잘라 주기도 해서(playerControl.ts `comboCancel`) 계산과 다를
+   * 수 있습니다. 그래서 **게임이 센 것**(`runStats().inputExpiredAttack`)
+   * 이 늘었는지만 봅니다.
+   */
+  {
+    console.log('⌨️ 선입력 — 무거운 동작 뒤에 눌러 둔 것이 나가는가\n')
+    const buf = await page.evaluate(
+      async ([states]) => {
+        const G = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 4))
+        const now = () => G.state().simElapsed
+        const wait = async (sec) => {
+          const t0 = now()
+          const dl = Date.now() + 20000
+          while (now() - t0 < sec && Date.now() < dl) await sleep()
+        }
+        const untilIdle = async () => {
+          const dl = Date.now() + 20000
+          while (G.state().player.state !== states.idle && Date.now() < dl) await sleep()
+        }
+
+        G.reset()
+        await wait(0.6)
+        G.freezeEnemies(true)
+        G.clearEnemies()
+        await wait(0.2)
+        G.teleportPlayer(0, 0)
+        await wait(0.2)
+        // 적이 있어야 공격이 평소처럼 나갑니다(빈 허공을 치면 콤보 취소
+        // 조건이 달라질 수 있습니다). 죽지 않게 체력을 올려 둡니다.
+        const e = G.spawnEnemyKind('grunt', 0, 1.6)
+        if (e != null && e >= 0) G.setHp(e, 9999)
+        await wait(0.3)
+        G.aimAtWorld(0, 1.6)
+
+        const trial = async (weaponSlot, key) => {
+          G.press(`Digit${weaponSlot + 1}`)
+          G.release(`Digit${weaponSlot + 1}`)
+          await wait(0.5)
+          G.setStamina(100)
+          G.setFocus(3)
+          await untilIdle()
+
+          G.press(key)
+          G.release(key)
+          // 동작이 실제로 시작될 때까지 기다립니다 — 시작 전에 눌러 두면
+          // 그건 선입력이 아니라 그냥 다음 입력입니다.
+          const dl = Date.now() + 20000
+          while (G.state().player.state === states.idle && Date.now() < dl) await sleep()
+          if (G.state().player.state === states.idle) return null
+
+          /**
+           * ⚠️ **장부를 여기서 읽습니다 — 동작을 시작한 *뒤*에.**
+           *
+           * 처음엔 동작 키를 누르기 **전**에 읽었다가 틀린 답을 받았습니다.
+           * 쉬는 자세에서 누른 것도 버퍼를 거쳐 나가므로 `used` 가 그 자리에서
+           * 1 오릅니다. 그래서 "눌러 둔 것이 나갔다"는 판정이 **선입력과
+           * 무관하게** 참이 됐고, 표에 「나갔다」가 셋이나 찍혔습니다.
+           * 재려는 것은 **두 번째** 입력의 운명입니다.
+           */
+          const e0 = G.runStats().inputExpiredAttack
+          const u0 = G.runStats().inputUsed
+
+          // 여기서 누른 것이 **이 동작이 끝난 뒤에 나가야** 합니다.
+          G.setStamina(100)
+          G.press('Mouse0')
+          G.release('Mouse0')
+
+          /**
+           * 창(0.55초)보다 한참 길게 두고 결말을 봅니다.
+           *
+           * ⚠️ **장부만 보다가 두 번 헤맸습니다.** `used` 는 쉬는 자세에서
+           * 낸 입력도 세고, 이어치기 경로가 장부를 안 지나갈 수도 있습니다.
+           * 그래서 *"실제로 한 번 더 휘둘렀는가"* 를 **눈에 보이는 것**으로
+           * 같이 봅니다 — 쉬는 자세로 돌아갔다가 **다시 공격 상태가 되는지**.
+           * 장부와 눈이 어긋나면 그 자체가 알아야 할 사실입니다.
+           */
+          const pressedAt = `${G.state().player.state}/${G.state().player.phase}`
+          const t0 = now()
+          let leftWindup = false
+          let swungAgain = false
+          let at = '—'
+          let stam = -1
+          const trail = []
+          while (now() - t0 < 3.5 && Date.now() < dl) {
+            const pl = G.state().player
+            // 선행동작을 한 번 벗어난 뒤 **다시 선행동작이 시작되면** 새 동작입니다.
+            // 「쉬는 자세를 거쳤는가」로 보면 안 됩니다 — 콤보 이어치기는
+            // 쉬는 자세를 아예 거치지 않고 다음 타로 넘어갑니다.
+            if (pl.phase !== 0 || pl.state === states.idle) leftWindup = true
+            else if (leftWindup && pl.phase === 0) {
+              swungAgain = true
+              break
+            }
+            // 상태가 바뀔 때마다 자취를 남깁니다 — 「무엇을 하다가 버려졌나」를
+            // 짐작이 아니라 순서로 읽으려면 이게 있어야 합니다.
+            const tag = `${pl.state}/${pl.phase}/${pl.comboIndex}`
+            if (trail[trail.length - 1] !== tag) trail.push(tag)
+            if (G.runStats().inputExpiredAttack > e0) {
+              // 버려진 그 순간 **무엇을 하고 있었는지** 남깁니다. 원인을
+              // 짐작하지 않으려면 이게 있어야 합니다.
+              at = `${pl.state}/${pl.phase}`
+              stam = G.state().stamina ?? G.state().player.stamina
+              break
+            }
+            await sleep()
+          }
+          await untilIdle()
+          return {
+            expired: G.runStats().inputExpiredAttack - e0,
+            used: G.runStats().inputUsed - u0,
+            swungAgain,
+            at,
+            stam,
+            pressedAt,
+            trail,
+          }
+        }
+
+        const out = []
+        const weapons = G.weaponTable()
+        for (let w = 0; w < weapons.length; w++) {
+          out.push({ name: `${weapons[w].name} 평타`, r: await trial(w, 'Mouse0') })
+        }
+        out.push({ name: '강타', r: await trial(0, 'Mouse2') })
+        out.push({ name: '스킬 Q', r: await trial(0, 'KeyQ') })
+        G.freezeEnemies(false)
+        return out
+      },
+      [t.actorStates],
+    )
+
+    console.log('    [무엇 중에 눌렀나]   눌러 둔 것이     장부(만료/이어짐)')
+    for (const b of buf) {
+      const verdict = !b.r ? '못 잼' : b.r.swungAgain ? '나갔다' : b.r.expired > 0 ? '❌ 버려짐' : '결말 없음'
+      console.log(
+        `    ${b.name.padEnd(18)} ${verdict.padEnd(14)} ${b.r ? `${b.r.expired}/${b.r.used}` : '—'}` +
+          `      ${b.r ? `누를 때 ${b.r.pressedAt} → ${b.r.at} (기력 ${b.r.stam})` : ''}`,
+      )
+      if (b.r && b.r.expired > 0) console.log(`        자취(상태/구간/단): ${b.r.trail.join(' → ')}`)
+    }
+    console.log('')
+    const decided = buf.filter((b) => b.r && (b.r.expired > 0 || b.r.swungAgain))
+    check(
+      decided.length === buf.length,
+      '⌨️ 모든 동작에서 **결말이 났다** (안 난 것을 조용히 통과시키지 않게)',
+      `${decided.length}/${buf.length}`,
+    )
+    if (decided.length === buf.length) {
+      const eaten = decided.filter((b) => !b.r.swungAgain)
+      check(
+        eaten.length === 0,
+        '⌨️ **무거운 동작 뒤에 눌러 둔 공격이 살아남는다** (무거울수록 씹히면 안 됩니다)',
+        eaten.length ? `씹힘 — ${eaten.map((b) => b.name).join(' · ')}` : `${decided.length}개 모두 나감`,
+      )
+    }
+  }
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**

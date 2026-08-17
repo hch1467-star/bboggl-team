@@ -124,7 +124,9 @@ export function resetStaminaSpent(): void {
   rollAttacks = 0
   plungeAttacks = 0
   inputFlow.used = 0
-  inputFlow.expired = 0
+  inputFlow.expiredAttack = 0
+  inputFlow.expiredDodge = 0
+  inputFlow.expiredSkill = 0
   inputFlow.dropped = 0
   inputFlow.waitSum = 0
   inputFlow.cancels = 0
@@ -196,17 +198,49 @@ export function readRhythm(): {
  *
  * ⚠️ 봇이 아니라 **게임이** 셉니다. 누른 것과 나간 것은 다릅니다.
  */
-const inputFlow = { used: 0, expired: 0, dropped: 0, waitSum: 0, cancels: 0 }
+/**
+ * ── ⌨️ **버려진 입력을 종류별로 셉니다** ────────────────────────────────
+ *
+ * 예전에는 `expired` 한 칸이었고, 거기에 **스킬·공격·구르기 셋**이 전부
+ * 들어갔습니다. 벤치는 그 숫자를 찍으면서 *"크면 창(0.55초)이 짧다는
+ * 뜻"* 이라고 읽는 법까지 적어 뒀는데, **셋의 처방이 서로 다릅니다**:
+ *
+ *   · 스킬이 버려짐   → 쿨다운·집중이 이야기입니다. 창과 무관합니다.
+ *   · 구르기가 버려짐 → 스태미나 이야기입니다. 창을 늘리면 오히려
+ *                       "다 떨어졌는데 뒤늦게 구르는" 그림이 됩니다.
+ *   · 공격이 버려짐   → 이때만 **창 대 후딜**의 이야기입니다.
+ *
+ * 바로 이 파일이 무기 전환 만료를 이 칸에 안 넣으면서 그 이유를 적어
+ * 뒀습니다 — *"한 칸이 두 뜻을 가지면 구분이 안 됩니다."* 그래 놓고
+ * 나머지 셋은 한 칸에 담고 있었습니다. 이제 갈라 놓습니다.
+ */
+const inputFlow = {
+  used: 0,
+  expiredAttack: 0,
+  expiredDodge: 0,
+  expiredSkill: 0,
+  dropped: 0,
+  waitSum: 0,
+  cancels: 0,
+}
 export function readInputFlow(): {
   used: number
   expired: number
+  expiredAttack: number
+  expiredDodge: number
+  expiredSkill: number
   dropped: number
   waitAvg: number
   cancels: number
 } {
   return {
     used: inputFlow.used,
-    expired: inputFlow.expired,
+    // 합계는 **여기서 한 번만** 만듭니다. 읽는 쪽마다 더하면 어느 날
+    // 한 곳이 항목 하나를 빠뜨려도 아무도 모릅니다.
+    expired: inputFlow.expiredAttack + inputFlow.expiredDodge + inputFlow.expiredSkill,
+    expiredAttack: inputFlow.expiredAttack,
+    expiredDodge: inputFlow.expiredDodge,
+    expiredSkill: inputFlow.expiredSkill,
     dropped: inputFlow.dropped,
     waitAvg: inputFlow.used > 0 ? inputFlow.waitSum / inputFlow.used : 0,
     // 공격을 도중에 끊고 구른 횟수. `used` 안에 포함된 값이라 더하면 안 됩니다.
@@ -424,7 +458,37 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   else if (index === PLUNGE_COMBO) plungeAttacks++
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
-  // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
+  /**
+   * ── ⌨️ **눌러 둔 것이 여기서 일합니다 — 세는 곳도 여기 하나** ────────
+   *
+   * ── 장부가 가장 흔한 성공을 통째로 빠뜨리고 있었습니다 ──────────────
+   * `inputFlow.used` 는 원래 `takeBufferedAttack()` 에서만 올랐고, 그건
+   * **쉬는 자세 가지**에서만 불렸습니다. 그런데 선입력이 실제로 가장 많이
+   * 일하는 자리는 거기가 아니라 **콤보 이어치기**입니다 — 후딜에서
+   * `endAttack → beginAttack(next)` 로 곧바로 넘어가는 길이라 쉬는 자세를
+   * 아예 거치지 않습니다. 처형(`FINISH_COMBO`)도, 스킬 후딜에서 빠져나오는
+   * 길도 마찬가지였습니다.
+   *
+   * 그래서 벤치의 *"선입력 … 이어짐 N회 · 버려짐 26%"* 는 **성공을 거의
+   * 안 세고 있었습니다.** 저는 그 26% 를 보고 "선입력 창이 짧은가 보다"를
+   * 이번 회차의 출발점으로 삼았는데, **분자가 비어 있어서 커 보였을 뿐**
+   * 이었습니다. 값을 손대기 전에 계기를 본 것이 다행이었습니다.
+   *
+   * ⚠️ 그래서 이 커밋 **이전의 선입력 숫자는 지금 것과 비교하면 안 됩니다.**
+   *
+   * ── 왜 하필 여기인가 ────────────────────────────────────────────
+   * 버퍼가 "쓰였다"는 것은 곧 **공격이 시작됐다**는 뜻이고, 공격이 시작되는
+   * 곳은 이 함수 하나입니다. 부르는 쪽마다 세면 길이 하나 늘 때마다 또
+   * 빠뜨립니다 — 실제로 그렇게 빠뜨렸습니다.
+   *
+   * 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로
+   * 빠질 수 있게).
+   */
+  if (Actor.bufferedAttack[p] === 1) {
+    inputFlow.used++
+    // 기다린 시간은 남은 창에서 거꾸로 나옵니다(`창 − 남은 시간`).
+    inputFlow.waitSum += BUFFER_TIME - Actor.bufferedAttackT[p]
+  }
   Actor.bufferedAttack[p] = 0
   Actor.bufferedAttackT[p] = 0
   spendStamina(p, c.staminaCost, '공격')
@@ -843,6 +907,42 @@ export function playerControlSystem(ctx: ControlContext): void {
     if (Actor.state[p] === ActorState.Dead) continue
 
     /**
+     * ── ⌨️ **손이 묶여 있는 동안에는 창이 흐르지 않습니다** ──────────────
+     *
+     * ── 여기 있던 구멍 ──────────────────────────────────────────────
+     * 선입력 창은 0.55초 고정이고, **동작 중에도 계속 줄어듭니다.** 그런데
+     * 실제 후딜은 그보다 긴 것이 있습니다:
+     *
+     *     강타 1.12초 · 처형 · 낙하 공격
+     *
+     * 그러면 강타를 내고 곧바로 누른 다음 공격이 **후딜이 끝나기도 전에
+     * 만료됩니다.** 플레이어에게는 "무거운 무기는 자꾸 씹힌다"로 옵니다.
+     * `npm run feel` 이 실제로 그렇게 찍었습니다 — 버려진 순간의 상태가
+     * 셋 다 `공격/후딜` 이었습니다.
+     *
+     * ── 창을 늘리지 않고 **멈춥니다** ────────────────────────────────
+     * 창을 1.2초로 늘리는 길도 있었지만, 이 파일이 만료를 둔 이유가 바로
+     * *"2초 전에 누른 것이 뜬금없이 튀어나오면 안 된다"* 입니다. 창을
+     * 늘리면 그 위험이 **모든 상황에서** 커집니다.
+     *
+     * 위험이 실제로 있는 구간은 **손이 빈 뒤**입니다 — 낼 수 있는데 안 내고
+     * 있다가 뒤늦게 나가는 것. 반대로 **내가 고른 동작이 끝나기를 기다리는
+     * 동안**은, 눌러 둔 것이 살아 있는 것이 정확히 플레이어의 뜻입니다.
+     * 그래서 창은 손이 빈 다음부터 흐릅니다. (세키로의 인살 뒤, 오공의
+     * 봉세 한 방 뒤에 눌러 둔 입력이 동작이 끝나는 순간 나가는 것과 같은
+     * 계약입니다.)
+     *
+     * ⚠️ **경직은 여기 없습니다.** 맞아서 못 움직이는 것은 "내가 고른 동작"이
+     *    아닙니다 — 그건 combat.ts 가 이미 버퍼를 비웁니다. 둘을 같이 묶으면
+     *    한 대 맞고 일어나면서 안 누른 칼이 나갑니다.
+     */
+    const handsBusy =
+      Actor.state[p] === ActorState.Attack ||
+      Actor.state[p] === ActorState.Skill ||
+      Actor.state[p] === ActorState.Dodge
+    const bufferDt = handsBusy ? 0 : dt
+
+    /**
      * ---- 스킬 선입력 버퍼 ----
      *
      * 플레이 테스트: **"스킬이 한 번씩밖에 사용이 안 되네."**
@@ -862,10 +962,10 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedSkill[p] = skillPressed + 1
       Actor.bufferedSkillT[p] = BUFFER_TIME
     } else if (Actor.bufferedSkillT[p] > 0) {
-      Actor.bufferedSkillT[p] = Math.max(0, Actor.bufferedSkillT[p] - dt)
+      Actor.bufferedSkillT[p] = Math.max(0, Actor.bufferedSkillT[p] - bufferDt)
       if (Actor.bufferedSkillT[p] === 0) {
         Actor.bufferedSkill[p] = 0
-        inputFlow.expired++
+        inputFlow.expiredSkill++
       }
     }
     /**
@@ -889,7 +989,7 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedWeapon[p] = weaponPressed + 1
       Actor.bufferedWeaponT[p] = BUFFER_TIME
     } else if (Actor.bufferedWeaponT[p] > 0) {
-      Actor.bufferedWeaponT[p] = Math.max(0, Actor.bufferedWeaponT[p] - dt)
+      Actor.bufferedWeaponT[p] = Math.max(0, Actor.bufferedWeaponT[p] - bufferDt)
       /**
        * ⚠️ 만료를 `inputFlow.expired` 에 **안 더합니다.**
        *
@@ -914,20 +1014,20 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedAttack[p] = 1
       Actor.bufferedAttackT[p] = BUFFER_TIME
     } else if (Actor.bufferedAttackT[p] > 0) {
-      Actor.bufferedAttackT[p] = Math.max(0, Actor.bufferedAttackT[p] - dt)
+      Actor.bufferedAttackT[p] = Math.max(0, Actor.bufferedAttackT[p] - bufferDt)
       if (Actor.bufferedAttackT[p] === 0) {
         Actor.bufferedAttack[p] = 0
-        inputFlow.expired++
+        inputFlow.expiredAttack++
       }
     }
     if (dodgePressed) {
       Actor.bufferedDodge[p] = 1
       Actor.bufferedDodgeT[p] = BUFFER_TIME
     } else if (Actor.bufferedDodgeT[p] > 0) {
-      Actor.bufferedDodgeT[p] = Math.max(0, Actor.bufferedDodgeT[p] - dt)
+      Actor.bufferedDodgeT[p] = Math.max(0, Actor.bufferedDodgeT[p] - bufferDt)
       if (Actor.bufferedDodgeT[p] === 0) {
         Actor.bufferedDodge[p] = 0
-        inputFlow.expired++
+        inputFlow.expiredDodge++
       }
     }
 
@@ -1111,14 +1211,6 @@ export function playerControlSystem(ctx: ControlContext): void {
       Actor.bufferedDodgeT[p] = 0
       return true
     }
-    const takeBufferedAttack = (): boolean => {
-      if (Actor.bufferedAttack[p] !== 1) return false
-      inputFlow.used++
-      inputFlow.waitSum += BUFFER_TIME - Actor.bufferedAttackT[p]
-      Actor.bufferedAttack[p] = 0
-      Actor.bufferedAttackT[p] = 0
-      return true
-    }
 
     /** 지금 이 자리에서 구르면 어디로 구를지. 이동 입력이 없으면 등 뒤로. */
     const dodgeDir = (): [number, number] =>
@@ -1258,12 +1350,11 @@ export function playerControlSystem(ctx: ControlContext): void {
            */
           const fin = finisherTarget(p)
           if (fin >= 0 && canAffordAttack(p, FINISHER.staminaCost)) {
-            takeBufferedAttack()
+            // 버퍼를 여기서 꺼내지 않습니다 — `beginAttack` 이 쓰고 셉니다.
             beginAttack(p, FINISH_COMBO, aimRot)
             break
           }
           if (canAffordAttack(p, weapon.combo[0].staminaCost)) {
-            takeBufferedAttack()
             // ⚔️ 상황이 모션을 고릅니다 — 판단은 `contextComboIndex` 한 곳에만.
             beginAttack(p, contextComboIndex(p, isSprinting(p)), aimRot)
             break
@@ -1758,15 +1849,37 @@ function endAttack(p: number, aimRot: number): void {
   if (Actor.comboIndex[p] === PLUNGE_COMBO) {
     Actor.state[p] = ActorState.Idle
     Actor.comboIndex[p] = 0
-    Actor.bufferedAttack[p] = 0
+    // ⌨️ **눌러 둔 것은 남깁니다** — 아래 「마무리」 주석 참고.
     Actor.comboWindowT[p] = 0
     return
   }
-  // 강타와 처형은 **마무리**입니다. 뒤로 콤보가 이어지면 그 한 방의 무게가 사라집니다.
+  /**
+   * ── 강타·처형은 **마무리**입니다 — 뒤로 콤보가 이어지면 안 됩니다 ────
+   *
+   * 그래서 `comboIndex` 를 0 으로 되돌립니다. 다음 공격은 **이어치기가
+   * 아니라 새 1타**가 되고, 한 방의 무게가 지켜집니다.
+   *
+   * ── ⌨️ 그런데 **눌러 둔 것까지 버리고 있었습니다** ────────────────
+   * `bufferedAttack` 을 여기서 지웠습니다. "콤보를 안 잇는다"와 "눌러 둔
+   * 입력을 없앤다"는 **다른 이야기인데** 한 줄로 붙어 있었습니다.
+   *
+   * 결과: 강타나 처형을 낸 직후에 누른 다음 공격이 **조용히 사라집니다.**
+   * 강타 후딜은 1.12초라 그 사이에 누르는 것이 자연스러운데, 그게 전부
+   * 씹혔습니다. `npm run feel` 이 이걸 잡았습니다 — 「무거운 동작 뒤에
+   * 눌러 둔 공격이 살아남는가」에서 강타와 처형만 빨갛게 떴습니다.
+   *
+   * 바로 아래 「콤보가 바닥나는 자리」 분기에 **이미 같은 결론이 적혀**
+   * 있습니다: *"눌러 둔 것이 버려지면 정확히 그 순간 한 박자가 비어,
+   * 다시 시작하려면 착지를 보고 다시 눌러야 합니다."* 같은 규칙이 세
+   * 갈래에만 적용되고 이쪽 세 갈래에는 안 닿아 있었습니다.
+   *
+   * 참고 게임도 전부 같습니다 — 세키로의 인살 뒤에도, 오공의 봉세 한 방
+   * 뒤에도, 눌러 둔 다음 입력은 동작이 끝나는 순간 나갑니다. 마무리의
+   * 무게는 **콤보를 안 잇는 것**으로 지키지, 손을 씹어서 지키지 않습니다.
+   */
   if (Actor.comboIndex[p] === HEAVY_COMBO || Actor.comboIndex[p] === FINISH_COMBO) {
     Actor.state[p] = ActorState.Idle
     Actor.comboIndex[p] = 0
-    Actor.bufferedAttack[p] = 0
     Actor.comboWindowT[p] = 0
     Player.focusSpent[p] = 0
     return

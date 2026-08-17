@@ -3987,6 +3987,14 @@ class Game {
     /** 이어짐 눈금 — 선입력이 실제로 일했는가 (playerControl.ts readInputFlow) */
     inputUsed: number
     inputExpired: number
+    /**
+     * 버려진 선입력을 **종류별로** 나눈 값. 셋의 처방이 서로 다르기
+     * 때문입니다 — 근거는 playerControl.ts `inputFlow` 에 적어 뒀습니다.
+     * 합계(`inputExpired`)는 게임이 한 곳에서 만들어 줍니다.
+     */
+    inputExpiredAttack: number
+    inputExpiredDodge: number
+    inputExpiredSkill: number
     inputDropped: number
     inputWaitAvg: number
     /** 공격/스킬을 끊고 구른 횟수. inputUsed 안에 **포함**된 값입니다. */
@@ -4037,6 +4045,9 @@ class Game {
       plungeAttacks: readRhythm().plungeAttacks,
       inputUsed: readInputFlow().used,
       inputExpired: readInputFlow().expired,
+      inputExpiredAttack: readInputFlow().expiredAttack,
+      inputExpiredDodge: readInputFlow().expiredDodge,
+      inputExpiredSkill: readInputFlow().expiredSkill,
       inputDropped: readInputFlow().dropped,
       inputWaitAvg: Number(readInputFlow().waitAvg.toFixed(3)),
       inputCancels: readInputFlow().cancels,
@@ -5697,6 +5708,9 @@ declare global {
         lightSwings: number
         inputUsed: number
         inputExpired: number
+        inputExpiredAttack: number
+        inputExpiredDodge: number
+        inputExpiredSkill: number
         inputDropped: number
         inputWaitAvg: number
         inputCancels: number
