@@ -204,6 +204,61 @@ try {
   }
 
   /**
+   * ── 🗺 **동선에서 구역까지** — 보물이 아니라 **장소**를 잽니다 ────────
+   *
+   * 지금까지 이 프로브는 **보물까지의 거리**만 쟀습니다. 그런데 벤치가
+   * 매번 이렇게 찍고 있었습니다:
+   *
+   *     북쪽 단상   머문 14초 · 처치 2마리 **(1/3판)**
+   *     성벽마루    머문 15초 · 처치 2마리 **(1/3판)**
+   *
+   * 세 판 중 한 판만 갑니다. 그게 **안 가는 것**인지 **못 가는 것**인지
+   * 아무도 몰랐습니다 — 둘은 고칠 곳이 완전히 다릅니다(유인 vs 배치).
+   *
+   * 그리고 문제가 보물 하나가 아니라 **구역 하나**일 수 있습니다. 보물만
+   * 재면 "저 보물이 멀다"까지만 보이고, 정작 *"저 장소 전체가 예산 밖이라
+   * 사다리도 적도 같이 못 쓰인다"* 는 안 보입니다. 실제로 그 깊은 북쪽에는
+   * 지름길 사다리와 적 셋이 함께 있습니다.
+   *
+   * 그래서 구역마다 **동선에서 걸어야 하는 거리**를 잽니다. 길찾기는
+   * 게임이 합니다(`distancesToward`) — 프로브가 지형을 다시 판정하면
+   * 그 판정이 두 곳에 살게 됩니다.
+   *
+   * ⚠️ 아직 **검사가 아니라 눈금**입니다. "구역이 예산 안에 있어야 한다"는
+   *    아직 이 저장소가 정한 규칙이 아닙니다(예산은 보물을 두고 정했습니다).
+   *    문턱을 여기서 지어내면 그건 측정이 아니라 제 취향입니다. 먼저
+   *    보이게 두고, 규칙이 정해지면 검사로 올립니다.
+   */
+  {
+    const regions = await page.evaluate(() => window.__game.regionList())
+    const rows = []
+    for (const r of regions) {
+      const d = await page.evaluate(
+        ([x, z, pts]) => window.__game.distancesToward(x, z, pts),
+        [r.x, r.z, trail.map((p) => ({ x: p.x, z: p.z }))],
+      )
+      const reach = (d?.points ?? []).filter((v) => Number.isFinite(v))
+      rows.push({ name: r.name, walk: reach.length ? Math.min(...reach) : Infinity })
+    }
+    rows.sort((a, b) => b.walk - a.walk)
+    console.log(`\n  🗺 동선에서 구역까지 — **걸어야 하는 거리** (곁길 예산 ${DETOUR_BUDGET}m)`)
+    for (const r of rows) {
+      const far = !Number.isFinite(r.walk) || r.walk > DETOUR_BUDGET
+      console.log(
+        `    ${far ? '⚠️' : '  '} ${r.name.padEnd(9)} ${
+          Number.isFinite(r.walk) ? `${r.walk.toFixed(0)}m` : '닿을 수 없음'
+        }${far ? '  ← 예산 밖' : ''}`,
+      )
+    }
+    const over = rows.filter((r) => !Number.isFinite(r.walk) || r.walk > DETOUR_BUDGET)
+    console.log(
+      `    → 예산 밖 구역 ${over.length}/${rows.length}곳` +
+        (over.length ? ` — ${over.map((r) => r.name).join(' · ')}` : ''),
+    )
+    console.log('')
+  }
+
+  /**
    * 보물에서 동선까지 — **두 가지로** 잽니다.
    *
    * ── 직선거리로만 재다가 네 번째로 데였습니다 ────────────────────
