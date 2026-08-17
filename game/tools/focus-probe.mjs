@@ -134,9 +134,22 @@ try {
   const timedRoll = await page.evaluate(async () => {
     const G = window.__game
     const e = await window.__t.dummy(1.8)
+    /**
+     * ⚠️ **횟수를 세지 말고 될 때까지 시도합니다.**
+     *
+     * 예전엔 `dodges < 2` 로 두 번만 시도하고 끝냈습니다. 완벽 회피는
+     * 타이밍이라 이 기계(GPU 없음, 프레임 흔들림)에서는 두 번으로 안 찹니다 —
+     * `2번 시도 · 0점` 으로 빨갛게 떴습니다. 그런데 바로 아래 2b 는 **같은
+     * 설정**인데 통과합니다. 차이는 하나뿐이었습니다: 2b 는 창이 열릴
+     * 때까지 **계속** 시도합니다.
+     *
+     * 즉 게임이 아니라 **표본이 모자랐습니다.** 재려는 것은 *"두 번 만에
+     * 되는가"* 가 아니라 *"무적으로 넘기면 집중이 쌓이는가"* 입니다.
+     * 안 차면 그 사실이 그대로 빨갛게 나오도록, 시도 횟수도 함께 냅니다.
+     */
     let dodges = 0
     const until = G.state().elapsed + 20
-    while (G.state().elapsed < until && dodges < 2) {
+    while (G.state().elapsed < until && G.focusInfo().focus <= 0) {
       const info = G.enemyInfo(e)
       if (!info) break
       /**

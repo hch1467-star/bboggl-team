@@ -22,6 +22,18 @@ import path from 'node:path'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 4205
+
+/**
+ * 합격선 뼈대 — 이 프로브에는 원래 `check(` 가 **한 줄도 없었습니다.**
+ * 표만 그리는 도구는 회귀를 못 잡습니다(자세한 근거는 아래 🎯 블록에).
+ */
+let pass = 0
+let fail = 0
+function check(ok, label, detail = '') {
+  if (ok) pass++
+  else fail++
+  console.log(`  ${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /** 적을 놓을 거리(m)와 커서를 빗겨 놓을 각도(도) */
@@ -108,6 +120,23 @@ try {
     return { rate: hits / tries, rot: rotN ? (rotSum / rotN) * (180 / Math.PI) : NaN }
   }
 
+  /**
+   * ── 🎯 **관찰 도구를 검사로 만듭니다** ────────────────────────────
+   *
+   * 이 프로브에는 `check(` 가 **한 줄도 없었습니다.** 표를 예쁘게 그리지만
+   * 무엇이 깨져도 **초록도 빨강도 아닙니다** — 회귀를 못 잡는다는 뜻입니다.
+   * 전 계기를 한꺼번에 돌려 보다가 이 파일만 합격선을 안 찍는 것을 봤습니다.
+   *
+   * 재야 할 약속은 이미 있습니다. 소프트 락온(과제 #22)이 존재하는 이유가
+   * *"쿼터뷰에서 커서가 조금 빗나가도 붙어 있는 적은 맞는다"* 이고,
+   * 그게 안 되면 논타겟 조준은 **손맛이 아니라 벌**이 됩니다.
+   *
+   * ⚠️ 문턱을 여기 적지 않습니다 — 표에 이미 있는 값(사거리 안쪽 거리 ·
+   *    작은 각도)만 씁니다. 그리고 **양쪽을 다** 봅니다: 작은 빗나감은
+   *    맞아야 하고, 큰 빗나감은 **맞으면 안 됩니다**(다 맞으면 그건 보정이
+   *    아니라 자동조준이고, 겨눌 이유가 사라집니다).
+   */
+  const grid = {}
   for (const [key, label] of [
     ['Digit1', '롱소드 (사거리 2.3m / 110°)'],
     ['Digit3', '쌍단검 (사거리 1.9m /  95°)'],
@@ -119,6 +148,7 @@ try {
       const rots = []
       for (const a of ANGLES) {
         const c = await cell(key, d, a)
+        grid[`${key}|${d}|${a}`] = c.rate
         row.push(c.rate === 1 ? '   O' : c.rate === 0 ? '   .' : `  ${Math.round(c.rate * 3)}/3`)
         rots.push(Number.isNaN(c.rot) ? '  -' : String(Math.round(c.rot)).padStart(4))
       }
@@ -128,6 +158,34 @@ try {
     }
   }
   console.log('\n  O = 명중,  . = 빗나감   (가로축 = 커서가 적에서 빗나간 각도)')
+
+  console.log('')
+  {
+    const near = DISTANCES.filter((d) => d <= 2.0)
+    const small = ANGLES.filter((a) => Math.abs(a) <= 15)
+    const wide = ANGLES.filter((a) => Math.abs(a) >= 45)
+    const at = (k, d, a) => grid[`${k}|${d}|${a}`]
+    const cells = (ds, as) =>
+      ['Digit1', 'Digit3'].flatMap((k) => ds.flatMap((d) => as.map((a) => at(k, d, a))))
+    const smallCells = cells(near, small).filter((v) => v !== undefined)
+    const wideCells = cells(near, wide).filter((v) => v !== undefined)
+    check(
+      smallCells.length >= 4 && wideCells.length >= 2,
+      '🎯 붙은 거리에서 작은/큰 빗나감을 **둘 다** 봤다 (비교의 게이트)',
+      `가까운 거리 ${near.join('·')}m · 작은 각 ${small.join('·')}° ${smallCells.length}칸` +
+        ` · 큰 각 ${wide.join('·')}° ${wideCells.length}칸`,
+    )
+    check(
+      smallCells.length > 0 && smallCells.every((v) => v === 1),
+      '🎯 **커서가 조금 빗나가도 붙은 적은 맞는다** (소프트 락온이 일한다)',
+      `${smallCells.filter((v) => v === 1).length}/${smallCells.length}칸 명중`,
+    )
+    check(
+      wideCells.length > 0 && wideCells.some((v) => v < 1),
+      '🎯 **크게 빗나가면 빗나간다** (보정이지 자동조준이 아니다 — 겨눌 이유가 남는다)',
+      `${wideCells.filter((v) => v < 1).length}/${wideCells.length}칸이 빗나감`,
+    )
+  }
 } catch (err) {
   /**
    * 💥 **도중에 죽으면 반드시 소리를 냅니다.**
@@ -153,3 +211,6 @@ try {
   await browser.close()
   await server.close()
 }
+
+console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
+if (fail > 0) process.exitCode = 1
