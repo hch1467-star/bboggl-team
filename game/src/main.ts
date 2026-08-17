@@ -328,6 +328,8 @@ class Game {
       intent: number
       start: number
       seen: number
+      /** 몸이 아니라 **지면 예고 부채꼴**이 화면 안이던 시간 */
+      cueSeen: number
       free: number
       /** 손이 묶여 있던 **이유별** 시간. 처방이 갈리므로 칸을 나눕니다. */
       blocked: Record<string, number>
@@ -378,14 +380,22 @@ class Game {
     intent: number
     /** 실제로 보여준 예고 시간(초) */
     telegraph: number
-    /** 그중 때린 쪽이 **화면 안에** 있던 시간 */
+    /** 그중 때린 쪽의 **몸이** 화면 안에 있던 시간 */
     seen: number
+    /**
+     * 그중 **지면 예고 부채꼴**이 화면에 걸쳐 있던 시간.
+     *
+     * `seen` 과 나누는 이유는 `cueOnScreen` 주석에 있습니다 — 몸이 화면
+     * 밖이어도 위험 표시는 내 발치에 보일 수 있고, 그 둘은 고칠 곳이
+     * 정반대입니다(게임이냐 계측기냐).
+     */
+    cueSeen: number
     /** 그중 플레이어가 **답할 수 있던**(구르기를 시작할 수 있던) 시간 */
     free: number
     damage: number
     /**
      * fair:안누름 · fair:다른적 · fair:일찍 · fair:늦게 · fair:못막는공격 ·
-     * unseen · locked:* · tooFast · unknown
+     * unseen:아무것도 · unseen:몸만 · locked:* · tooFast · unknown
      */
     verdict: string
     /** 구르기를 시작한 지 얼마 만에 맞았는가(초). -1 = 안 굴렀음. */
@@ -1398,6 +1408,7 @@ class Game {
           intent: -1,
           telegraph: 0,
           seen: 0,
+          cueSeen: 0,
           free: 0,
           damage: dmg,
           verdict: 'fall',
@@ -2859,6 +2870,7 @@ class Game {
           intent: attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent,
           start: time.simElapsed,
           seen: 0,
+          cueSeen: 0,
           free: 0,
           blocked: {},
           lastTryT: -1,
@@ -2872,6 +2884,11 @@ class Game {
         this.hurtWatch.set(e, rec)
       }
       if (this.onScreen(e)) rec.seen += dt
+      /**
+       * 🖥 **몸 말고 지면 예고도 따로 셉니다.** 근거는 `cueOnScreen` 주석.
+       * 둘을 한 칸에 담으면 "고칠 곳이 게임인가 계측기인가"가 안 갈립니다.
+       */
+      if (this.cueOnScreen(e)) rec.cueSeen += dt
       const why = this.answerBlock(p)
       if (why === '') rec.free += dt
       else rec.blocked[why] = (rec.blocked[why] ?? 0) + dt
@@ -2916,6 +2933,52 @@ class Game {
     // 죽거나 사라진 적의 기록은 버립니다 — 엔티티 번호는 재사용됩니다.
     for (const e of [...this.hurtWatch.keys()]) if (!live.has(e)) this.hurtWatch.delete(e)
     this.windingLast = windingNow
+  }
+
+  /**
+   * ── 🖥 그 적의 **지면 예고 부채꼴**이 화면에 걸쳐 있는가 ───────────
+   *
+   * `onScreen` 은 **몸**을 봅니다. 그런데 이 게임에서 위험을 말하는 것은
+   * 몸이 아니라 지면에 뜨는 부채꼴입니다(render/visuals.ts). 부채꼴은
+   * 적에게서 **플레이어 쪽으로** 뻗으므로, 적이 화면 밖이어도 그 표시는
+   * 내 발치에 걸쳐 있을 수 있습니다.
+   *
+   * 이 구분이 왜 필요한가. 화면은 세로 22m(±11m)인데 사거리 12m 짜리
+   * 공격이 둘 있습니다(🏹 궁수 · 🟣 끄는 자). 화면 세로 방향에서 오면
+   * 그 몸은 **원리적으로** 화면 밖입니다. 그걸 전부 *"못 봤다"* 로 적으면
+   * 두 가지가 한 칸에 뭉칩니다:
+   *
+   *   · 몸도 표시도 안 보였다 → 정말 못 봤습니다. **게임을 고칠 일.**
+   *   · 몸은 안 보였지만 표시는 보였다 → 알 수 있었습니다. **계측기를 고칠 일.**
+   *
+   * 처방이 정반대인 둘을 한 칸에 담아 두면, 이 저장소에서 늘 그랬듯이
+   * 엉뚱한 쪽을 고치러 갑니다.
+   *
+   * 윤곽을 **여러 점**으로 뜹니다. 한 점(부채꼴 중심 같은)만 보면 그 점이
+   * 하필 화면 밖일 때 "안 보인다"고 답하는데, 실제로는 나머지가 다
+   * 보이는 경우가 있습니다. 점 하나라도 화면 안이면 표시는 보인 것입니다.
+   */
+  private readonly cueProbe = new THREE.Vector3()
+  private cueOnScreen(e: number): boolean {
+    const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
+    const R = telegraphRadius(def)
+    const half = (def.arcDeg * Math.PI) / 360
+    const face = Transform.rotY[e]
+    const y = Transform.y[e] + 0.04
+    for (const s of [-1, 0, 1]) {
+      const a = face + s * half
+      for (const t of [0.25, 0.5, 0.75, 1]) {
+        const v = this.cueProbe
+          .set(
+            Transform.x[e] + Math.sin(a) * R * t,
+            y,
+            Transform.z[e] + Math.cos(a) * R * t,
+          )
+          .project(this.cam.camera)
+        if (Number.isFinite(v.x) && v.z <= 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1) return true
+      }
+    }
+    return false
   }
 
   /** 그 적이 지금 화면 안에 있는가 (몸 가운데 높이 기준). */
@@ -2972,6 +3035,7 @@ class Game {
         intent: -1,
         telegraph: 0,
         seen: 0,
+        cueSeen: 0,
         free: 0,
         damage,
         verdict: 'unknown',
@@ -3049,7 +3113,23 @@ class Game {
       telegraph < budget
         ? 'tooFast'
         : rec.seen < budget
-          ? 'unseen'
+          ? /**
+             * ── 🖥 **못 본 한 대를 둘로 가릅니다** ──────────────────────
+             *
+             *   · `unseen:아무것도` — 몸도 지면 예고도 화면 밖이었습니다.
+             *     플레이어에게 아무 신호도 안 갔습니다. **게임을 고칠 일.**
+             *   · `unseen:몸만`     — 몸은 화면 밖이었지만 지면 예고는
+             *     발치에 걸쳐 있었습니다. 색도 방향도 보였으니 알 수는
+             *     있었습니다. **여기는 `unseen` 이 부풀어 있던 것.**
+             *
+             * 이 게임은 세로 22m 화면에 사거리 12m 공격을 둘 갖고 있어서
+             * (🏹 궁수 · 🟣 끄는 자) 뒤엣것이 **원리적으로 자주** 생깁니다.
+             * 둘을 한 칸에 담아 두면 "화면 밖에서 왔다" 를 보고 사거리를
+             * 깎으러 가는데, 정작 표시는 보이고 있었을 수 있습니다.
+             */
+            rec.cueSeen < budget
+            ? 'unseen:아무것도'
+            : 'unseen:몸만'
           : rec.free < budget
             ? `locked:${worst ? worst[0] : '?'}`
             : missed
@@ -3068,6 +3148,7 @@ class Game {
       intent: rec.intent,
       telegraph: Number(telegraph.toFixed(3)),
       seen: Number(rec.seen.toFixed(3)),
+      cueSeen: Number(rec.cueSeen.toFixed(3)),
       free: Number(rec.free.toFixed(3)),
       damage,
       verdict,
@@ -3223,8 +3304,10 @@ class Game {
               ? `방금 굴러서 아직 구를 수 없었다`
               : last.verdict === 'locked:drink'
                 ? `성수병을 마시는 중이었다`
-                : last.verdict === 'unseen'
-                  ? `화면 밖에서 왔다`
+                : last.verdict === 'unseen:아무것도'
+                  ? `몸도 예고도 화면 밖이었다`
+                  : last.verdict === 'unseen:몸만'
+                  ? `몸은 화면 밖이었다 (예고는 발치에 보였다)`
                   : last.verdict === 'tooFast'
                     ? `예고가 ${tel}초뿐이었다`
                     : '원인을 기록하지 못했다'
@@ -3936,6 +4019,64 @@ class Game {
       }
     }
     return best
+  }
+
+  /**
+   * ── 🖥 **예고가 화면 안에 있었는가** — 몸과 위험 표시를 나눠서 ────────
+   *
+   * 피격 장부는 `unseen`("화면 밖에서 왔다")을 **적의 몸**으로 판정합니다.
+   * 그런데 이 게임에서 위험을 말하는 것은 몸이 아니라 **지면의 예고
+   * 부채꼴**입니다. 부채꼴은 적에게서 플레이어 쪽으로 뻗으므로, 적이
+   * 화면 밖이어도 **내 발치에 걸쳐 있을 수 있습니다.**
+   *
+   * 이 구분이 없으면 처방이 갈립니다:
+   *
+   *   · 몸도 표시도 안 보였다 → 정말로 못 봤습니다. **고칠 것은 게임**
+   *     (화면 밖 위협 표시를 넣거나, 그 사거리를 줄이거나).
+   *   · 몸은 안 보였지만 표시는 보였다 → 플레이어는 알 수 있었습니다.
+   *     **고칠 것은 계측기** — `unseen` 이 부풀어 있는 것입니다.
+   *
+   * 두 경우 모두 고칠 곳이 있고 서로 반대인데, 지금 장부는 둘을 한 칸에
+   * 담고 있습니다. 이 저장소에서 그런 칸은 늘 엉뚱한 곳을 고치게 했습니다.
+   *
+   * 세로 22m 화면(±11m)에 사거리 12m 짜리 공격이 둘 있습니다(🏹 궁수 ·
+   * 🟣 끄는 자). 화면 세로 방향이면 몸은 **원리적으로** 화면 밖입니다.
+   * 그러니 이 질문은 가정이 아니라 이미 벌어지고 있는 일입니다.
+   *
+   * `cueSeen` 은 부채꼴 윤곽을 여러 점으로 떠서 **그중 몇이 화면 안인지**
+   * 봅니다. 한 점(예: 부채꼴 중심)만 보면 그 점이 하필 화면 밖일 때
+   * "안 보인다"고 답하는데, 실제로는 나머지가 다 보이는 경우가 있습니다.
+   */
+  debugTelegraphView(): Array<{
+    entity: number
+    kind: number
+    id: string
+    intent: number
+    dist: number
+    bodySeen: boolean
+    cueSeen: boolean
+  }> {
+    const p = this.playerEntity
+    const out: ReturnType<Game['debugTelegraphView']> = []
+    const ids = enemyQuery.run()
+    for (let i = 0; i < enemyQuery.count; i++) {
+      const e = ids[i]
+      if (!isAlive(e) || Actor.state[e] !== ActorState.Attack) continue
+      if (Actor.phase[e] !== AttackPhase.Windup) continue
+      const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
+      out.push({
+        entity: e,
+        kind: Enemy.kind[e],
+        id: def.id,
+        intent: def.intent,
+        dist: Number(
+          Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p]).toFixed(2),
+        ),
+        bodySeen: this.onScreen(e),
+        cueSeen: this.cueOnScreen(e),
+      })
+    }
+    return out
   }
 
   debugCameraAxes(): { forwardX: number; forwardZ: number; rightX: number; rightZ: number } {
@@ -5091,6 +5232,16 @@ declare global {
       }[]
       slotCooldowns: () => { slot: number; key: string; cd: number; empty: boolean }[]
       cameraAxes: () => { forwardX: number; forwardZ: number; rightX: number; rightZ: number }
+      /** 🖥 지금 예고 중인 적마다 **몸**과 **지면 예고**가 화면 안인지 따로. */
+      telegraphView: () => {
+        entity: number
+        kind: number
+        id: string
+        intent: number
+        dist: number
+        bodySeen: boolean
+        cueSeen: boolean
+      }[]
       /** 지금 목표 지점(길안내와 **같은 계산**). 없으면 null. */
       objective: () => {
         x: number
@@ -5873,6 +6024,7 @@ window.__game = {
   heartbeatInfo: () => ({ ...sfx.debugHeartbeat(), warn: PLAYER_CFG.lowHpWarn }),
   slotCooldowns: () => game.debugSlotCooldowns(),
   cameraAxes: () => game.debugCameraAxes(),
+  telegraphView: () => game.debugTelegraphView(),
   objective: () => game.debugObjective(),
   bossEncounter: () => game.debugBossEncounter(),
   emberInfo: () => game.debugEmberInfo(),

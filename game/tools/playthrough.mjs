@@ -3186,7 +3186,9 @@ try {
         return t
       })(),
       hurt: (() => {
-        const t = { fair: 0, unseen: 0, tooFast: 0, unknown: 0 }
+        // 씨앗을 실제 판정 이름과 **같게** 둡니다. `unseen` 하나로 두었더니
+        // 판정이 둘로 갈린 뒤에도 늘 0 을 찍어, 없는 것처럼 보였습니다.
+        const t = { fair: 0, 'unseen:아무것도': 0, 'unseen:몸만': 0, tooFast: 0, unknown: 0 }
         // 'locked:stamina' 처럼 **이유가 붙어** 옵니다. 앞머리로 뭉치지 않고
         // 그대로 셉니다 — 뭉치면 어디를 고칠지 다시 알 수 없어집니다.
         for (const r of G.hurtLedger()) t[r.verdict] = (t[r.verdict] ?? 0) + 1
@@ -3458,7 +3460,7 @@ try {
     const fairTotal = fairs.reduce((a, [, v]) => a + v, 0) + (h.fair ?? 0)
     console.log(
       `  맞은 이유   ${total}대 · 못 피함 ${fairTotal}(${pct(fairTotal)}%)` +
-        ` · 못 봄 ${h.unseen ?? 0} · 예고가 짧음 ${h.tooFast ?? 0} · 출처불명 ${h.unknown ?? 0}`,
+        ` · 아무것도 못 봄 ${h['unseen:아무것도'] ?? 0} · 몸만 못 봄 ${h['unseen:몸만'] ?? 0} · 예고가 짧음 ${h.tooFast ?? 0} · 출처불명 ${h.unknown ?? 0}`,
     )
     console.log(
       `              그중 — ${fairs.length ? fairs.map(([k, v]) => `${k.slice(5)} ${v}`).join(' · ') : '갈라진 기록 없음'}`,

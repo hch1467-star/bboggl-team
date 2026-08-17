@@ -341,7 +341,9 @@ console.log(
     .join(' · ')
   console.log(
     `  맞은 이유      ${total}대(전 판 합) · 못 피함 ${fairTotal}(${pct(fairTotal)}%)` +
-      ` · 못 봄 ${sum('unseen')} · 예고가 짧음 ${sum('tooFast')} · 출처불명 ${sum('unknown')}`,
+      ` · 아무것도 못 봄 ${sum('unseen:아무것도')}` +
+      ` · 몸만 못 봄 ${sum('unseen:몸만')}` +
+      ` · 예고가 짧음 ${sum('tooFast')} · 출처불명 ${sum('unknown')}`,
   )
   console.log(`                 그중 — ${split || '갈라진 기록 없음'}`)
   console.log(`                 손이 묶임 — ${locks || '없음'}`)
