@@ -90,6 +90,78 @@ const captured = []
   process.on('exit', flush)
 }
 
+/**
+ * ── 창의 길이를 **기계 속도에서** 정합니다 ──────────────────────────
+ *
+ * 예전에는 창이 420 시뮬레이션초로 고정이었고, 벽시계 안전줄에 걸린 판을
+ * 버렸습니다. 그런데 버려지는 판이 무작위가 아니었습니다:
+ *
+ *   · 존을 깨면 판이 **그 순간 끝납니다**(예: 190초).
+ *   · 못 깨면 창 끝(420초)까지 **다 돕니다.**
+ *   → 벽시계에 먼저 걸리는 쪽은 언제나 **못 깬 판**입니다.
+ *
+ * 그래서 3판 중 2판이 잘리고 남은 1판이 클리어한 판이었던 벤치가
+ * `존 클리어 1/1판` 이라고 적었습니다. **1/3을 100%로 보고한 것입니다.**
+ * 자르는 잣대가 재려는 것과 붙어 있으면 남은 것은 표본이 아닙니다.
+ *
+ * 고치는 방향은 "잘 버리기"가 아니라 **"안 잘리게 하기"** 입니다. 짧은
+ * 예비 판으로 이 기계가 시뮬레이션 1초를 벽시계 몇 초에 도는지 재고,
+ * 안전줄 안에서 **끝까지 돌 수 있는 창**을 정해 모든 판에 똑같이 줍니다.
+ * 창이 짧아지면 "덜 깬다"가 아니라 **"짧은 창에서 몇 판이나 깨는가"** 라는
+ * 정직한 질문으로 바뀝니다 — 그래서 창 길이를 아래에 반드시 찍습니다.
+ *
+ * 안전 계수 0.85 는 예비 판이 **초반**만 본다는 것 때문입니다. 뒤로 갈수록
+ * 적도 이펙트도 많아져 느려집니다. (덜 데워진 브라우저 때문에 반대로 느려
+ * 보이던 몫은 `simPerWallWarm` 이 이미 걷어냈으니, 남은 건 이 부하 증가분
+ * 하나입니다.) 창이 조금 짧은 것은 손해지만, 창을 넘겨 잡으면 잘린 판이
+ * 다시 생기고 그건 편향으로 돌아옵니다.
+ */
+const SAFE_WALL = 780 // 자식 프로세스는 900초에 죽습니다. 기록을 쓸 여유를 남깁니다.
+const CAL_LIMIT = 40
+const WINDOW_MIN = 150
+const WINDOW_MAX = Number(process.env.BENCH_WINDOW_MAX ?? 420)
+
+function runOnce(out, limit, extraEnv = {}) {
+  return spawnSync('node', ['tools/playthrough.mjs'], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      ...extraEnv,
+      PLAY_JSON: out,
+      PLAY_LIMIT: String(limit),
+      PLAY_WALL: String(SAFE_WALL),
+    },
+    stdio: ['ignore', 'ignore', 'inherit'],
+    timeout: 15 * 60 * 1000,
+  })
+}
+
+let WINDOW = WINDOW_MAX
+{
+  process.stdout.write(`  기계 속도 재는 중(${CAL_LIMIT}초짜리 예비 판)… `)
+  const out = path.join(dir, 'calib.json')
+  const r = runOnce(out, CAL_LIMIT)
+  if (r.status === 0 && existsSync(out)) {
+    const c = JSON.parse(readFileSync(out, 'utf8'))
+    const speed = Number(c.simPerWallWarm ?? c.simPerWall)
+    if (Number.isFinite(speed) && speed > 0) {
+      WINDOW = Math.max(WINDOW_MIN, Math.min(WINDOW_MAX, Math.floor(SAFE_WALL * speed * 0.85)))
+      console.log(`시뮬 ${speed.toFixed(2)}초/벽시계 1초 → 창 ${WINDOW}초`)
+    } else {
+      console.log(`속도를 못 읽었습니다 — 창 ${WINDOW}초로 갑니다`)
+    }
+  } else {
+    console.log(`예비 판 실패 — 창 ${WINDOW}초로 갑니다`)
+  }
+  if (WINDOW < WINDOW_MAX) {
+    console.log(
+      `  ⚠️ 이 기계로는 ${WINDOW_MAX}초를 안전줄 안에 못 돕니다. ` +
+        `아래 수치는 전부 **${WINDOW}초짜리 창**의 이야기입니다.`,
+    )
+  }
+  console.log('')
+}
+
 const logs = []
 /** 벽시계에 걸려 잘린 판 수 — 집계에는 안 들어가지만 반드시 보고합니다. */
 let wallCut = 0
@@ -97,12 +169,7 @@ for (let i = 0; i < RUNS; i++) {
   const out = path.join(dir, `run${i}.json`)
   process.stdout.write(`  ${i + 1}/${RUNS}판 도는 중… `)
   const t0 = Date.now()
-  const r = spawnSync('node', ['tools/playthrough.mjs'], {
-    cwd: ROOT,
-    env: { ...process.env, PLAY_JSON: out },
-    stdio: ['ignore', 'ignore', 'inherit'],
-    timeout: 15 * 60 * 1000,
-  })
+  const r = runOnce(out, WINDOW)
   const secs = ((Date.now() - t0) / 1000).toFixed(0)
   if (r.status !== 0 || !existsSync(out)) {
     console.log(`❌ 실패 (${secs}초)`)
@@ -121,6 +188,12 @@ for (let i = 0; i < RUNS; i++) {
    * 섞으면 안 됩니다. 중간에 잘린 판은 처치도 피해도 적으니 **"쉬웠던
    * 판"처럼 보여** 모든 중앙값을 아래로 끌어내립니다. 그건 게임이 아니라
    * 기계를 재는 것입니다.
+   *
+   * ⚠️ 그런데 **빼는 것도 공짜가 아닙니다.** 잘리는 쪽은 못 깬 판에
+   *    쏠려 있어서(위 창 계산 주석), 여기서 빼면 클리어율이 부풀려집니다.
+   *    그래서 이제 창을 미리 줄여 **여기 걸리지 않게** 만듭니다. 그래도
+   *    걸린다면 그건 "느린 기계"가 아니라 **창 계산이 틀렸다는 신호**이고,
+   *    아래에서 그렇게 말합니다.
    */
   if (log.wallStopped) {
     wallCut++
@@ -136,8 +209,14 @@ for (let i = 0; i < RUNS; i++) {
 rmSync(dir, { recursive: true, force: true })
 
 if (wallCut > 0) {
+  const slowest = Math.min(...logs.map((l) => l.simPerWall ?? Infinity))
   console.log(
-    `\n  ⚠️ ${RUNS}판 중 ${wallCut}판이 **기계가 느려** 중간에 잘렸습니다 — 아래 수치는 나머지 ${logs.length}판입니다.`,
+    `\n  ⚠️ ${RUNS}판 중 ${wallCut}판이 안전줄에 걸려 잘렸습니다 — 창 계산(${WINDOW}초)이 낙관적이었습니다.` +
+      `\n     잘리는 쪽은 **못 깬 판**에 쏠려 있으니, 아래 클리어율은 실제보다 높습니다.` +
+      (Number.isFinite(slowest)
+        ? `\n     끝까지 돈 판의 가장 느린 속도는 시뮬 ${slowest.toFixed(2)}초/벽시계 1초였습니다` +
+          ` → 다음엔 \`BENCH_WINDOW_MAX=${Math.floor(SAFE_WALL * slowest * 0.7)}\` 로 다시 재십시오.`
+        : ''),
   )
 }
 
@@ -151,7 +230,13 @@ const cleared = logs.filter((l) => l.clearedAt > 0)
 const boss = logs.filter((l) => l.boss?.fought)
 
 console.log('\n  ── 진행 ──────────────────────────────')
-console.log(`  존 클리어      ${cleared.length}/${logs.length}판`)
+/**
+ * 창 길이를 **클리어율 옆에** 붙입니다. 이 둘은 떼면 거짓말이 됩니다 —
+ * 창이 420초일 때의 2/3판과 200초일 때의 2/3판은 다른 이야기인데,
+ * 표에는 똑같이 `2/3판` 이라고만 적힙니다. 다음에 이 표를 보는 사람이
+ * 창을 따로 찾아봐야 한다면 그 사람은 결국 안 찾아봅니다.
+ */
+console.log(`  존 클리어      ${cleared.length}/${logs.length}판  (창 ${WINDOW}초)`)
 console.log(`  클리어 시간    ${fmt(cleared.map((l) => l.clearedAt))}초`)
 console.log(`  사망           ${fmt(pick((l) => l.deaths), 1)}회`)
 console.log(`  처치           ${fmt(pick((l) => l.kills), 0)}마리`)
@@ -170,7 +255,7 @@ console.log(`  받은 피해      ${fmt(pick((l) => l.damageTaken), 0)}`)
  *    다르면 견줄 수 있는 것은 지도·경제처럼 속도에 안 묶인 것뿐입니다.
  */
 console.log(
-  `  기계 속도      판당 벽시계 ${fmt(pick((l) => l.wallSecs ?? NaN), 0)}초` +
+  `  기계 속도      시뮬 ${fmt(pick((l) => l.simPerWall ?? NaN), 2)}초/벽시계 1초` +
     ` · 봇 판단 ${fmt(pick((l) => l.botTicksPerSec ?? NaN), 1)}회/시뮬초` +
     '  ← 다른 벤치와 견주기 전에 이 줄을 먼저 보십시오',
 )
