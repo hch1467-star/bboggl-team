@@ -497,6 +497,111 @@ try {
     `[${seen.join(',')}]`,
   )
 
+  /**
+   * ── 🤸 **틀린 답을 되풀이하면 한 번 더 가르치는가** ──────────────────
+   *
+   * 위 4번은 *"처음 보는 색이면 한 번 알려준다"* 를 재고, 그게 전부였습니다.
+   * 그 뒤로 🟡 에 계속 구르며 계속 맞아도 아무도 말해 주지 않았습니다 —
+   * **죽어야** 죽음 화면이 말해 줍니다.
+   *
+   * 이 프로브가 방금 확인한 것: 두 광역 모두 예고가 뜬 순간부터 걸으면
+   * 벗어납니다. 즉 **답이 안 통하는 게 아니라 답을 모르는 것**이고,
+   * 모르는 것은 알려 주면 됩니다. 가르칠 자리는 **실패한 순간**입니다.
+   *
+   * 두 가지를 같이 재야 합니다 — 하나만 재면 반대쪽이 무너집니다:
+   *   · 되풀이하면 **다시 가르친다**
+   *   · 그래도 **잔소리가 되지 않는다** (색당 평생 두 번까지)
+   */
+  console.log('')
+  {
+    const teach = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      const runFor = async (sec) => {
+        const t = G.state().elapsed + sec
+        while (G.state().elapsed < t) await sleep()
+      }
+      G.reset()
+      await runFor(0.5)
+      G.clearEnemies()
+      await runFor(0.3)
+      const p0 = G.state().player
+      const e = G.spawnEnemyKind('grunt', p0.x + 12, p0.z)
+      await runFor(0.3)
+      G.setHp(e, 1000000)
+      const before = G.colorTeach()
+      const need = before.after
+      /**
+       * 🟡 예고가 뜰 때마다 **일부러 구릅니다** — 이 색의 오답입니다.
+       * 그리고 그 자리에 남습니다(걸어 나가면 안 맞고, 그러면 오답을
+       * 낸 적이 없는 것이 되어 아무것도 안 세어집니다).
+       */
+      /**
+       * ⚠️ **횟수를 세지 말고 목표가 찰 때까지 돕니다.**
+       *
+       * 잡몹은 `grunt_jab` 도 섞어 쓰므로 🟡 예고가 매번 오지 않습니다.
+       * `need + 6` 번 돌아 봤자 실제로 구른 것은 2회였습니다 — 재려는
+       * 것(오답 누적)이 안 찬 채로 판정이 났습니다. **표본이 찰 때까지**
+       * 돌고, 안 차면 그 사실이 그대로 빨갛게 나오게 둡니다.
+       */
+      let rolled = 0
+      for (let n = 0; n < need * 12; n++) {
+        if ((G.colorTeach().wrong[1] ?? 0) >= need + 1) break
+        /**
+         * ⚠️ **손이 빌 때까지 기다립니다.** 앞 한 대에 경직으로 묶여 있으면
+         *    Space 가 안 먹고, 그러면 `tries` 가 0 이라 **오답으로 세어지지
+         *    않습니다.** 처음엔 이걸 빼놓고 6번 시도해 1회만 세었습니다 —
+         *    게임이 아니라 재는 쪽이 조급했습니다(이 세션에서 몇 번째인지
+         *    모르겠습니다).
+         */
+        {
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 4 && G.state().player.state !== 0) await sleep()
+        }
+        const es = G.entityState(e)
+        G.teleportPlayer(es.x, es.z - 1.6)
+        G.setHp(G.playerEntity(), 100)
+        G.setStamina(1000)
+        const got = await window.__t.until(() => {
+          const i = G.enemyInfo(e)
+          return i?.winding === true && i.attackId === 'grunt_sweep'
+        }, 8)
+        if (!got) continue
+        // 예고가 끝나기 직전에 굴러서 무적을 흘려보냅니다 = 틀린 답.
+        await window.__t.until(() => (G.enemyInfo(e)?.timer ?? 9) <= 0.12, 3)
+        G.press('Space')
+        await sleep()
+        G.release('Space')
+        // 실제로 굴렀는지 확인합니다 — 안 굴렀으면 오답을 낸 적이 없습니다.
+        if (await window.__t.until(() => G.state().player.state === 2, 0.6)) rolled++
+        await runFor(1.4)
+      }
+      return { before, after: G.colorTeach(), need, rolled }
+    })
+    const SWEEP_INTENT = 1
+    const wrong = teach.after.wrong[SWEEP_INTENT] ?? 0
+    check(
+      teach.rolled >= teach.need,
+      '🤸 실제로 **틀린 답을 여러 번 냈다** (측정이 성립했다 — 굴렀는지 확인)',
+      `구른 횟수 ${teach.rolled}회 · 문턱 ${teach.need}회`,
+    )
+    check(
+      wrong >= teach.need,
+      '🤸 **틀린 답을 낸 것을 세고 있다** (구를 색이 아닌데 굴러서 맞음)',
+      `🟡 오답 ${wrong}회 · 문턱 ${teach.need}회`,
+    )
+    check(
+      teach.after.retaught.includes(SWEEP_INTENT),
+      '🤸 **되풀이하면 그 색의 정답을 한 번 더 알려준다** (죽어야 배우지 않게)',
+      `다시 가르친 색 [${teach.after.retaught.join(', ')}]`,
+    )
+    check(
+      teach.after.retaught.filter((x) => x === SWEEP_INTENT).length === 1,
+      '🤸 그래도 **잔소리가 되지 않는다** (색당 한 번만 더)',
+      `🟡 오답이 ${wrong}회인데 다시 가르친 것은 ${teach.after.retaught.filter((x) => x === SWEEP_INTENT).length}회`,
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

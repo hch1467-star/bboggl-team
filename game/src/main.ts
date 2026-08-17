@@ -54,6 +54,8 @@ import {
   INTENT_ANSWER,
   INTENT_EMOJI,
   INTENT_LABEL,
+  ANSWER_IS_DODGE,
+  RETEACH_AFTER,
   INTENT_NAME,
   SNARE_MOVE_SCALE,
   attackAt,
@@ -646,6 +648,9 @@ class Game {
     }
 
     this.kills = 0
+    // 🤸 색 학습도 판 단위입니다 — 앞 판에서 배운 것이 새 판에 얹히지 않게.
+    this.wrongAnswers.clear()
+    this.retaught.clear()
     // 💀 판이 바뀌면 사인 장부도 비웁니다 — 앞 판의 죽음이 다음 판에 얹히지 않게.
     this.deathLog = []
     this.waveTimer = 0
@@ -1118,6 +1123,40 @@ class Game {
         if (this.seenIntents.has(intent)) continue
         this.seenIntents.add(intent)
         this.hud.showColorHint(INTENT_LABEL[intent], INTENT_COLOR[intent])
+        break
+      }
+    }
+
+    /**
+     * ---- 🤸 **틀린 답을 되풀이하면 한 번 더** 알려줍니다 ----
+     *
+     * ── 왜 필요한가 (재고 나서) ────────────────────────────────────
+     * 위 안내는 **첫 목격 때 한 번**이 전부입니다. 그 뒤로 🟡 에 계속
+     * 구르며 계속 맞아도 *"그건 이 색의 답이 아니다"* 라고 말해 주는
+     * 곳이 없습니다 — **죽어야** 죽음 화면이 말해 줍니다.
+     *
+     * 그런데 자동 플레이(초보자의 하한선)는 **모든 색에 구르기로 답합니다.**
+     * 그리고 게임 쪽은 멀쩡합니다 — `npm run sweep` 이 두 광역 모두
+     * *"예고가 뜬 순간부터 걸으면 벗어난다"* 고 확인했습니다
+     * (잡몹 1.25초·4.6m → 판정 순간 8.8m). 즉 **답을 모르는 것**이지
+     * 답이 안 통하는 것이 아닙니다. 모르는 것은 알려 주면 됩니다.
+     *
+     * 참고한 자리: 세키로는 쳐내기 실패를 **즉시 다른 소리**로 알려 주고,
+     * 몬스터 헌터는 같은 실수를 반복하면 화면이 다시 가르칩니다.
+     * 공통 원리는 **가르칠 자리는 실패한 순간**이라는 것입니다 —
+     * 주의가 가장 높은 때이고, 그때 배운 것만 남습니다.
+     *
+     * ── 잔소리가 되지 않게 ────────────────────────────────────────
+     * 위 규칙 1(*"색마다 한 번만"*)을 깨는 것이므로 조건을 좁게 둡니다:
+     *   · **틀린 답으로** 맞았을 때만 셉니다(구를 색이 아닌데 굴렀다)
+     *   · 색마다 `RETEACH_AFTER` 번 쌓였을 때 **딱 한 번 더**
+     * 즉 색당 평생 최대 두 번입니다.
+     */
+    if (playerAlive) {
+      for (const [intent, n] of this.wrongAnswers) {
+        if (n < RETEACH_AFTER || this.retaught.has(intent)) continue
+        this.retaught.add(intent)
+        this.hud.showColorHint(INTENT_LABEL[intent as AttackIntent], INTENT_COLOR[intent as AttackIntent])
         break
       }
     }
@@ -2668,10 +2707,21 @@ class Game {
     this.hud.showBanner('다시 일어섰다', `${lesson} · 적 ${revived}마리 부활`, 3.6)
   }
 
+  /** 🤸 색마다 **틀린 답으로 맞은 횟수**(구를 색이 아닌데 굴렀다). */
+  private readonly wrongAnswers = new Map<number, number>()
+  /** 🤸 이미 한 번 더 가르친 색 — 색당 평생 두 번까지입니다. */
+  private readonly retaught = new Set<number>()
   /** 💀 이 판에서 죽은 순간마다의 사인. 벤치가 세어 줍니다. */
   private deathLog: string[] = []
   debugDeathLog(): string[] {
     return this.deathLog
+  }
+
+  /** 🤸 자동 검증용 — 색 학습 상태. */
+  debugColorTeach(): { wrong: Record<number, number>; retaught: number[]; after: number } {
+    const wrong: Record<number, number> = {}
+    for (const [k, v] of this.wrongAnswers) wrong[k] = v
+    return { wrong, retaught: [...this.retaught], after: RETEACH_AFTER }
   }
 
   /** 실험대 전용 — 화면이 지금 그리고 있는 인지 신호(visuals.ts 설계 노트). */
@@ -2994,6 +3044,16 @@ class Game {
           : rec.free < budget
             ? `locked:${worst ? worst[0] : '?'}`
             : missed
+    /**
+     * 🤸 **틀린 답을 셉니다** — 구를 색이 아닌데 굴러서 맞은 한 대.
+     *
+     * `tries > 0` 은 이 예고 동안 실제로 구르기를 시작했다는 뜻입니다
+     * (상태의 전이로 잡습니다). 그 색의 정답이 구르기가 아니라면
+     * **틀린 답을 낸 것**이고, 그게 되풀이되면 위에서 한 번 더 가르칩니다.
+     */
+    if (rec.tries > 0 && rec.intent >= 0 && !ANSWER_IS_DODGE[rec.intent as AttackIntent]) {
+      this.wrongAnswers.set(rec.intent, (this.wrongAnswers.get(rec.intent) ?? 0) + 1)
+    }
     this.hurtLedger.push({
       attackId: rec.id,
       intent: rec.intent,
@@ -4991,6 +5051,8 @@ declare global {
       threatRange: () => number
       /** 💀 이 판에서 죽은 순간마다의 사인(무엇에 · 왜 못 막았는지). */
       deathLog: () => string[]
+      /** 🤸 색별 오답 횟수 · 다시 가르친 색 · 문턱 */
+      colorTeach: () => { wrong: Record<number, number>; retaught: number[]; after: number }
       /** 📏 등 뒤 표시의 바깥 반지름(m). 판정에는 거리 제한이 없습니다. */
       backZoneOuter: (kind: number) => number
       /** ❤️ 저체력 심장 박동 — 뛴 횟수 · 세기(0~1) · 문턱 */
@@ -5784,6 +5846,8 @@ window.__game = {
   threats: (range) => game.debugThreats(range),
   threatRange: () => game.debugThreatRange(),
   deathLog: () => game.debugDeathLog(),
+  /** 🤸 색별 오답 횟수와 다시 가르친 색 — 프로브가 문턱을 안 들게 게임이 답합니다. */
+  colorTeach: () => game.debugColorTeach(),
   /**
    * 📏 **등 뒤 표시가 그려지는 바깥 반지름**(m) — 판정(`testBehind`)에는
    * 거리 제한이 없습니다. 둘을 나란히 놓아야 *"표시가 사실을 말하는가"* 를

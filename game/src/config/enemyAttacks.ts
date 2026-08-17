@@ -192,6 +192,34 @@ export const INTENT_NAME: Record<AttackIntent, string> = {
   [AttackIntent.Counter]: '반격',
 }
 
+/**
+ * 🤸 **그 색의 정답이 "구르기"인가.**
+ *
+ * 🔴 직격과 🔵 속박은 무적 프레임으로 넘기는 색이라 참,
+ * 🟡·🟣·🟢 는 굴러서는 안 되는 색이라 거짓입니다.
+ *
+ * ⚠️ `INTENT_ANSWER` 의 **문자열을 비교하지 않습니다.** 문구를 다듬는 날
+ *    (예: "구르기" → "굴러 넘기기") 비교가 조용히 거짓이 되고, 그걸
+ *    아무도 모릅니다. 뜻은 표로 적습니다.
+ */
+/**
+ * 🤸 **같은 색에 틀린 답을 몇 번 되풀이하면 다시 가르치는가.**
+ *
+ * 3 으로 둔 근거: 한 번은 실수, 두 번은 우연일 수 있습니다. 세 번이면
+ * **모르는 것**입니다. 더 크게 잡으면 그 색을 배우기 전에 존이 끝나고,
+ * 더 작게 잡으면 위 규칙 1(*"색마다 한 번만 — 반복되면 잔소리"*)을
+ * 필요 이상으로 깹니다.
+ */
+export const RETEACH_AFTER = 3
+
+export const ANSWER_IS_DODGE: Record<AttackIntent, boolean> = {
+  [AttackIntent.Strike]: true,
+  [AttackIntent.Sweep]: false,
+  [AttackIntent.Snare]: true,
+  [AttackIntent.Pull]: false,
+  [AttackIntent.Counter]: false,
+}
+
 /** 그 색의 **정답** — 죽음 화면이 다음 판에 할 일을 짚어 줄 때 씁니다. */
 export const INTENT_ANSWER: Record<AttackIntent, string> = {
   [AttackIntent.Strike]: '구르기',
