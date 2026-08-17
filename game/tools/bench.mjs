@@ -29,6 +29,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { SPEND_BUDGET } from './policy.mjs'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -608,7 +609,7 @@ console.log(
     )
     if (skips.length) {
       const ds = skips.map((f) => f.dist).filter((d) => d >= 0)
-      if (ds.length) console.log(`  접은 거리     ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)`)
+      if (ds.length) console.log(`  접은 거리     ${Math.min(...ds)}~${Math.max(...ds)}m (예산 ${SPEND_BUDGET}m)`)
     }
     /**
      * 닿고도 못 산 이유를 **묶어서** 셉니다. 이유마다 처방이 다릅니다:

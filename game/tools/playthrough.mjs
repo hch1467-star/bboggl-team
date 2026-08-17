@@ -34,7 +34,7 @@ import { createServer } from 'vite'
  * 주석은 읽는 사람에게만 말합니다. 그래서 `npm run guard` 가 이 실수를
  * 기계적으로 막습니다(evaluate 안에서 모듈 상수를 참조하면 실패).
  */
-import { DETOUR_BUDGET } from './policy.mjs'
+import { DETOUR_BUDGET, SPEND_BUDGET } from './policy.mjs'
 
 const PORT = 5191
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
@@ -125,7 +125,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -450,6 +450,8 @@ try {
      */
     let lastFireWallet = { embers: -1, stones: -1 }
     let fireCooldownUntil = 0
+    /** 직전에 접은 소비처 — 같은 것을 연달아 접는 것은 한 사건입니다. */
+    let lastSkipKey = ''
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
     let fireTripUntil = 0
     /** 지름길을 열러 가는 것을 잠시 멈추는 시각 / 그 왕복의 제한 시각. */
@@ -2205,7 +2207,7 @@ try {
        */
       if (fire) {
         const sp = G.pathStep(fire.x, fire.z)
-        if (sp && sp.dist <= 45) lastSpendChanceAt = Number(now().toFixed(1))
+        if (sp && sp.dist <= SPEND) lastSpendChanceAt = Number(now().toFixed(1))
       }
       if (affordableAt < 0 && canUpgradeWeapon) affordableAt = Number(now().toFixed(1))
       const walletGrew =
@@ -2421,7 +2423,32 @@ try {
           //    것(`passingBy`)은 더 걷는 거리가 0 이라 견줄 것이 없습니다.
         } else if (
           step &&
-          step.dist < 45 &&
+          /**
+           * ── 🧭 **밟고 지나가는 것에는 총 거리를 묻지 않습니다** ────────
+           *
+           * 여기 원래 `step.dist < 45` 하나였습니다. 그런데 `passingBy` 는
+           * **돌아가는 비용**(≤12m)으로 정해지고, 이 줄은 **총 거리**로
+           * 막았습니다. 같은 질문에 두 개의 자를 댄 것입니다.
+           *
+           * 그래서 이런 자리가 생겼습니다: 소비처가 목표 가는 길목에 있어
+           * 더 걷는 값이 5m 인데, 거기까지가 50m 라 이 줄이 막습니다.
+           * 막히면 아래 `else`(포기)로 떨어져 30초 쿨다운이 걸리는데,
+           * 다음 프레임에 `passingBy` 가 그 쿨다운을 다시 면제합니다.
+           * **매 프레임 포기했다가 다시 시도합니다.**
+           *
+           * 벤치가 그대로 찍었습니다 — `가려다 접음 113회 · 접은 거리
+           * 46~56m`. 한 상황이 수백 번으로 세어진 것이고, 더 나쁜 것은
+           * 포기할 때마다 `lastFireWallet` 이 지금 값으로 덮여서
+           * **`walletGrew` 가 영영 참이 못 된다**는 것입니다. 먼 소비처로
+           * 가는 진짜 왕복이 한 번도 성립하지 않습니다.
+           * (`닿음 2회 · 무기 강화 1회 · 남은 불티 289` 가 그 결과입니다.)
+           *
+           * 지나가다 들르는 데 총 거리는 뜻이 없습니다 — 어차피 그 길로
+           * 걷고 있으니까요. 소울류가 밟고 있는 화톳불에서 쉬는 것과 같은
+           * 이야기이고, 이 파일이 `treasureClaims` 에는 이미 그렇게 적어
+           * 두었는데(바로 아래 줄) 거리 쪽만 안 고쳐져 있었습니다.
+           */
+          (passingBy || step.dist < SPEND) &&
           straight > 1.6 &&
           (passingBy || !treasureClaims(step.dist))
         ) {
@@ -2475,6 +2502,25 @@ try {
            * 가설을 세우고 두 번 틀렸으니(모루 추가 · 성수병 사다리),
            * 이번에는 고치기 전에 적습니다.
            */
+          /**
+           * ── 🔢 **한 번 접은 것을 한 번으로 셉니다** ────────────────────
+           *
+           * 이 줄이 매 프레임 돌 수 있다는 것을 위 가지에서 확인했습니다
+           * (쿨다운이 `passingBy` 로 면제되면 그렇게 됩니다). 그때 벤치는
+           * `가려다 접음 113회` 를 찍었고, 저는 그걸 **113번 발길을 돌린
+           * 것**으로 읽을 뻔했습니다. 실제로는 한 상황이었습니다.
+           *
+           * 위 가지를 고쳤으니 지금은 안 그럴 것입니다. 그래도 여기서
+           * 전이만 세는 이유는, **다음에 또 그런 자리가 생겨도 눈금은
+           * 거짓말을 하면 안 되기** 때문입니다. 이 저장소가 연계 장부와
+           * 구르기 시도에서 이미 배운 규칙입니다 — *상태의 전이를 세야지
+           * 값을 세면 안 된다.*
+           */
+          const skipKey = `${fire.x.toFixed(0)},${fire.z.toFixed(0)}`
+          if (skipKey === lastSkipKey) {
+            // 같은 소비처를 계속 접고 있는 중입니다 — 새 사건이 아닙니다.
+          } else {
+          lastSkipKey = skipKey
           fireSkips.push({
             at: Number(now().toFixed(1)),
             dist: step ? Number(step.dist.toFixed(0)) : -1,
@@ -2485,6 +2531,7 @@ try {
               return `${sp.anvil ? '모루' : '불'}${st ? Math.round(st.dist) : -1}m`
             }),
           })
+          }
           fireCooldownUntil = now() + 30
           fireTripUntil = 0
           lastFireWallet = { embers: em.embers, stones: wu.stones }
@@ -3248,7 +3295,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET, SPEND_BUDGET])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
@@ -3378,7 +3425,7 @@ try {
   if ((log.fireSkips ?? []).length) {
     const ds = log.fireSkips.map((f) => f.dist)
     console.log(
-      `             소비처에 가려다 ${log.fireSkips.length}번 접음 — 걸어야 하는 거리 ${Math.min(...ds)}~${Math.max(...ds)}m (예산 45m)\n` +
+      `             소비처에 가려다 ${log.fireSkips.length}번 접음 — 걸어야 하는 거리 ${Math.min(...ds)}~${Math.max(...ds)}m (예산 ${SPEND_BUDGET}m)\n` +
         log.fireSkips
           .map((f) => `                ${String(f.at).padStart(6)}초 ${f.target} ${f.dist}m · 그때 전부: ${(f.all ?? []).join(' ')}`)
           .join('\n'),
