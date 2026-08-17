@@ -728,7 +728,37 @@ let bossGapInside = 0
 let bossGapMax = 0
 export function noteBleedDecay(t: number, lost: number): void {
   if (Enemy.kind[t] === EnemyKind.Boss) bossBleedDecayed += lost
+  bleedDecayedAll += lost
 }
+
+/**
+ * ── 🩸 **「0회」가 왜 0회인지 말하게 만듭니다** ──────────────────────────
+ *
+ * 출혈이 한 판에 **한 번도 안 터진** 상태가 오래 이어졌습니다. 그런데
+ * 장부에는 `터짐 0회 · 최고 96/100` 밖에 없어서, 원인이 **둘 중 어느
+ * 쪽인지 알 수 없었습니다**:
+ *
+ *   · **죽어서** — 게이지가 차기 전에 적이 먼저 쓰러진다 (잡몹 쪽 의심)
+ *   · **식어서** — 차는 속도보다 식는 속도가 이긴다 (보스 쪽 의심)
+ *
+ * 처방이 정반대입니다. 앞이면 **문턱**이나 **한 대당 축적**의 이야기이고,
+ * 뒤면 **식는 속도**나 **유예**의 이야기입니다. 이 저장소는 `locked` 한 칸에
+ * 원인 셋을 담았다가 뜻이 뒤집힌 적이 있습니다 — 0 도 한 칸이면 같은 함정입니다.
+ *
+ * 그래서 **죽는 순간 게이지에 남아 있던 몫**을 셉니다. 관측이 아니라
+ * 사건이 일어난 자리에서 셉니다 — 프레임 사이에 죽으면 관측은 못 봅니다.
+ */
+export function noteDeathWithBleed(t: number): void {
+  const left = Enemy.bleed[t]
+  if (left <= 0) return
+  diedWithBleedCount++
+  diedWithBleedSum += left
+  if (left > diedWithBleedMax) diedWithBleedMax = left
+}
+let bleedDecayedAll = 0
+let diedWithBleedCount = 0
+let diedWithBleedSum = 0
+let diedWithBleedMax = 0
 export function readBleedPeak(): {
   any: number
   boss: number
@@ -739,9 +769,20 @@ export function readBleedPeak(): {
   bossGapMax: number
   /** 유예(2.5초) 안에 이어진 타격의 비율 — 1에 가까울수록 압박이 안 끊긴 것 */
   bossGapInsideRate: number
+  decayedAll: number
+  diedWith: number
+  diedWithAvg: number
+  diedWithMax: number
 } {
   return {
     any: bleedPeak,
+    /** 🩸 식어서 날아간 총량(보스 말고 전부 포함) */
+    decayedAll: bleedDecayedAll,
+    /** 🩸 **게이지를 남긴 채 죽은 적**의 수 — 「죽어서 못 터짐」의 크기 */
+    diedWith: diedWithBleedCount,
+    /** 🩸 그 적들이 남기고 간 게이지의 평균과 최고 */
+    diedWithAvg: diedWithBleedCount > 0 ? diedWithBleedSum / diedWithBleedCount : 0,
+    diedWithMax: diedWithBleedMax,
     boss: bossBleedPeak,
     bossPops: bossBleedPops,
     bossApplied: bossBleedApplied,
@@ -752,6 +793,10 @@ export function readBleedPeak(): {
   }
 }
 export function resetBleedPeak(): void {
+  bleedDecayedAll = 0
+  diedWithBleedCount = 0
+  diedWithBleedSum = 0
+  diedWithBleedMax = 0
   bleedPeak = 0
   bossBleedPeak = 0
   bossBleedPops = 0
@@ -1367,6 +1412,8 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     }
 
     const killed = Health.hp[t] <= 0
+    // 🩸 죽는 순간 게이지에 남은 몫 — 「0회」의 이유를 가르는 값입니다.
+    if (killed && !targetIsPlayer && hasComponent(Enemy, t)) noteDeathWithBleed(t)
 
     /**
      * **처형은 죽여도 처형입니다.**

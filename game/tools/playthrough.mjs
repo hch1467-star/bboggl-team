@@ -2946,6 +2946,10 @@ try {
       botTicksPerSec: Number((botTicks / Math.max(1, now())).toFixed(1)),
       /** 이번 판에 덮어쓴 설정 — 나중에 "무엇을 바꿔 돌린 판인가"를 알 수 있게. */
       tweaks: G.tweaks ? G.tweaks() : [],
+      bleedDecayedAll: G.runStats().bleedDecayedAll,
+      bleedDiedWith: G.runStats().bleedDiedWith,
+      bleedDiedWithAvg: G.runStats().bleedDiedWithAvg,
+      bleedDiedWithMax: G.runStats().bleedDiedWithMax,
       inputExpired: G.runStats().inputExpired,
       // 버려진 것을 **종류별로** 나눠 적습니다 — 셋의 처방이 서로 다릅니다
       // (근거: playerControl.ts `inputFlow`).
@@ -3722,6 +3726,9 @@ try {
     `  백어택      ${log.backHits}/${log.hitsDealt}회 (${Math.round((log.backHits / Math.max(1, log.hitsDealt)) * 100)}%)` +
       ` — 때릴 거리에서 등 뒤를 잡고 있던 시간 ${Math.round((log.behindOk / Math.max(1, log.behindSamples)) * 100)}%\n` +
     `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0}/100)\n` +
+    // 🩸 「0회」의 이유를 가릅니다 — 죽어서인가 식어서인가. 처방이 정반대입니다.
+    `              그 0회의 이유 — 게이지를 남긴 채 죽은 적 ${log.bleedDiedWith ?? 0}마리` +
+    ` (평균 ${log.bleedDiedWithAvg ?? 0} · 최고 ${log.bleedDiedWithMax ?? 0}) · 식어서 날아간 총량 ${log.bleedDecayedAll ?? 0}\n` +
     `              그중 **보스에게** — 터짐 ${log.bossBleedPops ?? 0}회 · 최고 ${log.bossBleedPeak ?? 0}/100\n` +
     `                 쌓은 총량 ${log.bossBleedApplied ?? 0} · 식어서 날아간 것 ${log.bossBleedDecayed ?? 0}\n` +
     `                 타격 간격 평균 ${log.bossBleedGapAvg ?? 0}초 · 최대 ${log.bossBleedGapMax ?? 0}초 · 유예 안에 이어진 비율 ${Math.round((log.bossBleedGapInsideRate ?? 0) * 100)}%\n` +

@@ -3991,6 +3991,14 @@ class Game {
     crossfireHits: number
     /** 🩸 한 적에게 쌓였던 최고치 — "안 쌓임"과 "쌓였는데 안 터짐"을 가릅니다 */
     bleedPeak: number
+    /**
+     * 🩸 **「터짐 0회」가 왜 0회인지 가르는 값들** — 죽어서인가 식어서인가.
+     * 처방이 정반대라 한 칸에 두면 안 됩니다(combat.ts `noteDeathWithBleed`).
+     */
+    bleedDecayedAll: number
+    bleedDiedWith: number
+    bleedDiedWithAvg: number
+    bleedDiedWithMax: number
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
     bossBleedPeak: number
     bossBleedPops: number
@@ -4044,6 +4052,10 @@ class Game {
       poiseDealt: Number(readPoiseDealt().toFixed(1)),
       crossfireHits: readCrossfireHits(),
       bleedPeak: Number(readBleedPeak().any.toFixed(1)),
+      bleedDecayedAll: Number(readBleedPeak().decayedAll.toFixed(1)),
+      bleedDiedWith: readBleedPeak().diedWith,
+      bleedDiedWithAvg: Number(readBleedPeak().diedWithAvg.toFixed(1)),
+      bleedDiedWithMax: Number(readBleedPeak().diedWithMax.toFixed(1)),
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
       bossBleedPops: readBleedPeak().bossPops,
