@@ -397,5 +397,42 @@ check(
   )
 }
 
+/**
+ * ── 🧭 **곁길 예산이 두 곳에 있습니다 — 갈라지면 빨개져야 합니다** ────
+ *
+ * 게임의 `NAV.sideHintRange`(사람에게 *"저쪽에 보물"* 이라고 말하는 거리)와
+ * 봇의 `DETOUR_BUDGET`(실제로 발을 돌리는 거리)은 **같은 하나의 규칙**
+ * 입니다: *"이 정도 벗어나는 것이 이 존의 곁길 크기다."*
+ *
+ * 그런데 하나는 TypeScript 에, 하나는 mjs 에 있습니다. 프로브가 게임을
+ * 못 import 하고(브라우저 없이는 안 돌아갑니다), 게임이 도구를 import
+ * 하면 안 되니(빌드에 도구가 딸려 들어갑니다) **한 곳에 둘 수가 없습니다.**
+ *
+ * 그래서 실제로 갈라졌습니다 — 45 대 40 이었고, 주석에는 *"같은 값"*
+ * 이라고 적혀 있었습니다. 그 5m 폭 안의 보물은 **사람에게는 권하고
+ * 계측기는 안 가는** 자리가 됩니다. 아무도 알려 주지 않았습니다.
+ *
+ * 한 곳에 못 두면, 남는 수단은 **갈라지는 순간 빨개지게** 만드는 것입니다.
+ * 이 저장소가 지도와 생성기를 묶어 둔 방법과 같습니다.
+ */
+{
+  const bal = readFileSync(path.join(HERE, '..', 'src/config/balance.ts'), 'utf8')
+  const pol = readFileSync(path.join(HERE, 'policy.mjs'), 'utf8')
+  const hint = bal.match(/sideHintRange:\s*(\d+(?:\.\d+)?)/)
+  const budget = pol.match(/export const DETOUR_BUDGET\s*=\s*(\d+(?:\.\d+)?)/)
+  /**
+   * ⚠️ **못 찾은 것을 통과로 치지 않습니다.** 이름이 바뀌면 정규식이
+   *    조용히 아무것도 못 잡고, 그러면 이 검사는 영원히 초록입니다 —
+   *    이 저장소가 빈 표본으로 다섯 번 데인 것과 정확히 같은 모양입니다.
+   */
+  check(
+    hint !== null && budget !== null && Number(hint[1]) === Number(budget[1]),
+    '🧭 곁길 예산이 게임과 봇에서 **같다** (사람에게 권하는 거리 = 발이 도는 거리)',
+    hint === null || budget === null
+      ? `값을 못 찾았습니다 — NAV.sideHintRange ${hint?.[1] ?? '?'} · DETOUR_BUDGET ${budget?.[1] ?? '?'}`
+      : `양쪽 다 ${hint[1]}m`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

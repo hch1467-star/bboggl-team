@@ -3672,8 +3672,18 @@ class Game {
      * 🟡(걸어서 이탈)을 못 걸어 나오는지가 이 색의 존재 이유입니다.
      */
     snareMoveScale: number
+    /**
+     * 존의 실제 크기(m). 동선의 폭을 **존의 크기에 견주려면** 필요합니다 —
+     * "가로 128m 세로 34m" 는 그 자체로는 아무 말도 안 하고, 존이 얼마나
+     * 넓은지를 옆에 놓아야 *"넓은 땅을 한 줄로만 쓰고 있다"* 가 됩니다.
+     * 레벨이 없으면(아레나) 0.
+     */
+    zoneWidth: number
+    zoneDepth: number
   } {
     return {
+      zoneWidth: this.levelW * CELL_SIZE,
+      zoneDepth: this.levelH * CELL_SIZE,
       maxClimb: MAX_CLIMB,
       heightStep: HEIGHT_STEP,
       cellSize: CELL_SIZE,

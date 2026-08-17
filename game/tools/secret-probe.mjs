@@ -134,6 +134,11 @@ try {
     return {
       trail,
       goal,
+      /** 존의 실제 크기 — 동선의 폭이 "넓은 존을 얼마나 쓰는가"로 읽히게. */
+      zone: (() => {
+        const t = G.terrainInfo()
+        return t.zoneWidth > 0 ? { w: Math.round(t.zoneWidth), h: Math.round(t.zoneDepth) } : null
+      })(),
       treasures: G.treasurePositions().map((v) => ({ x: v.x, z: v.z })),
     }
   })
@@ -171,6 +176,32 @@ try {
     '주 동선을 그렸다 (게임의 길찾기를 따라간 자취)',
     `${trail.length}걸음 · 마지막 목표 "${walk.goal?.label ?? '?'}"`,
   )
+
+  /**
+   * ── 📐 **동선이 실제로 얼마나 휘는가** ────────────────────────────
+   *
+   * 아래 검사들은 *"보물이 동선에서 멀다"* 고 말합니다. 그런데 그건 결과일
+   * 뿐이고, 원인은 **동선의 모양**일 수 있습니다. 존은 가로세로가 다 넓은데
+   * 길이 한 줄로 곧게 나 있으면, 보물을 어디에 놓아도 수직으로 멀어집니다.
+   *
+   * 엘든 링·NRFTW·오공이 비밀을 보이게 만드는 방식은 보물을 길가로 끌어
+   * 내는 것이 **아니라 길이 그쪽으로 휘는 것**입니다. 그러니 고칠 곳이
+   * 배치인지 지형인지 가르려면 **길의 폭**을 봐야 합니다.
+   *
+   * ⚠️ 아직 **검사가 아니라 눈금**입니다. "얼마나 휘어야 충분한가"를
+   *    아직 재 본 적이 없어서, 지금 문턱을 정하면 그건 측정이 아니라
+   *    제 취향입니다. 먼저 값을 보이게 두고, 근거가 생기면 검사로 올립니다.
+   */
+  {
+    const xs = trail.map((p) => p.x)
+    const zs = trail.map((p) => p.z)
+    const spanX = Math.max(...xs) - Math.min(...xs)
+    const spanZ = Math.max(...zs) - Math.min(...zs)
+    console.log(
+      `  📐 동선의 폭 — 가로 ${spanX.toFixed(0)}m · **세로 ${spanZ.toFixed(0)}m**` +
+        ` (존은 ${walk.zone ? `${walk.zone.w}×${walk.zone.h}m` : '?'} · 카메라 22m)`,
+    )
+  }
 
   /**
    * 보물에서 동선까지 — **두 가지로** 잽니다.
