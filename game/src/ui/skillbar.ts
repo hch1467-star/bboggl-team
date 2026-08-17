@@ -82,6 +82,30 @@ export class SkillBar {
     this.weaponName.textContent = on ? `${this.current} → ${pending}` : this.current
   }
 
+  /**
+   * 🟢 **지금 반격할 수 있다**는 것을 스킬바가 말합니다.
+   *
+   * ── 왜 필요한가 (만든 사람이 헷갈렸습니다) ────────────────────────
+   * 🟢 의 정답은 **스킬로 정면을 때리는 것**입니다(combat.ts). 그런데
+   * 화면에 있던 것은 지면의 초록 부채꼴 하나뿐이었고, 그 색이 *"스킬을
+   * 써라"* 라고 말해 주지는 않습니다. 이 프로젝트를 만든 사람조차
+   * *"반격이 잘 모르겠다"* 고 했습니다.
+   *
+   * 색은 **무엇이 오는지**를 말하고, 이 신호는 **무엇을 누를지**를
+   * 말합니다. 로스트아크가 카운터 순간에 그 스킬을 번쩍이는 것과 같은
+   * 장치입니다 — 새 동사를 가르치려면 손가락이 갈 곳을 보여 줘야 합니다.
+   *
+   * ⚠️ **쓸 수 있는 슬롯만** 켭니다. 쿨다운이 도는 슬롯까지 번쩍이면
+   *    "누르라고 해서 눌렀는데 안 나간다"가 되어, 안내가 다시 거짓말이
+   *    됩니다. 빈 슬롯도 마찬가지입니다.
+   */
+  setCounterCue(on: boolean): void {
+    for (const view of this.slots) {
+      const usable = view.root.classList.contains('ready') && !view.root.classList.contains('empty')
+      view.root.classList.toggle('counter', on && usable)
+    }
+  }
+
   /** @param cooldowns 남은 시간(초) @param maxes 각 스킬의 전체 쿨다운(초) */
   update(cooldowns: number[], maxes: number[]): void {
     for (let i = 0; i < this.slots.length; i++) {

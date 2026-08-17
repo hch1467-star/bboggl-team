@@ -18,6 +18,7 @@ import {
   HEAVY_COMBO,
   FINISH_COMBO,
   SKILL_KEY_CODES,
+  longestPlayerReach,
 } from './config/arsenal'
 import {
   AWARE,
@@ -49,7 +50,7 @@ import {
   WORLD,
 } from './config/balance'
 import {
-  type AttackIntent,
+  AttackIntent,
   INTENT_COLOR,
   INTENT_ANSWER,
   INTENT_EMOJI,
@@ -1935,6 +1936,43 @@ class Game {
       this.cdMaxBuf[i] = skillForSlot(p, i)?.cooldown ?? 1
     }
     this.skillBar.update(this.cdBuf, this.cdMaxBuf)
+    /**
+     * 🟢 **지금 반격할 수 있는가** — 규칙은 여기가 정하고 화면은 그리기만.
+     *
+     * 조건을 combat.ts 의 판정과 **같은 모양**으로 둡니다: 🟢 예고 중이고,
+     * 내가 그 적의 **정면**에 있고, 스킬이 닿을 만한 거리. 화면이 자기
+     * 판단을 갖는 순간 "보이는 것과 실제가 다른" 버그가 시작됩니다.
+     *
+     * ⚠️ 거리는 **넉넉하게** 봅니다(예고 반경 + 여유). 반격은 *"달려가서
+     *    꽂는"* 답이라, 지금 사거리 안이어야 알려 준다면 이미 늦습니다 —
+     *    🟢 의 예고가 1.25초 이상으로 길게 잡혀 있는 이유가 그것입니다
+     *    (enemyAttacks.ts: 반격은 반사신경이 아니라 **결단**이어야 한다).
+     */
+    {
+      let canCounter = false
+      const eids = enemyQuery.run()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = eids[i]
+        if (!isAlive(e) || Actor.state[e] !== ActorState.Attack) continue
+        if (Actor.phase[e] !== AttackPhase.Windup) continue
+        const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
+        if (def.intent !== AttackIntent.Counter) continue
+        // 판정과 같은 함수입니다 — 뜻이 두 개가 되지 않게(combat.ts `countered`).
+        if (isBehindPoint(Transform.x[p], Transform.z[p], Transform.x[e], Transform.z[e], Transform.rotY[e]))
+          continue
+        const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
+        /**
+         * ⚠️ `+3` 같은 리터럴을 쓰지 않습니다. *"내 무기가 닿는 가장 먼
+         *    거리"* 는 게임이 이미 알고 있고(arsenal `longestPlayerReach`),
+         *    무기를 손보는 날 이 줄만 옛 값을 들고 있으면 안 됩니다.
+         *    문턱은 규칙이지 리터럴이 아닙니다.
+         */
+        if (d > def.reach + longestPlayerReach()) continue
+        canCounter = true
+        break
+      }
+      this.skillBar.setCounterCue(canCounter)
+    }
     /**
      * 🗡 예약된 무기 전환을 스킬바에 비춥니다.
      *

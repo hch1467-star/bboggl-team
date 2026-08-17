@@ -214,6 +214,19 @@
       /* 쿨다운 중에는 이름을 눌러 두어 숫자가 잘 읽히게 합니다. */
       .slot:not(.ready) .nm, .slot:not(.ready) .key { opacity: 0.45; }
       .slot.ready { border-color: rgba(255, 212, 121, 0.5); }
+      /* 🟢 반격 신호 — 지면 예고와 **같은 초록**이라 눈이 둘을 잇습니다.
+         테두리만 바꾸지 않고 맥박을 주는 이유: 전투 중에는 주변 시야로
+         보게 되는데, 정적인 색 변화는 주변 시야에서 거의 안 잡힙니다. */
+      .slot.counter {
+        border-color: rgba(120, 235, 130, 0.95);
+        box-shadow: 0 0 10px rgba(120, 235, 130, 0.75), inset 0 0 8px rgba(120, 235, 130, 0.35);
+        animation: counterPulse 0.42s ease-in-out infinite alternate;
+      }
+      .slot.counter .nm { color: #b8ffc0; }
+      @keyframes counterPulse {
+        from { box-shadow: 0 0 6px rgba(120, 235, 130, 0.45), inset 0 0 5px rgba(120, 235, 130, 0.2); }
+        to   { box-shadow: 0 0 16px rgba(120, 235, 130, 0.95), inset 0 0 11px rgba(120, 235, 130, 0.5); }
+      }
 
       #controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
       /* 배운 줄은 **사라지되 자리도 안 남깁니다.** 흐리게만 두면 화면은 그대로
