@@ -5075,7 +5075,8 @@ declare global {
       reactionBudget: () => {
         simple: number
         choice: number
-        colors: { intent: number; emoji: string; label: string }[]
+        /** `answerIsDodge` 는 `ANSWER_IS_DODGE` 를 그대로 실어 보냅니다. */
+        colors: { intent: number; emoji: string; label: string; answerIsDodge: boolean }[]
       }
       /**
        * 🩸 **피격 장부** — 맞은 한 대마다 볼 수 있었는지·답할 수 있었는지.
@@ -5872,7 +5873,10 @@ window.__game = {
    */
   hurtLedger: () => game.debugHurtLedger(),
   reactionBudget: () => {
-    const seen = new Map<number, { intent: number; emoji: string; label: string }>()
+    const seen = new Map<
+      number,
+      { intent: number; emoji: string; label: string; answerIsDodge: boolean }
+    >()
     for (const key of Object.keys(ENEMY_DEFS)) {
       for (const a of attacksFor(Number(key) as EnemyKind)) {
         if (!seen.has(a.intent)) {
@@ -5880,6 +5884,19 @@ window.__game = {
             intent: a.intent,
             emoji: INTENT_EMOJI[a.intent],
             label: INTENT_LABEL[a.intent],
+            /**
+             * **이 색의 정답이 구르기인가.** 규칙은 `enemyAttacks.ts`
+             * `ANSWER_IS_DODGE` 한 곳에만 있고 여기서는 실어 보내기만
+             * 합니다 — 프로브가 라벨 문자열로 짐작하지 않게.
+             *
+             * 없어서 생긴 일: `npm run react` 가 🔴·🟡·🟣·🟢 만 재고
+             * **🔵 속박을 아예 안 재고 있었습니다.** 🔵 의 정답도
+             * 구르기(무적 프레임)라 🔴 과 같은 검사를 받아야 하는데,
+             * 프로브가 색 목록을 손으로 적어 두어서 빠진 것을 아무도
+             * 몰랐습니다. 이제 게임이 답을 같이 보내므로 프로브가
+             * **색마다 빠짐없이** 돌 수 있습니다.
+             */
+            answerIsDodge: ANSWER_IS_DODGE[a.intent],
           })
         }
       }

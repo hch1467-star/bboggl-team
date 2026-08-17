@@ -109,6 +109,20 @@ try {
   // 색의 뜻은 라벨에서 찾습니다 — 숫자를 프로브가 외우지 않게.
   const intentBy = (needle) => budget.colors.find((c) => c.label.includes(needle))?.intent
 
+  /**
+   * ── 🕳 **검사가 자기가 안 재는 색을 못 봅니다** ──────────────────────
+   *
+   * 이 프로브는 🔴·🟡·🟣·🟢 을 손으로 적어 두고 그 넷만 쟀습니다. 게임에는
+   * **🔵 속박**이 있고, 그 색의 정답도 구르기(무적 프레임)라 🔴 과 같은
+   * 검사를 받아야 합니다. 그런데 목록에 없으니 **아무 말도 안 나옵니다** —
+   * 이 저장소가 가장 비싸게 여기는 실패(조용한 계측기) 그대로입니다.
+   *
+   * 그래서 **잰 색을 표시해 두고, 게임이 말한 색을 다 덮었는지** 맨 끝에서
+   * 묻습니다. 색이 여섯 번째로 늘어나면 그날 이 프로브가 빨개집니다.
+   */
+  const covered = new Set()
+  const mark = (...intents) => intents.forEach((i) => i != null && covered.add(i))
+
   const STRIKE = intentBy('구르기')
   const SWEEP = intentBy('걸어서')
   const PULL = intentBy('거리')
@@ -140,6 +154,8 @@ try {
    * 답하는 것이 원리적으로 불가능**합니다. 외워서 미리 누르는 것 말고는
    * 방법이 없고, 그건 이 게임이 팔겠다고 한 재미가 아닙니다.
    */
+  // 0번은 **모든 색**을 한꺼번에 봅니다(예고가 반응 시간보다 긴가).
+  // 그래도 색별 검사의 대체물은 아니므로 여기서 덮었다고 치지 않습니다.
   const tooFast = attacks.filter((a) => a.windup <= budget.choice)
   check(
     tooFast.length === 0,
@@ -198,6 +214,7 @@ try {
     }
   })
   const sweepBad = sweeps.filter((s) => s.have <= s.need)
+  mark(SWEEP)
   check(
     sweeps.length > 0 && sweepBad.length === 0,
     '🟡 은 반응하고도 **걸어서 빠져나올 시간이 남는다**',
@@ -238,11 +255,19 @@ try {
    *     **여유가 있다**는 것만 증명합니다. 빨강이 뜨면 그건 세 번 다
    *     실패했다는 뜻이라 훨씬 무거운 신호입니다.)
    */
-  {
-    const fastest = of(STRIKE).sort((a, b) => a.windup - b.windup)[0]
+  /**
+   * ⚠️ **색을 손으로 적지 않습니다.** 예전엔 `of(STRIKE)` 하나였는데,
+   *    정답이 구르기인 색은 🔴 말고 **🔵 속박**도 있습니다(그 색의 정답이
+   *    바로 무적 프레임입니다). 프로브가 색 목록을 외우고 있었기 때문에
+   *    🔵 은 이 검사를 **한 번도 안 받았습니다.** 이제 게임이 색마다
+   *    `answerIsDodge` 를 실어 보내므로 그 목록으로 돕니다.
+   */
+  for (const color of budget.colors.filter((c) => c.answerIsDodge)) {
+    const fastest = of(color.intent).sort((a, b) => a.windup - b.windup)[0]
     if (!fastest) {
-      check(false, '🔴 가장 빠른 직격을 찾았다 (검사의 게이트)')
+      check(false, `${color.emoji} 가장 빠른 공격을 찾았다 (검사의 게이트)`)
     } else {
+      mark(color.intent)
       /**
        * 한 번의 시도 = 예고를 잡고, `delay` 만큼 기다렸다가, 구르고, 맞았나.
        * 함수로 뽑는 이유는 아래에서 **여러 delay 로 되풀이**하기 때문입니다.
@@ -309,50 +334,71 @@ try {
         return { ok: false, r: null }
       }
 
+      /**
+       * ── ⏳ **"반응 시간에 정확히 누른다"는 최선이 아닙니다** ────────────
+       *
+       * 처음엔 예산(0.48초)에 딱 맞춰 한 번만 눌러 보고 판정했습니다.
+       * 그 검사가 🔵 을 이렇게 빨갛게 만들었습니다:
+       *
+       *     boss_bind 예고 0.828초 · 0.48초× 0.40× 0.32× **0.24○**
+       *     ❗예고 0.828 → 1.07초 필요
+       *
+       * **처방이 거꾸로였습니다.** 무적 창은 누른 뒤 0.06~0.30초입니다.
+       * 0.48초에 누르면 무적은 0.54~0.78초인데 판정은 0.828초 — **이미
+       * 닫혀 있습니다.** 실패 원인이 *늦어서*가 아니라 **너무 일찍 굴러서**
+       * 였고, 그런데도 검사는 "예고를 더 늘리라"고 처방했습니다. 그대로
+       * 따랐으면 일찍 구르는 문제를 **더 키웠을 것**입니다.
+       *
+       * 사람은 예고가 길면 반응하고 나서 **기다립니다.** 소울류가 긴 공격을
+       * 공정하게 만드는 것도 그 때문입니다 — 늦게 눌러도 되는 창이 있습니다.
+       * 그러니 물어야 할 것은 *"예산에 정확히 누르면 되는가"* 가 아니라
+       * **"예산 이후에 넘길 수 있는 순간이 있는가, 그 창이 얼마나 넓은가"**
+       * 입니다. 창의 넓이가 곧 이 공격의 너그러움입니다.
+       *
+       * ⚠️ 예산보다 **이른** 시각은 일부러 안 봅니다. 그건 색을 알아보기
+       *    전에 누른 것이라 반응이 아니라 **예측**입니다.
+       */
       const late = Number(budget.choice.toFixed(2))
-      const atBudget = await survives(late)
-      check(
-        !atBudget.spawnFailed,
-        '🔴 늦게 굴러 보는 실험이 성립했다 (적을 세우고 예고를 잡았다)',
-        atBudget.spawnFailed ? `적을 못 세웠습니다 — 종류 "${atBudget.spawnFailed}"` : '섰습니다',
-      )
-      if (!atBudget.spawnFailed) {
-        /**
-         * ── 📐 **못 넘겼으면 얼마가 필요한지까지 잽니다** ────────────────
-         *
-         * 이 프로브는 🟡 쪽에서 이미 그렇게 합니다(`wantWindup`). 판정만
-         * 내고 처방을 안 주면, 읽는 사람이 **짐작으로** 값을 고릅니다.
-         *
-         * 재는 법: 구르기를 조금씩 **앞당겨** 가며 마지막으로 넘기는
-         * 지점 D 를 찾습니다. 예고가 W 일 때 D 에 눌러야 넘어간다면,
-         * 반응 예산 B 에 눌러도 넘어가게 하려면 예고가 **W + (B − D)**
-         * 여야 합니다. 모자란 만큼 그대로 늘리는 것입니다.
-         */
-        let latest = atBudget.ok ? late : -1
-        const rows = [`${late.toFixed(2)}초${atBudget.ok ? '○' : '×'}`]
-        if (!atBudget.ok) {
-          for (let d = late - 0.08; d >= -1e-9; d -= 0.08) {
-            const delay = Math.max(0, Number(d.toFixed(2)))
-            const res = await survives(delay)
-            rows.push(`${delay.toFixed(2)}초${res.ok ? '○' : '×'}`)
-            if (res.ok) {
-              latest = delay
-              break
-            }
-            if (delay === 0) break
-          }
+      const STEP = 0.08
+      const hits = []
+      const rows = []
+      let spawnFailed = null
+      // 판정이 나간 뒤에 누르는 것은 뜻이 없으니 예고 길이에서 멈춥니다.
+      for (let d = late; d <= fastest.windup + 1e-9; d += STEP) {
+        const delay = Number(d.toFixed(2))
+        const res = await survives(delay)
+        if (res.spawnFailed) {
+          spawnFailed = res.spawnFailed
+          break
         }
-        const need = latest >= 0 ? fastest.windup + (late - latest) : null
+        rows.push(`${delay.toFixed(2)}초${res.ok ? '○' : '×'}`)
+        if (res.ok) hits.push(delay)
+      }
+      check(
+        !spawnFailed && rows.length > 0,
+        `${color.emoji} 늦게 굴러 보는 실험이 성립했다 (적을 세우고 예고를 잡았다)`,
+        spawnFailed
+          ? `적을 못 세웠습니다 — 종류 "${spawnFailed}"`
+          : rows.length
+            ? `${rows.length}개 시각을 재 봤습니다`
+            : '예산이 예고보다 길어 잴 자리가 없습니다',
+      )
+      if (!spawnFailed && rows.length > 0) {
+        /**
+         * 창의 넓이는 **성공한 시각들의 폭 + 한 칸**입니다. 한 칸을 더하는
+         * 이유: 0.08초 간격으로 훑었으므로 성공한 지점 하나는 최소 그
+         * 정도의 폭을 갖습니다. 한 지점만 성공했을 때 "폭 0" 이라고 적으면
+         * 실제보다 나쁘게 말하는 것입니다.
+         */
+        const width = hits.length ? hits[hits.length - 1] - hits[0] + STEP : 0
         check(
-          atBudget.ok,
-          '🔴 **반응 예산만큼 늦게 굴러도 실제로 넘긴다** (산수가 아니라 눌러 본 값)',
-          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup}초 · ${rows.join(' ')}` +
-            (atBudget.ok
-              ? ''
-              : latest >= 0
-                ? ` ❗늦어도 ${latest.toFixed(2)}초까지만 됩니다` +
-                  ` — 예고 ${fastest.windup} → **${need.toFixed(2)}초** 필요`
-                : ' ❗0초에 굴러도 못 넘깁니다 — 예고가 아니라 무적 창을 보십시오'),
+          hits.length > 0,
+          `${color.emoji} **읽고 나서 넘길 수 있는 순간이 있다** (산수가 아니라 눌러 본 값)`,
+          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup.toFixed(2)}초 · ${rows.join(' ')}` +
+            (hits.length
+              ? ` — ${hits[0].toFixed(2)}~${hits[hits.length - 1].toFixed(2)}초에 넘김` +
+                ` (창 ${width.toFixed(2)}초)`
+              : ' ❗예산 이후 **어느 순간에도** 못 넘깁니다'),
         )
       }
     }
@@ -384,6 +430,7 @@ try {
     }
   })
   const pullBad = pulls.filter((p) => p.have <= p.need)
+  mark(PULL)
   check(
     pulls.length > 0 && pullBad.length === 0,
     '🟣 은 반응하고도 **사거리 밖으로 물러날 시간이 남는다**',
@@ -412,6 +459,7 @@ try {
   const counterNeed = budget.choice + slowWeapon.firstHitAt
   const greens = of(COUNTER)
   const greenBad = greens.filter((a) => a.windup < counterNeed)
+  mark(COUNTER)
   check(
     greens.length > 0 && greenBad.length === 0,
     '🟢 은 반응하고도 **가장 느린 무기로 한 대 꽂을 시간이 남는다**',
@@ -421,6 +469,31 @@ try {
   )
 
   console.log('')
+  /**
+   * ── 🕳 **게임이 말한 색을 다 쟀는가** ──────────────────────────────
+   *
+   * 맨 마지막에 묻습니다. 이 프로브는 색 목록을 손으로 적어 두고 넷만
+   * 쟀고, 그래서 **🔵 속박이 한 번도 검사를 안 받았습니다.** 빠진 것을
+   * 알려 주는 것이 아무것도 없었습니다 — 통과하는 검사보다 나쁜 것이
+   * 아무 말도 안 하는 검사라고 이 파일 아래에 적어 두고, 정작 이 파일이
+   * 그러고 있었습니다.
+   *
+   * 색이 여섯 번째로 늘어나면 그날 이 줄이 빨개집니다. 그게 목적입니다.
+   *
+   * ⚠️ 표본이 비면 통과가 아닙니다 — 색을 하나도 못 읽었으면 그건
+   *    "다 쟀다"가 아니라 "아무것도 못 읽었다"입니다.
+   */
+  const missed = budget.colors.filter((c) => !covered.has(c.intent))
+  check(
+    budget.colors.length > 0 && missed.length === 0,
+    '🕳 **게임이 가진 색을 하나도 빠짐없이 쟀다** (안 재는 색을 검사가 스스로 볼 수 있게)',
+    budget.colors.length === 0
+      ? '색을 하나도 못 읽었습니다'
+      : missed.length
+        ? `안 잰 색 — ${missed.map((c) => `${c.emoji} ${c.label}`).join(' · ')}`
+        : `${budget.colors.length}색 전부 — ${budget.colors.map((c) => c.emoji).join('')}`,
+  )
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
   void LABEL
 } catch (err) {
