@@ -213,11 +213,43 @@ export function readInputFlow(): {
  */
 const TEMPO = PLAYER.tempo.attackScale
 
-function spendStamina(p: number, cost: number): void {
+/**
+ * 🫁 **마지막으로 기력을 쓴 것이 무엇인가.**
+ *
+ * ── 왜 필요한가 (벤치가 네 번 같은 말을 했습니다) ────────────────────
+ * `손이 묶임 — stamina` 는 벤치마다 `locked` 1위입니다(24 · 16 · 11 · 8).
+ * 뜻은 *"예고를 봤는데 기력이 없어 못 굴렀다"* 인데, **누가 그 기력을
+ * 썼는지**는 아무도 말해 주지 않습니다. 처방이 완전히 갈립니다:
+ *
+ *   · **공격**이 썼다 → 욕심입니다. 구르기 유보분(`canAffordAttack`)이
+ *     막아야 하는데 뚫렸다는 뜻이라 **버그**입니다.
+ *   · **구르기**가 썼다 → 겁먹고 연달아 굴렀습니다. 값이나 회복의
+ *     이야기이고, 소울류에서 **정상적인 실패**이기도 합니다.
+ *   · **헛친 가드**가 썼다 → 🟢 반격을 잘못 읽은 것입니다.
+ *
+ * 앞의 것은 고쳐야 하고 뒤의 것은 가르쳐야 합니다. 한 칸에 뭉쳐 두면
+ * 어느 쪽인지 영영 모릅니다 — 이 저장소가 `못 피함` 에서 이미 겪은 일입니다.
+ */
+export type StaminaSpender = '공격' | '구르기' | '구르기취소' | '헛친가드' | '스킬'
+let lastSpender: StaminaSpender | '' = ''
+let lastSpendAt = -1
+export function readLastSpender(): { what: string; at: number } {
+  return { what: lastSpender, at: lastSpendAt }
+}
+export function resetLastSpender(): void {
+  lastSpender = ''
+  lastSpendAt = -1
+}
+
+function spendStamina(p: number, cost: number, by: StaminaSpender): void {
   const used = Math.min(Stamina.value[p], cost)
   staminaSpent += used
   Stamina.value[p] = Math.max(0, Stamina.value[p] - cost)
   Stamina.regenDelayT[p] = PLAYER.staminaRegenDelay
+  if (used > 0) {
+    lastSpender = by
+    lastSpendAt = time.simElapsed
+  }
 }
 const finishable = defineQuery(Enemy, Transform, Health, Actor)
 
@@ -383,7 +415,7 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   // 자기 버퍼만 씁니다 — 구르기 선입력은 남겨 둡니다(후딜에서 구르기로 빠질 수 있게).
   Actor.bufferedAttack[p] = 0
   Actor.bufferedAttackT[p] = 0
-  spendStamina(p, c.staminaCost)
+  spendStamina(p, c.staminaCost, '공격')
   // 기둥 1 — **스태미나로 낸 공격**. 쿨다운으로 낸 것과 나눠 셉니다.
   lightSwings++
   // 스냅하지 않고 **목표만 정해 둡니다.** 선행동작 동안 수렴합니다(turnArrive).
@@ -714,7 +746,7 @@ function beginDodge(p: number, dirX: number, dirZ: number): void {
   Player.dodgeDirZ[p] = dirZ
   Player.dodgeElapsed[p] = 0
   // 무기마다 회피 값이 다릅니다 — arsenal.ts dodgeCostScale 설계 노트 참고.
-  spendStamina(p, PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1))
+  spendStamina(p, PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1), '구르기')
   Transform.rotY[p] = Math.atan2(dirX, dirZ)
   sfx.dodge()
 }
@@ -911,7 +943,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         Player.guardT[p] = Math.max(0, Player.guardT[p] - dt)
         if (Player.guardT[p] === 0) {
           Player.guardLockT[p] = GUARD.whiffLock
-          spendStamina(p, GUARD.whiffStamina)
+          spendStamina(p, GUARD.whiffStamina, '헛친가드')
           sfx.deny()
         }
       }
@@ -1100,7 +1132,7 @@ export function playerControlSystem(ctx: ControlContext): void {
       if (Stamina.value[p] < cancelCost) return false
       takeBufferedDodge()
       // 추가분만 여기서, 기본분은 beginDodge 가 무기 배율까지 얹어 뺍니다.
-      spendStamina(p, PLAYER.dodge.cancelExtraCost)
+      spendStamina(p, PLAYER.dodge.cancelExtraCost, '구르기취소')
       const [dx, dz] = dodgeDir()
       beginDodge(p, dx, dz)
       inputFlow.cancels++
@@ -1139,7 +1171,7 @@ export function playerControlSystem(ctx: ControlContext): void {
       if (canGuardNow(p)) {
         // 커밋을 뚫고 여는 것이면 여기서 값을 냅니다(서서 내면 0).
         const cost = guardOpenCost(p)
-        if (cost > 0) spendStamina(p, cost)
+        if (cost > 0) spendStamina(p, cost, '스킬')
         Player.guardT[p] = GUARD.window
         noteLearned('guard')
         sfx.cast(1)

@@ -3043,6 +3043,23 @@ try {
        */
       /** 💀 이 판에서 죽은 순간마다의 사인 — 판정은 게임이 내렸습니다. */
       deathLog: G.deathLog(),
+      /**
+       * 🫁 **기력에 묶여 맞은 한 대는 "누가 그 기력을 썼나"까지 셉니다.**
+       *
+       * `손이 묶임 — stamina` 는 벤치마다 `locked` 1위인데(24 · 16 · 11 · 8)
+       * 한 칸이라 처방을 못 정했습니다. 공격이 썼으면 구르기 유보분이
+       * 뚫린 것(버그)이고, 구르기가 썼으면 연달아 구른 것(가르칠 일),
+       * 헛친 가드면 🟢 를 잘못 읽은 것입니다.
+       */
+      lockSpenders: (() => {
+        const t = {}
+        for (const r of G.hurtLedger()) {
+          if (r.verdict !== 'locked:stamina') continue
+          const k = r.spender || '기록없음'
+          t[k] = (t[k] ?? 0) + 1
+        }
+        return t
+      })(),
       hurtByColor: (() => {
         const t = {}
         for (const r of G.hurtLedger()) {

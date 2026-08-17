@@ -192,6 +192,7 @@ import {
   resetStaminaSpent,
   dodgeBlock,
   canAffordAttack,
+  readLastSpender,
   contextComboIndex,
   isSprinting,
   type ControlContext,
@@ -393,6 +394,12 @@ class Game {
     expected: number
     /** 🚶 예고 동안 **내가 움직인 거리**(m). 기준점이 안 움직이는 값. */
     walked: number
+    /**
+     * 🫁 `locked:stamina` 일 때 **그 기력을 마지막으로 쓴 것**.
+     * 공격이면 유보분이 뚫린 것(버그), 구르기면 연달아 구른 것(가르칠 일),
+     * 헛친 가드면 🟢 를 잘못 읽은 것 — 처방이 각각 다릅니다.
+     */
+    spender: string
     /** 🚶 예고 동안 적과의 거리 변화(m). 음수면 다가갔다는 뜻. */
     moved: number
     /** 🎨 색 이름(이모지 포함) · 그 색이 요구한 답. 재는 쪽이 표를 안 들게. */
@@ -1398,6 +1405,7 @@ class Game {
           sinceTry: -1,
           expected: 0,
           walked: 0,
+          spender: '',
           moved: 0,
           color: '낙하',
           answer: '발밑을 보기',
@@ -2971,6 +2979,7 @@ class Game {
         sinceTry: -1,
         expected: 0,
         walked: 0,
+        spender: '',
         moved: 0,
         color: '?',
         answer: '?',
@@ -3117,6 +3126,12 @@ class Game {
           ) - rec.distStart
         ).toFixed(2),
       ),
+      /**
+       * 🫁 기력에 묶여 맞은 한 대만 **누가 썼는지**를 적습니다.
+       * 다른 판정에서는 뜻이 없으므로 빈 칸으로 둡니다 — 안 쓰는 축에
+       * 값을 채우면 그건 정보가 아니라 소음입니다.
+       */
+      spender: verdict === 'locked:stamina' ? readLastSpender().what : '',
       color: rec.intent >= 0 ? `${INTENT_EMOJI[rec.intent as AttackIntent]}${INTENT_NAME[rec.intent as AttackIntent]}` : '?',
       answer: rec.intent >= 0 ? INTENT_ANSWER[rec.intent as AttackIntent] : '?',
     })

@@ -261,6 +261,20 @@ console.log(
   console.log(`                 그중 — ${split || '갈라진 기록 없음'}`)
   console.log(`                 손이 묶임 — ${locks || '없음'}`)
   /**
+   * 🫁 **그 기력을 누가 썼는가.** 한 칸이던 `stamina` 를 갈라 봅니다 —
+   * 공격이면 유보분이 뚫린 것(버그), 구르기면 연달아 구른 것(가르칠 일).
+   */
+  {
+    const by = {}
+    for (const l of logs) for (const [k, v] of Object.entries(l.lockSpenders ?? {})) by[k] = (by[k] ?? 0) + v
+    const rows = Object.entries(by).sort((a, b) => b[1] - a[1])
+    if (rows.length) {
+      console.log(
+        `                    그 기력을 쓴 것 — ${rows.map(([k, v]) => `${k} ${v}`).join(' · ')}`,
+      )
+    }
+  }
+  /**
    * 🎨 **색별로 다시 봅니다 — 색마다 답이 다르기 때문입니다.**
    *
    * `안누름 30` 만 보면 *"구르기를 안 쓴다"* 로 읽히지만, 🟡 광역의 정답은
