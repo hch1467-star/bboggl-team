@@ -122,11 +122,29 @@ try {
   check(colors.has(1), '🟡 광역을 잡몹 단계에서 배움')
   check(colors.has(2), '🔵 속박을 잡몹 단계에서 배움 (이번에 추가)')
   check(colors.has(3), '🟣 끌어당김을 잡몹 단계에서 배움 (이번에 추가)')
-  // 한 적은 한 질문만 — 실루엣만 보고 대응이 정해져야 합니다.
+  /**
+   * ── 🎨 **한 적은 한 질문만 — 그런데 검사가 다른 것을 세고 있었습니다** ──
+   *
+   * 규칙의 근거는 *"실루엣만 보고 대응이 정해져야 한다"* 입니다. 그건
+   * **색 하나**를 뜻하지 패턴 하나를 뜻하지 않습니다 — 같은 색의 두 박자는
+   * 답이 여전히 하나입니다.
+   *
+   * 그런데 이 검사는 `attacks.length === 1`, 즉 **패턴 수**를 셌습니다.
+   * 규칙이 아니라 **지금의 구현**을 지키고 있었던 것입니다. 그래서 이 적들에게
+   * 박자를 하나 더 주려는 순간(NRFTW 의 적이 매력적인 이유가 그것입니다 —
+   * 한 적이 빠른 박자와 느린 박자를 같이 갖습니다) 검사가 막습니다.
+   * 색이 늘어나는 것은 여전히 막아야 하지만, 박자가 느는 것은 막을 이유가
+   * 없습니다.
+   *
+   * 그래서 **색의 가짓수**를 셉니다. 규칙은 그대로이고, 검사가 규칙을
+   * 보게 된 것입니다.
+   */
+  const intentsOf = (r) => new Set(r.attacks.map((a) => a.intent))
   check(
-    byId.binder.attacks.length === 1 && byId.dragger.attacks.length === 1,
-    '특수 적은 패턴이 하나뿐 (한 적 = 한 색)',
-    `얽는 자 ${byId.binder.attacks.length}개 · 끄는 자 ${byId.dragger.attacks.length}개`,
+    intentsOf(byId.binder).size === 1 && intentsOf(byId.dragger).size === 1,
+    '특수 적은 **색이 하나뿐** (한 적 = 한 질문 — 박자는 여럿이어도 됩니다)',
+    `얽는 자 색 ${intentsOf(byId.binder).size}개(패턴 ${byId.binder.attacks.length})` +
+      ` · 끄는 자 색 ${intentsOf(byId.dragger).size}개(패턴 ${byId.dragger.attacks.length})`,
   )
 
   // ---- 3. 실루엣이 실제로 다른가 ----
