@@ -12,6 +12,7 @@ import {
   finisherStep,
   swingRadius,
   swingRadiusUpperBound,
+  swingPower,
   RUN_COMBO,
   ROLL_COMBO,
   PLUNGE_COMBO,
@@ -589,7 +590,8 @@ class Game {
       rightZ: this.cam.right.z,
       aimX: 0,
       aimZ: 0,
-      onSwing: (x, z, rotY, range, arcDeg) => this.vfx.spawnSwing(x, z, rotY, range, arcDeg),
+      onSwing: (x, z, rotY, range, arcDeg, power) =>
+        this.vfx.spawnSwing(x, z, rotY, range, arcDeg, power),
       onCast: (v) => {
         const y = this.terrain ? this.terrain.groundYAt(v.x, v.z) : 0
         // 원형/지점 스킬은 전방위이므로 부채꼴 각도를 360°로 바꿉니다.
@@ -5557,6 +5559,9 @@ declare global {
           range: number
           drawnRange: number
           reachUpperBound: number
+          /** 이 단계의 **손끝**(히트스톱, 초)과 **눈**(궤적 무게 0~1). */
+          hitstop: number
+          power: number
         }[]
         /** 🥋 강타 — 태운 집중 0~3점 각각의 피해 */
         heavySteps: { spent: number; damage: number }[]
@@ -6354,6 +6359,17 @@ window.__game = {
         staminaCost: c.staminaCost,
         /** 📏 이 타의 사거리(m). 판정은 여기에 **대상의 굵기**를 더합니다. */
         range: c.range,
+        /**
+         * ⚔️ 이 단계의 **손끝**(히트스톱)과 **눈**(궤적 무게).
+         *
+         * 콤보 단계마다 히트스톱이 다르다는 것은 설계에 적혀만 있었고,
+         * 그게 실제로 손끝으로 구분될 만큼 벌어져 있는지는 아무도 안
+         * 쟀습니다. 그리고 그 무게가 화면에도 실려 나가는지는 더더욱요.
+         * 재려면 게임이 두 값을 같이 내야 합니다 — 프로브가 베껴 적으면
+         * 값을 바꾸는 날 그 검사만 옛 숫자를 지킵니다.
+         */
+        hitstop: c.hitstop,
+        power: Number(swingPower(w, c).toFixed(3)),
         /**
          * 📏 **화면에 실제로 그려지는 반지름**(m). 지금은 `range` 와 같지만,
          * 프로브가 그 사실을 **짐작하지 않도록** 게임이 답합니다

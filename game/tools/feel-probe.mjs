@@ -454,6 +454,63 @@ try {
   }
 
   console.log('')
+  /**
+   * ── ⚔️ **콤보 안에서도 손끝이 달라지는가** ─────────────────────────
+   *
+   * 위 「읽기의 등급」은 평타 → 백어택 → 완벽 회피를 가릅니다. 그런데
+   * **평타 안쪽**은 한 덩어리로 쟀습니다. 값은 이미 다릅니다 —
+   *
+   *     롱소드 0.055 → 0.11 · 대검 0.09 → 0.15 · 단검 0.035 → 0.08
+   *
+   * 즉 설계는 *"마무리는 다르다"* 고 적어 두었는데, **그게 손끝으로
+   * 구분될 만큼 벌어져 있는지는 아무도 안 쟀습니다.** 이 저장소에서
+   * 그런 것은 늘 조용히 무너져 있었습니다.
+   *
+   * 문턱은 위 검사와 **같은 값**을 씁니다 — 한 프레임(17ms). 같은 질문
+   * ("손끝으로 구분되는가")에 두 개의 답을 두지 않습니다.
+   *
+   * ── 🎨 그리고 **눈도 같이 달라지는가** ────────────────────────────
+   * 손끝만 달라지고 화면이 같으면, 플레이어는 마무리가 들어간 줄 모릅니다.
+   * 궤적의 무게(`power`)는 히트스톱에서 끌어오므로 값이 갈라질 수 없지만,
+   * **실제로 0 → 1 로 벌어지는지**는 확인해야 합니다. 정규화가 잘못되면
+   * 모든 단계가 같은 값을 받아도 아무도 모릅니다.
+   */
+  {
+    const table = await page.evaluate(() => window.__game.weaponTable())
+    const FRAME = 1 / 60
+    const rows = table
+      .filter((w) => (w.comboSteps ?? []).length >= 2)
+      .map((w) => {
+        const cs = w.comboSteps
+        const first = cs[0]
+        const last = cs[cs.length - 1]
+        return {
+          name: w.name,
+          gap: last.hitstop - first.hitstop,
+          powerGap: last.power - first.power,
+        }
+      })
+    check(
+      rows.length >= 2,
+      '⚔️ 콤보가 있는 무기를 실제로 읽었다 (비교의 게이트)',
+      `${rows.length}종 — ${rows.map((r) => r.name).join(' · ')}`,
+    )
+    if (rows.length >= 2) {
+      const bad = rows.filter((r) => r.gap < FRAME)
+      check(
+        bad.length === 0,
+        '⚔️ **콤보 마무리가 첫 타와 손끝으로 구분된다** (한 프레임 이상 더 멎는다)',
+        rows.map((r) => `${r.name} +${Math.round(r.gap * 1000)}ms`).join(' · '),
+      )
+      const flat = rows.filter((r) => r.powerGap < 0.9)
+      check(
+        flat.length === 0,
+        '🎨 **그 차이가 궤적에도 실린다** (손끝만 알고 눈은 모르면 안 됩니다)',
+        rows.map((r) => `${r.name} 무게 +${r.powerGap.toFixed(2)}`).join(' · '),
+      )
+    }
+  }
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**

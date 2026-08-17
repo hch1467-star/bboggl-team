@@ -114,7 +114,14 @@ export function setEnemyAiEnabled(enabled: boolean): void {
 }
 
 export interface EnemyAiContext {
-  onSwing: (x: number, z: number, rotY: number, range: number, arcDeg: number) => void
+  onSwing: (
+    x: number,
+    z: number,
+    rotY: number,
+    range: number,
+    arcDeg: number,
+    power: number,
+  ) => void
 }
 
 const enemies = defineQuery(Enemy, Actor, Transform, Velocity, Health)
@@ -1397,7 +1404,10 @@ export function enemyAiSystem(
            *    깃발을 따로 뒀습니다.
            */
           Enemy.whiffing[e] = 1
-          ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg)
+          // 적의 궤적은 **무게를 안 실어 보냅니다**(0). 적이 무엇을 하는지는
+          // 지면의 4색 예고가 이미 말하고, 궤적까지 등급을 가지면 그 색과
+          // 다투게 됩니다 — 화면이 시끄러워지는 만큼 색이 안 읽힙니다.
+          ctx.onSwing(Transform.x[e], Transform.z[e], Transform.rotY[e], atk.reach, atk.arcDeg, 0)
           // 실제로 휘두르는 순간. 예고음(windup 시작)과 시간이 벌어져 있어서
           // "예고 → 발동" 두 박자가 귀로도 잡힙니다.
           sfx.swing(cfg.heavy ? 0.95 : 0.55, Transform.x[e], Transform.z[e])

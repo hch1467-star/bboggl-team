@@ -19,8 +19,19 @@ const GROUND_POOL = 20
 
 const DAMAGE_LIFE = 0.75
 const SPARK_LIFE = 0.22
-/** 궤적은 짧아야 잔상처럼 보입니다. 길면 지면에 눌어붙은 장판처럼 보입니다. */
+/**
+ * 궤적은 짧아야 잔상처럼 보입니다. 길면 지면에 눌어붙은 장판처럼 보입니다.
+ *
+ * ⚔️ **무게에 따라 늘어납니다.** 콤보 마무리는 첫 타보다 오래 남아야
+ * *"방금 큰 게 들어갔다"* 가 눈에 남습니다 — 손끝(히트스톱)이 이미 그렇게
+ * 말하고 있는데 화면만 같은 말을 반복하고 있었습니다.
+ * 최대치도 0.30초에 묶어 둡니다. 더 길면 잔상이 아니라 장판이 됩니다.
+ */
 const SWING_LIFE = 0.19
+const SWING_LIFE_HEAVY = 0.3
+/** 가벼운 것은 서늘한 흰빛, 무거운 것은 달아오른 호박빛. */
+const SWING_COLOR_LIGHT = 0xeaf6ff
+const SWING_COLOR_HEAVY = 0xffc46b
 
 
 interface DamageItem {
@@ -67,6 +78,9 @@ interface SwingItem {
   mesh: THREE.Mesh
   material: THREE.MeshBasicMaterial
   life: number
+  /** 이 궤적이 **처음 받은** 수명. 무게마다 다르므로 사그라드는 비율을
+   *  고정값으로 나누면 무거운 것이 갑자기 사라집니다. */
+  maxLife: number
   baseScale: number
 }
 
@@ -214,7 +228,7 @@ export class Vfx {
       mesh.visible = false
       mesh.renderOrder = 14
       scene.add(mesh)
-      this.swings.push({ mesh, material, life: 0, baseScale: 1 })
+      this.swings.push({ mesh, material, life: 0, maxLife: SWING_LIFE, baseScale: 1 })
     }
 
     for (let i = 0; i < GROUND_POOL; i++) {
@@ -339,7 +353,18 @@ export class Vfx {
    * 이 도형이 곧 "내 공격이 닿는 범위"의 설명이므로, 조금이라도 어긋나면
    * 플레이어가 사거리를 잘못 배우게 됩니다.
    */
-  spawnSwing(x: number, z: number, rotY: number, range: number, arcDeg: number): void {
+  /**
+   * @param power 이 한 방의 **무게** 0~1 (arsenal `swingPower`).
+   *              색·두께·머무는 시간이 이 값 하나로 갈립니다.
+   */
+  spawnSwing(
+    x: number,
+    z: number,
+    rotY: number,
+    range: number,
+    arcDeg: number,
+    power = 0,
+  ): void {
     const item = this.swings[this.swingCursor]
     this.swingCursor = (this.swingCursor + 1) % SWING_POOL
     item.mesh.geometry = this.crescentGeo(arcDeg)
@@ -351,7 +376,19 @@ export class Vfx {
     item.mesh.scale.set(range, 1, range)
     item.mesh.visible = true
     item.material.opacity = 1
-    item.life = SWING_LIFE
+    /**
+     * ⚔️ 무게가 세 가지를 한꺼번에 움직입니다 — 색·크기·머무는 시간.
+     *
+     * 하나만 바꾸면 (예: 색만) 눈에 잘 안 들어옵니다. 주변 시야로 보는
+     * 화면에서 읽히는 것은 **여러 신호가 같은 방향으로 함께 움직일 때**
+     * 입니다 — 이 저장소가 반격 신호를 만들 때 이미 쓴 규칙입니다
+     * (테두리만 바꾸지 않고 맥박을 같이 준 것).
+     */
+    const w = Math.max(0, Math.min(1, power))
+    item.material.color.setHex(SWING_COLOR_LIGHT).lerp(new THREE.Color(SWING_COLOR_HEAVY), w)
+    item.mesh.scale.y = 1 + w * 0.6
+    item.life = SWING_LIFE + (SWING_LIFE_HEAVY - SWING_LIFE) * w
+    item.maxLife = item.life
   }
 
   /**
@@ -429,7 +466,7 @@ export class Vfx {
         w.mesh.visible = false
         continue
       }
-      const t = 1 - w.life / SWING_LIFE
+      const t = 1 - w.life / (w.maxLife || SWING_LIFE)
       // 살짝 커지면서 사라집니다 — 칼이 지나간 뒤 잔상이 퍼지는 느낌.
       const grow = 1 + t * 0.12
       w.mesh.scale.x = w.baseScale * grow

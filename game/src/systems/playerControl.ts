@@ -7,6 +7,7 @@ import {
   ROLL_COMBO,
   PLUNGE_COMBO,
   type SkillDef,
+  swingPower,
 } from '../config/arsenal'
 import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
@@ -83,7 +84,18 @@ export interface ControlContext {
   aimX: number
   aimZ: number
   /** 기본 공격 검격 궤적 */
-  onSwing: (x: number, z: number, rotY: number, range: number, arcDeg: number) => void
+  /**
+   * @param power 이 한 방의 **무게** 0~1. 콤보 마무리·강타처럼 무거운 것일수록 1 에
+   *              가깝습니다. 궤적의 색·두께·머무는 시간이 이 값으로 갈립니다.
+   */
+  onSwing: (
+    x: number,
+    z: number,
+    rotY: number,
+    range: number,
+    arcDeg: number,
+    power: number,
+  ) => void
   /** 스킬 예고/발동 이펙트 */
   onCast: (visual: CastVisual) => void
   /** 무기를 바꿨을 때 (HUD 갱신용) */
@@ -1374,12 +1386,24 @@ export function playerControlSystem(ctx: ControlContext): void {
             // 파고들기가 끝나면 잔여 속도를 죽입니다(대시와 같은 이유).
             forwardOverride = null
             damp(p, PLAYER.moveSpeed * weapon.moveSpeedScale * 0.3)
+            /**
+             * ⚔️ **이 한 방의 무게를 궤적에 실어 보냅니다.**
+             *
+             * 콤보 단계마다 히트스톱이 이미 다릅니다(롱소드 0.055 → 0.11,
+             * 단검 0.035 → 0.08). 즉 **손끝은 마무리를 알고 있는데 눈은
+             * 몰랐습니다** — 첫 타와 마무리의 궤적이 같은 색, 같은 길이였습니다.
+             *
+             * 무게를 새로 지어내지 않고 **이미 있는 값(히트스톱)** 을 씁니다.
+             * 새 숫자를 만들면 그 둘이 언젠가 갈라지고, 그러면 화면이
+             * 손끝과 다른 말을 하게 됩니다 — 이 저장소가 여러 번 데인 모양입니다.
+             */
             ctx.onSwing(
               Transform.x[p],
               Transform.z[p],
               Transform.rotY[p],
               combo.range,
               combo.arcDeg,
+              swingPower(weapon, combo),
             )
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery

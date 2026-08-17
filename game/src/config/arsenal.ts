@@ -803,6 +803,35 @@ export function swingRadius(step: { range: number; lunge: number }): number {
   return step.range + slimmestFoeRadius()
 }
 
+/**
+ * ⚔️ **이 한 방의 무게** 0~1 — 궤적이 얼마나 화려해야 하는가.
+ *
+ * ── 왜 새 숫자를 안 만드는가 ──────────────────────────────────────
+ * 콤보 단계마다 히트스톱이 이미 다릅니다(롱소드 0.055 → 0.11 · 대검
+ * 0.09 → 0.15 · 단검 0.035 → 0.08). **손끝은 마무리를 알고 있는데 눈이
+ * 몰랐습니다** — 첫 타와 마무리의 궤적이 같은 색, 같은 길이였습니다.
+ *
+ * 그래서 `power` 를 따로 적지 않고 **히트스톱에서 끌어옵니다.** 새 숫자를
+ * 만들면 그 둘이 언젠가 갈라지고, 그러면 화면이 손끝과 다른 말을 합니다 —
+ * 이 저장소가 여러 번 데인 자리입니다(값이 두 곳에 있으면 갈라집니다).
+ *
+ * 무기 **안에서** 정규화하는 이유: 단검의 마무리(0.08)는 대검의 첫 타
+ * (0.09)보다 가볍지만, 단검을 쓰는 사람에게는 **그것이 자기 무기의 절정**
+ * 입니다. 무기를 넘나드는 절대 등급이 필요한 자리가 아니라, *"지금 쥔 것
+ * 안에서 이번 것이 얼마나 큰가"* 를 말해야 하는 자리입니다.
+ */
+export function swingPower(weapon: WeaponDef, step: ComboStep): number {
+  let lo = Infinity
+  let hi = 0
+  for (const c of weapon.combo) {
+    if (c.hitstop < lo) lo = c.hitstop
+    if (c.hitstop > hi) hi = c.hitstop
+  }
+  // 강타·처형처럼 콤보 밖의 것이 더 무거우면 그대로 1 을 넘지 않게 자릅니다.
+  if (!(hi > lo)) return step.hitstop >= hi ? 1 : 0
+  return Math.max(0, Math.min(1, (step.hitstop - lo) / (hi - lo)))
+}
+
 export function longestPlayerReach(): number {
   let m = 0
   for (const w of WEAPONS) for (const c of w.combo) if (c.range > m) m = c.range
