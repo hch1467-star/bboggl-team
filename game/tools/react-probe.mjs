@@ -61,6 +61,8 @@ try {
   const t = await page.evaluate(() => window.__game.terrainInfo())
   const roster = await page.evaluate(() => window.__game.enemyRoster())
   const dodges = await page.evaluate(() => window.__game.dodgeScales())
+  /** 무적 구간 — 아래 📐 예측이 쓰는 값. 프로브가 숫자를 들고 있지 않게. */
+  const dodge = await page.evaluate(() => window.__game.dodgeInfo())
   const weapons = await page.evaluate(() => window.__game.weaponTable())
   const budget = await page.evaluate(() => window.__game.reactionBudget())
 
@@ -377,6 +379,28 @@ try {
        * ⚠️ 예산보다 **이른** 시각은 일부러 안 봅니다. 그건 색을 알아보기
        *    전에 누른 것이라 반응이 아니라 **예측**입니다.
        */
+      /**
+       * ── 📐 **기하학이 예측하는 창을 나란히 찍습니다** ────────────────
+       *
+       * 무적은 누른 뒤 `iFrameStart ~ iFrameEnd` 입니다. 판정이 예고 끝
+       * `W` 에 온다면, 넘기려면 무적이 그 순간을 덮어야 하므로 누르는 시각은
+       *
+       *     t ∈ [W − iFrameEnd, W − iFrameStart]
+       *
+       * 입니다. 이 예측을 실측 옆에 두는 이유는, 둘이 어긋나는 순간이
+       * **무적이 새고 있다**거나 **선입력이 시각을 옮기고 있다**는 신호이기
+       * 때문입니다. 지금은 맞습니다 — `boss_bind`(예고 0.83초)에서 예측한
+       * 창이 0.53~0.77초였고, 실측이 `0.48초 0/3 · 0.56초 1/3 ·
+       * 0.64초 3/3 · 0.72초 3/3 · 0.80초 1/3` 로 **경계까지 그대로**
+       * 나왔습니다.
+       *
+       * 그 덕에 기전을 정정할 수 있었습니다. 저는 앞서 이 실패를
+       * *"밀려나서 살았다"* 로 읽었는데, 예측이 경계까지 맞는 이상 기전은
+       * **무적 프레임 타이밍** 하나입니다. 짐작한 기전 위에서 값을 만졌으면
+       * 엉뚱한 것을 고쳤을 것입니다.
+       */
+      const openAt = fastest.windup - dodge.iFrameEnd
+      const closeAt = fastest.windup - dodge.iFrameStart
       const late = Number(budget.choice.toFixed(2))
       const STEP = 0.08
       const hits = []
@@ -426,7 +450,13 @@ try {
         check(
           hits.length > 0,
           `${color.emoji} **읽고 나서 넘길 수 있는 순간이 있다** (산수가 아니라 눌러 본 값)`,
-          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup.toFixed(2)}초 · ${rows.join(' · ')}` + note,
+          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup.toFixed(2)}초` +
+            ` · 📐 예측한 창 ${Math.max(0, openAt).toFixed(2)}~${closeAt.toFixed(2)}초` +
+            (openAt > budget.choice
+              ? ` (반응 예산보다 ${(openAt - budget.choice).toFixed(2)}초 늦게 열림 — **읽자마자 구르면 안 됩니다**)`
+              : '') +
+            `\n                 ${rows.join(' · ')}` +
+            note,
         )
       }
     }
