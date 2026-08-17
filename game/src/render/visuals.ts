@@ -23,6 +23,7 @@ import {
   FOCUS,
   GRUNT,
   GUARD,
+  HURT,
   PLAYER,
   TREASURE,
   hearDistance,
@@ -91,6 +92,13 @@ export function renderKindForEnemy(kind: EnemyKind): number {
 
 interface Visual {
   group: THREE.Group
+  /**
+   * 🤕 **몸만 젖혀지는 축** — 피격 기울기가 여기에 걸립니다.
+   *
+   * `group` 에 걸면 바닥에 깔린 4색 예고까지 같이 들립니다. 근거는 이 축을
+   * 만드는 자리에 적어 두었습니다. 보물처럼 몸이 없는 것에는 없습니다.
+   */
+  leanPivot?: THREE.Group
   material: THREE.MeshStandardMaterial
   /**
    * 무기를 휘두르는 축.
@@ -545,21 +553,47 @@ export class Visuals {
       emissive: new THREE.Color(0x000000),
     })
 
+    /**
+     * 🤕 **몸만 젖혀지는 축.**
+     *
+     * ── 여기 하마터면 큰 것을 부술 뻔했습니다 ─────────────────────────
+     * 피격 시 기울기를 처음엔 `group` 에 직접 걸었습니다. 그런데 이 그룹에는
+     * 몸통만 있는 게 아닙니다 — **4색 예고 · 등 뒤 구역 · 발소리 링 · 속박
+     * 족쇄 · 체력바**가 전부 같은 그룹의 자식입니다. 그러면 한 대 맞을
+     * 때마다 **바닥에 깔린 예고가 같이 들려서 비스듬히** 섭니다.
+     *
+     * 그건 연출이 어색해지는 정도가 아니라 **이 게임의 기둥을 부수는**
+     * 일입니다(DESIGN.md 기둥 2 — 예고를 읽고 답한다). 맞는 순간마다 읽어야
+     * 할 도형이 흔들리면, 맞을수록 읽기 어려워집니다.
+     *
+     * 그래서 축을 하나 끼웁니다. **몸(과 무기)만** 이 축 아래로 들어가고,
+     * 바닥에 그리는 것들은 `group` 에 그대로 남습니다.
+     */
+    const leanPivot = new THREE.Group()
+    group.add(leanPivot)
+
     const body = new THREE.Mesh(this.geos[kind], material)
     body.position.y = cfg.height / 2
     body.castShadow = true
     body.receiveShadow = true
-    group.add(body)
+    leanPivot.add(body)
 
     // 종류를 윤곽으로 가르는 표식(위 silhouetteFor 설계 노트).
-    if (!isPlayer) for (const part of silhouetteFor(enemyKind, material)) group.add(part)
+    if (!isPlayer) for (const part of silhouetteFor(enemyKind, material)) leanPivot.add(part)
 
     // 무기를 휘두르는 축 — 어깨 높이에 둡니다.
     const swingPivot = new THREE.Group()
     swingPivot.position.y = cfg.height * 0.62
-    group.add(swingPivot)
+    leanPivot.add(swingPivot)
 
-    const visual: Visual = { group, material, floats: false, telegraphWindup: 0, swingPivot }
+    const visual: Visual = {
+      group,
+      leanPivot,
+      material,
+      floats: false,
+      telegraphWindup: 0,
+      swingPivot,
+    }
 
     if (isPlayer) {
       // 무기 3종을 미리 만들어 두고 보이기/숨기기로 교체합니다(교체가 즉각적입니다).
@@ -1016,11 +1050,24 @@ export class Visuals {
 
       v.group.position.set(Transform.x[e], Transform.y[e], Transform.z[e])
       v.group.rotation.y = Transform.rotY[e]
+      this.syncLean(e, v)
 
       this.syncSwing(e, v)
 
-      // 피격 플래시 — 흰색 발광을 순간적으로 올렸다가 감쇠시킵니다.
-      const flash = Math.max(0, Health.flashT[e]) / 0.12
+      /**
+       * 🤕 **피격 플래시 — 길이가 무게입니다.**
+       *
+       * 나누는 값이 예전에는 `0.12`, 즉 **넣는 쪽이 쓰던 숫자를 여기 다시
+       * 적어 둔 것**이었습니다. 이제 무게마다 길이가 다르므로 그 방식은
+       * 아예 성립하지 않습니다 — 무거운 타격이 1을 넘겨 잘려 버립니다.
+       *
+       * 대신 **가장 가벼운 타격의 길이**로 나눕니다. 그러면 모든 타격이
+       * 마지막 `flashLight` 동안 **똑같은 곡선으로** 사그라들고, 무거울수록
+       * 그 앞에 하얗게 **머무는 시간**이 붙습니다. 즉 "머묾 → 사라짐"이고,
+       * 눈에는 *가벼운 것은 톡, 무거운 것은 쿵* 으로 읽힙니다.
+       * 밝기를 등급 매기지 않는 근거는 balance.ts `HURT` 에 적어 두었습니다.
+       */
+      const flash = Math.max(0, Health.flashT[e]) / HURT.flashLight
       /**
        * 페이즈 전환 중에는 **금빛으로 타오릅니다.**
        * 무적이라 피격 플래시가 아예 안 뜨는데, 아무 반응이 없으면 플레이어는
@@ -1455,6 +1502,54 @@ export class Visuals {
    * 그 값을 받아 **그리기만** 합니다 — 화면이 자기 식을 갖는 순간
    * "보이는 대로 했는데 들키는" 경험이 시작되고, 그건 버그보다 나쁩니다.
    */
+  /**
+   * 🤕 **밀려나는 쪽으로 몸이 젖혀집니다.**
+   *
+   * ── 왜 넉백 속도에서 뽑는가 ───────────────────────────────────────
+   * "기울기"라는 상태를 새로 만들 수도 있었지만, 그러면 값을 넣는 순간과
+   * 지우는 순간을 **또 관리해야 하고**, 무엇보다 밀림과 기울기가 서로 다른
+   * 곡선을 타게 됩니다 — 발은 이미 멈췄는데 몸만 젖혀져 있는 그림이 나옵니다.
+   * `Velocity.k*` 는 **이미** 밀림 그 자체이고, physics.ts 가 매 프레임
+   * 같은 비율로 줄여 줍니다. 그래서 여기서는 **읽기만** 하면 방향도 세기도
+   * 감쇠도 공짜로 맞습니다.
+   *
+   * ── 왜 로컬 좌표로 바꾸는가 ───────────────────────────────────────
+   * 넉백은 **월드** 방향인데 기울기는 **몸**의 앞뒤·좌우입니다. 그대로
+   * 쓰면 적이 어느 쪽을 보고 있느냐에 따라 옆으로 맞았는데 뒤로 젖혀집니다.
+   *
+   * 축(`leanPivot`)이 이미 몸이 돌아간 뒤의 자식이므로, 여기서 넣는 x·z
+   * 회전은 **돌아선 몸 기준**으로 적용됩니다 — 회전 순서를 따로 손댈
+   * 필요가 없습니다.
+   */
+  private syncLean(e: number, v: Visual): void {
+    const pivot = v.leanPivot
+    if (!pivot) return
+    const kx = Velocity.kx[e]
+    const kz = Velocity.kz[e]
+    if (kx === 0 && kz === 0) {
+      if (pivot.rotation.x !== 0 || pivot.rotation.z !== 0) {
+        pivot.rotation.x = 0
+        pivot.rotation.z = 0
+      }
+      return
+    }
+
+    const mag = Math.hypot(kx, kz)
+    // 최대치를 넘겨도 더 젖혀지지 않게 자릅니다. 안 자르면 여러 대가 겹쳐
+    // 들어온 순간 적이 바닥에 눕습니다.
+    const lean = Math.min(1, mag / HURT.leanFullKnock) * HURT.leanMax
+    const nx = kx / mag
+    const nz = kz / mag
+    // 앞(sin, cos) 기준으로 월드 방향을 몸의 앞뒤·좌우로 풉니다.
+    const s = Math.sin(Transform.rotY[e])
+    const c = Math.cos(Transform.rotY[e])
+    const fwd = nx * s + nz * c
+    const right = nx * c - nz * s
+    // 뒤로 밀리면(fwd < 0) 몸이 뒤로 젖혀져야 하므로 부호를 뒤집습니다.
+    pivot.rotation.x = -fwd * lean
+    pivot.rotation.z = right * lean
+  }
+
   private syncNoise(e: number, v: Visual, unawareNear: boolean): void {
     if (!v.noiseRing || !v.noiseMat) return
     if (!unawareNear) {

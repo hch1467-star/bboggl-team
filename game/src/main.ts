@@ -40,6 +40,8 @@ import {
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
   LEVEL_AGGRO_RANGE,
+  HURT,
+  hurtFlash,
   PLAYER as PLAYER_CFG,
   NAV,
   TRAVEL_KEY,
@@ -1391,7 +1393,9 @@ class Game {
       if (!isAlive(f.entity) || Actor.state[f.entity] === ActorState.Dead) continue
       const dmg = Health.max[f.entity] * (f.steps - FALL.freeSteps) * FALL.damagePerStep
       Health.hp[f.entity] -= dmg
-      Health.flashT[f.entity] = 0.12
+      // 🤕 낙하는 무기가 없으니 히트스톱이 없습니다. 가장 무거운 쪽 끝을
+      // 그대로 씁니다 — 절벽에서 떨어진 것은 어떤 칼보다 가볍지 않습니다.
+      Health.flashT[f.entity] = hurtFlash(HURT.heavyHitstop)
       this.vfx.spawnDamage(f.x, f.y + 1.3, f.z, Math.round(dmg))
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2
@@ -5130,6 +5134,10 @@ declare global {
         /** 🍶 다음 공격까지 남은 쿨다운(초). 음수 = 준비된 채로 기다린 시간 */
         cooldown: number
         brokenT: number
+        /** 🤕 지금 남아 있는 피격 번쩍임(초) — 타격의 무게만큼 길어집니다. */
+        flashT: number
+        /** 🤕 지금 밀려나는 속도(m/s) — 몸이 젖혀지는 양의 출처. */
+        knock: number
         intent: number
         staggered: boolean
         broken: boolean
@@ -5902,6 +5910,15 @@ window.__game = {
        */
       cooldown: Number(Actor.cooldownT[entity].toFixed(3)),
       brokenT: Number(Enemy.brokenT[entity].toFixed(2)),
+      /**
+       * 🤕 **지금 남아 있는 피격 번쩍임**(초). 프로브가 *"무거운 타격이
+       * 실제로 더 오래 반응을 남기는가"* 를 **설정이 아니라 화면에 실린
+       * 값으로** 재려고 노출합니다 — 상수를 읽어 비교하면 배선이 끊겨
+       * 있어도 통과합니다.
+       */
+      flashT: Number(Health.flashT[entity].toFixed(3)),
+      /** 🤕 지금 밀려나는 속도(m/s). 몸이 젖혀지는 양이 여기서 나옵니다. */
+      knock: Number(Math.hypot(Velocity.kx[entity], Velocity.kz[entity]).toFixed(3)),
       intent: attackAt(kind, Enemy.attackIndex[entity]).intent,
       /**
        * **후딜 중인가** — 판정이 이미 끝나 무방비인 구간.

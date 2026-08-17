@@ -503,5 +503,74 @@ check(
   )
 }
 
+/**
+ * ── 🤕 **피격 번쩍임을 손으로 적지 않는가** ────────────────────────────
+ *
+ * ── 여기서 실제로 갈라져 있었습니다 ─────────────────────────────────
+ * 피격 번쩍임의 길이 `0.12` 가 **세 파일에 각자** 적혀 있었습니다:
+ *
+ *   combat.ts   `Health.flashT[t] = 0.12`        ← 때렸을 때 넣고
+ *   main.ts     `Health.flashT[f.entity] = 0.12` ← 떨어졌을 때 또 넣고
+ *   visuals.ts  `Health.flashT[e] / 0.12`        ← 그 값으로 밝기를 만들고
+ *
+ * 셋 중 하나만 고치면 나머지 둘은 **아무 말 없이** 어긋납니다. 이 저장소가
+ * 지도와 생성기에서, 곁길 예산 45 대 40 에서 이미 두 번 겪은 모양입니다.
+ * 이제 규칙은 `balance.ts hurtFlash()` **한 곳**에 있습니다.
+ *
+ * 그런데 주석으로 "여기 적지 마세요"라고 써 두는 것만으로는 부족합니다 —
+ * 이 저장소가 스스로 적어 둔 문장 그대로, **한 곳에 못 두면 갈라지는
+ * 순간 빨개지게** 만들어야 합니다. 그래서 기계가 봅니다.
+ *
+ * 규칙: `flashT[...] = ` 의 오른쪽은 `hurtFlash(` 로 시작하거나 `0`
+ * (초기화/리셋)이어야 합니다. 숫자를 직접 쓰면 잡힙니다.
+ *
+ * ⚠️ 이 검사가 **못 잡는 것**: 다른 이름의 상태를 새로 만들어 같은 뜻을
+ *    두 번 적는 것. 기계가 볼 수 있는 것은 **이 이름의 대입**뿐입니다.
+ */
+{
+  const files = []
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (f.name === 'node_modules' || f.name.startsWith('.')) continue
+      const full = path.join(dir, f.name)
+      if (f.isDirectory()) walk(full)
+      else if (/\.ts$/.test(f.name)) files.push(full)
+    }
+  }
+  walk(path.join(HERE, '..', 'src'))
+  const bad = []
+  let seen = 0
+  for (const f of files) {
+    // 컴포넌트 선언(`flashT: 'f32'`)은 대입이 아니므로 안 걸립니다.
+    for (const m of readFileSync(f, 'utf8').matchAll(/flashT\[[^\]]*\]\s*=\s*([^\n]+)/g)) {
+      seen++
+      const rhs = m[1].trim()
+      // 자기 자신을 줄이는 감쇠(health.ts)는 **새 출처가 아닙니다** — 통과시킵니다.
+      /**
+       * ⚠️ 여기 처음 쓴 것이 `/^0\b/` 였고, **잡아야 할 것을 통과시켰습니다.**
+       * `\b` 는 `0` 과 `.` 사이에서도 성립하므로 `0.12` 가 "0" 으로 읽혔습니다.
+       * 일부러 위반을 넣어 돌려 보지 않았으면 **영원히 초록인 검사**를
+       * 하나 더 만들 뻔했습니다. 이제 **딱 0** 만 통과시킵니다.
+       */
+      const ok = rhs.startsWith('hurtFlash(') || /^0(?![.\d])/.test(rhs) || rhs.includes('flashT[')
+      if (!ok) bad.push(`${path.basename(f)}: ${rhs.slice(0, 40)}`)
+    }
+    // 나누는 쪽도 같습니다 — 밝기를 만들려고 숫자를 다시 적으면 갈라집니다.
+    for (const m of readFileSync(f, 'utf8').matchAll(/flashT\[[^\]]*\][^\n]*\/\s*([0-9.]+)/g)) {
+      bad.push(`${path.basename(f)}: flashT 를 숫자 ${m[1]} 로 나눔`)
+    }
+  }
+  /** ⚠️ 표본이 비면 통과가 아닙니다 — 대입을 한 곳도 못 읽었으면 정규식이 죽은 것입니다. */
+  check(
+    seen > 0 && bad.length === 0,
+    '🤕 피격 번쩍임의 길이가 **규칙 한 곳에서만** 나온다 (balance.ts `hurtFlash`)',
+    seen === 0
+      ? '대입을 한 곳도 못 읽었습니다'
+      : bad.length
+        ? `${bad.length}곳 — ${[...new Set(bad)].slice(0, 4).join(' | ')}`
+        : `대입 ${seen}곳 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

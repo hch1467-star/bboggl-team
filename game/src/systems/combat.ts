@@ -7,7 +7,7 @@ import {
   stepFor,
   type SkillShape,
 } from '../config/arsenal'
-import { BLEED, COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE } from '../config/balance'
+import { BLEED, COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE, hurtFlash } from '../config/balance'
 import {
   Actor,
   ActorState,
@@ -1232,7 +1232,10 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     ) {
       Health.hp[t] = 1
     }
-    Health.flashT[t] = 0.12
+    // 🤕 맞는 쪽 반응은 **이 한 대의 무게**로 갈립니다 (balance.ts `HURT`).
+    // 숫자를 여기 적지 않는 이유: 그리는 쪽(visuals.ts)이 같은 규칙으로
+    // 되읽어야 하는데, 양쪽에 적어 두면 갈라져도 아무도 모릅니다.
+    Health.flashT[t] = hurtFlash(spec.hitstop)
     // 다단히트 스킬은 무적 시간을 아주 짧게 줘야 두 번째 타격이 씹히지 않습니다.
     Health.invulnT[t] = targetIsPlayer ? PLAYER.invulnAfterHit : 0.02
 

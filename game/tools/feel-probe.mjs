@@ -511,6 +511,192 @@ try {
     }
   }
 
+  console.log('')
+  /**
+   * ── 🤕 **맞는 쪽도 무게를 아는가** ────────────────────────────────
+   *
+   * 위 두 검사는 전부 **때리는 쪽**을 잽니다 — 화면이 얼마나 멎는지,
+   * 궤적이 얼마나 굵은지. 그런데 *"때렸다"* 는 감각의 절반은 **맞은
+   * 쪽이 어떻게 반응했는가**입니다. 이 저장소는 그쪽을 한 번도 안 쟀고,
+   * 실제로 비어 있었습니다: 단검 1타(7 피해)와 대검 마무리(46 피해)가
+   * **똑같은 0.12초 번쩍임** 하나로 끝났습니다.
+   *
+   * ── 설정을 안 읽고 **적에게 실제로 남은 값**을 잽니다 ──────────────
+   * `hurtFlash()` 를 프로브가 다시 계산하면, 배선이 끊겨 있어도(예: 넣는
+   * 쪽만 고치고 그리는 쪽은 옛 숫자를 쥔 채로) 통과합니다. 그래서
+   * `enemyInfo().flashT` — **적 몸에 실제로 걸린 값** — 만 봅니다.
+   *
+   * ── 눈금을 히트스톱과 **다르게** 둡니다 ───────────────────────────
+   * 위 검사들의 눈금은 한 프레임(17ms)입니다. 히트스톱은 **입력이 멎는
+   * 것**이라 한 프레임도 손끝에 걸립니다. 하지만 번쩍임은 **눈이 길이를
+   * 재는 것**이고, 사람은 짧은 섬광의 길이를 프레임 단위로 구분하지
+   * 못합니다 — 한 장 더 남는 것은 "조금 밝았나?" 로 뭉개집니다. 세 장쯤
+   * 되어야 번쩍임이 **머무는 것**으로 보입니다. 이 50ms 는 게임 상수에서
+   * 가져오지 않았습니다(가져오면 규칙이 자기를 재게 됩니다).
+   *
+   * ── ⚠️ 찍히는 값은 **건 값보다 한 프레임 낮습니다** ────────────────
+   * 번쩍임은 걸린 그 프레임에 이미 한 번 깎입니다(health.ts 가 combat.ts
+   * 뒤에 돕니다). 이 컨테이너의 한 프레임이 0.05초라, 0.116 을 걸면
+   * 0.066 이 보입니다. **차이를 재는 데는 지장이 없습니다** — 양쪽에서
+   * 똑같이 한 프레임씩 빠지니까요. 다만 이 숫자를 절대값으로 읽고
+   * "규칙이 안 걸렸다"고 오해하지 않도록 적어 둡니다.
+   */
+  {
+    console.log('🤕 맞는 쪽의 반응 — 무거운 한 대가 더 오래 남는가\n')
+    const hurt = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 4))
+      const now = () => G.state().simElapsed
+      const wait = async (sec) => {
+        const t0 = now()
+        const dl = Date.now() + 20000
+        while (now() - t0 < sec && Date.now() < dl) await sleep()
+      }
+
+      G.reset()
+      await wait(0.6)
+      G.freezeEnemies(true)
+
+      /**
+       * 평타를 `swings` 단까지 **이어** 넣고, 그동안 적에게 걸린 번쩍임의
+       * 최댓값을 돌려줍니다.
+       *
+       * ── 처음 쓴 방식이 틀렸고, 그걸 이 게이트가 잡았습니다 ────────────
+       * 처음엔 "0.45초마다 한 번씩" 눌렀습니다. 롱소드의 콤보 창은
+       * **0.42초**라 매번 **간발의 차로 창이 닫힌 뒤** 눌린 셈이었고,
+       * 세 번 다 1타였습니다. 그래서 "한 대 0.066 / 콤보 0.066 — 차이
+       * 없음"이 나왔는데, 그건 **게임의 답이 아니라 프로브의 실수**였습니다.
+       *
+       * 두 가지를 고쳤습니다:
+       *   · 시간이 아니라 **직전 타격이 걸린 순간**에 다음 것을 누릅니다
+       *     (후딜 중 선입력 → 다음 단으로 이어짐). 콤보 창 값을 프로브가
+       *     베껴 오지 않아도 됩니다.
+       *   · **몇 단까지 실제로 갔는지**(`player.comboIndex`)를 증인으로
+       *     세웁니다. 번쩍임으로 번쩍임을 확인하면 순환이라, 이어졌는지를
+       *     **다른 값**으로 봐야 합니다.
+       */
+      const run = async (swings) => {
+        G.clearEnemies()
+        await wait(0.2)
+        G.teleportPlayer(0, 0)
+        await wait(0.2)
+        const e = G.spawnEnemyKind('grunt', 0, 1.5)
+        if (e == null || e < 0) return null
+        // 콤보를 끝까지 넣으려면 적이 중간에 죽으면 안 됩니다. 죽으면
+        // 마무리가 아예 안 들어가서 "차이 없음"이 나옵니다.
+        G.setHp(e, 9999)
+        await wait(0.3)
+        G.aimAtWorld(0, 1.5)
+        G.setStamina(100)
+        await wait(0.6)
+
+        const swing = () => {
+          G.setStamina(100)
+          G.press('Mouse0')
+          G.release('Mouse0')
+        }
+
+        let peak = 0
+        let push = 0
+        let hits = 0
+        let step = 0
+        let prev = 0
+        let pressed = 1
+        swing()
+        const t0 = now()
+        const dl = Date.now() + 25000
+        while (Date.now() < dl && now() - t0 < 3.2) {
+          const info = G.enemyInfo(e)
+          if (!info) break
+          const f = info.flashT
+          // **오르는 순간**만 한 대로 셉니다. 값을 세면 같은 한 대를
+          // 폴링 횟수만큼 세게 됩니다.
+          if (f > prev + 1e-6) {
+            hits++
+            const idx = G.state().player.comboIndex
+            if (idx > step) step = idx
+            // 걸린 그 순간 다음 것을 눌러 둡니다 — 후딜 중이라 선입력으로
+            // 접수되고, 다음 단으로 이어집니다.
+            if (pressed < swings) {
+              swing()
+              pressed++
+            }
+          }
+          if (f > peak) peak = f
+          // 몸이 젖혀지는 양은 **밀려나는 속도**에서 나옵니다(visuals.ts
+          // `syncLean`). 그래서 기울기가 등급을 가지려면 이 값이 먼저
+          // 갈라져 있어야 합니다 — 여기가 그 전제입니다.
+          if (info.knock > push) push = info.knock
+          prev = f
+          await sleep()
+        }
+        return { peak, hits, step, push }
+      }
+
+      const mid = (xs) => {
+        const s = [...xs].sort((a, b) => a - b)
+        const h = s.length >> 1
+        return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2
+      }
+      const gather = async (swings, tries) => {
+        const got = []
+        for (let i = 0; i < tries; i++) {
+          const r = await run(swings)
+          // **원하는 단까지 실제로 간 판만** 씁니다. 세 번 때렸어도 셋 다
+          // 1타였다면 그건 「콤보 마무리」가 아닙니다.
+          if (r && r.hits >= swings && r.step === swings - 1) got.push(r)
+        }
+        if (got.length === 0) return null
+        return {
+          peak: mid(got.map((g) => g.peak)),
+          push: mid(got.map((g) => g.push)),
+          n: got.length,
+        }
+      }
+
+      const one = await gather(1, 5)
+      const full = await gather(3, 5)
+      G.freezeEnemies(false)
+      return { one, full }
+    })
+
+    const EYE = 3 / 60
+    const row = (name, r) =>
+      `    ${name.padEnd(14)} ${r ? `${r.peak.toFixed(3)}초` : '  못 잼'}` +
+      `      ${r ? `${r.push.toFixed(1)}m/s` : '   —'}` +
+      `      ${r ? `${r.n}회` : '—'}`
+    console.log('    [경우]          번쩍임      밀림      표본')
+    console.log(row('한 대만', hurt.one))
+    console.log(`${row('콤보 마무리까지', hurt.full)}\n`)
+    check(
+      !!hurt.one && !!hurt.full,
+      '🤕 두 경우를 **실제로 때려서** 쟀다 (콤보가 안 이어진 판은 안 셉니다)',
+      `${hurt.one ? '한 대 ✓' : '한 대 ✗'} · ${hurt.full ? '콤보 ✓' : '콤보 ✗'}`,
+    )
+    if (hurt.one && hurt.full) {
+      const gap = hurt.full.peak - hurt.one.peak
+      check(
+        gap >= EYE,
+        '🤕 **무거운 한 대가 눈에 띄게 더 오래 남는다** (세 프레임 이상)',
+        `${gap >= 0 ? '+' : ''}${Math.round(gap * 1000)}ms (눈금 ${Math.round(EYE * 1000)}ms)`,
+      )
+      /**
+       * 몸이 젖혀지는 각은 밀림 속도에서 **그대로** 나옵니다(visuals.ts
+       * `syncLean`). 렌더링이라 훅으로 읽을 수 없으니, **각을 만드는 값**이
+       * 실제로 갈라져 있는지를 봅니다. 여기가 평평하면 기울기도 평평합니다.
+       *
+       * 배수(1.5배)를 쓰는 이유: m/s 로 문턱을 정하면 넉백 값을 손볼 때마다
+       * 검사를 같이 고쳐야 합니다. *"눈에 띄게 더 밀리는가"* 는 비율의
+       * 질문이지 절대값의 질문이 아닙니다.
+       */
+      check(
+        hurt.full.push >= hurt.one.push * 1.5,
+        '🤕 **그 한 대가 몸도 더 크게 밀어낸다** (젖혀지는 각의 출처)',
+        `${hurt.one.push.toFixed(1)} → ${hurt.full.push.toFixed(1)} m/s`,
+      )
+    }
+  }
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
