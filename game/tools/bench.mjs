@@ -960,6 +960,44 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
 }
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
 /**
+ * ── 🎨 **보스가 실제로 낸 색 — 그리고 한 번도 안 낸 것** ────────────────
+ *
+ * DESIGN.md 는 보스를 *"넷을 혼자 다 쓰는 **종합 시험**"* 이라고 부릅니다.
+ * 그런데 벤치는 보스의 휘두름을 **한 덩어리로만** 셌습니다(`예고 9회`).
+ * 그러면 *"배운 것 중 시험에 안 나온 것이 있는가"* 를 물을 수가 없습니다.
+ *
+ * 이게 빈말이 아닌 이유: `npm run pace` 가 15판에서 `boss_charge`(🟢 반격)를
+ * **한 번도** 못 봤습니다. 알고 보니 그 실험대가 손을 3m 안에 붙여 두는데
+ * 🟢 은 `minRange 3` 이라 그 침대에서는 원리적으로 안 나오는 것이었고,
+ * `npm run boss`(고정 거리)는 3.6m·5.6m 에서 9회·7회로 **가중치대로**
+ * 냈습니다. 규칙은 멀쩡합니다.
+ *
+ * 남은 질문은 규칙이 아니라 **도달**입니다 — *"실제 판에서 3m 밖 거리가
+ * 생기는가."* 그건 여정이 있는 이 벤치만 답할 수 있는데, 답할 눈이
+ * 없었습니다. 그래서 만듭니다.
+ *
+ * ⚠️ **0회를 이름으로 부릅니다.** 양수만 늘어놓으면 안 나온 패턴은 목록에서
+ *    그냥 사라지고, 사라진 것은 아무도 못 봅니다 — `react` 의 색 커버리지에서
+ *    이미 같은 자리를 고쳤습니다(🔵 속박이 그렇게 빠져 있었습니다).
+ *    "무엇이 없는가"는 "무엇이 있는가"에서 저절로 읽히지 않습니다.
+ */
+if (boss.length > 0) {
+  const per = new Map()
+  for (const l of boss) for (const a of l.bossSwings ?? []) per.set(a.id, (per.get(a.id) ?? 0) + a.swings)
+  /** 이 보스가 **가질 수 있는** 패턴 전부 — 게임이 적어 준 목록에서 옵니다. */
+  const all = (logs.find((l) => (l.bossPatterns ?? []).length)?.bossPatterns ?? [...per.keys()]).slice()
+  const shown = all.filter((id) => (per.get(id) ?? 0) > 0)
+  const never = all.filter((id) => (per.get(id) ?? 0) === 0)
+  console.log(
+    `  보스가 낸 색   ${shown.map((id) => `${id} ${per.get(id)}`).join(' · ') || '없음'}` +
+      ` (${boss.length}판 합)`,
+  )
+  console.log(
+    `                 ${never.length === 0 ? '✅' : '❌'} 보스가 **가진 패턴을 전부 냈다** (종합 시험)` +
+      (never.length ? ` — 한 번도 안 나온 것: **${never.join(' · ')}**` : ` — ${all.length}개 전부`),
+  )
+}
+/**
  * ── ⚔️ **보스 앞에 설 때 몇 단계였는가** ─────────────────────────────
  *
  * 이 값은 한 판짜리 출력에만 있었고 **벤치는 집계하지 않았습니다.** 그런데

@@ -434,5 +434,57 @@ check(
   )
 }
 
+/**
+ * ── 🔗 **인용한 `npm run …` 이 실재하는가** ─────────────────────────
+ *
+ * 이 저장소는 주석으로 서로를 가리킵니다 — *"판정은 `npm run boss` 에
+ * 있습니다"* 같은 문장이 코드와 주석에 **204곳** 있습니다. 그게 이 코드를
+ * 읽는 사람이 길을 찾는 방법입니다.
+ *
+ * 그런데 프로브 이름을 하나 바꾸는 날, 그중 몇 곳이 **조용히 허공을**
+ * 가리키게 됩니다. 지도와 생성기가 갈라졌을 때도, 곁길 예산이 45 대 40 으로
+ * 갈라졌을 때도 같은 모양이었습니다 — 갈라진 것을 알려 주는 것이 아무것도
+ * 없었습니다.
+ *
+ * ⚠️ 이 검사가 **못 잡는 것**도 적어 둡니다: 이름이 살아 있어도 그 스크립트가
+ *    더 이상 그 판정을 안 할 수 있습니다. 실제로 그런 일이 있었습니다 —
+ *    벤치가 보스 구간 판정을 흔들림 게이트로 막으면서, `pace` 의
+ *    *"판정은 npm run bench"* 가 **판정 안 하는 곳**을 가리키게 됐습니다.
+ *    기계가 잡을 수 있는 것은 **이름뿐**이고, 뜻은 사람이 봐야 합니다.
+ */
+{
+  const scripts = new Set(Object.keys(JSON.parse(readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).scripts))
+  const files = []
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (f.name === 'node_modules' || f.name.startsWith('.')) continue
+      const full = path.join(dir, f.name)
+      if (f.isDirectory()) walk(full)
+      else if (/\.(mjs|ts)$/.test(f.name)) files.push(full)
+    }
+  }
+  walk(path.join(HERE, '..', 'src'))
+  walk(HERE)
+  const dead = []
+  let seen = 0
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8')
+    for (const m of src.matchAll(/npm run ([a-z][a-z-]*)/g)) {
+      seen++
+      if (!scripts.has(m[1])) dead.push(`${path.basename(f)}: npm run ${m[1]}`)
+    }
+  }
+  /** ⚠️ 표본이 비면 통과가 아닙니다 — 한 곳도 못 읽었으면 그건 고장입니다. */
+  check(
+    seen > 0 && dead.length === 0,
+    '🔗 주석이 인용한 `npm run …` 이 **전부 실재하는 스크립트다** (길잡이가 허공을 안 가리키게)',
+    seen === 0
+      ? '인용을 한 곳도 못 읽었습니다'
+      : dead.length
+        ? `${dead.length}곳 — ${[...new Set(dead)].slice(0, 4).join(' | ')}`
+        : `${seen}곳 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

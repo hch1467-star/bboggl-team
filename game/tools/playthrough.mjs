@@ -3019,6 +3019,13 @@ try {
           ? Number((((now() - warmSimT0) * 1000) / Math.max(1, Date.now() - warmWallT0)).toFixed(3))
           : null,
       bossSwings: Object.entries(G.bossSwingLog()).map(([id, v]) => ({ id, ...v })),
+      /**
+       * 보스가 **가질 수 있는** 패턴 전부. 벤치가 *"한 번도 안 나온 것"* 을
+       * 물으려면 기준 목록이 있어야 하는데, 나온 것에서 추론하면 안 나온
+       * 것은 정의상 안 보입니다 — 그건 검사가 아니라 동어반복입니다.
+       * 목록은 게임이 줍니다(프로브가 패턴 이름을 외우지 않게).
+       */
+      bossPatterns: (G.enemyRoster().find((r) => r.id === 'boss')?.attacks ?? []).map((a) => a.id),
       /** 적 종류별 휘두름/적중 — "이 적이 존에서 제 일을 하는가" */
       foeSwings: Object.entries(G.foeSwingLog?.() ?? {}).map(([id, v]) => ({ id, ...v })),
       // 절벽 낙하 — 「밀어서 떨어뜨리기」가 실제로 일어나는지.
