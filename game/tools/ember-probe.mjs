@@ -105,8 +105,50 @@ try {
       const p = window.__game.state().player
       window.__game.spawnEnemyKind(kindId, p.x + 6, p.z)
       await window.__t.runFor(0.2)
-      window.__game.killAllEnemies()
-      await window.__t.runFor(0.4)
+      /**
+       * ── ☠️ **보스는 한 번에 안 죽습니다 — 설계입니다** ────────────────
+       *
+       * 여기 원래 `killAllEnemies()` 한 번이었습니다. 그래서 이 검사가
+       * **`보스가 압도적으로 많이 줌 — 0`** 이라고 몇 회차 동안 빨갛게
+       * 떠 있었고, 저는 그걸 "보스가 불티를 안 준다"로 읽을 뻔했습니다.
+       *
+       * 실제로 재 보니 체력이 **620 → 465.5** 에서 멈췄습니다. 620의
+       * 정확히 75% — **페이즈 경계**입니다. 보스는 한 번에 두 단계를
+       * 건너뛰지 못하게 막혀 있습니다(enemyAI.ts: 화력이 높으면 설계한
+       * 학습 순서가 통째로 무너지므로). 그러니 체력을 0으로 만들어도
+       * **경계까지만** 깎이고, 한 번으로는 절대 안 죽습니다.
+       *
+       * 즉 빨간 줄이 말하던 것은 "보상이 0"이 아니라 **"안 죽었다"** 였고,
+       * 그 둘은 고칠 곳이 정반대입니다(밸런스 vs 계측기). 이 저장소가
+       * 반복해서 데인 그 모양입니다.
+       *
+       * 그래서 **죽을 때까지** 때립니다. 몇 번이 필요한지는 페이즈 수에
+       * 달렸으니 세지 않고, **적이 없어질 때까지** 돕니다.
+       */
+      /**
+       * ⏳ **그리고 그냥 여러 번 때리는 것으로도 안 됩니다.**
+       *
+       * 8번을 연달아 때려도 체력이 465.5 에 그대로 붙어 있었습니다.
+       * 1단계에는 **학습 잠금**이 걸려 있기 때문입니다 — *"색을 세 가지
+       * 보여주기 전에는 1단계가 안 끝난다"*, 상한 12초(enemyAI.ts
+       * `PHASE1_TEACH_COLORS` · `PHASE1_TEACH_CAP`). 이 시험대에서는 보스가
+       * 공격을 안 하니 색을 못 보여주고, 그래서 **상한이 지나기 전에는
+       * 무슨 짓을 해도 안 죽습니다.**
+       *
+       * 시간을 넉넉히 주고 그동안 계속 때립니다. 상한값을 여기 베껴 적지
+       * 않으려고 **적이 없어질 때까지**로 조건을 겁니다 — 상한을 바꾸는
+       * 날 이 검사만 옛 숫자를 들고 있으면 안 됩니다.
+       */
+      for (let i = 0; i < 40 && window.__game.enemyCount() > 0; i++) {
+        window.__game.killAllEnemies()
+        await window.__t.runFor(0.5)
+      }
+      /**
+       * ⚠️ 못 죽였으면 **숫자를 내지 않고 그렇다고 말합니다.** 0 을 그냥
+       *    돌려주면 "보상이 0"으로 읽히는데, 그게 바로 이 검사가 여러
+       *    회차 동안 하던 거짓말입니다.
+       */
+      if (window.__game.enemyCount() > 0) return -1
       return window.__game.emberInfo().embers
     }
     return {
@@ -119,6 +161,16 @@ try {
   console.log(
     `  [처치 보상] 잡몹 ${perKind.grunt} · 얽는 자 ${perKind.binder} · ` +
       `끄는 자 ${perKind.dragger} · 보스 ${perKind.boss}`,
+  )
+  /**
+   * ⚠️ `-1` 은 **못 죽였다**는 뜻입니다(위 주석). 0 과 나눠야 "보상이 없다"와
+   *    "재지 못했다"가 안 섞입니다.
+   */
+  const undead = Object.entries(perKind).filter(([, v]) => v < 0)
+  check(
+    undead.length === 0,
+    '☠️ 검사한 적을 **전부 실제로 죽였다** (못 죽인 것을 보상 0으로 읽지 않게)',
+    undead.length ? `못 죽인 적 — ${undead.map(([k]) => k).join(' · ')}` : '전부 죽었습니다',
   )
   check(perKind.grunt > 0, '잡몹이 불티를 줌', String(perKind.grunt))
   check(
