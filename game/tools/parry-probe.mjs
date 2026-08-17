@@ -297,6 +297,84 @@ try {
   check(whiff.spent > 0, '   헛치면 기력을 낸다', `-${whiff.spent.toFixed(0)}`)
 
   /**
+   * ── 🛡 **헛친 벌이 다음 방어까지 가져가지 않는가** ────────────────────
+   *
+   * 벤치가 `손이 묶임 — stamina` 를 갈라 주고 나서 보인 것입니다:
+   *
+   *     구르기 10 · **헛친가드 5** · 공격 1   (16대 중)
+   *
+   * 헛친 벌(18)이 구르기 값(18)과 **정확히 같아서**, 한 번 잘못 읽으면
+   * 다음 예고를 보고도 못 굴렀습니다. 실패 한 번이 **두 번의 실패**가
+   * 되는 구조입니다 — 배울 기회 자체가 사라집니다.
+   *
+   * **양쪽을 다 재야 합니다.** 벌이 사라지면 "일단 눌러"가 되고,
+   * 벌이 다음 방어를 먹으면 배울 수가 없습니다:
+   *   · 여유가 있으면 벌을 **다** 낸다 (벌은 그대로)
+   *   · 빠듯하면 **구르기 한 번 분은 남는다**
+   */
+  {
+    const edge = await page.evaluate(async () => {
+      const G = window.__game
+      const sleep = () => new Promise((r) => setTimeout(r, 8))
+      const di = G.dodgeInfo()
+      const gi = G.guardInfo()
+      /** 기력을 `hp` 로 세워 두고 **헛치게** 한 뒤, 남은 기력과 구르기 여부를 봅니다. */
+      const at = async (hp) => {
+        G.reset()
+        await new Promise((r) => setTimeout(r, 300))
+        G.clearEnemies()
+        await new Promise((r) => setTimeout(r, 200))
+        G.pinStamina(null)
+        G.setStamina(hp)
+        // 적이 없으니 어떤 가드든 헛칩니다 — 그게 이 측정이 원하는 것입니다.
+        G.press(gi.key)
+        await sleep()
+        G.release(gi.key)
+        /**
+         * ⚠️ **잠금이 걸릴 때까지 기다립니다.** 벌은 창이 *닫히는* 순간에
+         *    붙습니다. 창이 열린 것만 보고 읽었더니 `100 → 100`,
+         *    즉 아직 아무것도 안 낸 시점이었습니다. 위 ③ 검사가 이미
+         *    `lockT > 0` 을 기다리고 있는데 저는 그걸 안 베끼고 새로 썼습니다.
+         */
+        await window.__t.until(() => G.guardInfo().windowT > 0, 1)
+        await window.__t.until(() => G.guardInfo().lockT > 0, 2)
+        const t0 = G.state().elapsed
+        const left = G.state().player.stamina
+        // 잠금이 풀릴 때까지 기다렸다가 구를 수 있는지 봅니다.
+        while (G.state().elapsed - t0 < 3 && G.state().player.state !== 0) await sleep()
+        const before = G.state().player.stamina
+        G.press('Space')
+        await sleep()
+        G.release('Space')
+        const rolled = await window.__t.until(() => G.state().player.state === 2, 0.6)
+        return { left: Number(left.toFixed(1)), before: Number(before.toFixed(1)), rolled }
+      }
+      // 넉넉한 자리(벌을 다 내야 함)와 빠듯한 자리(구르기 몫이 남아야 함).
+      return {
+        cost: di.cost,
+        whiff: gi.whiffStamina ?? 0,
+        rich: await at(100),
+        tight: await at(di.cost + 6),
+      }
+    })
+    check(
+      edge.rich.rolled !== undefined && edge.tight.rolled !== undefined,
+      '🛡 넉넉할 때와 빠듯할 때를 **둘 다** 재봤다 (비교의 게이트)',
+      `구르기 ${edge.cost} · 헛친 벌 ${edge.whiff} · 넉넉 100 → ${edge.rich.left} · 빠듯 ${edge.cost + 6} → ${edge.tight.left}`,
+    )
+    check(
+      100 - edge.rich.left >= edge.whiff - 1,
+      '🛡 여유가 있으면 **벌을 다 낸다** (사라지면 "일단 눌러"가 됩니다)',
+      `100 → ${edge.rich.left} (−${(100 - edge.rich.left).toFixed(0)}, 벌 ${edge.whiff})`,
+    )
+    check(
+      edge.tight.rolled,
+      '🛡 **빠듯해도 구르기 한 번은 남는다** (실패 한 번이 두 번이 되지 않게)',
+      `기력 ${edge.cost + 6} 에서 헛친 뒤 ${edge.tight.before} 남음 · 구르기 ${edge.tight.rolled ? '나감' : '막힘'}`,
+    )
+  }
+
+  /**
    * ── ③-2 등지고는 못 막는다 ──────────────────────────────────────
    *
    * ①과 **같은 상황에서 방향만 뒤집습니다.** 그래서 이 검사가 빨개지면

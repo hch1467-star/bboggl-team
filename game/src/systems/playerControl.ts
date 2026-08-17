@@ -943,7 +943,18 @@ export function playerControlSystem(ctx: ControlContext): void {
         Player.guardT[p] = Math.max(0, Player.guardT[p] - dt)
         if (Player.guardT[p] === 0) {
           Player.guardLockT[p] = GUARD.whiffLock
-          spendStamina(p, GUARD.whiffStamina, '헛친가드')
+          /**
+           * 🛡 헛친 벌은 **구르기 한 번 분 위에서만** 깎습니다
+           * (balance.ts `whiffKeepsDodge` — 근거는 그 주석에).
+           * 벌은 그대로 두되, 다음 예고에 답할 수단까지 가져가지 않습니다.
+           */
+          {
+            const keep = GUARD.whiffKeepsDodge
+              ? PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
+              : 0
+            const room = Math.max(0, Stamina.value[p] - keep)
+            spendStamina(p, Math.min(GUARD.whiffStamina, room), '헛친가드')
+          }
           sfx.deny()
         }
       }
