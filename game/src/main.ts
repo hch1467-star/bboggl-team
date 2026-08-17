@@ -41,6 +41,7 @@ import {
   LEVEL_AGGRO_RANGE,
   PLAYER as PLAYER_CFG,
   NAV,
+  TRAVEL_KEY,
   POISE,
   PUNISH_HEAL,
   reactionTime,
@@ -1094,6 +1095,7 @@ class Game {
           ? 'foe' // 화톳불에 닿았는데 적이 14m 안에 있습니다
           : 'away' // 아직 어느 소비처에도 안 닿았습니다
       this.tryUpgrade(p, this.canSpendHere)
+      this.tryTravel(p, atFire)
       this.tryUpgradeWeapon(p, this.canSpendHere)
       if (nearAnvil && !atFire) this.hud.setRest(true, 0, false, true)
       else this.hud.setRest(rest.near !== null, rest.progress, rest.blocked)
@@ -2581,6 +2583,59 @@ class Game {
     Player.embers[p] = 0
     this.drop = { x: Transform.x[p], y: Transform.y[p], z: Transform.z[p], amount }
     this.dropVisual = this.visuals.addEmberDrop(this.drop.x, this.drop.y, this.drop.z)
+  }
+
+  /**
+   * ── 🔥 **화톳불 사이 빠른 이동 — 지름길을 연 뒤에만 열립니다** ────────
+   *
+   * ── 왜 조건을 다는가 (안 달았으면 사다리가 죽습니다) ─────────────────
+   * 이 존의 화톳불 둘은 같은 복도에 74m 떨어져 있고, 사다리 지름길이
+   * 아끼는 거리가 72m 입니다. 즉 조건 없이 이동을 열면 **사다리가 갚을
+   * 것이 없어집니다.** 바로 앞 회차에 화톳불을 지름길 뒤에 놓았다가
+   * 정확히 그 일을 냈습니다 — `map` 이 *"부활 화톳불에서 보스까지
+   * 64m → 64m (0m 단축)"* 로 잡았습니다.
+   *
+   * 다크 소울 1 이 빠른 이동을 **중반에** 여는 이유가 이것입니다. 지형을
+   * 알아내는 일이 먼저이고, 편의는 그 위에 얹힙니다. 우리 버전의 "군주의
+   * 그릇"은 **사다리**입니다 — 한 바퀴 돌아 위에서 내린 그 사다리가
+   * 이동의 열쇠가 됩니다. 지름길을 죽이는 대신 **지름길이 이동을
+   * 낳습니다.**
+   *
+   * ── 왜 목록 UI 가 없는가 ────────────────────────────────────────
+   * 이 게임의 화톳불에는 일부러 상호작용 키를 안 뒀습니다(bonfire.ts:
+   * *"키 안내가 필요한 상호작용은 게임이 설명해야 할 것이 하나 느는 일"*).
+   * 켜진 화톳불이 둘일 때 "다음 것으로"는 곧 "다른 것으로"라 고를 것이
+   * 없습니다. 셋 이상이 되면 그때 목록이 필요해지고, 그건 그때의 변경
+   * 입니다 — 지금 만들면 쓰지 않는 화면을 하나 더 지키게 됩니다.
+   *
+   * ⚠️ **쉴 수 있을 때만** 됩니다(`atFire` 는 적이 가까우면 거짓입니다).
+   *    전투 중 탈출로가 되면 이 게임에서 가장 비싼 자원인 *"도망칠 수
+   *    없다"* 가 사라집니다.
+   */
+  private tryTravel(p: number, atFire: boolean): void {
+    const lit = this.bonfires.filter((f) => f.lit)
+    const opened = (this.terrain?.shortcuts ?? []).some((s) => s.open)
+    const ready = atFire && lit.length >= 2 && opened
+    this.hud.setTravel(atFire && lit.length >= 2, opened)
+    if (!ready || !consumePress(TRAVEL_KEY)) return
+    /**
+     * 지금 서 있는 화톳불 **다음** 것으로. 목록의 순서를 쓰므로 여러 번
+     * 누르면 순환합니다 — 셋 이상이 되어도 규칙이 그대로 성립합니다.
+     */
+    let here = 0
+    let best = Infinity
+    for (let i = 0; i < lit.length; i++) {
+      const d = Math.hypot(lit[i].x - Transform.x[p], lit[i].z - Transform.z[p])
+      if (d < best) {
+        best = d
+        here = i
+      }
+    }
+    const to = lit[(here + 1) % lit.length]
+    this.debugTeleport(to.x, to.z)
+    sfx.bossPhase()
+    this.cam.snapTo(to.x, to.z)
+    this.hud.showBanner('화톳불 사이를 건넜다', '지름길을 연 값입니다', 1.8)
   }
 
   /**
@@ -4127,6 +4182,14 @@ class Game {
     return out
   }
 
+  debugTravelInfo(): { lit: number; opened: boolean; key: string } {
+    return {
+      lit: this.bonfires.filter((f) => f.lit).length,
+      opened: (this.terrain?.shortcuts ?? []).some((s) => s.open),
+      key: TRAVEL_KEY,
+    }
+  }
+
   debugCameraAxes(): { forwardX: number; forwardZ: number; rightX: number; rightZ: number } {
     return {
       forwardX: this.cam.forward.x,
@@ -5516,6 +5579,8 @@ declare global {
       >
       /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
       levelFoes: () => { kind: string; x: number; z: number; region: string; level: number }[]
+      /** 🔥 화톳불 사이 이동의 상태 — 프로브가 규칙을 베끼지 않게. */
+      travelInfo: () => { lit: number; opened: boolean; key: string }
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -6303,6 +6368,7 @@ window.__game = {
   /** 보스가 어떤 색을 몇 번 휘두르고 몇 번 맞혔는가 — 절정이 위험한지 재는 값. */
   bossSwingLog: () => game.debugBossSwingLog(),
   levelFoes: () => game.debugLevelFoes(),
+  travelInfo: () => game.debugTravelInfo(),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),

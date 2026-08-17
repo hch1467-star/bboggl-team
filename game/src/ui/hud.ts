@@ -39,6 +39,8 @@ export class Hud {
   private readonly vialText = el<HTMLElement>('vialText')
   private readonly restHint = el<HTMLDivElement>('restHint')
   private readonly restLabel = el<HTMLElement>('restLabel')
+  /** 🔥 화톳불 사이 이동 — 조건이 안 맞을 때도 **왜 안 되는지** 말합니다. */
+  private readonly travelHint = el<HTMLDivElement>('travelHint')
   private readonly restFill = el<HTMLDivElement>('restFill')
   private readonly lowHp = el<HTMLDivElement>('lowHp')
   private readonly emberText = el<HTMLElement>('emberText')
@@ -312,6 +314,29 @@ export class Hud {
     this.restLabel.textContent = blocked ? '적이 가까워 쉴 수 없다' : '화톳불 — 가만히 서 있으면 쉰다'
     this.restLabel.style.color = blocked ? '#ff8a7a' : '#ffd9a0'
     this.restFill.style.width = `${Math.round(progress * 100)}%`
+  }
+
+  /**
+   * 🔥 **화톳불 사이 이동이 열렸는가**를 쉴 때 같이 말합니다.
+   *
+   * 두 상태를 **구분해서** 보여 줍니다:
+   *   · 아직 못 감  — *"지름길을 열면 화톳불 사이를 건널 수 있다"*
+   *   · 갈 수 있음  — *"[H] 다른 화톳불로"*
+   *
+   * 앞의 줄이 중요합니다. 조건이 있는 기능을 **조건이 안 맞을 때 아예
+   * 숨기면**, 플레이어에게는 그 기능이 없는 것과 같습니다. 이 저장소가
+   * 지난 라운드에 같은 실수를 했습니다 — 인지 규칙을 셋 만들고 화면에
+   * 한 글자도 안 올려서, 플레이어에게는 없는 기능이었습니다.
+   * 다크 소울이 군주의 그릇을 받기 전에도 화톳불이 *"아직"* 이라고
+   * 말해 주는 것과 같은 자리입니다.
+   */
+  setTravel(near: boolean, opened: boolean): void {
+    this.travelHint.style.display = near ? 'block' : 'none'
+    if (!near) return
+    this.travelHint.textContent = opened
+      ? '[H] 다른 화톳불로'
+      : '지름길을 열면 화톳불 사이를 건널 수 있다'
+    this.travelHint.style.color = opened ? '#ffd9a0' : '#8fa4b6'
   }
 
   setMode(mode: 'arena' | 'level'): void {

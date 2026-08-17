@@ -200,6 +200,19 @@ check(
     [...configText.matchAll(/\bkey:\s*'([A-Za-z0-9]+)'/g)].map((m) => m[1]),
   )
   /** 배열 선언 — 스킬 키(QERFG)가 여기 있습니다. 이름별로 담아 둡니다. */
+  /**
+   * 홑 상수 — `export const TRAVEL_KEY = 'KeyZ'` 처럼 **키 하나를 담은
+   * 이름**. 맥락 키를 config 로 빼면 이 모양이 되는데, 예전 규칙은
+   * `X.key` 와 배열만 읽어서 이걸 *"못 읽었다"* 로 빨갛게 냈습니다.
+   *
+   * 이름을 `TRAVEL.key` 로 억지로 바꿔 규칙에 맞추는 것이 아니라 **읽는
+   * 쪽을 넓힙니다** — 검사가 코드의 모양을 강제하기 시작하면, 다음 사람은
+   * 검사를 피하려고 이상한 이름을 짓게 됩니다.
+   */
+  const singleKeys = new Map()
+  for (const m of configText.matchAll(/\b([A-Z][A-Z0-9_]*)\s*=\s*'((?:Key|Digit|Mouse|Arrow|Shift|Space|Tab|F\d)[A-Za-z0-9]*)'/g)) {
+    singleKeys.set(m[1], m[2])
+  }
   const keyArrays = new Map()
   for (const m of configText.matchAll(/\b([A-Z_]+)\s*=\s*\[([^\]]*)\]/g)) {
     const items = [...m[2].matchAll(/'([A-Za-z0-9]+)'/g)].map((x) => x[1])
@@ -222,6 +235,10 @@ check(
       } else if (allowConst && /^[A-Z_]+(?:\.[A-Za-z]+)*\.key$/.test(arg)) {
         // `GUARD.key` · `PLAYER.dodge.key` 같은 선언 — config 에서 읽은 키들을 전부 상시로 봅니다.
         for (const k of configKeys) out.add(k)
+      } else if (singleKeys.has(arg)) {
+        // `TRAVEL_KEY` 같은 홑 상수 — 그 키 **하나만** 더합니다.
+        // (`X.key` 와 달리 무엇인지 정확히 아니까 뭉뚱그리지 않습니다.)
+        out.add(singleKeys.get(arg))
       } else if (allowConst && keyArrays.has(arg.replace(/\[.*$/, ''))) {
         // `SKILL_KEY_CODES[i]` 같은 배열 접근 — 그 배열의 키 전부가 상시 키입니다.
         for (const k of keyArrays.get(arg.replace(/\[.*$/, ''))) out.add(k)
