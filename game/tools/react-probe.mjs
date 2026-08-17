@@ -322,16 +322,35 @@ try {
           },
           [fastest.kindId, fastest.id, delay],
         )
-      /** 세 번 중 한 번이라도 넘기면 그 delay 는 "된다"입니다(프레임 흔들림 몫). */
+      /**
+       * ── 🎲 **몇 번 중 몇 번인지까지 셉니다** ────────────────────────
+       *
+       * 예전엔 한 번이라도 넘기면 곧장 `ok` 를 내고 멈췄습니다. 그래서
+       * **1/3과 3/3이 표에서 똑같이 ○** 로 보였습니다. 실제로 이 차이가
+       * 눈앞에서 드러났습니다 — `boss_bind` 의 0.48초가 한 번 돌렸을 때
+       * `×`(0/3), 다음에 돌렸을 때 `○` 였습니다. **같은 자리가 판마다
+       * 뒤집힙니다.**
+       *
+       * 프레임이 0.05초라 이 정도 흔들림은 기계 몫입니다. 그걸 없앨 수는
+       * 없지만 **숨기지는 않습니다.** 아슬아슬하게 되는 자리와 넉넉히 되는
+       * 자리는 게임에서 완전히 다른 것이고, ○ 하나로 뭉치면 그 차이가
+       * 사라집니다 — 이 저장소가 여러 번 데인 그 모양입니다.
+       *
+       * 판정은 그대로 "한 번이라도 넘기면 된다"입니다(기계 운을 재지
+       * 않으려고). 다만 **몇 번이었는지는 표에 남깁니다.**
+       */
+      const TRIES = 3
       const survives = async (delay) => {
-        for (let i = 0; i < 3; i++) {
+        let win = 0
+        let ran = 0
+        for (let i = 0; i < TRIES; i++) {
           const r = await rollAfter(delay)
           if (!r) continue
           if (r.spawnFailed) return { spawnFailed: r.spawnFailed }
-          if (r.hp === r.before) return { ok: true, r }
-          if (i === 2) return { ok: false, r }
+          ran++
+          if (r.hp === r.before) win++
         }
-        return { ok: false, r: null }
+        return { ok: win > 0, win, ran }
       }
 
       /**
@@ -371,8 +390,8 @@ try {
           spawnFailed = res.spawnFailed
           break
         }
-        rows.push(`${delay.toFixed(2)}초${res.ok ? '○' : '×'}`)
-        if (res.ok) hits.push(delay)
+        rows.push(`${delay.toFixed(2)}초 ${res.win}/${res.ran || TRIES}`)
+        if (res.ok) hits.push({ delay, win: res.win, ran: res.ran || TRIES })
       }
       check(
         !spawnFailed && rows.length > 0,
@@ -390,15 +409,24 @@ try {
          * 정도의 폭을 갖습니다. 한 지점만 성공했을 때 "폭 0" 이라고 적으면
          * 실제보다 나쁘게 말하는 것입니다.
          */
-        const width = hits.length ? hits[hits.length - 1] - hits[0] + STEP : 0
+        const width = hits.length ? hits[hits.length - 1].delay - hits[0].delay + STEP : 0
+        /**
+         * 창이 훑는 간격 한 칸뿐이거나, 넘긴 자리가 전부 아슬아슬(3번 중
+         * 1번)하면 **초록이라고 안심시키지 않습니다.** 그 둘은 "된다"가
+         * 아니라 **"측정 한계에서 겨우 보인다"** 입니다.
+         */
+        const thin = hits.length > 0 && (width <= STEP + 1e-9 || hits.every((h) => h.win === 1))
+        const note = !hits.length
+          ? ' ❗예산 이후 **어느 순간에도** 못 넘깁니다'
+          : thin
+            ? ` — ⚠️ 창이 ${width.toFixed(2)}초뿐입니다(훑는 간격 ${STEP}초 · 프레임 0.05초).` +
+              ' 된다기보다 **겨우 보인다**에 가깝습니다'
+            : ` — ${hits[0].delay.toFixed(2)}~${hits[hits.length - 1].delay.toFixed(2)}초에 넘김` +
+              ` (창 ${width.toFixed(2)}초)`
         check(
           hits.length > 0,
           `${color.emoji} **읽고 나서 넘길 수 있는 순간이 있다** (산수가 아니라 눌러 본 값)`,
-          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup.toFixed(2)}초 · ${rows.join(' ')}` +
-            (hits.length
-              ? ` — ${hits[0].toFixed(2)}~${hits[hits.length - 1].toFixed(2)}초에 넘김` +
-                ` (창 ${width.toFixed(2)}초)`
-              : ' ❗예산 이후 **어느 순간에도** 못 넘깁니다'),
+          `${fastest.from} ${fastest.id} · 예고 ${fastest.windup.toFixed(2)}초 · ${rows.join(' · ')}` + note,
         )
       }
     }
