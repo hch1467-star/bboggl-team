@@ -58,6 +58,9 @@ export function spawnPlayer(x = 0, z = 0): number {
   Stamina.max[e] = PLAYER.maxStamina
   Stamina.regenDelayT[e] = 0
   Status.snareT[e] = 0
+  // 💥 오사 재장전도 같이 비웁니다 — 엔티티 번호는 재활용되므로,
+  // 안 비우면 새로 태어난 적이 **남의 쿨다운을 물려받습니다.**
+  Status.crossfireT[e] = 0
   Actor.state[e] = ActorState.Idle
   Actor.phase[e] = 0
   Actor.timer[e] = 0
@@ -198,6 +201,9 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.introT[e] = 0
   Enemy.leashT[e] = 0
   Status.snareT[e] = 0
+  // 💥 오사 재장전도 같이 비웁니다 — 엔티티 번호는 재활용되므로,
+  // 안 비우면 새로 태어난 적이 **남의 쿨다운을 물려받습니다.**
+  Status.crossfireT[e] = 0
   Renderable.kind[e] = renderKindForEnemy(kind)
   return e
 }

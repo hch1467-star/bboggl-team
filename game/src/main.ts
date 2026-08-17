@@ -117,12 +117,14 @@ import {
   readFocusFlow,
   resetFocusFlow,
   noteFocusDodge,
+  readCrossfireHits,
   readPoiseDealt,
   resetPoiseDealt,
   resetBleedPeak,
   breakPoise,
   finisherEvents,
   counterEvents,
+  crossfireEvents,
   countLivingEnemies,
   justGuardEvents,
   perfectDodgeEvents,
@@ -1558,6 +1560,27 @@ class Game {
       }
     }
     counterEvents.length = 0
+
+    /**
+     * ---- 💥 오사 연출 — **작게, 그러나 확실히** ----
+     *
+     * 화면을 멈추거나 흔들지 **않습니다.** 오사는 플레이어가 낸 타격이
+     * 아니라 **판이 만든 사건**입니다. 여기에 히트스톱을 얹으면, 잡몹이
+     * 많을수록 화면이 제멋대로 끊깁니다 — 내 손과 무관하게 멎는 화면은
+     * 손맛이 아니라 렉으로 읽힙니다.
+     *
+     * 대신 불꽃 몇 개와 짧은 소리로 *"저기서 뭔가 들어갔다"* 만 말합니다.
+     * 무너지면 그때는 기존 무너짐 연출이 크게 알려 줍니다 — 알림의 크기가
+     * **사건의 크기**를 따라가야 합니다.
+     */
+    for (const c of crossfireEvents) {
+      for (let i = 0; i < 3; i++) {
+        const a = (i / 3) * Math.PI * 2
+        this.vfx.spawnHitSpark(c.x + Math.cos(a) * 0.5, c.y, c.z + Math.sin(a) * 0.5, 0.7)
+      }
+      sfx.impact(false, false, c.x, c.z)
+    }
+    crossfireEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -3961,6 +3984,11 @@ class Game {
     bleedPops: number
     /** 🔨 실제로 깎은 강인도의 누적 (관측이 아니라 깎은 쪽이 셉니다) */
     poiseDealt: number
+    /**
+     * 💥 **적이 적을 스친 횟수.** 규칙을 넣을 때 세는 칸을 같이 넣습니다 —
+     * 안 그러면 "있는지 없는지도 모르는 규칙"이 하나 늘어납니다.
+     */
+    crossfireHits: number
     /** 🩸 한 적에게 쌓였던 최고치 — "안 쌓임"과 "쌓였는데 안 터짐"을 가릅니다 */
     bleedPeak: number
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
@@ -4014,6 +4042,7 @@ class Game {
       bleedPops: this.bleedPops,
       // 🔨 깎은 쪽이 센 강인도 누적 — 관측은 무너지는 한 방을 놓칩니다.
       poiseDealt: Number(readPoiseDealt().toFixed(1)),
+      crossfireHits: readCrossfireHits(),
       bleedPeak: Number(readBleedPeak().any.toFixed(1)),
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),

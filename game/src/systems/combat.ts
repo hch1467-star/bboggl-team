@@ -24,7 +24,7 @@ import {
 } from '../core/components'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { enemyDef } from '../config/enemies'
-import { AttackIntent, attackAt } from '../config/enemyAttacks'
+import { AttackIntent, attackAt, crossfirePause } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { time } from '../core/time'
@@ -417,7 +417,49 @@ export function setPlayerInvulnerable(on: boolean): void {
   debugPlayerInvulnerable = on
 }
 
-function applyPoise(t: number, spec: AttackSpec, behind = false): void {
+/**
+ * ── 💥 **적끼리의 오사 — 자리를 잡으면 적이 적을 무너뜨립니다** ──────────
+ *
+ * ── 이 게임에 없던 것 ──────────────────────────────────────────────
+ * 여럿을 상대할 때 지금까지 할 수 있는 일은 *"순서를 고르는 것"* 하나뿐
+ * 이었습니다. 어디에 서느냐는 백어택 말고는 아무 뜻도 없었습니다. 그래서
+ * 잡몹 셋이든 다섯이든 **같은 싸움을 횟수만 늘려서** 했습니다.
+ *
+ * 참고한 게임들은 전부 여기에 답을 갖고 있습니다:
+ *
+ *   · 엘든 링·니오 — 적의 광역이 동료를 그대로 때립니다. 유인이 전술이 됩니다
+ *   · 오공 — 적을 겹쳐 세우면 한 동작이 여럿을 흔듭니다
+ *   · 위키드 — 좁은 길에서 서로 걸려 자세가 무너집니다
+ *
+ * 공통점은 **"어디에 서는가"가 값을 갖게 된다**는 것입니다.
+ *
+ * ── 그런데 피해는 **주지 않습니다** ────────────────────────────────
+ * 엘든 링처럼 피해까지 주면, 이 게임에서는 최적해가 *"끌고 다니며 서로
+ * 죽이게 두기"* 로 굳습니다. 그러면 이 게임의 기둥(예고를 읽고 답한다)을
+ * **통째로 우회**하는 길이 하나 생깁니다. 재미를 늘리려다 이유를 없애는 셈입니다.
+ *
+ * 그래서 오사는 **강인도만** 깎습니다. 유인으로 적을 죽일 수는 없지만,
+ * **무너뜨릴 수는 있습니다** — 그리고 무너진 적에게는 처형이 열립니다.
+ * 즉 자리를 잡는 일이 *"싸움을 건너뛰는 길"* 이 아니라 *"더 좋은 한 방을
+ * 여는 길"* 이 됩니다. (니오의 기력 붕괴, 오공의 자세 무너뜨리기가 같은 계약입니다.)
+ *
+ * ── 배수를 새로 만들지 않습니다 — 다만 **처음 고른 것은 틀렸습니다** ────
+ * 처음엔 `POISE.windupMultiplier`(2.5)를 골랐습니다. *"자리를 만드는 것도
+ * 예고를 읽는 것과 같은 급의 판단"* 이라는 그럴듯한 이유까지 적었습니다.
+ * 그런데 **재 보니 한 번 스치면 그 자리에서 무너졌습니다**:
+ *
+ *     잡몹 0.34 × fromTrauma 40 × 2.5 = 34   vs   잡몹 강인도 **30**
+ *
+ * 그건 *"자리를 잡으면 무너뜨릴 수 있다"* 가 아니라 *"스치면 즉시
+ * 무너진다"* 입니다. 잡몹 무리가 자기들끼리 스치기만 해도 줄줄이 무너지면,
+ * 피해를 뺀 의미가 없어집니다 — 우회로를 막아 놓고 옆문을 연 셈입니다.
+ *
+ * `POISE.backMultiplier`(1.6)로 내렸습니다. 뜻이 더 정확하기도 합니다 —
+ * 백어택 배수는 *"좋은 자리를 잡고 때렸다"* 이고, 오사는 *"좋은 자리를
+ * 잡아 적이 적을 때리게 했다"* 입니다. 같은 것을 재는 값입니다.
+ * 이제 잡몹은 **두 번** 스쳐야 무너집니다(21.8 × 2 > 30).
+ */
+function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
 
   /**
@@ -443,13 +485,15 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
    * "둘 다 쓰면 두 배로 좋다"는 곱셈은 밸런스를 빠르게 무너뜨립니다.
    * 평타는 `basicMultiplier` 로 크게 줄여, 끊는 수단에 값을 몰아줍니다.
    */
-  const multiplier = spec.heavyBlow
-    ? FOCUS.poiseMult
-    : winding
-      ? POISE.windupMultiplier
-      : behind
-        ? POISE.backMultiplier
-        : POISE.basicMultiplier
+  const multiplier = crossfire
+    ? POISE.backMultiplier
+    : spec.heavyBlow
+      ? FOCUS.poiseMult
+      : winding
+        ? POISE.windupMultiplier
+        : behind
+          ? POISE.backMultiplier
+          : POISE.basicMultiplier
   const dmg = poiseDamage(spec.trauma, spec.poiseScale ?? 1, multiplier, Enemy.kind[t], Enemy.phase[t])
   /**
    * 🔨 **깎은 쪽이 셉니다.**
@@ -463,7 +507,15 @@ function applyPoise(t: number, spec: AttackSpec, behind = false): void {
    * 이 저장소가 스태미나에서 이미 똑같이 배웠습니다 — *"쓴 쪽이 세는
    * 것이 정확합니다."* 관측은 프레임 사이에 일어난 일을 못 봅니다.
    */
-  poiseDealt += dmg
+  /**
+   * ⚠️ **오사는 이 장부에 안 넣습니다.** `poiseDealt` 는 *"플레이어가 깎은
+   * 강인도"* 이고, 무기별 비교(`npm run weapons`)가 그 값으로 대검과 단검을
+   * 가릅니다. 적이 깎은 것을 섞으면 **옆에 서 있던 무기가 잘한 것처럼**
+   * 보입니다. 이 저장소가 `locked` 한 칸에 원인 셋을 담았다가 뜻이 뒤집힌
+   * 것과 같은 모양입니다 — 다른 사건은 다른 칸에.
+   */
+  if (crossfire) crossfireHits++
+  else poiseDealt += dmg
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
@@ -582,6 +634,20 @@ export function readPoiseDealt(): number {
 }
 export function resetPoiseDealt(): void {
   poiseDealt = 0
+  crossfireHits = 0
+}
+
+/**
+ * 💥 **적이 적을 스친 횟수.**
+ *
+ * 눈금이 없으면 이 규칙은 **있는지 없는지도 모르는 규칙**이 됩니다. 이
+ * 저장소에는 이미 그런 것이 하나 있었습니다 — 화살이 동료 몸에 막히는
+ * 규칙(`blocker`)은 오래전부터 있었는데, 실제로 한 판에 몇 번 일어나는지
+ * 아무도 안 셌습니다. 규칙을 넣을 때 세는 칸을 같이 넣습니다.
+ */
+let crossfireHits = 0
+export function readCrossfireHits(): number {
+  return crossfireHits
 }
 
 /** 🩸 출혈이 터진 순간 — 게임 루프가 읽고 비웁니다(연출은 시스템 밖에서). */
@@ -769,6 +835,12 @@ export const breakEvents: BreakEvent[] = []
 
 /** 🟢 반격이 성립한 순간. 무너짐과 **따로** 알립니다 — 다른 사건이기 때문입니다. */
 export const counterEvents: BreakEvent[] = []
+
+/**
+ * 💥 적이 적을 스친 순간. 무너짐과 따로 알립니다 — 스쳤다고 늘 무너지는
+ * 것은 아니고, 플레이어는 **쌓이는 중**인 것도 봐야 자리를 잡을 이유가 생깁니다.
+ */
+export const crossfireEvents: BreakEvent[] = []
 
 /** 🥋 완벽 회피 — 실제로 맞을 공격을 무적 프레임으로 넘긴 순간. */
 export const perfectDodgeEvents: BreakEvent[] = []
@@ -979,6 +1051,42 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     if (spec.projectile) {
       if (t !== blocker) continue
     } else if (attackerIsPlayer === targetIsPlayer) {
+      /**
+       * ── 💥 **적이 적을 스치면 — 무너집니다** ─────────────────────────
+       *
+       * 설계 근거는 `applyPoise` 위에 길게 적어 뒀습니다. 요약: 피해는
+       * 없고 강인도만 깎입니다. 유인으로 죽일 수는 없지만 무너뜨릴 수는
+       * 있고, 무너지면 처형이 열립니다.
+       *
+       * ⚠️ **여기서 `continue` 로 빠져나갑니다.** 아래 본문(피해·출혈·
+       *    넉백·어그로·피해 숫자·장부)은 한 줄도 타지 않습니다. 오사가
+       *    "약한 타격"이 아니라 **다른 사건**이기 때문입니다 — 본문에
+       *    조건을 흩뿌리면 나중에 하나 빠뜨린 곳이 조용히 생깁니다.
+       */
+      if (
+        !attackerIsPlayer &&
+        hasComponent(Enemy, t) &&
+        hasComponent(Status, t) &&
+        Actor.state[t] !== ActorState.Dead &&
+        // 💥 **한 번 스치면 잠시 안 스칩니다.** 이게 없으면 판정이 열려
+        // 있는 매 프레임 다시 성립합니다 — 실제로 8초에 1166회가
+        // 찍혔습니다(components.ts `crossfireT`).
+        Status.crossfireT[t] <= 0 &&
+        // 화살은 위에서 이미 「처음 만나는 몸」 규칙을 씁니다 — 두 번 처리 금지.
+        !spec.projectile &&
+        shapeDist(t) >= 0
+      ) {
+        Status.crossfireT[t] = crossfirePause()
+        applyPoise(t, spec, false, true)
+        // 눈에 보여야 규칙입니다 — 맞은 쪽 번쩍임은 무게 규칙을 그대로 씁니다.
+        Health.flashT[t] = hurtFlash(spec.hitstop)
+        crossfireEvents.push({
+          entity: t,
+          x: Transform.x[t],
+          y: Transform.y[t] + Body.height[t] * 0.5,
+          z: Transform.z[t],
+        })
+      }
       continue
     }
 

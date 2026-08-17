@@ -1105,6 +1105,8 @@ export function enemyAiSystem(
       Status.snareT[e] = Math.max(0, Status.snareT[e] - dt)
       snareScale = SNARE_MOVE_SCALE
     }
+    // 💥 오사 재장전 — 근거는 components.ts `crossfireT` 에 적어 뒀습니다.
+    if (Status.crossfireT[e] > 0) Status.crossfireT[e] = Math.max(0, Status.crossfireT[e] - dt)
 
     // 경직 중에는 아무것도 못 합니다 — 플레이어가 흐름을 끊을 수 있는 근거
     if (Actor.state[e] === ActorState.Stagger) {

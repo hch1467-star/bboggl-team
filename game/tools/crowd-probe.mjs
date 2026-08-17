@@ -196,6 +196,125 @@ try {
     `가장 좁았던 순간 ${ring.worst.toFixed(2)}m vs 몸 지름 ${ring.meD.toFixed(2)}m`,
   )
 
+  /**
+   * ── 💥 **적이 적을 스치는가** ─────────────────────────────────────
+   *
+   * 규칙을 넣었으니 **일어나는지**를 봅니다. 이 저장소에는 이미
+   * "있는데 아무도 안 세는 규칙"이 하나 있었습니다 — 화살이 동료 몸에
+   * 막히는 규칙이 그랬습니다. 규칙과 눈금은 같이 들어와야 합니다.
+   *
+   * 두 가지를 나눠 봅니다:
+   *   1. **성립하는가** — 일부러 겹쳐 세우고 확인합니다(규칙의 존재)
+   *   2. **일어나는가** — 그냥 둘러싸고 얼마나 나오는지 셉니다(규칙의 값어치)
+   *
+   * 1만 보면 "코드에 있다"까지밖에 말 못 하고, 2만 보면 안 나왔을 때
+   * 규칙이 없는 건지 자리가 안 났던 건지 못 가립니다.
+   */
+  console.log('\n💥 오사 — 적의 광역이 동료를 무너뜨리는가\n')
+  const cross = await page.evaluate(async () => {
+    const G = window.__game
+    const nap = () => new Promise((r) => setTimeout(r, 4))
+    const now = () => G.state().simElapsed
+    const wait = async (sec) => {
+      const t0 = now()
+      const dl = Date.now() + 20000
+      while (now() - t0 < sec && Date.now() < dl) await nap()
+    }
+
+    G.reset()
+    await wait(0.6)
+    G.clearEnemies()
+    await wait(0.3)
+    G.teleportPlayer(0, 0)
+    await wait(0.3)
+    // 뒤(A) → 앞(B) → 플레이어. A 가 플레이어를 치면 그 부채꼴이 B 를 지납니다.
+    const b = G.spawnEnemyKind('grunt', 0, 2.0)
+    const a = G.spawnEnemyKind('grunt', 0, 4.0)
+    if (a == null || a < 0 || b == null || b < 0) return null
+    await wait(0.3)
+    G.wakeEnemy(a)
+    G.wakeEnemy(b)
+    // 플레이어가 죽어서 관측이 끊기지 않게. 규칙을 재는 것이지
+    // 플레이어의 생존을 재는 것이 아닙니다.
+    G.setPlayerInvulnerable(true)
+
+    /**
+     * ⚠️ **둘 다 봅니다.** 처음엔 앞에 세운 쪽(b)만 봤다가 *"6회 스쳤는데
+     * 강인도는 그대로"* 라는 앞뒤 안 맞는 답을 받았습니다. 적은 서로
+     * 밀리며 자리를 바꾸므로 **누가 누구를 스쳤는지 미리 정할 수 없습니다.**
+     * 한쪽만 보면 규칙이 멀쩡해도 빨갛게 뜹니다.
+     */
+    const before = G.runStats().crossfireHits
+    const watch = [a, b].map((e) => {
+      const i = G.enemyInfo(e)
+      return {
+        e,
+        poiseMax: i?.poiseMax ?? 0,
+        poiseLow: i?.poise ?? 0,
+        hp0: i?.hp ?? 0,
+        hpLow: i?.hp ?? 0,
+        broke: false,
+      }
+    })
+    /**
+     * ⚠️ **벽시계 마감이 같이 있어야 합니다.** 처음엔 시뮬 시계만 보고
+     * 돌렸는데, 그 시계가 안 흐르면 이 고리는 **영원히 돕니다.** 실제로
+     * 한 판이 그렇게 900초 뒤에 통째로 잘렸고, 제목 줄만 찍힌 채
+     * 종료 코드는 0 이었습니다 — 이 저장소가 가장 비싸게 여기는 실패
+     * (아무 말도 안 하면서 성공했다고 하는 계측기)입니다.
+     */
+    const t0 = now()
+    const dl2 = Date.now() + 60000
+    while (now() - t0 < 8 && Date.now() < dl2) {
+      for (const w of watch) {
+        const info = G.enemyInfo(w.e)
+        if (!info) continue
+        if (info.poise < w.poiseLow) w.poiseLow = info.poise
+        if (info.hp < w.hpLow) w.hpLow = info.hp
+        /**
+         * ⚠️ **무너짐을 따로 봅니다.** 강인도의 「최저값」만 보면 규칙이
+         * 멀쩡해도 안 보일 수 있습니다 — 무너지는 순간 강인도가 **최대치로
+         * 되돌아가서**, 프레임 사이에 일어난 하락은 흔적이 안 남습니다.
+         * 이 저장소가 `poiseDealt` 에서 이미 똑같이 당했습니다.
+         */
+        if (info.broken) w.broke = true
+      }
+      await nap()
+    }
+    return { hits: G.runStats().crossfireHits - before, watch }
+  })
+
+  if (!cross) {
+    check(false, '💥 겹쳐 세운 두 적을 실제로 만들었다 (비교의 게이트)')
+  } else {
+    console.log(`    스친 횟수 ${cross.hits}회`)
+    for (const w of cross.watch) {
+      console.log(
+        `      적 ${w.e} — 강인도 ${w.poiseMax} → 최저 ${w.poiseLow}` +
+          `${w.broke ? ' (무너짐 ✔)' : ''} · 체력 ${w.hp0} → 최저 ${w.hpLow}`,
+      )
+    }
+    console.log('')
+    check(cross.hits > 0, '💥 **적의 광역이 동료를 실제로 스친다**', `${cross.hits}회`)
+    const dented = cross.watch.filter((w) => w.poiseLow < w.poiseMax || w.broke)
+    check(
+      dented.length > 0,
+      '💥 그 스침이 **자세를 무너뜨린다** (자리를 잡은 값어치)',
+      cross.watch.map((w) => `${w.poiseMax}→${w.poiseLow}${w.broke ? ' · 무너짐' : ''}`).join(' · '),
+    )
+    /**
+     * ⚠️ 이게 이 규칙의 **뚜껑**입니다. 피해까지 들어가면 최적해가
+     *    "끌고 다니며 서로 죽이게 두기"로 굳어, 예고를 읽는 기둥을
+     *    통째로 우회하는 길이 생깁니다(combat.ts `applyPoise` 설계 노트).
+     */
+    check(
+      // 빈 표본이 통과하지 않게 길이를 같이 봅니다(`npm run guard`).
+      cross.watch.length > 0 && cross.watch.every((w) => w.hpLow >= w.hp0 - 0.01),
+      '💥 그런데 **피해는 한 점도 안 들어간다** (유인이 싸움을 대신하면 안 됩니다)',
+      cross.watch.map((w) => `${w.hp0}→${w.hpLow}`).join(' · '),
+    )
+  }
+
   const still = await trial(false)
   const total = [...still.hist.values()].reduce((a, b) => a + b, 0)
   console.log('동시 예고 개수 분포 (20초, 잡몹 5마리에 포위)')
