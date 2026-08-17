@@ -435,6 +435,46 @@ try {
       '⏱ 늦게 출발하는 경우를 실제로 재 봤다 (여유가 있는지 묻는 게이트)',
       rows.join(' '),
     )
+    /**
+     * ── 🐲 **보스 광역도 같은 질문을 받습니다** ──────────────────────
+     *
+     * 위는 잡몹(예고 1.25초 · 반경 4.6m)입니다. 존에서 자주 만나는 쪽이라
+     * 여유를 촘촘히 쟀습니다. 그런데 **플레이어가 마지막에 시험받는 것은
+     * 보스**(예고 1.9초 · 반경 7.5m)이고, 그쪽은 한 번도 이 질문을 안
+     * 받았습니다. 예고가 길어 넉넉할 것 같지만 반경도 큽니다 — 둘이
+     * 반대로 작용하므로 **짐작으로는 답이 안 나옵니다.**
+     *
+     * 여기서는 여유의 크기를 찾지 않고 **한 점만** 찍습니다: *"반응 예산만큼
+     * 늦게 출발해도 벗어나는가."* 그게 이 검사가 실제로 묻는 것이고,
+     * 0.1초씩 훑으면 판이 열세 번 더 돌아 검사가 40분짜리가 됩니다.
+     * 알고 싶은 것보다 비싼 측정은 안 합니다.
+     */
+    {
+      const late = Number(budget.choice.toFixed(2))
+      let ok = false
+      let last = null
+      for (let i = 0; i < 3; i++) {
+        const r = await page.evaluate(
+          ([k, id, dl]) => window.__t.walkOut(k, id, dl),
+          ['boss', 'boss_quake', late],
+        )
+        if (!r) continue
+        last = r
+        if (r.hp === r.before) {
+          ok = true
+          break
+        }
+      }
+      check(
+        ok,
+        '🐲 **보스 광역도 읽고 나서 출발하면 벗어난다** (마지막 시험에서도 읽는 색)',
+        last
+          ? `${late.toFixed(2)}초 늦게 출발 · 예고 ${last.telegraph}초 · 판정 순간 ${last.far}m` +
+            ` · ${ok ? '안 맞음' : `${last.before}→${last.hp}`}`
+          : '예고를 못 잡았습니다',
+      )
+    }
+
     if (latest >= 0) {
       check(
         latest >= budget.choice,
