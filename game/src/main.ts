@@ -2493,7 +2493,13 @@ class Game {
       if (!anyEnemy || d < anyEnemy.dist) anyEnemy = { x: Transform.x[e], z: Transform.z[e], dist: d }
     }
     if (boss) {
-      return { ...boss, label: '수문장 처치', dist: Math.hypot(boss.x - px, boss.z - pz) }
+      // 🐉 이름은 **적 표에서** 가져옵니다 — 화면 위쪽 보스 바와 같은 값이라야
+      //    한 놈에게 이름이 둘이 되지 않습니다(enemies.ts `Boss.name` 주석).
+      return {
+        ...boss,
+        label: `${enemyDef(EnemyKind.Boss).name} 처치`,
+        dist: Math.hypot(boss.x - px, boss.z - pz),
+      }
     }
 
     // 보스를 잡았으면 남은 보물이 목표가 됩니다.

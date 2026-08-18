@@ -70,7 +70,8 @@
     "shop": "node tools/shop-probe.mjs",
     "bleed": "node tools/bleed-probe.mjs",
     "elite": "node tools/elite-probe.mjs",
-    "depth": "node tools/depth-probe.mjs"
+    "depth": "node tools/depth-probe.mjs",
+    "hud": "node tools/hud-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
