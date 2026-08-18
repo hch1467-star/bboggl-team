@@ -7,11 +7,24 @@ import {
   stepFor,
   type SkillShape,
 } from '../config/arsenal'
-import { BLEED, COMBAT, COUNTER, FOCUS, GUARD, PLAYER, POISE, hurtFlash } from '../config/balance'
+import {
+  BARREL,
+  BLEED,
+  COMBAT,
+  COUNTER,
+  FOCUS,
+  GUARD,
+  PLAYER,
+  POISE,
+  barrelFuse,
+  barrelStaminaLoss,
+  hurtFlash,
+} from '../config/balance'
 import {
   Actor,
   ActorState,
   AttackPhase,
+  Barrel,
   Body,
   Enemy,
   EnemyKind,
@@ -912,6 +925,145 @@ export const perfectDodgeEvents: BreakEvent[] = []
  */
 export const justGuardEvents: BreakEvent[] = []
 
+/** 💥 통에 불이 붙은 순간. 소리와 연출이 읽습니다. */
+export const barrelLitEvents: BreakEvent[] = []
+/** 💥 통이 터진 순간. `radius` 는 **실제로 쓴 반경** 입니다(그림이 규칙을 베끼지 않게). */
+export const barrelBlastEvents: (BreakEvent & { radius: number; caught: number })[] = []
+
+const barrels = defineQuery(Barrel, Transform, Health)
+
+/**
+ * ── 💥 **도화선을 굴리고, 다 타면 터뜨립니다** ──────────────────────
+ *
+ * 설계 근거는 balance.ts `BARREL` 에 길게 적어 두었습니다. 요약:
+ * **피해는 없고 자세만 무너집니다** — 적은 강인도로, 플레이어는
+ * 스태미나로. 오사가 *"유인이 싸움을 대신하면 안 된다"* 로 피해를 뺀 것과
+ * 같은 이유이고, 여기서 피해를 주면 "통 옆으로 끌고 가기"가 전투의
+ * 정답이 됩니다.
+ *
+ * ⚠️ 적을 **죽이지 않는** 것에는 실무적인 이유도 하나 더 있습니다.
+ *    처치는 불티·처치 수·세이브·출혈 장부를 함께 건드리는데, 그 경로는
+ *    `applyHit` 본문에 있습니다. 폭발이 죽일 수 있게 하려면 그 경로를
+ *    두 번째로 구현해야 하고, 두 벌이 된 순간 한쪽만 고치는 날이 옵니다.
+ *    지금 규칙은 그 위험 자체를 없앱니다.
+ */
+export function barrelSystem(dt: number): void {
+  const ids = barrels.run()
+  const count = barrels.count
+  // ⚠️ 터진 통을 이 루프 안에서 지우면 질의 배열이 밑에서 바뀝니다.
+  //    터질 것을 모아 두고 루프가 끝난 뒤 처리합니다.
+  const blown: number[] = []
+  for (let i = 0; i < count; i++) {
+    const b = ids[i]
+    /**
+     * ① **점화** — 체력이 0이 된 통에 불이 붙습니다. 이 저장소에서 통에
+     *    불을 붙이는 자리는 **여기 하나뿐**입니다(근거는 `applyHit` 의
+     *    통 가지 주석).
+     *
+     * ⚠️ `lit` 을 안 보면 터진 통이 매 프레임 다시 불붙습니다 — 조건이
+     *    「체력 ≤ 0」 이라 터진 뒤에도 영원히 참이기 때문입니다.
+     * ⚠️ 붙인 프레임에는 `continue` 로 **안 태웁니다.** 붙는 것과 타는
+     *    것이 같은 프레임에 일어나면, 긴 프레임에서 도화선이 규칙보다
+     *    짧아집니다.
+     */
+    if (Health.hp[b] <= 0 && Barrel.lit[b] === 0) {
+      Barrel.lit[b] = 1
+      Barrel.fuseT[b] = barrelFuse()
+      Barrel.fuseTotal[b] = Barrel.fuseT[b]
+      barrelLitEvents.push({
+        entity: b,
+        x: Transform.x[b],
+        y: Transform.y[b] + BARREL.height * 0.5,
+        z: Transform.z[b],
+      })
+      continue
+    }
+    // ② **연소**
+    if (Barrel.fuseT[b] <= 0) continue
+    Barrel.fuseT[b] -= dt
+    if (Barrel.fuseT[b] <= 0) blown.push(b)
+  }
+  for (const b of blown) explodeBarrel(b)
+}
+
+function explodeBarrel(b: number): void {
+  const bx = Transform.x[b]
+  const bz = Transform.z[b]
+  const by = Transform.y[b]
+  // 두 번 터지지 않게 먼저 끕니다 — 연쇄가 이 통을 다시 집을 수 있습니다.
+  Barrel.fuseT[b] = 0
+  Barrel.fuseTotal[b] = 0
+  Health.hp[b] = 0
+
+  const tids = targets.run()
+  const tcount = targets.count
+  let caught = 0
+  for (let j = 0; j < tcount; j++) {
+    const t = tids[j]
+    if (t === b) continue
+    const dx = Transform.x[t] - bx
+    const dz = Transform.z[t] - bz
+    /**
+     * 📏 대상의 **굵기를 더합니다** — 타격 판정(`shapeDist`)과 같은 규칙
+     * 입니다. 폭발만 중심으로 재면 "그린 원에 몸이 걸쳤는데 안 맞았다"가
+     * 생기고, 그건 이 저장소가 이미 한 번 고친 종류의 어긋남입니다.
+     */
+    if (Math.hypot(dx, dz) > BARREL.blast + Body.radius[t]) continue
+
+    /**
+     * 💥 **연쇄** — 반경 안의 다른 통에도 불이 붙습니다.
+     *
+     * 붙는 것은 **불**이지 폭발이 아닙니다(도화선을 처음부터 굴립니다).
+     * 즉 연쇄는 즉발이 아니라 **한 박자 뒤**에 옵니다 — 플레이어에게도
+     * 적에게도 다시 한 번 *"걸어서 이탈"* 할 시간이 주어집니다.
+     * 이미 불붙은 통은 건드리지 않으므로 무한 연쇄가 생길 수 없습니다.
+     */
+    if (hasComponent(Barrel, t)) {
+      // 옆 통은 **체력만 깎습니다.** 불은 다음 프레임에 `barrelSystem` 이
+      // 붙입니다 — 점화 경로가 하나여야 연쇄도 규칙대로 한 박자 뒤에 옵니다.
+      if (Health.hp[t] > 0) Health.hp[t] = 0
+      continue
+    }
+
+    if (Actor.state[t] === ActorState.Dead) continue
+
+    if (hasComponent(Player, t)) {
+      /**
+       * 🫁 휘말린 플레이어는 **스태미나를 잃습니다**(구르기 2회분).
+       * 피해가 아닌 이유는 balance.ts `BARREL` 주석에 있습니다.
+       * 회복 지연도 같이 겁니다 — 안 그러면 잃자마자 도로 차오릅니다.
+       */
+      Stamina.value[t] = Math.max(0, Stamina.value[t] - barrelStaminaLoss())
+      Stamina.regenDelayT[t] = Math.max(Stamina.regenDelayT[t], PLAYER.staminaRegenDelay)
+      const len = Math.hypot(dx, dz) || 1
+      Velocity.kx[t] = (dx / len) * BARREL.knockback
+      Velocity.kz[t] = (dz / len) * BARREL.knockback
+      caught++
+      continue
+    }
+
+    /**
+     * 무너뜨립니다. `breakPoise` 를 그대로 부르는 이유: 무방비 시간·
+     * 넉백 취소·붕괴 사건 기록이 전부 거기 한 곳에 있습니다. 여기서
+     * 흉내 내면 처형 창의 규칙이 두 벌이 됩니다.
+     */
+    if (hasComponent(Enemy, t)) {
+      breakPoise(t)
+      Health.flashT[t] = hurtFlash(BARREL.hitstop)
+      caught++
+    }
+  }
+
+  barrelBlastEvents.push({
+    entity: b,
+    x: bx,
+    y: by + BARREL.height * 0.5,
+    z: bz,
+    radius: BARREL.blast,
+    caught,
+  })
+}
+
 /** 이 프레임에 이 액터가 쓰고 있는 공격의 제원. */
 export function currentSpec(a: number): AttackSpec | null {
   const state = Actor.state[a] as ActorState
@@ -1156,6 +1308,42 @@ function applyHit(a: number, spec: AttackSpec): boolean {
 
     const dist = shapeDist(t)
     if (dist < 0) continue
+
+    /**
+     * ── 💥 **폭발통에 불을 붙입니다** ────────────────────────────────
+     *
+     * 오사와 **같은 자리·같은 모양**으로 짭니다: 여기서 `continue` 로
+     * 빠져나가고 아래 본문(피해·출혈·넉백·어그로·피해 숫자·장부)은
+     * 한 줄도 안 탑니다. 통에 불이 붙는 것은 "약한 타격"이 아니라
+     * **다른 사건**이기 때문입니다.
+     *
+     * ⚠️ 여기에 **적은 못 옵니다.** 적이 통을 치면 위 진영 검사에서
+     *    `attackerIsPlayer === targetIsPlayer`(둘 다 false)로 걸려
+     *    오사 가지로 갔다가 `hasComponent(Enemy, t)` 에서 떨어집니다.
+     *    일부러 그렇습니다 — 통은 **플레이어가 고르는 도구**이지
+     *    아무 때나 터지는 함정이 아닙니다. 함정이 되면 플레이어는
+     *    "저 통 옆에서 싸우지 말자"만 배웁니다.
+     *
+     * ⚠️ `landed = true` 로 둡니다. 통을 친 것도 **맞은 것**이라
+     *    히트스톱·소리가 나야 합니다. 안 그러면 허공을 벤 것처럼 보입니다.
+     */
+    if (hasComponent(Barrel, t)) {
+      /**
+       * 여기서는 **체력만 깎습니다.** 불을 붙이는 것은 `barrelSystem` 한 곳
+       * 뿐입니다.
+       *
+       * ⚠️ 처음엔 여기서 바로 불을 붙였습니다. `npm run barrel` 이 그걸
+       *    잡았습니다 — 다른 경로로 들어온 피해(실험대의 `damageEntity`,
+       *    앞으로 생길 지형 피해·장판 등)로는 통이 **꿈쩍도 안 했습니다.**
+       *    주석에는 *"체력 1이라 한 대면 터진다"* 고 적어 놓고 정작 체력은
+       *    한 번도 안 줄고 있었습니다. 점화 조건을 **「체력이 0이 되면」**
+       *    하나로 모으면, 앞으로 어떤 피해원이 생겨도 저절로 통합니다.
+       */
+      if (Health.hp[t] > 0) Health.hp[t] = 0
+      landed = true
+      continue
+    }
+
     const dx = Transform.x[t] - originX
     const dz = Transform.z[t] - originZ
 

@@ -19,6 +19,7 @@ import {
 } from '../config/enemyAttacks'
 import {
   AWARE,
+  BARREL,
   BOSS,
   COMBAT,
   FOCUS,
@@ -71,6 +72,11 @@ import { time } from '../core/time'
 
 export const KIND_PLAYER = 0
 export const KIND_TREASURE = 2
+/**
+ * 💥 폭발통. 적도 플레이어도 아니라 **몸 만드는 길이 따로** 필요합니다
+ * (적은 `renderKindForEnemy` 로 100+ 를 씁니다 — 겹치지 않습니다).
+ */
+export const KIND_BARREL = 3
 
 /**
  * 적의 렌더 종류는 **EnemyKind 에 상수를 더한 값**입니다.
@@ -539,6 +545,11 @@ export class Visuals {
       return
     }
 
+    if (kind === KIND_BARREL) {
+      this.attachBarrel(entity, group)
+      return
+    }
+
     const isPlayer = kind === KIND_PLAYER
     // 이 엔티티가 어떤 적인지. 색·크기·예고 도형이 전부 여기서 나옵니다.
     const enemyKind: EnemyKind = hasComponent(Enemy, entity) ? Enemy.kind[entity] : EnemyKind.Grunt
@@ -911,6 +922,59 @@ export class Visuals {
 
     this.scene.add(group)
     this.items.set(entity, visual)
+  }
+
+  /**
+   * ── 💥 **폭발통** — 「저건 건드리면 터진다」가 한눈에 ────────────────
+   *
+   * 실루엣부터 다르게 만듭니다. 이 존의 다른 몸은 전부 **캡슐**(플레이어·
+   * 적)이거나 **팔면체**(보물)입니다. 통은 **위아래가 넓은 짧은 원통** —
+   * 캡슐과 헷갈릴 수 없는 비율이고, 그림자만 봐도 갈립니다.
+   * (`npm run shape` 가 크기를 지우고 모양만 겹쳐 보는 검사라, 여기서
+   *  비율을 다르게 두는 것이 실제로 값을 합니다.)
+   *
+   * 색은 🟡 예고색(`INTENT_COLOR[Sweep]`)을 **그대로** 씁니다. 통이 만드는
+   * 것이 노랑이니 몸도 노랑이어야 *"때리면 저 색이 깔린다"* 가 배우기 전에
+   * 짐작됩니다. 리터럴을 안 적고 표에서 가져오는 이유는 늘 같습니다 —
+   * 예고 색을 손보는 날 통만 옛 색으로 남지 않게.
+   *
+   * 테를 두 줄 두르는 것은 장식이 아니라 **읽기**입니다. 직교 카메라에서
+   * 단색 원통은 높이가 안 읽혀서 바닥 무늬처럼 보입니다.
+   */
+  private attachBarrel(entity: number, group: THREE.Group): void {
+    const color = INTENT_COLOR[AttackIntent.Sweep]
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color,
+      emissive: new THREE.Color(color),
+      // 어둡게 깔린 존에서 **혼자 살짝 빛납니다.** 배경에 묻히면
+      // "쓸 수 있는 물건"이라는 사실 자체가 전달되지 않습니다.
+      emissiveIntensity: 0.35,
+      roughness: 0.6,
+      metalness: 0.25,
+    })
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(BARREL.radius, BARREL.radius * 0.86, BARREL.height, 10),
+      bodyMat,
+    )
+    body.position.y = BARREL.height * 0.5
+    body.castShadow = true
+    group.add(body)
+
+    const hoopMat = new THREE.MeshStandardMaterial({ color: 0x2f2a26, roughness: 0.9 })
+    for (const y of [BARREL.height * 0.28, BARREL.height * 0.72]) {
+      const hoop = new THREE.Mesh(
+        new THREE.TorusGeometry(BARREL.radius * 0.98, 0.05, 5, 12),
+        hoopMat,
+      )
+      hoop.position.y = y
+      hoop.rotation.x = Math.PI / 2
+      group.add(hoop)
+    }
+
+    this.scene.add(group)
+    // `floats: false` — 보물은 둥둥 뜨지만 통은 **땅에 붙어** 있어야 합니다.
+    // 뜨는 물건은 이 게임에서 "주워라"라는 뜻이라, 통이 뜨면 오해가 됩니다.
+    this.items.set(entity, { group, material: bodyMat, floats: false, telegraphWindup: 0 })
   }
 
   private attachTreasure(entity: number, group: THREE.Group): void {

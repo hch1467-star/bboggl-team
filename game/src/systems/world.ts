@@ -1,10 +1,11 @@
-import { PLAYER, VIAL, WORLD } from '../config/balance'
+import { BARREL, PLAYER, VIAL, WORLD } from '../config/balance'
 import { NO_CHAIN } from '../config/bossPhases'
 import { enemyDef, kindFromId } from '../config/enemies'
 import type { Bonfire } from './bonfire'
 import {
   Actor,
   ActorState,
+  Barrel,
   Body,
   Enemy,
   EnemyKind,
@@ -22,7 +23,7 @@ import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
 import type { LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
-import { KIND_PLAYER, KIND_TREASURE, renderKindForEnemy } from '../render/visuals'
+import { KIND_BARREL, KIND_PLAYER, KIND_TREASURE, renderKindForEnemy } from '../render/visuals'
 
 /** 스폰 전용 RNG. 전투 RNG와 분리해야 재현성이 깨지지 않습니다. */
 const spawnRng = new Rng(20260807)
@@ -232,6 +233,58 @@ export function spawnTreasure(x: number, z: number): number {
 }
 
 /**
+ * 💥 **폭발통** — 때리면 도화선이 붙는 통.
+ *
+ * `Health` 를 주는 이유는 체력 싸움을 시키려는 게 아니라, `combat.ts` 의
+ * 대상 질의가 `Transform + Body + Health` 이기 때문입니다. 그 셋을 갖추면
+ * **아무 무기·스킬로나** 칠 수 있습니다 — 통 전용 판정을 따로 만들면
+ * 새 스킬을 넣는 날 "이것만 통을 못 친다"가 조용히 생깁니다.
+ *
+ * 체력은 1입니다. **한 대면 불이 붙습니다** — 통을 여러 번 때리게 하면
+ * 이 물건이 묻는 질문("칠까 말까, 치면 어디로 빠질까")이 "몇 대 남았지"로
+ * 바뀝니다.
+ */
+export function spawnBarrel(x: number, z: number): number {
+  const e = createEntity()
+  addComponent(Transform, e)
+  addComponent(Body, e)
+  addComponent(Health, e)
+  addComponent(Barrel, e)
+  addComponent(Renderable, e)
+  Transform.x[e] = x
+  Transform.y[e] = 0
+  Transform.z[e] = z
+  Transform.rotY[e] = 0
+  Body.radius[e] = BARREL.radius
+  Body.height[e] = BARREL.height
+  Health.hp[e] = 1
+  Health.max[e] = 1
+  Health.invulnT[e] = 0
+  Health.flashT[e] = 0
+  Barrel.fuseT[e] = 0
+  Barrel.fuseTotal[e] = 0
+  /**
+   * ⚠️ **`lit` 을 반드시 0으로 지웁니다.**
+   *
+   * 이 저장소가 처음 겪은 종류의 버그입니다. ECS 는 **엔티티 id 를
+   * 재사용**하고, 컴포넌트 값은 배열에 그대로 남습니다. 그래서 앞서 터진
+   * 통의 id 를 물려받은 새 통이 *"이미 불붙었던 것"* 으로 태어나
+   * **영원히 안 터졌습니다.** (점화 조건이 `체력 ≤ 0 && lit === 0` 이라
+   * 스태미나도 안 깎이고 적도 안 무너지는데, 통은 조용히 사라지기만 해서
+   * 겉으로는 "가끔 안 터진다"로 보입니다.)
+   *
+   * `npm run barrel` 이 잡았습니다 — 검사를 순서대로 여러 번 돌린 덕분에
+   * **두 번째 통부터** 안 터지는 것이 드러났습니다. 한 번만 재는 검사였으면
+   * 통과했을 버그입니다.
+   *
+   * 규칙: **spawn 함수는 자기가 쓰는 칸을 하나도 빼지 않고 초기화합니다.**
+   */
+  Barrel.lit[e] = 0
+  Renderable.kind[e] = KIND_BARREL
+  return e
+}
+
+/**
  * 아레나 가장자리 링 위에 적을 흩뿌립니다. (레벨이 없을 때의 기본 모드)
  * 플레이어 바로 옆에 튀어나오면 "불공정하다"고 느껴지므로,
  * 항상 시야 안쪽 가장자리에서 걸어 들어오게 합니다.
@@ -378,7 +431,7 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     else if (item.kind === 'treasure') {
       e = spawnTreasure(item.x, item.z)
       treasureTotal++
-    }
+    } else if (item.kind === 'barrel') e = spawnBarrel(item.x, item.z)
     if (e < 0) continue
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     entities.push(e)

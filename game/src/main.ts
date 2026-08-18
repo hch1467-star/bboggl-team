@@ -23,7 +23,10 @@ import {
 } from './config/arsenal'
 import {
   AWARE,
+  BARREL,
   BLEED,
+  barrelFuse,
+  barrelStaminaLoss,
   hearDistance,
   BOSS_ARENA,
   COMBAT,
@@ -74,6 +77,7 @@ import { ENEMY_DEFS, bleedMaxOf, enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
   ActorState,
+  Barrel,
   Body,
   Enemy,
   EnemyKind,
@@ -125,6 +129,9 @@ import {
   finisherEvents,
   counterEvents,
   crossfireEvents,
+  barrelSystem,
+  barrelLitEvents,
+  barrelBlastEvents,
   countLivingEnemies,
   justGuardEvents,
   perfectDodgeEvents,
@@ -208,6 +215,7 @@ import {
   bossKey,
   enemyCountForWave,
   respawnLevelEnemies,
+  spawnBarrel,
   spawnEnemy,
   spawnFromLevel,
   spawnGrunt,
@@ -273,6 +281,9 @@ class Game {
   private levelMode = false
   private levelName = ''
   private terrain: Terrain | null = null
+  /** 💥 이번 판에 터진 통 수 · 그 폭발에 휘말린 몸 수 — 벤치·프로브가 읽습니다. */
+  private barrelsBlown = 0
+  private barrelsCaught = 0
   private treasureTotal = 0
   private treasuresFound = 0
   private regions: LevelRegion[] = []
@@ -728,6 +739,8 @@ class Game {
     this.bossDefeated = false
     this.treasuresFound = 0
     this.treasureTotal = 0
+    this.barrelsBlown = 0
+    this.barrelsCaught = 0
     this.hitsDealt = 0
     this.damageDealt = 0
     this.backHits = 0
@@ -991,6 +1004,12 @@ class Game {
     // 🩸 예고 중에 모읍니다 — 맞고 나서 되짚으면 화면도 상태도 이미 바뀝니다.
     this.watchTelegraphs(p)
     resolveAttacks()
+    /**
+     * 💥 도화선은 **판정 뒤에** 굴립니다. 순서가 뜻입니다 — 이 프레임에
+     * 붙은 불이 같은 프레임에 한 틱 타 버리면, 짧은 프레임에서는 도화선이
+     * 규칙보다 짧아집니다. 붙는 것과 타는 것은 다른 프레임의 일입니다.
+     */
+    barrelSystem(time.dt)
 
     // ---- 3. 타격 피드백 ----
     // 손맛의 3요소(정지 + 흔들림 + 숫자)를 여기서 한꺼번에 터뜨립니다.
@@ -1638,6 +1657,61 @@ class Game {
       sfx.impact(false, false, c.x, c.z)
     }
     crossfireEvents.length = 0
+
+    /**
+     * ── 💥 **폭발통** — 예고는 4색과 **같은 장치**로 그립니다 ────────────
+     *
+     * 여기서 통 전용 그림을 새로 만들지 않는 것이 요점입니다. 적의 🟡 광역이
+     * 쓰는 바로 그 `spawnGroundShape` 를, 같은 색(`INTENT_COLOR[Sweep]`)으로,
+     * 같은 두 겹(테두리 = 범위 · 차오름 = 남은 시간)으로 씁니다.
+     *
+     * 그래야 플레이어가 배운 것이 그대로 통합니다 — *"노란 원이 차오르면
+     * 걸어서 나간다."* 통이라고 다른 그림을 쓰면, 이미 가르친 문장을 두고
+     * **새 문장을 하나 더** 외우게 하는 셈입니다.
+     *
+     * 길이는 게임에게 묻지 않고 **사건이 실어 옵니다**(`fuseTotal`). 여기서
+     * `barrelFuse()` 를 다시 부르면 규칙의 두 번째 사본이 생깁니다.
+     */
+    for (const lit of barrelLitEvents) {
+      const life = Barrel.fuseTotal[lit.entity] || barrelFuse()
+      const gy = Transform.y[lit.entity]
+      const color = INTENT_COLOR[AttackIntent.Sweep]
+      this.vfx.spawnGroundShape(lit.x, gy, lit.z, 0, BARREL.blast, 360, color, life, 'outline')
+      this.vfx.spawnGroundShape(lit.x, gy, lit.z, 0, BARREL.blast, 360, color, life, 'fill')
+      sfx.impact(true, false, lit.x, lit.z)
+    }
+    barrelLitEvents.length = 0
+
+    /**
+     * 터진 뒤: 번쩍임 + 화면 흔들림 + 통 치우기.
+     *
+     * ⚠️ 흔들림은 **방향 없이** 겁니다. 방향을 주면 "누가 나를 때렸다"로
+     *    읽히는데, 이건 내가 만든 사건입니다.
+     */
+    for (const blast of barrelBlastEvents) {
+      this.vfx.spawnGroundShape(
+        blast.x,
+        Transform.y[blast.entity],
+        blast.z,
+        0,
+        blast.radius,
+        360,
+        INTENT_COLOR[AttackIntent.Sweep],
+        0.4,
+        'fade',
+      )
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2
+        this.vfx.spawnHitSpark(blast.x + Math.cos(a) * 1.1, blast.y, blast.z + Math.sin(a) * 1.1, 1.4)
+      }
+      this.cam.addTrauma(BARREL.trauma)
+      sfx.impact(true, true, blast.x, blast.z)
+      this.barrelsBlown++
+      this.barrelsCaught += blast.caught
+      this.visuals.detach(blast.entity)
+      destroyEntity(blast.entity)
+    }
+    barrelBlastEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -3739,6 +3813,57 @@ class Game {
     return this.bossSwingLog
   }
 
+  /**
+   * 🧪 **실험대 전용** — 원하는 자리에 통을 하나 세웁니다.
+   *
+   * `setHp`·`setStamina` 와 같은 성격입니다: 게임 규칙이 아니라 **재기 위한
+   * 받침대**입니다. 존에 놓인 통 셋은 서로 멀리 떨어져 있어서
+   * *"연쇄가 붙는가"* 나 *"반경 밖은 안 무너지는가"* 를 **존 안에서는
+   * 세울 수가 없습니다.** 그 상황을 못 세우면 그 규칙은 영영 안 재집니다.
+   */
+  debugSpawnBarrel(x: number, z: number): number {
+    const e = spawnBarrel(x, z)
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    this.visuals.attach(e, Renderable.kind[e])
+    return e
+  }
+
+  /**
+   * 💥 **폭발통의 상태와 규칙** — 프로브가 반경·도화선을 베껴 적지 않게.
+   *
+   * `blast`·`fuse`·`staminaLoss` 는 게임이 **실제로 쓰는 값**이고,
+   * `barrels` 는 지금 판에 남아 있는 통들입니다. 검사는 이 둘을 맞대 보는
+   * 것으로 *"그린 원이 규칙과 같은가"* 를 물을 수 있습니다.
+   */
+  debugBarrelInfo(): {
+    blast: number
+    fuse: number
+    staminaLoss: number
+    blown: number
+    caught: number
+    barrels: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[]
+  } {
+    const out: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[] = []
+    for (let e = 0; e < 4096; e++) {
+      if (!isAlive(e) || !hasComponent(Barrel, e)) continue
+      out.push({
+        entity: e,
+        x: Number(Transform.x[e].toFixed(3)),
+        z: Number(Transform.z[e].toFixed(3)),
+        fuseT: Number(Barrel.fuseT[e].toFixed(3)),
+        fuseTotal: Number(Barrel.fuseTotal[e].toFixed(3)),
+      })
+    }
+    return {
+      blast: BARREL.blast,
+      fuse: barrelFuse(),
+      staminaLoss: barrelStaminaLoss(),
+      blown: this.barrelsBlown,
+      caught: this.barrelsCaught,
+      barrels: out,
+    }
+  }
+
   debugShortcutInfo(): {
     key: string
     open: boolean
@@ -5817,6 +5942,17 @@ declare global {
       levelFoes: () => { kind: string; x: number; z: number; region: string; level: number }[]
       /** 🔥 화톳불 사이 이동의 상태 — 프로브가 규칙을 베끼지 않게. */
       travelInfo: () => { lit: number; opened: boolean; key: string }
+      /** 🧪 실험대 전용 — 통을 하나 세웁니다(연쇄·반경 검사를 세우려면 필요). */
+      spawnBarrel: (x: number, z: number) => number
+      /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
+      barrelInfo: () => {
+        blast: number
+        fuse: number
+        staminaLoss: number
+        blown: number
+        caught: number
+        barrels: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[]
+      }
       shortcutInfo: () => {
         key: string
         open: boolean
@@ -6682,6 +6818,8 @@ window.__game = {
   bossSwingLog: () => game.debugBossSwingLog(),
   levelFoes: () => game.debugLevelFoes(),
   travelInfo: () => game.debugTravelInfo(),
+  barrelInfo: () => game.debugBarrelInfo(),
+  spawnBarrel: (x, z) => game.debugSpawnBarrel(x, z),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),

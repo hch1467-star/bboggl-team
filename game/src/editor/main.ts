@@ -150,6 +150,9 @@ class Editor {
       anvil: new THREE.CylinderGeometry(0.55, 0.3, 0.7, 4),
       // 쏘는 자 — 가늘고 길쭉하게. 멀리서 쏘는 적이라 실루엣이 가장 얇습니다.
       archer: new THREE.CapsuleGeometry(0.3, 1.2, 4, 8),
+      // 폭발통 — 게임 안과 같은 **짧고 굵은 원통**. 캡슐(적)·원뿔(화톳불)·
+      // 팔면체(보물) 어느 것과도 안 겹칩니다.
+      barrel: new THREE.CylinderGeometry(0.5, 0.43, 1.15, 10),
     }
 
     this.level = loadLevelFromStorage() ?? createEmptyLevel()

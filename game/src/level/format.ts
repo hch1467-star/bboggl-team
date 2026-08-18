@@ -50,6 +50,7 @@ export type EntityKind =
   | 'charger'
   | 'archer'
   | 'anvil'
+  | 'barrel'
 
 export const ENTITY_KINDS: EntityKind[] = [
   'spawn',
@@ -63,6 +64,7 @@ export const ENTITY_KINDS: EntityKind[] = [
   'charger',
   'archer',
   'anvil',
+  'barrel',
 ]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
@@ -77,6 +79,7 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   charger: '달려드는 자 🟢',
   archer: '쏘는 자 🔴(원거리)',
   anvil: '모루(강화만)',
+  barrel: '폭발통 💥',
 }
 
 /**
@@ -98,6 +101,9 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   charger: 0x4dffa1,
   archer: 0x8fb3c9,
   anvil: 0x8fa4b8,
+  // 예고 🟡 과 같은 색입니다 — 통이 만드는 것이 노랑이라, 에디터에서도
+  // 그 사실이 먼저 보여야 합니다.
+  barrel: 0xffd23f,
 }
 
 export interface LevelEntity {
