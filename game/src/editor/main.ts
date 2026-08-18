@@ -133,6 +133,10 @@ class Editor {
     this.markerGeos = {
       spawn: new THREE.ConeGeometry(0.5, 1.6, 5),
       grunt: new THREE.CapsuleGeometry(0.42, 0.9, 4, 8),
+      // 🛡️ 정예 — 잡몹과 **같은 키에 훨씬 굵게**. 게임 안에서 둘을 가르는
+      // 신호가 정확히 그것이라(색도 예고도 같습니다) 지도 위에서도 같은
+      // 그림이라야 배치하며 보는 것과 플레이하며 보는 것이 어긋나지 않습니다.
+      elite: new THREE.CapsuleGeometry(0.66, 0.9, 4, 10),
       treasure: new THREE.OctahedronGeometry(0.55),
       boss: new THREE.CapsuleGeometry(0.7, 1.5, 4, 10),
       // 게임 안과 같은 실루엣 규칙 — 얽는 자는 가늘고 크게, 끄는 자는 낮고 넓게.

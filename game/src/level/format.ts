@@ -51,6 +51,8 @@ export type EntityKind =
   | 'archer'
   | 'anvil'
   | 'barrel'
+  /** 🛡️ 정예 — 잡몹과 **같은 공격**을 쓰는 큰 개체. 근거는 balance.ts `ELITE`. */
+  | 'elite'
 
 export const ENTITY_KINDS: EntityKind[] = [
   'spawn',
@@ -65,6 +67,7 @@ export const ENTITY_KINDS: EntityKind[] = [
   'archer',
   'anvil',
   'barrel',
+  'elite',
 ]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
@@ -80,6 +83,7 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   archer: '쏘는 자 🔴(원거리)',
   anvil: '모루(강화만)',
   barrel: '폭발통 💥',
+  elite: '정예 🛡️(잡몹과 같은 색)',
 }
 
 /**
@@ -104,6 +108,9 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   // 예고 🟡 과 같은 색입니다 — 통이 만드는 것이 노랑이라, 에디터에서도
   // 그 사실이 먼저 보여야 합니다.
   barrel: 0xffd23f,
+  // 잡몹과 **같은 예고 색**입니다 — 같은 공격을 쓰니까요. 에디터에서
+  // 둘을 가르는 것은 색이 아니라 라벨이라야 그 사실이 안 흐려집니다.
+  elite: 0xc0453f,
 }
 
 export interface LevelEntity {

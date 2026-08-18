@@ -150,10 +150,80 @@ try {
   // ---- 3. 실루엣이 실제로 다른가 ----
   //
   // 색만 다르면 색약인 사람에게는 전부 같은 적입니다. 키가 확실히 갈려야 합니다.
-  const heights = roster.map((r) => r.height).sort((a, b) => a - b)
+  /**
+   * ── ⚠️ **"모든 쌍"이 아니라 "답이 다른 쌍"입니다** ────────────────
+   *
+   * 이 검사는 원래 키를 정렬해 **이웃한 두 값**의 차이를 봤습니다. 실제로
+   * 이 게임의 키는 1.4 · 1.7 · 2.0 · 2.3 · 2.6 · 2.9 로 **0.3 사다리**가
+   * 꽉 차 있고, 그래서 정예(2.15)를 넣는 순간 빨개졌습니다.
+   *
+   * 그런데 이 규칙이 지키려는 것은 바로 위에 적혀 있습니다 —
+   * *"실루엣만 보고 **대응**이 정해져야 한다."* 정예는 잡몹과 **공격
+   * 목록이 글자 그대로 같습니다**(enemyAttacks.ts 에서 같은 배열을
+   * 가리킵니다). 즉 둘을 헷갈려도 **내야 할 답은 하나도 안 바뀝니다.**
+   * 사다리에 자리가 없다고 정예를 보스보다 크게 만들면, 규칙이 아니라
+   * **지금의 구현**에 게임을 맞추는 것입니다.
+   *
+   * 바로 위 「색이 하나뿐」 검사가 이미 같은 교정을 한 번 겪었습니다 —
+   * 패턴 수를 세다가 **색의 가짓수**를 세도록 바꾼 그 자리입니다.
+   *
+   * 그래서 **답이 같은 적끼리는 사다리에서 면제**하되, 면제받은 쌍은
+   * 아래에서 *"그래도 눈에 띄게 다른가"* 를 따로 확인합니다. 면제가
+   * 공짜가 되면 안 됩니다.
+   */
+  const answerOf = (r) => r.attacks.map((a) => a.id).join(',')
   let minGap = Infinity
-  for (let i = 1; i < heights.length; i++) minGap = Math.min(minGap, heights[i] - heights[i - 1])
-  check(minGap >= 0.29, '키 차이가 최소 0.3m 이상 (색약 대비 실루엣 구분)', `가장 가까운 두 종류 차이 ${minGap.toFixed(2)}m`)
+  let closest = ''
+  const exempt = []
+  for (let i = 0; i < roster.length; i++) {
+    for (let j = i + 1; j < roster.length; j++) {
+      const gap = Math.abs(roster[i].height - roster[j].height)
+      if (answerOf(roster[i]) === answerOf(roster[j])) {
+        exempt.push([roster[i], roster[j]])
+        continue
+      }
+      if (gap < minGap) {
+        minGap = gap
+        closest = `${roster[i].id}(${roster[i].height})↔${roster[j].id}(${roster[j].height})`
+      }
+    }
+  }
+  check(
+    Number.isFinite(minGap) && minGap >= 0.29,
+    '키 차이가 최소 0.3m 이상 (색약 대비 실루엣 구분) — **답이 다른 적끼리**',
+    `가장 가까운 두 종류 ${minGap.toFixed(2)}m — ${closest}`,
+  )
+  /**
+   * 🛡️ 면제받은 쌍(= 같은 답을 요구하는 적들)도 **그냥 같아서는** 안 됩니다.
+   *
+   * 답이 같아도 *"이놈은 두 배 단단하다"* 는 알아야 물러설지 붙을지를
+   * 정할 수 있습니다. 색을 같은 계열로 두었으니(같은 공격이라서) 남는
+   * 신호는 **덩치**뿐이고, 그게 실제로 크게 다른지를 봅니다.
+   */
+  if (exempt.length > 0) {
+    /**
+     * ⚠️ **큰 쪽을 키로 고르지 않습니다.**
+     *
+     * 처음엔 *"키가 큰 쪽이 big"* 으로 잡았는데, 정예는 잡몹과 **키가
+     * 같습니다.** 그래서 순서가 뒤집혀 `굵기 0.64배` 라는 값이 나왔고,
+     * 검사가 *"덩치가 안 갈린다"* 고 말했습니다 — 실제로는 1.56배
+     * 두꺼운데도요. 축마다 **큰 쪽 ÷ 작은 쪽**으로 재는 것이 맞습니다.
+     */
+    const ratio = (x, y) => (Math.min(x, y) > 0 ? Math.max(x, y) / Math.min(x, y) : 0)
+    const ratios = exempt.map(([a, b]) => ({
+      label: `${a.id}↔${b.id}`,
+      h: ratio(a.height, b.height),
+      r: ratio(a.radius, b.radius),
+    }))
+    console.log(
+      `  [사다리 면제] 답이 같은 쌍 — ${ratios.map((x) => `${x.label} 키 ${x.h.toFixed(2)}배 · 굵기 ${x.r.toFixed(2)}배`).join(' · ')}`,
+    )
+    check(
+      ratios.every((x) => x.h >= 1.2 || x.r >= 1.2),
+      '🛡️ 사다리를 면제받은 쌍도 **덩치로는 확실히 갈린다** (면제가 공짜가 아니게)',
+      ratios.map((x) => `${x.label} ${Math.max(x.h, x.r).toFixed(2)}배`).join(' · '),
+    )
+  }
 
   // ---- 4. 거리 유지 AI가 작동하는가 ----
   //

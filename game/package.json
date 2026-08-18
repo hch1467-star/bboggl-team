@@ -68,7 +68,8 @@
     "barrel": "node tools/barrel-probe.mjs",
     "gear": "node tools/gear-probe.mjs",
     "shop": "node tools/shop-probe.mjs",
-    "bleed": "node tools/bleed-probe.mjs"
+    "bleed": "node tools/bleed-probe.mjs",
+    "elite": "node tools/elite-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
