@@ -897,6 +897,21 @@ try {
           G.setStamina(100)
           G.setFocus(3)
           await untilIdle()
+          /**
+           * ⚠️ **쿨다운을 기다립니다.** 안 기다렸더니 스킬 Q 가 두 시점에서
+           *    아예 안 나갔고, 제 표는 그걸 **「갇힘」**으로 찍었습니다 —
+           *    안 나간 것과 못 빠져나간 것은 정반대의 이야기인데요.
+           *    `reach` 에서 똑같이 당하고 고쳐 놓고, 여기로 안 옮겼습니다.
+           */
+          {
+            const dl0 = Date.now() + 30000
+            while (Date.now() < dl0) {
+              const cds = G.slotCooldowns()
+              const busy = cds.some((c) => !c.empty && c.cd > 0)
+              if (!busy) break
+              await wait(0.3)
+            }
+          }
 
           G.press(key)
           G.release(key)
@@ -1009,6 +1024,178 @@ try {
         eaten.length === 0,
         '⌨️ **무거운 동작 뒤에 눌러 둔 공격이 살아남는다** (무거울수록 씹히면 안 됩니다)',
         eaten.length ? `씹힘 — ${eaten.map((b) => b.name).join(' · ')}` : `${decided.length}개 모두 나감`,
+      )
+    }
+  }
+
+  console.log('')
+  /**
+   * ── 🏃 **빠져나갈 수 있는 구간 — 「빠릿빠릿」의 진짜 값** ──────────────
+   *
+   * 이 프로브는 *누른 것이 언제 접수되는가*(1프레임)와 *언제 다시 쉬는
+   * 자세가 되는가*(되찾기)를 재 왔습니다. 그런데 액션 게임에서 「굼뜨다」를
+   * 만드는 것은 그 둘이 아니라 **그 사이에 갇혀 있는 시간**입니다.
+   *
+   * 로스트아크·디아블로가 빠릿하게 느껴지는 이유는 이동이 빨라서가
+   * 아니라 **언제든 구르기로 빠져나갈 수 있어서**입니다. 반대로 소울류가
+   * 무겁게 느껴지는 이유는 휘두르면 **끝까지 책임져야** 하기 때문입니다.
+   * 둘 다 설계이고, 중요한 것은 **우리가 어느 쪽인지 아무도 안 쟀다**는
+   * 것입니다.
+   *
+   * 그래서 잽니다: 누른 뒤 여러 시점에 구르기를 눌러 보고, **어디까지
+   * 빠져나가지는가**를 찾습니다. 못 빠져나가는 구간이 곧 **커밋**이고,
+   * 그 길이가 이 게임의 무게입니다.
+   */
+  {
+    console.log('🏃 커밋 — 휘두른 뒤 언제까지 구르기로 빠져나갈 수 있는가\n')
+    const esc = await page.evaluate(
+      async ([states]) => {
+        const G = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 4))
+        const now = () => G.state().simElapsed
+        const wait = async (sec) => {
+          const t0 = now()
+          const dl = Date.now() + 20000
+          while (now() - t0 < sec && Date.now() < dl) await sleep()
+        }
+        const untilIdle = async () => {
+          const dl = Date.now() + 20000
+          while (G.state().player.state !== states.idle && Date.now() < dl) await sleep()
+        }
+
+        G.reset()
+        await wait(0.6)
+        G.clearEnemies()
+        G.freezeEnemies(true)
+        await wait(0.3)
+
+        /**
+         * 한 시점에서 빠져나가지는지 봅니다.
+         * @param delay 동작을 누른 뒤 **몇 초 있다가** 구르기를 누를지
+         */
+        const tryEscape = async (weaponSlot, key, delay) => {
+          G.press(`Digit${weaponSlot + 1}`)
+          G.release(`Digit${weaponSlot + 1}`)
+          await wait(0.4)
+          G.setStamina(100)
+          G.setFocus(3)
+          await untilIdle()
+
+          G.press(key)
+          G.release(key)
+          // 동작이 실제로 시작될 때까지 — 시작 전에 누르면 그건 탈출이 아닙니다.
+          const dl = Date.now() + 20000
+          while (G.state().player.state === states.idle && Date.now() < dl) await sleep()
+          if (G.state().player.state === states.idle) return null
+
+          await wait(delay)
+          // 이미 끝나 버렸으면 그 시점은 **잴 수 없는 시점**입니다.
+          if (G.state().player.state === states.idle) return { done: true, escaped: false }
+
+          G.setStamina(100)
+          /**
+           * ⚠️ **못 빠져나간 이유를 같이 남깁니다.**
+           *
+           * 「갇힘」의 뜻이 여럿인데 처방이 전부 다릅니다 — 후딜이라
+           * 규칙상 못 나가는 것 · 구르기 쿨다운이 남은 것 · 기력이 모자란
+           * 것. 이번 세션에서 이유를 안 적어 두고 표만 보다가 없는 현상에
+           * 이름을 붙인 적이 있어, 이번에는 **누르는 순간의 상태**를
+           * 그대로 적습니다.
+           */
+          const at = G.state().player
+          /**
+           * ⚠️ **막은 이유는 게임이 답합니다.** `dodgeInfo().block` 이
+           *    이미 그 문자열을 갖고 있습니다(`cooldown`·`stamina`·
+           *    `stagger`…). 프로브가 상태·구간을 보고 이유를 **다시
+           *    지어내면**, 규칙이 바뀌는 날 조용히 틀린 설명을 냅니다.
+           */
+          const why = {
+            state: at.state,
+            phase: at.phase,
+            block: G.dodgeInfo().block || '(막힘 없음)',
+            stamina: Math.round(at.stamina),
+          }
+          G.press('Space')
+          G.release('Space')
+          let escaped = false
+          const t0 = now()
+          while (now() - t0 < 0.5 && Date.now() < dl) {
+            if (G.state().player.state === states.dodge) {
+              escaped = true
+              break
+            }
+            await sleep()
+          }
+          await untilIdle()
+          return { done: false, escaped, why }
+        }
+
+        const DELAYS = [0.05, 0.15, 0.3, 0.5, 0.8]
+        const out = []
+        const weapons = G.weaponTable()
+        const jobs = [
+          { name: `${weapons[0].name} 평타`, w: 0, key: 'Mouse0' },
+          { name: `${weapons[1].name} 평타`, w: 1, key: 'Mouse0' },
+          { name: '강타', w: 0, key: 'Mouse2' },
+          { name: '스킬 Q', w: 0, key: 'KeyQ' },
+        ]
+        for (const j of jobs) {
+          const row = { name: j.name, marks: [] }
+          for (const d of DELAYS) {
+            const r = await tryEscape(j.w, j.key, d)
+            // ⚠️ `null` 은 **동작이 안 나간 판**입니다 — 갇힘이 아니라 못 잼.
+            row.marks.push({ d, ...(r ?? { done: false, escaped: false, notFired: true }) })
+          }
+          out.push(row)
+        }
+        G.freezeEnemies(false)
+        return { delays: DELAYS, rows: out }
+      },
+      [t.actorStates],
+    )
+
+    console.log(`    [동작]            ${esc.delays.map((d) => `${d}초`.padStart(6)).join('')}`)
+    for (const r of esc.rows) {
+      console.log(
+        `    ${r.name.padEnd(16)} ` +
+          r.marks
+            .map((m) =>
+              m.notFired ? ' 못 잼' : m.done ? '  끝남' : m.escaped ? '  빠짐' : ' **갇힘**',
+            )
+            .join('')
+            .padEnd(6),
+      )
+    }
+    console.log('')
+
+    /**
+     * ⚠️ **표본이 있는지 먼저 봅니다.** 전부 「끝남」이면 아무것도 안 잰
+     *    것이고, 그때 「갇힘 0회」를 좋은 소식으로 읽으면 안 됩니다.
+     */
+    const measured = esc.rows.filter((r) => r.marks.some((m) => !m.done && !m.notFired))
+    check(
+      measured.length === esc.rows.length,
+      '🏃 네 동작 모두 **실제로 진행 중인 시점을 잡았다** (비교의 게이트)',
+      `${measured.length}/${esc.rows.length}`,
+    )
+    /**
+     * 판단은 하지 않고 **찍기만** 합니다. 커밋이 긴 것은 고장이 아니라
+     * 성격일 수 있습니다(소울류). 다만 **얼마인지 모르는 것**은 성격이
+     * 아니라 그냥 모르는 것입니다.
+     */
+    for (const r of esc.rows) {
+      const stuck = r.marks.filter((m) => !m.done && !m.escaped && !m.notFired)
+      console.log(
+        `    ${r.name.padEnd(16)} 갇힌 시점 ` +
+          (stuck.length
+            ? stuck
+                .map(
+                  (m) =>
+                    `${m.d}초(상태 ${m.why?.state}/구간 ${m.why?.phase}` +
+                    ` · 게임이 말한 이유 **${m.why?.block}** · 기력 ${m.why?.stamina})`,
+                )
+                .join(' · ')
+            : '없음'),
       )
     }
   }
