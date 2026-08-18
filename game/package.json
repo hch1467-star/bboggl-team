@@ -67,7 +67,8 @@
     "shots": "node tools/zone-shot.mjs",
     "barrel": "node tools/barrel-probe.mjs",
     "gear": "node tools/gear-probe.mjs",
-    "shop": "node tools/shop-probe.mjs"
+    "shop": "node tools/shop-probe.mjs",
+    "bleed": "node tools/bleed-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

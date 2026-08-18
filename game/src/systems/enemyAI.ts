@@ -1,4 +1,4 @@
-import { enemyDef } from '../config/enemies'
+import { bleedMaxOf, enemyDef } from '../config/enemies'
 import {
   Actor,
   ActorState,
@@ -1083,7 +1083,22 @@ export function enemyAiSystem(
     Enemy.bleedIdleT[e] += dt
     if (Enemy.bleedIdleT[e] >= BLEED.decayDelay && Enemy.bleed[e] > 0) {
       const before = Enemy.bleed[e]
-      Enemy.bleed[e] = Math.max(0, Enemy.bleed[e] - BLEED.decayPerSec * dt)
+      /**
+       * 🩸 **몰릴수록 지운 것이 덜 지워집니다** — 근거는 balance.ts
+       * `decayFloorRatio`. 규칙은 저기 한 곳에만 있고 여기서는 **바닥까지만**
+       * 깎습니다. 체력이 가득한 적에게는 바닥이 정확히 0 이라, 짧게 끝나는
+       * 싸움과 허수아비 벤치는 **한 점도 안 움직입니다.**
+       *
+       * ⚠️ 바닥 **위로 끌어올리지는 않습니다.** `Math.max(floor, …)` 가
+       *    아니라 이미 바닥 아래인 값은 그대로 둡니다 — 안 그러면 한 대도
+       *    안 때린 적의 게이지가 체력이 깎였다는 이유만으로 차오릅니다.
+       *    올리는 것은 타격의 몫이고, 이 값이 하는 일은 **지우지 않는 것**
+       *    뿐입니다.
+       */
+      const hpLeft = Health.max[e] > 0 ? Math.min(1, Math.max(0, Health.hp[e]) / Health.max[e]) : 1
+      const floor = bleedMaxOf(Enemy.kind[e]) * BLEED.decayFloorRatio * (1 - hpLeft)
+      const next = Enemy.bleed[e] - BLEED.decayPerSec * dt
+      Enemy.bleed[e] = Math.max(0, Math.min(Enemy.bleed[e], Math.max(floor, next)))
       // 🩸 **깎은 쪽이 셉니다** — 관측은 프레임 사이에 날아간 양을 놓칩니다.
       noteBleedDecay(e, before - Enemy.bleed[e])
     }

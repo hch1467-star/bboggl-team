@@ -609,6 +609,23 @@ function applyBleed(t: number, spec: AttackSpec): void {
 }
 
 /**
+ * 🧪 **실험대 전용 — 게임과 같은 경로로** 출혈을 한 대분 얹습니다.
+ *
+ * 프로브가 `Enemy.bleed` 를 직접 더하면 문턱 판정도, 터짐도, 강인도
+ * 연동도 통째로 건너뜁니다 — 그러면 *"쌓인다"* 만 확인하고 정작 묻고
+ * 싶은 *"터진다"* 는 못 봅니다. 이 저장소가 상점 구매를 잴 때 배운 것과
+ * 같은 규약입니다: **창의 버튼과 같은 함수를 부릅니다.**
+ *
+ * @returns 이 타격으로 **터졌는가**. (터지면 게이지가 0으로 돌아가므로,
+ *          쌓은 만큼 안 올랐다는 것이 곧 터졌다는 뜻입니다.)
+ */
+export function debugApplyBleed(t: number, bleedScale: number): boolean {
+  const before = Enemy.bleed[t]
+  applyBleed(t, { bleedScale } as AttackSpec)
+  return Enemy.bleed[t] < before + BLEED.perHit * bleedScale - 0.001
+}
+
+/**
  * 🥋 집중의 출처별 누적 · 흘린 양 · 태운 양.
  *
  * 설계 노트는 *"집중을 쌓는 것은 가벼운 공격"* 이라고 적어 뒀는데,

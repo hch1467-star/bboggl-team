@@ -143,6 +143,7 @@ import {
   isBehindPoint,
   resolveAttacks,
   setPlayerInvulnerable,
+  debugApplyBleed,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -277,6 +278,12 @@ class Game {
   private playerEntity = -1
   private wave = 1
   private kills = 0
+  /**
+   * 🩸 출혈 실험대의 **고정 체력**. 터짐 피해가 체력 비율을 흔들면
+   * *"체력만 다른 두 판"* 이 성립하지 않습니다 — 그래서 세운 값을 기억했다
+   * 매 타격 뒤 되돌립니다.
+   */
+  private readonly bleedDummyHp = new Map<number, number>()
   private waveTimer = 0
   private gameOver = false
   /** 이 존의 보스를 잡았는가 — 존의 끝은 보스입니다(아래 6번 설계 노트). */
@@ -2872,6 +2879,50 @@ class Game {
 
   debugSwingVisible(): boolean {
     return this.vfx.hasActiveSwing()
+  }
+
+  /**
+   * 🩸 **출혈 실험대** — 죽지 않는 허수아비를 원하는 체력 비율로 세웁니다.
+   *
+   * *"같은 간격으로 때리는데 체력만 다르면 결과가 달라지는가"* 를 재려면
+   * 두 판의 차이가 **체력 하나뿐**이어야 합니다. 실제 적은 맞다가 죽으므로
+   * 최대 체력을 크게 잡아 **타수를 다 채울 때까지 버티게** 합니다.
+   *
+   * ⚠️ 잠들여 둡니다(`asleep`). 깨어 있으면 플레이어에게 걸어와 때리고,
+   *    그러면 이 실험의 변수가 체력 하나가 아니게 됩니다. 출혈이 식는
+   *    코드는 잠든 적에게도 그대로 흐릅니다(enemyAI 의 같은 루프).
+   */
+  debugSpawnBleedDummy(hpRatio: number): number {
+    const e = this.debugSpawnTestEnemy(-80, -80, 0, true)
+    Health.max[e] = 10000
+    Health.hp[e] = Math.max(1, 10000 * Math.min(1, Math.max(0, hpRatio)))
+    this.bleedDummyHp.set(e, Health.hp[e])
+    Enemy.bleed[e] = 0
+    Enemy.bleedBuilt[e] = 0
+    Enemy.bleedIdleT[e] = 0
+    return e
+  }
+
+  /** 🩸 실험대 — 한 대분 얹습니다(게임과 **같은 함수**). 터졌으면 true. */
+  debugHitBleedDummy(e: number, bleedScale = 1): boolean {
+    const popped = debugApplyBleed(e, bleedScale)
+    // 터짐 피해로 체력 비율이 흔들리지 않게 되돌립니다 — 재려는 변수는 체력이고,
+    // 그 체력이 실험 도중에 바뀌면 두 판을 견줄 수가 없습니다.
+    Health.hp[e] = this.bleedDummyHp.get(e) ?? Health.hp[e]
+    return popped
+  }
+
+  /** 🩸 실험대 — 지금 쌓여 있는 양. */
+  debugBleedOf(e: number): number {
+    return Enemy.bleed[e]
+  }
+
+  /** 🩸 실험대 — 치웁니다. 남겨 두면 다음 판의 "가장 가까운 적"이 됩니다. */
+  debugDespawnBleedDummy(e: number): void {
+    this.bleedDummyHp.delete(e)
+    if (!isAlive(e)) return
+    this.visuals.detach(e)
+    destroyEntity(e)
   }
 
   debugClearEnemies(): void {
@@ -5774,6 +5825,14 @@ declare global {
       requestSample: () => void
       getSample: () => ReturnType<Game['getSample']>
       clearEnemies: () => void
+      /** 🩸 실험대 — 죽지 않는 허수아비를 원하는 체력 비율(0~1)로 세웁니다. */
+      spawnBleedDummy: (hpRatio: number) => number
+      /** 🩸 실험대 — 한 대분 얹습니다(게임과 **같은 함수**). 터졌으면 true. */
+      hitBleedDummy: (e: number, bleedScale?: number) => boolean
+      /** 🩸 실험대 — 지금 쌓여 있는 양. */
+      bleedOf: (e: number) => number
+      /** 🩸 실험대 — 치웁니다. */
+      despawnBleedDummy: (e: number) => void
       testBehind: (ax: number, az: number, tx: number, tz: number, trot: number) => boolean
       /** 검증 스크립트가 수치를 하드코딩하지 않도록 튜닝 상수를 그대로 내보냅니다. */
       tuning: () => { backArcDeg: number }
@@ -6569,6 +6628,12 @@ window.__game = {
   requestSample: () => game.requestSample(),
   getSample: () => game.getSample(),
   clearEnemies: () => game.debugClearEnemies(),
+  /** 🩸 실험대 — 죽지 않는 허수아비를 원하는 체력 비율로 세웁니다. */
+  spawnBleedDummy: (hpRatio) => game.debugSpawnBleedDummy(hpRatio),
+  /** 🩸 실험대 — 한 대분 얹습니다(게임과 같은 함수). 터졌으면 true. */
+  hitBleedDummy: (e, bleedScale) => game.debugHitBleedDummy(e, bleedScale),
+  bleedOf: (e) => game.debugBleedOf(e),
+  despawnBleedDummy: (e) => game.debugDespawnBleedDummy(e),
   // 등 뒤 판정은 순수 기하 계산이라 엔티티 없이 그대로 검증할 수 있습니다.
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
@@ -6928,6 +6993,8 @@ window.__game = {
     perHit: BLEED.perHit,
     decayDelay: BLEED.decayDelay,
     decayPerSec: BLEED.decayPerSec,
+    /** 🩸 몰린 적의 게이지 **바닥** 비율 — 규칙은 balance.ts `decayFloorRatio` 한 곳에만. */
+    decayFloorRatio: BLEED.decayFloorRatio,
     popDamagePct: BLEED.popDamagePct,
     popDamageCap: BLEED.popDamageCap,
     weapons: WEAPONS.map((w) => ({
@@ -6956,6 +7023,18 @@ window.__game = {
        */
       breakEvenGap: Number(
         (BLEED.decayDelay + (BLEED.perHit * w.bleedScale) / BLEED.decayPerSec).toFixed(2),
+      ),
+      /**
+       * 🩸 **바닥에서 문턱까지 몇 대인가.**
+       *
+       * 이번에 넣은 규칙(`decayFloorRatio`)이 파는 문장이 *"몰아붙이면
+       * 터진다"* 인데, 그게 **한 번 붙는 동안에 들어오는 타수**인지가
+       * 전부입니다. 빈사(체력 0 기준)의 바닥에서 문턱까지 필요한 타수를
+       * 게임이 계산합니다 — 프로브가 이 식을 베껴 두면 값을 손보는 날
+       * 조용히 옛말이 됩니다.
+       */
+      hitsFromFloor: Math.ceil(
+        (BLEED.max * (1 - BLEED.decayFloorRatio)) / (BLEED.perHit * w.bleedScale),
       ),
     })),
   }),
