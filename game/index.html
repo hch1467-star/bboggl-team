@@ -292,7 +292,11 @@
         z-index: 6;
       }
       #shop.show { transform: translateX(0); }
-      #shopBody { padding: 12px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+      /* ⚠️ `min-height: 0` 이 있어야 **실제로 스크롤됩니다.** flex 자식의
+         기본 min-height 는 auto 라, 내용이 길면 줄어들지 않고 창 밖으로
+         밀려납니다(재고를 6개로 늘리면서 실제로 아슬아슬해졌습니다 —
+         720px 화면에서 마지막 줄이 바닥까지 60px 남았습니다). */
+      #shopBody { padding: 12px 16px; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
       .shopRow {
         border: 1px solid rgba(150,175,220,0.18); border-radius: 9px;
         padding: 9px 11px; background: rgba(18,23,32,0.7);

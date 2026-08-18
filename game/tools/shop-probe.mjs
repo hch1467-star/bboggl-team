@@ -94,11 +94,46 @@ try {
   }
   check(at.atAnvil, '🏪 모루 앞에 서면 **상점이 열린다**')
   check(at.items.length > 0, '🏪 재고가 비어 있지 않다 (검사의 게이트)', `${at.items.length}개`)
+  /**
+   * 🏪 **무기 종류마다 같은 수만큼** 내놓는가.
+   *
+   * ⚠️ 이 검사는 원래 *"종류마다 **하나씩**"* 이었습니다. 재고를 둘로
+   *    늘리면서 빨갛게 됐는데, **틀린 것은 게임이 아니라 이 검사**였습니다 —
+   *    지키려던 성질은 "하나"가 아니라 *"안 쓰는 무기 것만 나오지 않는다"*
+   *    입니다. 개수를 리터럴로 적어 두면 규칙을 손볼 때마다 검사가
+   *    거짓말을 합니다. 그래서 **재고에서 세어** 봅니다.
+   */
+  const perWeaponCount = new Map()
+  for (const it of at.items) perWeaponCount.set(it.weaponIndex, (perWeaponCount.get(it.weaponIndex) ?? 0) + 1)
+  const counts = [...perWeaponCount.values()]
+  const kinds = await page.evaluate(() => window.__game.gearInfo().weapons.length)
   check(
-    at.items.length > 0 &&
-      new Set(at.items.map((i) => i.weaponIndex)).size === at.items.length,
-    '🏪 **무기 종류마다 하나씩** 내놓는다 (안 쓰는 무기 것만 셋이 나오지 않게)',
-    at.items.map((i) => i.weaponName).join(' · '),
+    at.items.length > 0 && perWeaponCount.size === kinds && counts.every((c) => c === counts[0]),
+    '🏪 **무기 종류가 하나도 안 빠지고 같은 수만큼** 나온다 (안 쓰는 무기 것만 나오지 않게)',
+    [...perWeaponCount.entries()].map(([w, c]) => `${at.items.find((i) => i.weaponIndex === w).weaponName} ${c}개`).join(' · '),
+  )
+  /**
+   * 🏪 **같은 무기 안에서도 고를 것이 있는가.**
+   *
+   * 재고를 둘로 늘린 이유가 이것입니다 — 한 무기를 밀고 있는 사람에게
+   * 모루가 하나만 내놓으면 그건 선택이 아니라 *"살까 말까"* 입니다.
+   * 값이 다르거나(싼 것/비싼 것) 옵션이 다르면(공격력이냐 쿨타임이냐)
+   * 그때부터 **고르는 일**이 됩니다.
+   */
+  const sameWeapon = [...perWeaponCount.keys()]
+    .map((w) => at.items.filter((i) => i.weaponIndex === w))
+    .filter((g) => g.length > 1)
+  check(
+    sameWeapon.length > 0 &&
+      sameWeapon.every(
+        (g) =>
+          new Set(g.map((i) => i.price)).size > 1 ||
+          new Set(g.map((i) => i.affixes.map((a) => a.name).join(','))).size > 1,
+      ),
+    '🏪 **같은 무기 것끼리도 다르다** (값이 다르거나 옵션이 다르다 — 그래야 고르는 일이 됩니다)',
+    sameWeapon
+      .map((g) => `${g[0].weaponName}: ${g.map((i) => `${i.tierName}/${i.price}`).join(' vs ')}`)
+      .join(' · '),
   )
 
   /**
