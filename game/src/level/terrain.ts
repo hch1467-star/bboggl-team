@@ -100,6 +100,24 @@ interface Chunk {
  */
 const STEP_FACE_MIX = 0.85
 const WALL_FACE_MIX = 0.22
+/**
+ * 🌗 옆면 **윗변**을 아랫변의 몇 배로 **올릴지**(`quad` 설계 노트).
+ *
+ * ── ⚠️ 처음엔 반대로 만들었다가 픽셀로 들켰습니다 ──────────────────────
+ * 처음엔 *아랫변을 더 어둡게* 했습니다. 그럴듯했는데, 찍어서 재 보니
+ * 화면이 **더 어두워지기만** 했습니다:
+ *
+ *     가장 어두운 5%  4.4 → **3.6** · 15%·30%·중앙값은 **한 자리도 안 움직임**
+ *
+ * 고치려던 것이 *"벽이 새까매서 형태가 안 보인다"* 였는데, 아래를 더
+ * 깎으면 **그 문제를 더 키웁니다.** 방향을 뒤집습니다 — 아랫변은 그대로
+ * 두고 **윗변을 올립니다.** 그러면 어떤 픽셀도 전보다 어두워지지 않고,
+ * 벽의 위쪽 가장자리에 빛이 앉아 윤곽과 높이가 읽힙니다.
+ *
+ * 턱은 조금만(이미 밝습니다), 벽은 크게(거의 검정에서 출발하니까).
+ */
+const SIDE_HEAD_STEP = 1.25
+const SIDE_HEAD_WALL = 1.9
 
 export class Terrain {
   readonly maxLevel: number
@@ -714,15 +732,28 @@ export class Terrain {
            * 낭떠러지(VOID)는 내려갈 수는 있어도 올라올 수는 없으므로 벽 쪽입니다.
            */
           const side = this.sideColor(lvl, nLvl === VOID ? 99 : lvl - nLvl, tint)
+          /**
+           * 🌗 윗변을 밝게 — 빛은 위에서 옵니다(`quad` 설계 노트).
+           * 아랫변은 **건드리지 않습니다**: 어떤 픽셀도 전보다 어두워지지
+           * 않아야, 고치려던 「새까만 벽」을 되레 키우지 않습니다.
+           */
+          const climbable = nLvl !== VOID && lvl - nLvl <= MAX_CLIMB
+          const head = climbable ? SIDE_HEAD_STEP : SIDE_HEAD_WALL
+          // 윗변만 올립니다 — 아랫변(`side`)은 예전 값 그대로입니다.
+          const sideTop: [number, number, number] = [
+            side[0] * head,
+            side[1] * head,
+            side[2] * head,
+          ]
 
           if (dir === 'nx') {
-            quad(b, [x0, baseY, z0], [x0, baseY, z1], [x0, y, z1], [x0, y, z0], [-1, 0, 0], side)
+            quad(b, [x0, baseY, z0], [x0, baseY, z1], [x0, y, z1], [x0, y, z0], [-1, 0, 0], sideTop, side)
           } else if (dir === 'px') {
-            quad(b, [x1, baseY, z1], [x1, baseY, z0], [x1, y, z0], [x1, y, z1], [1, 0, 0], side)
+            quad(b, [x1, baseY, z1], [x1, baseY, z0], [x1, y, z0], [x1, y, z1], [1, 0, 0], sideTop, side)
           } else if (dir === 'nz') {
-            quad(b, [x1, baseY, z0], [x0, baseY, z0], [x0, y, z0], [x1, y, z0], [0, 0, -1], side)
+            quad(b, [x1, baseY, z0], [x0, baseY, z0], [x0, y, z0], [x1, y, z0], [0, 0, -1], sideTop, side)
           } else {
-            quad(b, [x0, baseY, z1], [x1, baseY, z1], [x1, y, z1], [x0, y, z1], [0, 0, 1], side)
+            quad(b, [x0, baseY, z1], [x1, baseY, z1], [x1, y, z1], [x0, y, z1], [0, 0, 1], sideTop, side)
           }
         }
       }
@@ -835,12 +866,50 @@ function quad(
   e: [number, number, number],
   normal: [number, number, number],
   color: [number, number, number],
+  /**
+   * ── 🌗 **아랫변 색** — 주면 세로 그라데이션이 됩니다 ──────────────────
+   *
+   * ── 스크린샷을 보고 나서야 알았습니다 ────────────────────────────────
+   * 실제 존을 찍어 보니 **벽 옆면이 거의 순수한 검정**이었습니다. 계산해
+   * 보면 그럴 만합니다 — 옆면은 윗면 색의 22%(`WALL_FACE_MIX`)라, 0단
+   * 바닥 기준으로 밝기가 3~7% 까지 떨어집니다.
+   *
+   * 그 어둡기 자체는 의도된 것입니다(값싼 앰비언트 오클루전 — 단차가
+   * 뚜렷해집니다). 문제는 **면 전체가 한 값**이라는 것입니다. 그래서
+   * 1단 턱과 3단 벽이 **똑같은 검은 판**으로 보이고, 이 게임이 스스로
+   * 못박아 둔 레벨 문법(1단=통로 · 2단 이상=막힘)이 눈에서 사라집니다.
+   *
+   * 빛은 위에서 옵니다. 윗변을 밝게, 아랫변을 어둡게 두면
+   *   · 벽의 **윤곽**이 살아나고(어디가 끝인지 보임)
+   *   · **높이**가 읽힙니다(긴 면일수록 그라데이션이 길게 늘어짐)
+   *   · 바닥의 어두움은 **그대로** 남아 오클루전 효과를 안 잃습니다
+   *
+   * 로스트아크·디아블로·헤이디스가 쿼터뷰에서 벽을 다루는 방식이 같습니다 —
+   * 어둡게 하되 **납작하게 두지는 않습니다.**
+   *
+   * ⚠️ 어느 꼭짓점이 위인지 **인자 순서로 정하지 않습니다.** 네 면(nx·px·
+   *    nz·pz)이 감기는 순서가 제각각이라, 순서로 정하면 한 면만 뒤집혀
+   *    칠해집니다. **y 값으로** 가릅니다 — 순서가 바뀌어도 안 틀립니다.
+   */
+  colorBottom?: [number, number, number],
 ): void {
   const base = b.pos.length / 3
-  for (const v of [a, c, d, e]) {
+  const verts = [a, c, d, e]
+  let midY = 0
+  if (colorBottom) {
+    let lo = Infinity
+    let hi = -Infinity
+    for (const v of verts) {
+      if (v[1] < lo) lo = v[1]
+      if (v[1] > hi) hi = v[1]
+    }
+    midY = (lo + hi) / 2
+  }
+  for (const v of verts) {
     b.pos.push(v[0], v[1], v[2])
     b.norm.push(normal[0], normal[1], normal[2])
-    b.col.push(color[0], color[1], color[2])
+    const c2 = colorBottom && v[1] <= midY ? colorBottom : color
+    b.col.push(c2[0], c2[1], c2[2])
   }
   b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
 }
