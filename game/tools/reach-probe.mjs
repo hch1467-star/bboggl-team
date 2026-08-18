@@ -358,8 +358,33 @@ try {
       while (G.state().elapsed < tCd && (G.slotCooldowns()[slot]?.cd ?? 0) > 0) await sleep2()
       const before = G.enemyInfo(e).hp
       const h0 = G.state().hitsDealt
+      /**
+       * ── 🎬 **나가기는 했는가 — 「안 나감」과 「빗나감」은 다릅니다** ─────
+       *
+       * 실측 0 의 뜻이 둘인데 처방이 정반대입니다:
+       *
+       *   · **안 나갔다** — 쿨다운·기력·상태. 그건 0 이 아니라 **못 잰 것**입니다.
+       *   · **나갔는데 빗나갔다** — 거리·돌진·판정의 이야기입니다.
+       *
+       * 지금까지는 `누른 뒤 상태`와 `시전 뒤 쿨`을 사람이 읽어 짐작해야
+       * 했습니다. 짐작하게 두면 언젠가 반대로 읽습니다 — 실제로 저는 이
+       * 빨강을 **쿨다운 때문**이라고 읽고, 바로 몇 줄 아래 **이미 있던**
+       * 대기 코드를 한 번 더 넣을 뻔했습니다. 그래서 게임이 답하게 합니다:
+       * 누른 뒤 **한 번이라도 쉬는 자세를 벗어났는가.**
+       */
+      let fired = false
       G.press(keys[slot])
       G.release(keys[slot])
+      {
+        const tf = G.state().elapsed + 1
+        while (G.state().elapsed < tf) {
+          if (G.state().player.state !== 0) {
+            fired = true
+            break
+          }
+          await sleep2()
+        }
+      }
       const t0 = G.state().elapsed
       while (G.state().elapsed - t0 < 3 && G.state().hitsDealt === h0) await sleep2()
       let last = G.state().elapsed
@@ -380,6 +405,7 @@ try {
          * 10 근처가 정상). 누르기 직전 값이 아니라는 것을 이름에 적어 둡니다 —
          * 이 저장소가 이름 때문에 잘못 읽은 적이 있습니다.
          */
+        fired,
         cdAfterCast: G.slotCooldowns()[slot]?.cd ?? -1,
         stateAfter: G.state().player.state,
         stand: Number(stand.toFixed(2)),
@@ -433,7 +459,9 @@ try {
       tri.after.hit === true &&
         Math.abs(tri.after.dealt - tri.after.want) <= Math.max(0.5, tri.after.want * 0.02),
       '🌿 **바뀐 값이 실제 타격에 들어온다** (표만 바뀌고 손은 그대로면 장식입니다)',
-        `실측 ${tri.after.dealt} vs 표 ${tri.after.want} · 시전 뒤 쿨 ${tri.after.cdAfterCast} · 누른 뒤 상태 ${tri.after.stateAfter} · 선 거리 ${tri.after.stand}(돌진 ${tri.after.dash})`,
+        `실측 ${tri.after.dealt} vs 표 ${tri.after.want} · ` +
+          `시전 ${tri.after.fired ? '나감 ✓' : '**안 나감**(→ 쿨다운·기력 이야기이지 값의 이야기가 아닙니다)'} · ` +
+          `선 거리 ${tri.after.stand}(돌진 ${tri.after.dash}) · 시전 뒤 쿨 ${tri.after.cdAfterCast}`,
     )
   }
 
