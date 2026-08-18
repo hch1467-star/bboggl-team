@@ -236,6 +236,8 @@ import {
 import { Hud } from './ui/hud'
 import { SkillBar } from './ui/skillbar'
 import { TripodPanel } from './ui/tripodPanel'
+import { ShopPanel } from './ui/shopPanel'
+import { shopItemKey, shopStock, type ShopItem } from './systems/shop'
 
 /**
  * 게임 루프 — 시스템 실행 순서가 여기 담깁니다.
@@ -266,6 +268,8 @@ class Game {
   private readonly hud: Hud
   private readonly skillBar: SkillBar
   private readonly tripodPanel: TripodPanel
+  /** 🏪 모루의 상점 창 — 트라이포드 창과 같은 규격입니다. */
+  private readonly shopPanel: ShopPanel
   /** 매 프레임 배열을 새로 만들지 않도록 재사용합니다. */
   private readonly cdBuf = new Array<number>(SLOT_COUNT).fill(0)
   private readonly cdMaxBuf = new Array<number>(SLOT_COUNT).fill(1)
@@ -495,6 +499,10 @@ class Game {
   private bonfires: Bonfire[] = []
   /** 모루 — 불티·정련석을 쓰는 곳. 부활도 회복도 아닙니다(world.ts 설계 노트). */
   private anvils: { x: number; y: number; z: number }[] = []
+  /** 🏪 지금 서 있는 모루(없으면 null) — 상점 재고의 열쇠입니다. */
+  private shopAnvil: { x: number; y: number; z: number } | null = null
+  /** 🏪 이미 산 물건들. 세이브에 남습니다 — 재입고가 없으니 이게 곧 재고입니다. */
+  private boughtItems = new Set<string>()
   private ladderVisuals: { setOpen: (open: boolean) => void }[] = []
   /** 지금까지 쉰 횟수 — 자동 플레이 봇이 **추측하지 않고 읽도록** 노출합니다. */
   private restCount = 0
@@ -651,6 +659,8 @@ class Game {
     this.hud = new Hud()
     this.skillBar = new SkillBar()
     this.tripodPanel = new TripodPanel()
+    this.shopPanel = new ShopPanel()
+    this.shopPanel.setBuyHandler((item) => this.buyGear(item))
 
     const params = new URLSearchParams(location.search)
     this.source =
@@ -773,8 +783,10 @@ class Game {
     this.hud.hideBanner()
     this.saveId = ''
     this.takenTreasures = new Set()
+    this.boughtItems = new Set()
     resetTripods()
     this.tripodPanel.setOpen(false)
+    this.shopPanel.setOpen(false)
     setEnemyAiEnabled(true)
     // 아레나는 종류별 기본값(55m)을 그대로 씁니다 — 좁히면 반경 21m에 소환된
     // 적이 영원히 제자리에 섭니다. 레벨을 실제로 불러온 뒤에 방 단위로 덮습니다.
@@ -864,6 +876,7 @@ class Game {
       if (save) {
         applySave(save, this.playerEntity)
         this.takenTreasures = new Set(save.treasures)
+        this.boughtItems = new Set(save.boughtItems ?? [])
         this.defeatedBosses = new Set(save.bosses)
         // 내려둔 사다리는 남습니다. **지름길은 지식의 보상**이라, 게임을 껐다
         // 켰다고 다시 걷히면 알아낸 것을 빼앗는 셈이 됩니다.
@@ -1006,6 +1019,25 @@ class Game {
     // 창을 열어도 게임은 계속 돕니다(ui/tripodPanel.ts 설계 노트).
     // 그래서 여는 것 자체가 안전하지 않은 선택이 되고, "언제 열지"도 판단이 됩니다.
     if (consumePress('KeyT')) this.tripodPanel.toggle()
+
+    // ---- 1.6 상점 창 (N) — **모루 앞에서만** ----
+    /**
+     * 🏪 맥락 키입니다(*"이 자리에서 할 수 있는 일"*). 모루에서 멀면
+     * 아무 일도 안 일어나고, 멀어지면 창이 저절로 닫힙니다.
+     *
+     * ⚠️ 상시 키(전투 동사)와 겹치면 안 됩니다 — `npm run guard` 가 봅니다.
+     *    N 은 전투에서 아무 뜻도 없는 키입니다.
+     * ⚠️ **안 되는 이유를 말해 줍니다.** 아무 반응이 없으면 「고장」으로
+     *    읽힙니다 — 사다리가 아래에서 안 열릴 때와 같은 규칙입니다.
+     */
+    if (consumePress('KeyN')) {
+      if (this.shopAnvil) {
+        this.shopPanel.toggle()
+        if (this.shopPanel.isOpen()) this.refreshShop()
+      } else {
+        this.hud.showBanner('상점은 모루에서', '모루 앞에 서면 N 으로 열립니다', 1.6)
+      }
+    }
 
     // ---- 2. 시뮬레이션 ----
     /**
@@ -1166,14 +1198,20 @@ class Game {
      * 하나뿐이어야 배울 것이 늘지 않습니다.
      */
     let nearAnvil = false
+    // 🏪 **어느** 모루인지도 기억합니다 — 상점의 재고가 모루마다 다릅니다.
+    this.shopAnvil = null
     if (playerAlive) {
       for (const a of this.anvils) {
         if (Math.hypot(a.x - Transform.x[p], a.z - Transform.z[p]) <= BONFIRE.radius) {
           nearAnvil = true
+          this.shopAnvil = a
           break
         }
       }
     }
+    // 모루에서 멀어지면 창이 따라 닫힙니다. **자리를 떠나면 그 자리의 일도
+    // 끝나야** "이 자리에서 할 수 있는 일"이라는 약속이 지켜집니다.
+    if (!nearAnvil && this.shopPanel.isOpen()) this.shopPanel.setOpen(false)
 
     if (playerAlive && (this.bonfires.length > 0 || nearAnvil)) {
       const rest =
@@ -2564,6 +2602,123 @@ class Game {
   }
 
   /**
+   * 🏪 **상점의 규칙과 지금 재고** — 프로브가 값을 베껴 적지 않게.
+   *
+   * `atAnvil` 이 false 면 재고는 빈 배열입니다. 그게 곧 규칙입니다 —
+   * 상점은 **자리**이지 메뉴가 아닙니다.
+   */
+  debugShopInfo(): {
+    atAnvil: boolean
+    open: boolean
+    embers: number
+    items: {
+      weaponIndex: number
+      weaponName: string
+      tier: number
+      tierName: string
+      price: number
+      sold: boolean
+      haveTier: number
+      affordable: boolean
+      affixes: { name: string; unit: string; value: number }[]
+    }[]
+  } {
+    const a = this.shopAnvil
+    const p = this.playerEntity
+    if (!a) return { atAnvil: false, open: this.shopPanel.isOpen(), embers: Player.embers[p], items: [] }
+    const key = treasureKey(a.x, a.z)
+    return {
+      atAnvil: true,
+      open: this.shopPanel.isOpen(),
+      embers: Player.embers[p],
+      items: shopStock(key, this.progressRatio(a.x, a.z)).map((item) => ({
+        weaponIndex: item.weaponIndex,
+        weaponName: item.weaponName,
+        tier: item.tier as number,
+        tierName: item.tierName,
+        price: item.price,
+        sold: this.boughtItems.has(shopItemKey(key, item)),
+        haveTier: weaponTier(p, item.weaponIndex),
+        affordable: Player.embers[p] >= item.price,
+        affixes: item.affixes.map((x) => ({ name: x.name, unit: x.unit, value: x.value })),
+      })),
+    }
+  }
+
+  /**
+   * 🧪 **실험대 전용** — 재고의 n번째를 삽니다.
+   *
+   * 창의 버튼을 클릭하는 것과 **같은 함수**(`buyGear`)를 부릅니다. 프로브가
+   * 따로 사는 길을 만들면, 창에만 있는 조건을 안 지나가서 *"프로브는
+   * 통과하는데 사람은 못 사는"* 상태가 생깁니다.
+   */
+  debugBuyShopItem(index: number): boolean {
+    const a = this.shopAnvil
+    if (!a) return false
+    const stock = shopStock(treasureKey(a.x, a.z), this.progressRatio(a.x, a.z))
+    const item = stock[index]
+    if (!item) return false
+    const before = weaponTier(this.playerEntity, item.weaponIndex)
+    this.buyGear(item)
+    return weaponTier(this.playerEntity, item.weaponIndex) !== before
+  }
+
+  /** 🏪 지금 서 있는 모루의 재고를 창에 그립니다. */
+  private refreshShop(): void {
+    const a = this.shopAnvil
+    if (!a) return
+    const p = this.playerEntity
+    const key = treasureKey(a.x, a.z)
+    const stock = shopStock(key, this.progressRatio(a.x, a.z))
+    this.shopPanel.render(
+      stock.map((item) => ({
+        item,
+        sold: this.boughtItems.has(shopItemKey(key, item)),
+        haveTier: weaponTier(p, item.weaponIndex),
+        embers: Player.embers[p],
+      })),
+      Player.embers[p],
+    )
+  }
+
+  /**
+   * 🏪 **삽니다.**
+   *
+   * ⚠️ 조건을 여기서 **다시 봅니다.** 창의 버튼이 이미 걸러 주지만, 창은
+   *    마지막으로 그린 시점의 상태를 들고 있습니다 — 그 사이에 죽어서
+   *    불티를 흘렸을 수도 있습니다. **누르는 쪽이 아니라 파는 쪽이**
+   *    조건을 지켜야 합니다(이 저장소가 강화에서 이미 배운 자리:
+   *    *"일어나기 전에 재지 않습니다"*).
+   */
+  private buyGear(item: ShopItem): void {
+    const a = this.shopAnvil
+    if (!a) return
+    const p = this.playerEntity
+    const key = shopItemKey(treasureKey(a.x, a.z), item)
+    if (this.boughtItems.has(key)) return
+    if (item.tier <= weaponTier(p, item.weaponIndex)) return
+    if (Player.embers[p] < item.price) {
+      sfx.deny()
+      return
+    }
+    Player.embers[p] -= item.price
+    this.boughtItems.add(key)
+    equipGear(p, item.weaponIndex, item.tier, item.seed)
+    this.refreshLoadout()
+    this.refreshShop()
+    sfx.pickup()
+    const td = tierDef(item.tier)
+    this.hud.showBanner(
+      `${item.tierName} ${item.weaponName}`,
+      item.affixes.map((x) => `${x.name} +${x.value}${x.unit === '%' ? '%' : ''}`).join(' · ') ||
+        '옵션 없음',
+      2.6,
+      td.color,
+    )
+    this.persist()
+  }
+
+  /**
    * 🏆 **이 자리의 상자에서 나올 것** — 시드와 등급.
    *
    * ⚠️ **줍는 곳과 검사가 같은 함수를 부릅니다.** 프로브가 좌표에서
@@ -2694,6 +2849,7 @@ class Game {
         time.elapsed,
         this.defeatedBosses,
         this.terrain?.openShortcutKeys() ?? [],
+        this.boughtItems,
       ),
     )
     this.hud.flashSaved(ok)
@@ -6079,6 +6235,8 @@ declare global {
       /** 소비처 전부(화톳불 + 모루). **고르는 것은 부르는 쪽** — 걸어야 하는 거리로. */
       spendPoints: () => { x: number; z: number; anvil: boolean }[]
       anvils: () => { x: number; z: number }[]
+      /** 💰 강화 곡선(불티) — 상점 값의 출처. */
+      upgradeCosts: () => number[]
       /** 안내가 나간 예고 색들(AttackIntent 값) */
       seenIntents: () => number[]
       /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지 */
@@ -6210,6 +6368,25 @@ declare global {
       travelInfo: () => { lit: number; opened: boolean; key: string }
       /** 🧪 실험대 전용 — 통을 하나 세웁니다(연쇄·반경 검사를 세우려면 필요). */
       spawnBarrel: (x: number, z: number) => number
+      /** 🏪 상점의 지금 재고 — 프로브가 값을 베끼지 않게. */
+      shopInfo: () => {
+        atAnvil: boolean
+        open: boolean
+        embers: number
+        items: {
+          weaponIndex: number
+          weaponName: string
+          tier: number
+          tierName: string
+          price: number
+          sold: boolean
+          haveTier: number
+          affordable: boolean
+          affixes: { name: string; unit: string; value: number }[]
+        }[]
+      }
+      /** 🧪 실험대 전용 — 재고의 n번째를 삽니다(창의 버튼과 같은 함수). */
+      buyShopItem: (index: number) => boolean
       /** 🏆 장비 등급의 규칙과 지금 상태 — 프로브가 표를 베끼지 않게. */
       gearInfo: () => {
         tiers: { id: number; name: string; color: number; affixes: number; scale: number; weight: number }[]
@@ -6933,6 +7110,8 @@ window.__game = {
   nearestBonfire: () => game.debugNearestBonfire(),
   spendPoints: () => game.debugSpendPoints(),
   anvils: () => game.debugAnvils(),
+  /** 💰 강화 곡선 — 상점 값이 이것을 그대로 쓰는지 프로브가 맞대 봅니다. */
+  upgradeCosts: () => [...WEAPON_UPGRADE.costs],
   seenIntents: () => game.debugSeenIntents(),
   foeSwingLog: () => game.debugFoeSwingLog(),
   fallLog: () => game.debugFallLog(),
@@ -7114,6 +7293,8 @@ window.__game = {
   travelInfo: () => game.debugTravelInfo(),
   barrelInfo: () => game.debugBarrelInfo(),
   gearInfo: () => game.debugGearInfo(),
+  shopInfo: () => game.debugShopInfo(),
+  buyShopItem: (i) => game.debugBuyShopItem(i),
   treasureRolls: () => game.debugTreasureRolls(),
   /** 🧪 실험대 전용 — 원하는 등급/시드를 무기에 끼웁니다(등급 비교를 세우려면 필요). */
   setGear: (weaponIndex, tier, seed) => game.debugSetGear(weaponIndex, tier, seed),

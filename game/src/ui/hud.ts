@@ -328,7 +328,9 @@ export class Hud {
     this.restHint.style.display = near ? 'block' : 'none'
     if (!near) return
     if (anvil) {
-      this.restLabel.textContent = '모루 — 강화만 할 수 있다 (회복·부활 없음)'
+      // 🏪 상점이 생겼으니 **모루가 하는 일이 둘**입니다. 자리에 서면 둘 다
+      //    보여야 합니다 — 안 보이는 기능은 없는 기능입니다.
+      this.restLabel.textContent = '모루 — 강화(B) · 상점(N) · 회복·부활은 없다'
       this.restLabel.style.color = '#b9cfe2'
       this.restFill.style.width = '0%'
       return

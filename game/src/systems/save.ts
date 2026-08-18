@@ -44,7 +44,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 7
+const SAVE_VERSION = 8
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -105,6 +105,14 @@ export interface SaveData {
    *    `rollAffixes` 가 언제든 같은 것을 냅니다. 값을 박아 두면 옵션 표를
    *    손보는 날 **세이브만 옛 규칙**을 들고 있게 됩니다(gear.ts 주석).
    */
+  /**
+   * 🏪 **이미 산 상점 물건들.**
+   *
+   * 재고는 저장하지 않습니다 — 모루의 좌표에서 언제든 같은 것이 나옵니다.
+   * 저장해야 하는 것은 *"무엇이 이미 팔렸는가"* 뿐이고, 그게 없으면
+   * 다시 켤 때마다 같은 물건을 또 살 수 있습니다.
+   */
+  boughtItems: string[]
   weaponTiers: number[]
   weaponSeeds: number[]
   /**
@@ -184,6 +192,7 @@ export function loadSave(levelId: string): SaveData | null {
       ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
       stones: Number(d.stones) || 0,
       learned: Array.isArray(d.learned) ? d.learned.filter((v) => typeof v === 'string') : [],
+      boughtItems: Array.isArray(d.boughtItems) ? d.boughtItems.map(String) : [],
       weaponTiers: Array.isArray(d.weaponTiers)
         ? d.weaponTiers.slice(0, 3).map((v) => Number(v) || 0)
         : [0, 0, 0],
@@ -229,6 +238,7 @@ export function captureSave(
   now: number,
   bosses: ReadonlySet<string> = new Set(),
   ladders: readonly string[] = [],
+  bought: ReadonlySet<string> = new Set(),
 ): SaveData {
   return {
     version: SAVE_VERSION,
@@ -239,6 +249,7 @@ export function captureSave(
     rune1: Loadout.rune1[player],
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
+    boughtItems: [...bought],
     weaponLevels: [Loadout.wLv0[player], Loadout.wLv1[player], Loadout.wLv2[player]],
     weaponTiers: [Loadout.wTier0[player], Loadout.wTier1[player], Loadout.wTier2[player]],
     weaponSeeds: [Loadout.wSeed0[player], Loadout.wSeed1[player], Loadout.wSeed2[player]],
