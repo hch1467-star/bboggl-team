@@ -196,6 +196,12 @@
         깜빡이지 않습니다: 이 게임에서 맥동은 "시간이 간다"는 뜻인데,
         예약은 재촉이 아니라 **곧 된다**는 약속입니다.
       */
+      /* 🏆 장비 옵션 줄 — 이름보다 작고 조용하게. 정보이지 경고가 아닙니다. */
+      #weaponAffix {
+        font-size: 10px; letter-spacing: 0.02em; opacity: 0.9;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+      }
+      #weaponAffix:empty { display: none; }
       #weaponName.pending {
         color: #eaf4ff; border-color: rgba(190,215,255,0.55);
         background: rgba(36,46,64,0.86);
@@ -471,6 +477,7 @@
       <div class="hud-bottom" style="flex-direction: column; align-items: center">
         <div id="loadout">
           <div id="weaponName">롱소드</div>
+          <div id="weaponAffix"></div>
           <div id="slots">
             <div class="slot" id="slot0"><span class="cd"></span><span class="cdText"></span><span class="key">Q</span><span class="nm">-</span></div>
             <div class="slot" id="slot1"><span class="cd"></span><span class="cdText"></span><span class="key">E</span><span class="nm">-</span></div>

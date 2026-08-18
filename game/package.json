@@ -65,7 +65,8 @@
     "reach": "node tools/reach-probe.mjs",
     "stuck": "node tools/stuck-probe.mjs",
     "shots": "node tools/zone-shot.mjs",
-    "barrel": "node tools/barrel-probe.mjs"
+    "barrel": "node tools/barrel-probe.mjs",
+    "gear": "node tools/gear-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

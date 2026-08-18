@@ -450,8 +450,14 @@ export class Hud {
     this.colorHintT = seconds
   }
 
-  showBanner(title: string, sub: string, seconds: number): void {
+  /**
+   * @param color 🏆 제목에 입힐 색(등급 색). 안 주면 기본 색으로 돌아갑니다.
+   *   **돌려놓는 것이 중요합니다** — 한 번 신화 색을 칠하고 안 지우면
+   *   그 다음 「룬 획득」배너까지 신화처럼 보입니다.
+   */
+  showBanner(title: string, sub: string, seconds: number, color?: number): void {
     this.bannerTitle.textContent = title
+    this.bannerTitle.style.color = color === undefined ? '' : `#${color.toString(16).padStart(6, '0')}`
     this.bannerSub.textContent = sub
     this.banner.classList.add('show')
     this.restartButton.style.display = 'none'

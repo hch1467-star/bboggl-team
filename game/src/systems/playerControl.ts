@@ -37,7 +37,9 @@ import {
   skillForSlot,
   SLOT_COUNT,
   tickCooldowns,
+  weaponCooldownScale,
   weaponOf,
+  weaponSpeedScale,
 } from './loadout'
 
 /**
@@ -257,7 +259,22 @@ export function readInputFlow(): {
  * 상대적으로 뒤로 밀려 **취소가 더 늦게** 열립니다 — 빠르게 만들려던 것이
  * 반대로 굼떠집니다. 그래서 아래 모든 자리에 함께 곱합니다.
  */
-const TEMPO = PLAYER.tempo.attackScale
+/**
+ * ⚡ **이 플레이어의 공격 템포 배율.**
+ *
+ * `PLAYER.tempo.attackScale`(게임 전체의 박자) × 🏆 등급 옵션의 공속.
+ *
+ * ⚠️ **판정(active)에는 안 곱합니다.** 이 파일이 원래 그렇게 되어 있고
+ *    (`Actor.timer[p] = combo.active` 에는 배율이 없습니다), 이유가
+ *    있습니다 — 맞는 순간의 길이가 장비마다 달라지면 *"이 무기는 언제
+ *    맞는가"* 를 장비마다 다시 배워야 합니다. 공속이 사는 것은
+ *    **기다리는 시간**(선행동작·후딜)이지 맞는 순간이 아닙니다.
+ *    덤으로, 판정이 한 프레임보다 짧아지는 사고도 원천적으로 없습니다.
+ */
+const TEMPO_BASE = PLAYER.tempo.attackScale
+function tempoOf(e: number): number {
+  return TEMPO_BASE * weaponSpeedScale(e)
+}
 
 /**
  * 🫁 **마지막으로 기력을 쓴 것이 무엇인가.**
@@ -445,7 +462,7 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   const rot = aim.rot
   Actor.state[p] = ActorState.Attack
   Actor.phase[p] = AttackPhase.Windup
-  Actor.timer[p] = c.windup * TEMPO
+  Actor.timer[p] = c.windup * tempoOf(p)
   Actor.comboIndex[p] = index
   /**
    * 🤸 **쓰면 창을 닫습니다.** 안 닫으면 구르기 공격 뒤 0.35초 안의
@@ -526,7 +543,7 @@ function beginSkill(
   if (slot >= 0 && slot < skillCasts.length) skillCasts[slot]++
   Actor.state[p] = ActorState.Skill
   Actor.phase[p] = AttackPhase.Windup
-  Actor.timer[p] = def.windup * TEMPO
+  Actor.timer[p] = def.windup * tempoOf(p)
   Actor.skillSlot[p] = slot
   // 환급은 **시전 하나에 한 번**입니다(components.ts counterRefunded 설계 노트).
   Player.counterRefunded[p] = 0
@@ -539,7 +556,15 @@ function beginSkill(
   // 기본 공격과 같은 규칙 — 스냅하지 않고 선행동작 동안 수렴합니다.
   Player.faceRot[p] = aimRot
   // 기둥 1 의 리듬 손잡이 — balance.ts SKILL_COOLDOWN_SCALE 설계 노트 참고.
-  setCooldown(p, slot, def.cooldown * SKILL_COOLDOWN_SCALE)
+  /**
+   * ⏱ 🏆 **등급 옵션의 쿨타임 감소가 여기서 곱해집니다.**
+   *
+   * 시전하는 **이 순간**에 한 번 곱합니다. 매 프레임 흐르는 쪽
+   * (`tickCooldowns`)에 곱하면 무기를 바꾸는 순간 이미 도는 쿨다운의
+   * 속도까지 바뀌어서, *"왜 갑자기 빨리 찼지"* 가 됩니다. 계약은
+   * **누를 때 정해집니다.**
+   */
+  setCooldown(p, slot, def.cooldown * SKILL_COOLDOWN_SCALE * weaponCooldownScale(p))
 
   // 대시 거리는 **조준한 지점 바로 뒤**에 착지하도록 그때그때 계산합니다.
   //
@@ -553,7 +578,7 @@ function beginSkill(
     const adz = ctx.aimZ - Transform.z[p]
     const aimDist = Math.hypot(adx, adz)
     const distance = Math.min(def.dash, aimDist + DASH_OVERSHOOT)
-    Player.dashSpeed[p] = distance / Math.max(def.windup * TEMPO + def.active, 0.001)
+    Player.dashSpeed[p] = distance / Math.max(def.windup * tempoOf(p) + def.active, 0.001)
   } else {
     Player.dashSpeed[p] = 0
   }
@@ -585,7 +610,7 @@ function beginSkill(
     arcDeg: def.arcDeg,
     color: def.color,
     phase: 'telegraph',
-    duration: def.windup * TEMPO,
+    duration: def.windup * tempoOf(p),
   })
 }
 
@@ -1498,7 +1523,7 @@ export function playerControlSystem(ctx: ControlContext): void {
             )
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery
-            Actor.timer[p] = combo.recovery * TEMPO
+            Actor.timer[p] = combo.recovery * tempoOf(p)
             Actor.comboWindowT[p] = weapon.comboWindow
           } else {
             endAttack(p, aimRot)
@@ -1525,7 +1550,7 @@ export function playerControlSystem(ctx: ControlContext): void {
             canAffordAttack(p, FINISHER.staminaCost) && finisherTarget(p) >= 0
           if (
             (hasNext || canFinish) &&
-            Actor.timer[p] <= combo.recovery * TEMPO * PLAYER.tempo.comboCancel
+            Actor.timer[p] <= combo.recovery * tempoOf(p) * PLAYER.tempo.comboCancel
           )
             endAttack(p, aimRot)
         }
@@ -1559,7 +1584,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (
           phase === AttackPhase.Recovery &&
           Actor.bufferedAttack[p] === 1 &&
-          Actor.timer[p] <= def.recovery * TEMPO * 0.5
+          Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5
         ) {
           /**
            * 스킬 후딜에서도 **처형**이 나갑니다 — 콤보 후딜과 같은 규칙입니다.
@@ -1585,7 +1610,7 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 후딜 후반에는 **다음 스킬로 바로 이어갈 수 있습니다.**
         // 스킬 3개를 엮는 것이 이 게임의 리듬이므로, 이어치기가 안 되면
         // 슬롯을 늘린 의미가 없습니다. 전반부는 못 빠지므로 커밋은 유지됩니다.
-        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * TEMPO * 0.5) {
+        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5) {
           const queued = takeBufferedSkill()
           if (queued) {
             beginSkill(p, queued.slot, queued.def, aimRot, ctx)
@@ -1603,7 +1628,7 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 회피·스킬 이어가기와 **같은 규칙**(후딜 절반 이후)을 씁니다 —
          * 규칙이 하나면 외울 것도 하나입니다.
          */
-        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * TEMPO * 0.5) {
+        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5) {
           if (Player.vials[p] > 0) {
             beginDrink(p)
             break
@@ -1616,7 +1641,7 @@ export function playerControlSystem(ctx: ControlContext): void {
           phase === AttackPhase.Recovery &&
           Actor.bufferedDodge[p] === 1 &&
           canDodge &&
-          Actor.timer[p] <= def.recovery * TEMPO * 0.5
+          Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5
         ) {
           takeBufferedDodge()
           const [dx, dz] = dodgeDir()
@@ -1660,7 +1685,7 @@ export function playerControlSystem(ctx: ControlContext): void {
             })
           } else if (phase === AttackPhase.Active) {
             Actor.phase[p] = AttackPhase.Recovery
-            Actor.timer[p] = def.recovery * TEMPO
+            Actor.timer[p] = def.recovery * tempoOf(p)
             // 대시가 끝나면 남은 속도를 반드시 죽여야 합니다.
             //
             // 자동 검증으로 잡은 버그: 대시는 초당 29m로 달리는데, 대시가 끝난 뒤

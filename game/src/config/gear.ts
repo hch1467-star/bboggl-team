@@ -1,0 +1,224 @@
+/**
+ * ── 🏆 **장비 등급과 옵션** ─────────────────────────────────────────
+ *
+ * ── 왜 만들었나 ────────────────────────────────────────────────────
+ * 이 게임의 성장은 지금까지 둘뿐이었습니다 — **강화**(불티+정련석으로
+ * 피해 +12%/단계)와 **트라이포드**(스킬 변형). 둘 다 *"골라서 키운다"*
+ * 이고, **"주웠는데 뭐가 나왔지?"** 가 없었습니다.
+ *
+ * 그게 탐험의 재미 중 큰 한 덩어리입니다. 디아블로·로스트아크·POE 가
+ * 상자를 열게 만드는 힘은 난이도가 아니라 **모르는 것을 여는 것**입니다.
+ * 지금 이 존의 보물 5개는 전부 **같은 것**(정련석)을 줍니다 — 다섯 번째
+ * 상자를 여는 이유가 첫 번째와 똑같습니다.
+ *
+ * ── 다섯 등급 ──────────────────────────────────────────────────────
+ * 로스트아크의 등급 이름을 그대로 씁니다(일반·레어·유니크·전설·신화).
+ * 이름이 이미 널리 통하는 말이면 새로 가르칠 것이 없습니다.
+ *
+ * 등급이 바꾸는 것은 **둘뿐**입니다:
+ *   · 붙는 옵션의 **개수** (0 → 4)
+ *   · 그 옵션의 **크기**   (×1.0 → ×1.5)
+ * 등급마다 다른 규칙을 주지 않습니다. 규칙이 등급마다 다르면 다섯 개를
+ * 따로 외워야 하고, 그건 성장이 아니라 숙제입니다.
+ *
+ * ── ⚠️ **색을 어떻게 할 것인가** (이 저장소의 오래된 제약) ───────────
+ * 이 게임의 색 다섯(🔴🟡🔵🟣🟢)은 **대응을 말하는 말**입니다. 등급 색을
+ * 아무렇게나 얹으면 *"보라 = 끌어당김"* 이 *"보라 = 유니크"* 와 섞입니다.
+ *
+ * 그래서 **자리를 나눕니다**:
+ *   · 4색 예고는 **바닥**에 깔립니다 (크고, 발밑에, 대응을 요구)
+ *   · 등급 색은 **손에 든 물건과 글자**에만 씁니다 (작고, 위에, 정보)
+ * 그리고 등급을 색만으로 말하지 않습니다 — **밝기와 화려함**이 같이
+ * 올라갑니다(아래 `glow`·`sparkle`). 색을 못 보는 사람도 신화가 신화로
+ * 보여야 합니다. 이 존의 다른 모든 신호가 지키는 규칙 그대로입니다.
+ *
+ * ⚠️ 이 판단은 **재서 확인합니다** — `npm run contrast` 가 예고 4색이
+ *    바닥에서 안 묻히는지 픽셀로 보고 있습니다. 등급 색을 넣은 뒤에도
+ *    그 검사가 초록이어야 합니다.
+ */
+import { Rng } from '../core/rng'
+
+/** 등급 — **값을 바꾸지 마세요.** 세이브에 숫자로 저장됩니다. */
+export const enum GearTier {
+  Common = 0,
+  Rare = 1,
+  Unique = 2,
+  Legendary = 3,
+  Mythic = 4,
+}
+
+export interface GearTierDef {
+  id: GearTier
+  name: string
+  /** 글자·테두리에 쓰는 색. 손에 든 무기의 **광택**에도 같은 색을 씁니다. */
+  color: number
+  /** 붙는 옵션의 개수 */
+  affixes: number
+  /** 옵션 크기 배율 — 등급이 오르면 개수와 크기가 **둘 다** 오릅니다. */
+  scale: number
+  /**
+   * 무기에서 나오는 빛의 세기(0=없음). 색을 못 봐도 등급이 읽히게 하는 축.
+   * 등급 이름을 몰라도 *"이건 다르다"* 가 먼저 보여야 합니다.
+   */
+  glow: number
+  /**
+   * 무기 주위를 도는 알갱이 수. 소울류가 특수 무기에 붙이는 그 신호이고,
+   * **개수**라 색맹과 무관하게 읽힙니다.
+   */
+  sparkle: number
+  /**
+   * 이 등급이 나올 상대 가중치.
+   *
+   * 신화를 1 로 둔 근거: 이 존의 보물은 **5개**입니다. 신화가 흔하면
+   * 다섯 번 다 신화가 나오고, 그러면 등급이 있으나 마나입니다. 반대로
+   * 0 이면 존재하지 않는 등급이 됩니다. 1/(20+9+5+2+1)=**2.7%** —
+   * 다섯 상자를 다 열어도 대개 못 보고, 어쩌다 보면 그 판이 기억에 남습니다.
+   */
+  weight: number
+}
+
+export const GEAR_TIERS: readonly GearTierDef[] = [
+  { id: GearTier.Common, name: '일반', color: 0xb9c2cc, affixes: 0, scale: 1.0, glow: 0, sparkle: 0, weight: 20 },
+  { id: GearTier.Rare, name: '레어', color: 0x4aa3ff, affixes: 1, scale: 1.0, glow: 0.25, sparkle: 0, weight: 9 },
+  { id: GearTier.Unique, name: '유니크', color: 0xb46bff, affixes: 2, scale: 1.15, glow: 0.5, sparkle: 3, weight: 5 },
+  { id: GearTier.Legendary, name: '전설', color: 0xffa02a, affixes: 3, scale: 1.3, glow: 0.85, sparkle: 6, weight: 2 },
+  { id: GearTier.Mythic, name: '신화', color: 0xff5d4a, affixes: 4, scale: 1.5, glow: 1.3, sparkle: 10, weight: 1 },
+]
+
+export function tierDef(t: number): GearTierDef {
+  return GEAR_TIERS[Math.max(0, Math.min(GEAR_TIERS.length - 1, t))]
+}
+
+/**
+ * ── 옵션(어픽스) 넷 ────────────────────────────────────────────────
+ *
+ * 넷으로 **묶어 둡니다**. 옵션이 많을수록 좋은 것 같지만, 이 게임에는
+ * 이미 축이 셋(무기 성격 · 강화 단계 · 트라이포드) 있고 거기에 열 개를
+ * 더 얹으면 *"무엇이 나를 세게 만들었는가"* 를 아무도 못 읽습니다.
+ *
+ * 넷은 서로 **다른 것을 삽니다** — 이게 고를 이유를 만듭니다:
+ *   · ⚔️ 공격력 — 한 대의 크기       (대검과 궁합)
+ *   · ⚡ 공속   — 한 바퀴의 길이     (쌍단검과 궁합, 출혈이 빨리 참)
+ *   · ⏱ 쿨타임 — 스킬 구간의 밀도   (기둥 1의 리듬을 직접 만집니다)
+ *   · ✨ 마법   — **고정 피해**       (약한 타격 여러 번에 강합니다)
+ *
+ * ⚠️ 마법만 **비율이 아니라 고정값**인 것이 요점입니다. 비율은 원래 센
+ *    무기를 더 세게 만들 뿐이라 넷이 다 같은 옵션이 됩니다. 고정 피해는
+ *    **작은 타격이 많은 쪽**(쌍단검 4타)에 훨씬 크게 붙습니다 — 그래서
+ *    "어느 무기에 붙었는가"가 처음으로 의미를 갖습니다.
+ */
+export const enum AffixKind {
+  Damage = 0,
+  Speed = 1,
+  Cooldown = 2,
+  Magic = 3,
+}
+
+export interface AffixDef {
+  kind: AffixKind
+  /** 화면에 뜨는 이름 */
+  name: string
+  /** 값의 단위 — `%` 면 비율, `flat` 이면 고정값 */
+  unit: '%' | 'flat'
+  /** 등급 배율을 곱하기 **전**의 값 범위 */
+  min: number
+  max: number
+}
+
+/**
+ * 값의 근거 — 롱소드 한 바퀴(3타 = 12+14+27 = **53**)를 기준으로 잡았습니다.
+ *
+ *   · 공격력 6~14% → 한 바퀴 +3~7. 강화 한 단계(+12%)와 비슷한 자리라
+ *     *"옵션 하나 ≈ 강화 한 단계"* 로 감이 잡힙니다.
+ *   · 공속 5~12%   → 롱소드 한 바퀴 1.34초가 1.18~1.27초.
+ *   · 쿨타임 6~15% → 스킬 평균 9초가 7.6~8.5초. 기둥 1이 재는
+ *     *"쓸 스킬이 하나도 없던 시간"* 을 직접 줄입니다.
+ *   · 마법 2~5     → 롱소드 3타면 +6~15(한 바퀴의 11~28%),
+ *     쌍단검 4타면 타당 피해가 작아 **비율로는 훨씬 큽니다.**
+ *
+ * ⚠️ 전부 **가정**입니다. 아직 어떤 벤치도 이 값을 안 쟀습니다 —
+ *    `npm run gear` 는 *"규칙대로 붙고 실제로 수치를 바꾸는가"* 만 봅니다.
+ *    "이 정도가 재미있는가"는 다음 판의 질문입니다.
+ */
+export const AFFIX_DEFS: readonly AffixDef[] = [
+  { kind: AffixKind.Damage, name: '공격력', unit: '%', min: 6, max: 14 },
+  { kind: AffixKind.Speed, name: '공격 속도', unit: '%', min: 5, max: 12 },
+  { kind: AffixKind.Cooldown, name: '쿨타임 감소', unit: '%', min: 6, max: 15 },
+  { kind: AffixKind.Magic, name: '마법 피해', unit: 'flat', min: 2, max: 5 },
+]
+
+export interface Affix {
+  kind: AffixKind
+  name: string
+  unit: '%' | 'flat'
+  /** 이미 등급 배율이 곱해진 **최종 값** */
+  value: number
+}
+
+/**
+ * ── 🎲 **굴림은 시드에서 나옵니다** ────────────────────────────────
+ *
+ * `Math.random()` 은 이 저장소에서 금지입니다(core/rng.ts). 여기서는
+ * 그보다 한 걸음 더 갑니다 — **저장하는 것은 시드 하나**이고 옵션은
+ * 언제든 다시 계산합니다.
+ *
+ * 그 덕에:
+ *   · 세이브가 작습니다(등급 + 시드 두 숫자).
+ *   · 프로브가 **같은 시드로 같은 결과**를 확인할 수 있습니다.
+ *   · 옵션 표를 손보면 예전 세이브의 아이템도 **새 규칙으로** 다시 계산됩니다
+ *     (값을 박아 저장하면 규칙과 세이브가 갈라집니다 — 이 저장소가
+ *      여러 번 데인 그 모양입니다).
+ *
+ * ⚠️ 같은 옵션이 두 번 붙지 않습니다. *"공격력 +8%, 공격력 +9%"* 는
+ *    한 줄로 보이는 게 맞고, 두 줄로 보이면 화면이 규칙을 잘못 가르칩니다.
+ */
+export function rollAffixes(seed: number, tier: number): Affix[] {
+  const def = tierDef(tier)
+  if (def.affixes <= 0) return []
+  const rng = new Rng(seed)
+  const pool = [...AFFIX_DEFS]
+  const out: Affix[] = []
+  for (let i = 0; i < def.affixes && pool.length > 0; i++) {
+    const pick = pool.splice(rng.int(0, pool.length - 1), 1)[0]
+    const raw = rng.range(pick.min, pick.max) * def.scale
+    out.push({
+      kind: pick.kind,
+      name: pick.name,
+      unit: pick.unit,
+      // 소수 한 자리 — 화면에 `+8.3%` 로 뜹니다. 정수로 반올림하면
+      // 등급 배율(×1.15 등)이 만든 차이가 눈에서 사라집니다.
+      value: Number(raw.toFixed(1)),
+    })
+  }
+  return out
+}
+
+/** 이 아이템의 옵션 중 그 종류의 합계(없으면 0). */
+export function affixValue(affixes: readonly Affix[], kind: AffixKind): number {
+  let n = 0
+  for (const a of affixes) if (a.kind === kind) n += a.value
+  return n
+}
+
+/**
+ * ── 🎁 **등급 추첨** ───────────────────────────────────────────────
+ *
+ * 가중치는 위 표 한 곳에만 있습니다. 여기서 확률을 다시 쓰면 표와
+ * 갈라집니다.
+ *
+ * ⚠️ `luck` 은 **진행도**입니다(0=존의 시작, 1=보스 앞). 뒤에서 나온
+ *    상자일수록 좋은 것이 나와야 *"더 깊이 들어갈 이유"* 가 생깁니다 —
+ *    소울류의 후반 보물, 디아블로의 몬스터 레벨이 하는 일입니다.
+ *    낮은 등급의 가중치를 진행도만큼 **깎는** 방식이라, 표에 적힌
+ *    상대 비율은 그대로 두고 **아래쪽만 마릅니다.**
+ */
+export function rollTier(seed: number, luck = 0): GearTier {
+  const rng = new Rng(seed ^ 0x9e3779b9)
+  const k = Math.max(0, Math.min(1, luck))
+  const picked = rng.weighted(GEAR_TIERS, (t) => {
+    // 일반은 진행도만큼 마르고, 신화는 그대로 남습니다.
+    const dry = 1 - k * (1 - t.id / (GEAR_TIERS.length - 1))
+    return t.weight * Math.max(0.05, dry)
+  })
+  return picked.id
+}

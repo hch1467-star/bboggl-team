@@ -364,6 +364,24 @@ export class Vfx {
     range: number,
     arcDeg: number,
     power = 0,
+    /**
+     * 🏆 **등급 물들임** — 등급 색과 그 세기(0=안 물들임, 1=완전히 그 색).
+     *
+     * ── 왜 여기인가 (스크린샷을 보고 옮겼습니다) ─────────────────────
+     * 처음엔 손에 든 무기 모델을 빛나게 했습니다. 찍어 보니 **안 보였습니다** —
+     * 이 카메라에서 캐릭터는 40px 남짓이고 칼은 그 안의 몇 픽셀입니다.
+     * "화려한 전설의 검"이 화면에서 **한 픽셀도 화려하지 않았습니다.**
+     *
+     * 이 줌에서 크게 보이는 것은 **휘두른 자국**입니다. 그리고 그게
+     * 나오는 순간은 정확히 *"내 무기가 특별하다"* 를 말하고 싶은
+     * 순간입니다. 손맛이 나는 자리에 등급을 얹습니다.
+     *
+     * ⚠️ **무게 색을 덮지 않고 섞습니다.** 무게(가벼움↔무거움)는 이미
+     *    이 자국의 색으로 말하고 있고, 그건 손맛의 정보입니다. 등급이
+     *    그걸 지우면 정보 하나를 장식으로 바꾸는 셈입니다.
+     */
+    tierColor = 0,
+    tierMix = 0,
   ): void {
     const item = this.swings[this.swingCursor]
     this.swingCursor = (this.swingCursor + 1) % SWING_POOL
@@ -386,6 +404,10 @@ export class Vfx {
      */
     const w = Math.max(0, Math.min(1, power))
     item.material.color.setHex(SWING_COLOR_LIGHT).lerp(new THREE.Color(SWING_COLOR_HEAVY), w)
+    // 🏆 등급이 있으면 그쪽으로 **섞습니다**(덮지 않습니다 — 위 주석).
+    if (tierMix > 0) {
+      item.material.color.lerp(new THREE.Color(tierColor), Math.min(0.75, tierMix))
+    }
     item.mesh.scale.y = 1 + w * 0.6
     item.life = SWING_LIFE + (SWING_LIFE_HEAVY - SWING_LIFE) * w
     item.maxLife = item.life
@@ -401,6 +423,22 @@ export class Vfx {
   hasActiveSwing(): boolean {
     for (const s of this.swings) if (s.life > 0) return true
     return false
+  }
+
+  /**
+   * 🏆 **지금 떠 있는 검격 자국의 색**(0xRRGGBB). 없으면 -1.
+   *
+   * 스크린샷으로 등급 물들임을 확인하려다 배웠습니다 — 두 장의 **애니메이션
+   * 시점이 달라서** 픽셀 비교가 색이 아니라 타이밍을 재고 있었습니다.
+   * (밝은 자리가 다른 장에서는 어두운 바닥이었습니다.)
+   *
+   * 그래서 **그린 값**을 직접 묻습니다. 이 저장소가 콤보 궤적을 잴 때
+   * 쓴 방법 그대로입니다(`debugSwingPose`) — 규칙을 다시 계산하지 않고
+   * 화면에 실제로 놓인 값을 봅니다.
+   */
+  debugSwingColor(): number {
+    for (const s of this.swings) if (s.life > 0) return s.material.color.getHex()
+    return -1
   }
 
   update(camera: THREE.Camera): void {

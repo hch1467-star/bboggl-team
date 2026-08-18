@@ -29,6 +29,7 @@ export interface SlotState {
 
 export class SkillBar {
   private readonly weaponName = el<HTMLElement>('weaponName')
+  private readonly weaponAffix = el<HTMLElement>('weaponAffix')
   private readonly slots: SlotView[] = []
   private readonly lastPercent = SKILL_KEYS.map(() => -1)
   /** 지금 실제로 들고 있는 무기 이름 — 예약 표시를 껐다 켤 때 되돌릴 자리. */
@@ -46,9 +47,20 @@ export class SkillBar {
     }
   }
 
-  setLoadout(weapon: string, slots: SlotState[]): void {
+  /**
+   * @param gear 🏆 등급 색과 옵션 줄. 안 주면 **원래대로 되돌립니다** —
+   *   등급이 낮은 무기로 바꿨는데 색과 옵션이 남아 있으면 화면이
+   *   거짓말을 합니다.
+   */
+  setLoadout(weapon: string, slots: SlotState[], gear?: { color: number; affixes: string[] }): void {
     this.current = weapon
     this.weaponName.textContent = weapon
+    this.weaponName.style.color = gear ? `#${gear.color.toString(16).padStart(6, '0')}` : ''
+    this.weaponName.style.borderColor = gear && gear.affixes.length > 0
+      ? `#${gear.color.toString(16).padStart(6, '0')}66`
+      : ''
+    this.weaponAffix.textContent = gear ? gear.affixes.join(' · ') : ''
+    this.weaponAffix.style.color = gear ? `#${gear.color.toString(16).padStart(6, '0')}` : ''
     for (let i = 0; i < this.slots.length; i++) {
       const view = this.slots[i]
       const state = slots[i]

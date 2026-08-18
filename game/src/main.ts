@@ -5,6 +5,7 @@ import {
   RUNE_ORDER,
   SKILLS,
   WEAPONS,
+  weaponAt,
   runningStep,
   stepFor,
   rollingStep,
@@ -73,6 +74,7 @@ import {
   telegraphRadius,
 } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
+import { GEAR_TIERS, rollAffixes, rollTier, tierDef } from './config/gear'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
 import { ENEMY_DEFS, bleedMaxOf, enemyDef, kindFromId } from './config/enemies'
 import {
@@ -179,10 +181,18 @@ import {
   cooldownOf,
   grantRune,
   setCooldown,
+  equipGear,
   setWeaponLevel,
   skillForSlot,
+  weaponAffixes,
   weaponLevel,
   weaponOf,
+  weaponCooldownScale,
+  weaponDamageMult,
+  weaponMagicFlat,
+  weaponSeed,
+  weaponSpeedScale,
+  weaponTier,
 } from './systems/loadout'
 import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
 import {
@@ -654,7 +664,18 @@ class Game {
       aimX: 0,
       aimZ: 0,
       onSwing: (x, z, rotY, range, arcDeg, power) =>
-        this.vfx.spawnSwing(x, z, rotY, range, arcDeg, power),
+        this.vfx.spawnSwing(
+          x,
+          z,
+          rotY,
+          range,
+          arcDeg,
+          power,
+          tierDef(weaponTier(this.playerEntity)).color,
+          // 세기는 등급의 `glow` 를 그대로 씁니다 — 손에서 빛나는 세기와
+          // 자국에 물드는 세기가 **같은 값**이라야 둘이 한 사건으로 읽힙니다.
+          tierDef(weaponTier(this.playerEntity)).glow,
+        ),
       onCast: (v) => {
         const y = this.terrain ? this.terrain.groundYAt(v.x, v.z) : 0
         // 원형/지점 스킬은 전방위이므로 부채꼴 각도를 360°로 바꿉니다.
@@ -900,7 +921,21 @@ class Game {
     // 강화 단계를 무기 이름에 붙입니다. 소울라이크가 "+3 롱소드"라고 쓰는 이유는
     // **지금 내 무기가 얼마나 컸는지**가 매 순간 보여야 투자가 실감되기 때문입니다.
     const lv = weaponLevel(p)
-    this.skillBar.setLoadout(lv > 0 ? `${weaponOf(p).name} +${lv}` : weaponOf(p).name, slots)
+    /**
+     * 🏆 **등급을 이름 앞에 붙이고, 이름에 등급 색을 입힙니다.**
+     *
+     * 옵션 줄은 이름 아래에 작게 답니다 — 이 게임의 화면 규칙(*"안내는
+     * 필요한 만큼만"*)을 지키되, **지금 내가 무엇을 들고 있는가**는 늘
+     * 보여야 합니다. 그게 안 보이면 상자를 여는 재미가 배너 3초로 끝납니다.
+     */
+    const tier = weaponTier(p)
+    const td = tierDef(tier)
+    const base = lv > 0 ? `${weaponOf(p).name} +${lv}` : weaponOf(p).name
+    const label = tier > 0 ? `${td.name} ${base}` : base
+    this.skillBar.setLoadout(label, slots, {
+      color: td.color,
+      affixes: weaponAffixes(p).map((a) => `${a.name} +${a.value}${a.unit === '%' ? '%' : ''}`),
+    })
     this.tripodPanel.setPlayer(p)
   }
 
@@ -2474,12 +2509,131 @@ class Game {
         this.tripodPanel.refresh()
         this.hud.showBanner('각인석 획득', `T 를 눌러 스킬을 변형하세요 (보유 ${tripodPoints()})`, 2.6)
       }
+
+      /**
+       * ── 🏆 **상자마다 무기가 하나 나옵니다** ────────────────────────
+       *
+       * 이 존의 보물 다섯은 지금까지 **전부 같은 것**을 줬습니다(룬 또는
+       * 각인석). 다섯 번째 상자를 여는 이유가 첫 번째와 똑같았습니다.
+       * 그게 탐험의 재미에서 가장 큰 구멍이었습니다 — 디아블로·로스트아크가
+       * 상자를 열게 만드는 힘은 **모르는 것을 여는 것**입니다.
+       *
+       * ── 시드는 **자리**에서 나옵니다 ───────────────────────────────
+       * `treasureKey`(좌표)를 숫자로 접어 시드로 씁니다. 그래서:
+       *   · 같은 상자는 **언제 열어도 같은 것**이 나옵니다. 죽고 되돌아와
+       *     다시 열면 더 좋은 게 나오는 게임은, 상자가 아니라 **재시도**를
+       *     보상합니다.
+       *   · 프로브가 **같은 결과를 재현**할 수 있습니다.
+       *
+       * ── 진행도가 등급을 밀어 올립니다 ─────────────────────────────
+       * `luck` 은 시작 지점에서 걸어온 거리의 비율입니다. 뒤에 있는 상자일수록
+       * 좋은 것이 나와야 *"더 깊이 들어갈 이유"* 가 생깁니다 — 소울류의
+       * 후반 보물이 하는 일 그대로입니다. 규칙은 gear.ts `rollTier` 한 곳에.
+       *
+       * ⚠️ **지금 든 무기에만** 끼웁니다. 셋 다 올려 주면 무기를 고르는 일이
+       *    사라지고, 상자가 "진행도"가 됩니다. 지금 든 것이 좋아지는 쪽이
+       *    *"이 무기로 가겠다"* 는 선택을 갚습니다.
+       * ⚠️ 등급이 지금 것보다 낮으면 **안 바꿉니다**(loadout.ts `equipGear`).
+       */
+      {
+        const { seed, tier } = this.gearRollAt(Transform.x[e], Transform.z[e])
+        const weaponIndex = Loadout.weapon[p]
+        const got = equipGear(p, weaponIndex, tier, seed)
+        const td = tierDef(tier)
+        const wname = weaponAt(weaponIndex).name
+        if (got) {
+          this.refreshLoadout()
+          const lines = weaponAffixes(p, weaponIndex)
+            .map((a) => `${a.name} +${a.value}${a.unit === '%' ? '%' : ''}`)
+            .join(' · ')
+          this.hud.showBanner(`${td.name} ${wname}`, lines || '옵션 없음', 3.0, td.color)
+        } else {
+          // **아무 말도 안 하면 안 됩니다.** "나왔는데 안 바뀌었다"와
+          // "아무것도 안 나왔다"는 다른 사건이고, 화면이 그걸 갈라 줘야
+          // 플레이어가 규칙(더 좋을 때만 바뀐다)을 배웁니다.
+          this.hud.showBanner(`${td.name} ${wname}`, '지금 든 것이 더 좋다', 2.0, td.color)
+        }
+      }
+
       this.visuals.detach(e)
       destroyEntity(e)
       // 진행이 실제로 바뀐 순간에만 저장합니다. 매 프레임 쓰면 낭비이고,
       // 종료 시점에만 쓰면 브라우저를 그냥 닫는 흔한 경우에 통째로 날아갑니다.
       this.persist()
     }
+  }
+
+  /**
+   * 🏆 **이 자리의 상자에서 나올 것** — 시드와 등급.
+   *
+   * ⚠️ **줍는 곳과 검사가 같은 함수를 부릅니다.** 프로브가 좌표에서
+   *    시드를 다시 만들면 규칙의 두 번째 사본이 생기고, 시드 식을 손보는
+   *    날 둘이 갈라집니다. 이 저장소에서 가장 비쌌던 버그가 전부 그
+   *    모양이었습니다.
+   */
+  gearRollAt(x: number, z: number): { seed: number; luck: number; tier: number } {
+    const key = treasureKey(x, z)
+    let seed = 0
+    for (let i = 0; i < key.length; i++) seed = (Math.imul(seed, 31) + key.charCodeAt(i)) | 0
+    const luck = this.progressRatio(x, z)
+    return { seed, luck, tier: rollTier(seed, luck) }
+  }
+
+  /**
+   * 🎁 존에 남아 있는 상자들이 **각각 무엇을 줄 것인가** — 열어 보지 않고.
+   *
+   * 검사가 *"상자마다 다른 것이 나오는가"* 를 물으려면 다섯 번을 실제로
+   * 열어야 하는데, 그건 자동 플레이 한 판입니다. 규칙이 다양한 결과를
+   * 내는지는 **자리만으로** 답할 수 있습니다.
+   */
+  debugTreasureRolls(): {
+    x: number
+    z: number
+    luck: number
+    tier: number
+    tierName: string
+    affixes: { name: string; unit: string; value: number }[]
+  }[] {
+    const out = []
+    for (const item of this.terrain?.level.entities ?? []) {
+      if (item.kind !== 'treasure') continue
+      const roll = this.gearRollAt(item.x, item.z)
+      out.push({
+        x: item.x,
+        z: item.z,
+        luck: Number(roll.luck.toFixed(3)),
+        tier: roll.tier as number,
+        tierName: tierDef(roll.tier).name,
+        affixes: rollAffixes(roll.seed, roll.tier).map((a) => ({
+          name: a.name,
+          unit: a.unit,
+          value: a.value,
+        })),
+      })
+    }
+    return out.sort((a, b) => a.luck - b.luck)
+  }
+
+  /**
+   * 🏆 **지금 이 자리가 존의 어디쯤인가**(0=시작, 1=보스).
+   *
+   * 등급 추첨의 `luck` 으로 씁니다 — 뒤에 있는 상자일수록 좋은 것이
+   * 나와야 *"더 깊이 들어갈 이유"* 가 생깁니다.
+   *
+   * ⚠️ **직선 거리로 잽니다.** 실제로 걸어야 하는 거리가 더 정확하지만,
+   *    이 값이 정하는 것은 **다섯 상자의 순서**뿐이고 이 존은 한 방향
+   *    (+X)이라 직선으로도 순서가 안 뒤집힙니다. 길찾기를 태워 정밀도를
+   *    사는 대신, **틀리면 눈에 보이는 곳**(상자 다섯의 등급 분포)에서
+   *    확인합니다 — `npm run gear` 가 그걸 봅니다.
+   *    존이 여러 갈래가 되는 날 다시 볼 자리입니다.
+   */
+  private progressRatio(x = Transform.x[this.playerEntity], z = Transform.z[this.playerEntity]): number {
+    const boss = this.terrain?.level.entities.find((e) => e.kind === 'boss')
+    const spawn = this.terrain?.level.entities.find((e) => e.kind === 'spawn')
+    if (!boss || !spawn) return 0
+    const span = Math.hypot(boss.x - spawn.x, boss.z - spawn.z)
+    if (span <= 0.001) return 0
+    return Math.max(0, Math.min(1, Math.hypot(x - spawn.x, z - spawn.z) / span))
   }
 
   /**
@@ -3826,11 +3980,92 @@ class Game {
    * *"연쇄가 붙는가"* 나 *"반경 밖은 안 무너지는가"* 를 **존 안에서는
    * 세울 수가 없습니다.** 그 상황을 못 세우면 그 규칙은 영영 안 재집니다.
    */
+  /**
+   * 🧪 **실험대 전용** — 등급을 직접 끼웁니다.
+   *
+   * `equipGear` 와 달리 **내려가는 것도 허용**합니다. 검사는 *"신화가
+   * 일반보다 센가"* 를 물어야 하는데, 게임 규칙만 쓰면 한 번 올라간
+   * 등급을 되돌릴 수가 없어서 **비교 자체가 성립하지 않습니다.**
+   */
+  /** 🏆 지금 떠 있는 검격 자국의 색 — 그림이 아니라 **그린 값**을 봅니다. */
+  debugSwingColor(): number {
+    return this.vfx.debugSwingColor()
+  }
+
+  debugSetGear(weaponIndex: number, tier: number, seed: number): void {
+    const p = this.playerEntity
+    if (weaponIndex === 1) {
+      Loadout.wTier1[p] = tier
+      Loadout.wSeed1[p] = seed >>> 0
+    } else if (weaponIndex === 2) {
+      Loadout.wTier2[p] = tier
+      Loadout.wSeed2[p] = seed >>> 0
+    } else {
+      Loadout.wTier0[p] = tier
+      Loadout.wSeed0[p] = seed >>> 0
+    }
+    this.refreshLoadout()
+  }
+
   debugSpawnBarrel(x: number, z: number): number {
     const e = spawnBarrel(x, z)
     if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
     this.visuals.attach(e, Renderable.kind[e])
     return e
+  }
+
+  /**
+   * 🏆 **장비 등급의 규칙과 지금 상태** — 프로브가 표를 베껴 적지 않게.
+   *
+   * `tiers` 는 규칙 그 자체이고, `weapons` 는 지금 이 판의 상태입니다.
+   * 검사는 둘을 맞대 보는 것만으로 *"규칙대로 붙었는가"* 를 물을 수 있고,
+   * 표를 손보는 날 검사만 옛 규칙을 지키는 일이 없습니다.
+   */
+  debugGearInfo(): {
+    tiers: { id: number; name: string; color: number; affixes: number; scale: number; weight: number }[]
+    weapons: {
+      index: number
+      name: string
+      tier: number
+      tierName: string
+      seed: number
+      level: number
+      affixes: { kind: number; name: string; unit: string; value: number }[]
+    }[]
+    /** 지금 든 무기가 실제로 곱하고 있는 값들 — **결과**를 봅니다. */
+    live: { damageMult: number; speedScale: number; cooldownScale: number; magicFlat: number }
+  } {
+    const p = this.playerEntity
+    return {
+      tiers: GEAR_TIERS.map((t) => ({
+        id: t.id,
+        name: t.name,
+        color: t.color,
+        affixes: t.affixes,
+        scale: t.scale,
+        weight: t.weight,
+      })),
+      weapons: WEAPONS.map((w, i) => ({
+        index: i,
+        name: w.name,
+        tier: weaponTier(p, i),
+        tierName: tierDef(weaponTier(p, i)).name,
+        seed: weaponSeed(p, i),
+        level: weaponLevel(p, i),
+        affixes: weaponAffixes(p, i).map((a) => ({
+          kind: a.kind as number,
+          name: a.name,
+          unit: a.unit,
+          value: a.value,
+        })),
+      })),
+      live: {
+        damageMult: Number(weaponDamageMult(p).toFixed(4)),
+        speedScale: Number(weaponSpeedScale(p).toFixed(4)),
+        cooldownScale: Number(weaponCooldownScale(p).toFixed(4)),
+        magicFlat: Number(weaponMagicFlat(p).toFixed(2)),
+      },
+    }
   }
 
   /**
@@ -5975,6 +6210,33 @@ declare global {
       travelInfo: () => { lit: number; opened: boolean; key: string }
       /** 🧪 실험대 전용 — 통을 하나 세웁니다(연쇄·반경 검사를 세우려면 필요). */
       spawnBarrel: (x: number, z: number) => number
+      /** 🏆 장비 등급의 규칙과 지금 상태 — 프로브가 표를 베끼지 않게. */
+      gearInfo: () => {
+        tiers: { id: number; name: string; color: number; affixes: number; scale: number; weight: number }[]
+        weapons: {
+          index: number
+          name: string
+          tier: number
+          tierName: string
+          seed: number
+          level: number
+          affixes: { kind: number; name: string; unit: string; value: number }[]
+        }[]
+        live: { damageMult: number; speedScale: number; cooldownScale: number; magicFlat: number }
+      }
+      /** 🎁 존의 상자들이 각각 무엇을 줄 것인가 — 열어 보지 않고. */
+      treasureRolls: () => {
+        x: number
+        z: number
+        luck: number
+        tier: number
+        tierName: string
+        affixes: { name: string; unit: string; value: number }[]
+      }[]
+      /** 🏆 지금 떠 있는 검격 자국의 색(0xRRGGBB). 없으면 -1. */
+      swingColor: () => number
+      /** 🧪 실험대 전용 — 등급/시드를 직접 끼웁니다. */
+      setGear: (weaponIndex: number, tier: number, seed: number) => void
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
       barrelInfo: () => {
         blast: number
@@ -6118,6 +6380,7 @@ window.__game = {
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
   swingVisible: () => game.debugSwingVisible(),
+  swingColor: () => game.debugSwingColor(),
   telegraphs: () => game.debugTelegraphs(),
   spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
@@ -6850,6 +7113,10 @@ window.__game = {
   levelFoes: () => game.debugLevelFoes(),
   travelInfo: () => game.debugTravelInfo(),
   barrelInfo: () => game.debugBarrelInfo(),
+  gearInfo: () => game.debugGearInfo(),
+  treasureRolls: () => game.debugTreasureRolls(),
+  /** 🧪 실험대 전용 — 원하는 등급/시드를 무기에 끼웁니다(등급 비교를 세우려면 필요). */
+  setGear: (weaponIndex, tier, seed) => game.debugSetGear(weaponIndex, tier, seed),
   spawnBarrel: (x, z) => game.debugSpawnBarrel(x, z),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),

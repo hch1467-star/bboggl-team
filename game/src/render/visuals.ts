@@ -31,6 +31,7 @@ import {
   hearDistance,
 } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
+import { tierDef } from '../config/gear'
 import { isTimingAnswer } from '../config/punish'
 import { ENEMY_DEFS, bleedMaxOf, enemyDef } from '../config/enemies'
 import {
@@ -56,6 +57,7 @@ import { defineQuery, hasComponent } from '../core/ecs'
  * 말합니다 — 틀린 예고는 없는 예고보다 나쁩니다.
  */
 import { poiseDamage } from '../systems/combat'
+import { weaponTier } from '../systems/loadout'
 import { time } from '../core/time'
 
 /**
@@ -1741,6 +1743,7 @@ export class Visuals {
     if (v.weaponModels && hasComponent(Loadout, e)) {
       const idx = Math.min(Loadout.weapon[e], v.weaponModels.length - 1)
       for (let i = 0; i < v.weaponModels.length; i++) v.weaponModels[i].visible = i === idx
+      this.syncGearGlow(e, v.weaponModels[idx])
     }
 
     const state = Actor.state[e] as ActorState
@@ -1797,6 +1800,47 @@ export class Visuals {
       pivot.rotation.y += (REST_SWING - pivot.rotation.y) * k
       pivot.rotation.x += (REST_TILT - pivot.rotation.x) * k
     }
+  }
+
+  /**
+   * ── 🏆 **등급이 손에서 빛납니다** ──────────────────────────────────
+   *
+   * 배너는 3초면 사라지고 HUD 글자는 화면 아래에 있습니다. 그런데 이
+   * 게임에서 플레이어가 **내내 보고 있는 것**은 자기 캐릭터입니다.
+   * 등급이 거기 안 보이면, 좋은 것을 주웠다는 사실이 3초짜리 알림으로
+   * 끝납니다 — 소울류가 특수 무기에 빛을 넣는 이유가 이것입니다.
+   *
+   * ── 색만으로 말하지 않습니다 ──────────────────────────────────────
+   * 색(등급 색)과 **세기**(glow)가 같이 오릅니다. 색을 못 보는 사람에게도
+   * 신화는 *"눈에 띄게 밝은 것"* 으로 남습니다. 이 존의 다른 신호가
+   * 전부 지키는 규칙 그대로입니다(4색 예고도 색 + 도형입니다).
+   *
+   * ── 맥동시키는 이유 ───────────────────────────────────────────────
+   * 정지한 빛은 **재질**로 보이고 움직이는 빛은 **상태**로 보입니다.
+   * 이 빛이 말하려는 것은 "이 칼은 금색이다"가 아니라 **"이건 특별하다"**
+   * 이므로 아주 느리게(2.2Hz) 숨 쉬게 합니다. 빠르게 깜빡이면 4색 예고의
+   * 차오름과 헷갈립니다 — 그건 **답해야 하는** 신호이고 이건 아닙니다.
+   *
+   * ⚠️ 등급이 일반이면 **정확히 0** 으로 되돌립니다. 한 번 칠하고 안 지우면
+   *    무기를 바꿔도 앞 무기의 빛이 남습니다.
+   */
+  private syncGearGlow(e: number, model?: THREE.Group): void {
+    if (!model) return
+    const td = tierDef(weaponTier(e))
+    const pulse = td.glow > 0 ? td.glow * (0.72 + 0.28 * Math.sin(time.elapsed * 2.2)) : 0
+    model.traverse((o) => {
+      const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
+      if (!mat || !mat.isMeshStandardMaterial) return
+      if (pulse <= 0) {
+        if (mat.emissiveIntensity !== 0) {
+          mat.emissiveIntensity = 0
+          mat.emissive.setRGB(0, 0, 0)
+        }
+        return
+      }
+      mat.emissive.setHex(td.color)
+      mat.emissiveIntensity = pulse
+    })
   }
 
   /**

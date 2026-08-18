@@ -41,7 +41,7 @@ import { AttackIntent, attackAt, crossfirePause } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
 import { time } from '../core/time'
-import { skillForSlot, weaponDamageMult, weaponOf } from './loadout'
+import { skillForSlot, weaponHit, weaponOf } from './loadout'
 
 /**
  * 타격 판정 — 플레이어와 적이 **같은 코드**를 씁니다.
@@ -221,7 +221,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     const h = stepFor(weapon, HEAVY_COMBO, Player.focusSpent[e], 0)
     return {
       shape: 'cone',
-      damage: h.damage * weaponDamageMult(e),
+      damage: weaponHit(e, h.damage),
       range: h.range,
       arcDeg: h.arcDeg,
       knockback: h.knockback,
@@ -242,7 +242,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     const f = stepFor(weapon, FINISH_COMBO, 0, 0)
     return {
       shape: 'cone',
-      damage: f.damage * weaponDamageMult(e),
+      damage: weaponHit(e, f.damage),
       range: f.range,
       arcDeg: f.arcDeg,
       knockback: f.knockback,
@@ -283,7 +283,7 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
   return {
     shape: 'cone',
     source: situational ? '상황' : '평타',
-    damage: c.damage * weaponDamageMult(e),
+    damage: weaponHit(e, c.damage),
     range: c.range,
     arcDeg: c.arcDeg,
     knockback: c.knockback,
@@ -305,7 +305,8 @@ function skillSpec(e: number, slot: number): AttackSpec | null {
   return {
     shape: def.shape,
     // 무기 스킬(0~2)만 강화의 영향을 받습니다. 룬(3~4)은 무기가 아닙니다.
-    damage: def.damage * (slot <= 2 ? weaponDamageMult(e) : 1),
+    // 룬 스킬(슬롯 3 이상)은 무기가 아니라 각인이라 무기 성장이 안 붙습니다.
+    damage: weaponHit(e, def.damage, slot <= 2),
     range: def.range,
     arcDeg: def.arcDeg,
     knockback: def.knockback,

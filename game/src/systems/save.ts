@@ -44,7 +44,7 @@ import { exportTripods, importTripods, type TripodSaveData } from './tripod'
  * 의심하지 못하게 되니까요. 버전이 다르면 **버리고 새로 시작**합니다.
  * (정식 출시 전까지는 마이그레이션보다 폐기가 정직합니다.)
  */
-const SAVE_VERSION = 6
+const SAVE_VERSION = 7
 
 const KEY_PREFIX = 'qvarpg.save.'
 
@@ -98,6 +98,15 @@ export interface SaveData {
    * **불티를 쓰는 것 자체가 손해**가 됩니다.
    */
   weaponLevels: number[]
+  /**
+   * 🏆 무기별 **등급**과 **옵션 시드**.
+   *
+   * ⚠️ 옵션 값 자체는 저장하지 않습니다 — 등급과 시드만 있으면
+   *    `rollAffixes` 가 언제든 같은 것을 냅니다. 값을 박아 두면 옵션 표를
+   *    손보는 날 **세이브만 옛 규칙**을 들고 있게 됩니다(gear.ts 주석).
+   */
+  weaponTiers: number[]
+  weaponSeeds: number[]
   /**
    * 가진 정련석.
    *
@@ -175,6 +184,12 @@ export function loadSave(levelId: string): SaveData | null {
       ladders: Array.isArray(d.ladders) ? d.ladders.filter((t) => typeof t === 'string') : [],
       stones: Number(d.stones) || 0,
       learned: Array.isArray(d.learned) ? d.learned.filter((v) => typeof v === 'string') : [],
+      weaponTiers: Array.isArray(d.weaponTiers)
+        ? d.weaponTiers.slice(0, 3).map((v) => Number(v) || 0)
+        : [0, 0, 0],
+      weaponSeeds: Array.isArray(d.weaponSeeds)
+        ? d.weaponSeeds.slice(0, 3).map((v) => Number(v) >>> 0)
+        : [0, 0, 0],
       weaponLevels: Array.isArray(d.weaponLevels)
         ? d.weaponLevels.slice(0, 3).map((v) => Number(v) || 0)
         : [0, 0, 0],
@@ -225,6 +240,8 @@ export function captureSave(
     runesOwned: Loadout.runesOwned[player],
     treasures: [...treasures],
     weaponLevels: [Loadout.wLv0[player], Loadout.wLv1[player], Loadout.wLv2[player]],
+    weaponTiers: [Loadout.wTier0[player], Loadout.wTier1[player], Loadout.wTier2[player]],
+    weaponSeeds: [Loadout.wSeed0[player], Loadout.wSeed1[player], Loadout.wSeed2[player]],
     stones: Player.stones[player],
     learned: readLearnedActions(),
     bosses: [...bosses],
@@ -245,6 +262,14 @@ export function applySave(save: SaveData, player: number): void {
   Loadout.wLv0[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[0] ?? 0)
   Loadout.wLv1[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[1] ?? 0)
   Loadout.wLv2[player] = Math.min(WEAPON_UPGRADE.maxLevel, lv[2] ?? 0)
+  const tiers = save.weaponTiers ?? []
+  const seeds = save.weaponSeeds ?? []
+  Loadout.wTier0[player] = tiers[0] ?? 0
+  Loadout.wTier1[player] = tiers[1] ?? 0
+  Loadout.wTier2[player] = tiers[2] ?? 0
+  Loadout.wSeed0[player] = (seeds[0] ?? 0) >>> 0
+  Loadout.wSeed1[player] = (seeds[1] ?? 0) >>> 0
+  Loadout.wSeed2[player] = (seeds[2] ?? 0) >>> 0
   Player.embers[player] = save.embers
   Player.stones[player] = save.stones ?? 0
   restoreLearnedActions(save.learned ?? [])
