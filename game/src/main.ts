@@ -4001,6 +4001,8 @@ class Game {
     bleedDiedWithMax: number
     /** 🩸 그 적들에게 **쌓았던** 총량의 평균 — 남은 것과 견주면 식은 몫. */
     bleedDiedBuiltAvg: number
+    /** 🩸 죽기까지 맞은 횟수의 평균 — 쌓은 총량의 **분모**. */
+    bleedDiedHitsAvg: number
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
     bossBleedPeak: number
     bossBleedPops: number
@@ -4059,6 +4061,7 @@ class Game {
       bleedDiedWithAvg: Number(readBleedPeak().diedWithAvg.toFixed(1)),
       bleedDiedWithMax: Number(readBleedPeak().diedWithMax.toFixed(1)),
       bleedDiedBuiltAvg: Number(readBleedPeak().diedBuiltAvg.toFixed(1)),
+      bleedDiedHitsAvg: Number(readBleedPeak().diedHitsAvg.toFixed(1)),
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
       bossBleedPops: readBleedPeak().bossPops,
@@ -6153,6 +6156,26 @@ window.__game = {
       hitsPerCombo: w.combo.length,
       /** 콤보 한 바퀴가 쌓는 양 — "몇 바퀴면 터지는가"를 게임이 계산합니다. */
       perCombo: Number((BLEED.perHit * w.bleedScale * w.combo.length).toFixed(1)),
+      /**
+       * ── 🩸 **손익분기 간격**(초) — 이보다 느리게 때리면 **줄어듭니다** ──
+       *
+       * 출혈은 쌓기만 하는 눈금이 아닙니다. 유예(`decayDelay`)가 지나면
+       * 초당 `decayPerSec` 씩 식습니다. 그래서 한 대의 값어치는 절대량이
+       * 아니라 **간격과의 싸움**입니다:
+       *
+       *     손익분기 = 유예 + (한 대가 쌓는 양 ÷ 식는 속도)
+       *
+       * 이 간격보다 느리게 때리면 한 대 쌓는 동안 그보다 더 잃습니다 —
+       * 아무리 오래 싸워도 **영원히 안 찹니다.** 실제로 보스전이 그랬습니다:
+       * 평균 간격 3.20초에 롱소드 손익분기 3.10초. 0.1초 차이로 지고
+       * 있었고, 그래서 96/100 까지 갔다가 늘 되돌아왔습니다.
+       *
+       * 게임이 계산합니다 — 프로브가 이 식을 베껴 두면 값을 손보는 날
+       * 조용히 옛말이 됩니다.
+       */
+      breakEvenGap: Number(
+        (BLEED.decayDelay + (BLEED.perHit * w.bleedScale) / BLEED.decayPerSec).toFixed(2),
+      ),
     })),
   }),
   /**

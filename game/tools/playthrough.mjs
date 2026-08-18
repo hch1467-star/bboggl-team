@@ -2951,6 +2951,7 @@ try {
       bleedDiedWithAvg: G.runStats().bleedDiedWithAvg,
       bleedDiedWithMax: G.runStats().bleedDiedWithMax,
       bleedDiedBuiltAvg: G.runStats().bleedDiedBuiltAvg,
+      bleedDiedHitsAvg: G.runStats().bleedDiedHitsAvg,
       inputExpired: G.runStats().inputExpired,
       // 버려진 것을 **종류별로** 나눠 적습니다 — 셋의 처방이 서로 다릅니다
       // (근거: playerControl.ts `inputFlow`).
@@ -3170,6 +3171,14 @@ try {
       upgrades: G.vialInfo().max - startVialMax,
       weaponUps: G.weaponUpgradeInfo().levels.reduce((a, v, i) => a + (v - startWeaponLevels[i]), 0),
       weaponId: G.state().loadout.weapon,
+      /**
+       * 🩸 **손익분기 간격** — 이보다 느리게 때리면 출혈은 영영 안 찹니다.
+       * 식을 프로브가 들고 있지 않습니다(main.ts `bleedInfo().breakEvenGap`).
+       */
+      bleedBreakEven: (G.bleedInfo().weapons ?? []).map((w) => ({
+        id: w.id,
+        gap: w.breakEvenGap,
+      })),
       /**
        * ── 존에서 **등 뒤를 실제로 잡는가** ────────────────────────────
        *
@@ -3742,9 +3751,33 @@ try {
     // "쌓아 놓고 딴 데 갔다 왔다"(식는 속도 이야기)입니다.
     `              그 적들에게 쌓았던 총량 평균 ${log.bleedDiedBuiltAvg ?? 0}` +
     ` → 죽을 때 남은 ${log.bleedDiedWithAvg ?? 0} (식어서 잃은 ${Math.round(((log.bleedDiedBuiltAvg ?? 0) - (log.bleedDiedWithAvg ?? 0)) * 10) / 10})\n` +
+    /**
+     * 🩸 **분모.** 「쌓은 총량이 적다」의 뜻이 둘이라 나눠 봐야 합니다 —
+     * 몇 대 안 맞은 것인가, 맞긴 했는데 안 쌓는 타격이었나.
+     *
+     * ⚠️ **「한 대당 쌓인」이 설정값보다 3할쯤 작게 나오는 것은 정상입니다.**
+     *    `applyBleed` 는 **죽이지 않은 타격**에서만 돌기 때문입니다 —
+     *    마지막 한 대는 분모에는 들어가고 분자에는 안 들어갑니다. 잡몹이
+     *    3~4대에 죽으니 그 한 대가 25~30%를 차지합니다.
+     *    (롱소드 12 → 8.5 · 쌍단검 19.2 → 13.4 — 둘 다 0.7배로 같습니다.)
+     *    이걸 안 적어 두면 다음에 보는 사람이 "출혈이 새고 있다"고 읽습니다.
+     */
+    `              죽기까지 맞은 횟수 평균 ${log.bleedDiedHitsAvg ?? 0}대` +
+    ` → 한 대당 쌓인 ${(((log.bleedDiedBuiltAvg ?? 0) / Math.max(0.001, log.bleedDiedHitsAvg ?? 0)) || 0).toFixed(1)}\n` +
     `              그중 **보스에게** — 터짐 ${log.bossBleedPops ?? 0}회 · 최고 ${log.bossBleedPeak ?? 0}/100\n` +
     `                 쌓은 총량 ${log.bossBleedApplied ?? 0} · 식어서 날아간 것 ${log.bossBleedDecayed ?? 0}\n` +
     `                 타격 간격 평균 ${log.bossBleedGapAvg ?? 0}초 · 최대 ${log.bossBleedGapMax ?? 0}초 · 유예 안에 이어진 비율 ${Math.round((log.bossBleedGapInsideRate ?? 0) * 100)}%\n` +
+    /**
+     * 🩸 **이 한 줄이 「왜 96까지 갔다가 되돌아오는가」의 답입니다.**
+     *
+     * 출혈은 쌓기만 하는 눈금이 아니라 **간격과의 싸움**입니다. 손익분기보다
+     * 느리게 때리면 한 대 쌓는 동안 그보다 더 잃어서, 아무리 오래 싸워도
+     * 안 찹니다. 평균 간격을 손익분기 **옆에 두지 않으면** 이 사실이
+     * 숫자 두 개 사이에 숨습니다.
+     */
+    `                 손익분기 간격 — ${(log.bleedBreakEven ?? [])
+      .map((w) => `${w.id} ${w.gap}초`)
+      .join(' · ')}  ← 평균 간격이 이보다 크면 **영원히 안 찹니다**\n` +
     `              📊 보스를 녹인 것 (1/2/3단계) — ${Object.entries(log.bossDamageBySource ?? {})
       .filter(([, v]) => v.reduce((a, b) => a + b, 0) > 0)
       .sort((a, b) => b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0))

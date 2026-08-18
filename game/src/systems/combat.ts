@@ -759,8 +759,10 @@ export function noteDeathWithBleed(t: number): void {
   if (left > diedWithBleedMax) diedWithBleedMax = left
   // 이 적에게 **쌓은 총량**도 같이 — 둘의 차이가 「식어서 날아간 몫」입니다.
   diedBuiltSum += Enemy.bleedBuilt[t]
+  diedHitsSum += Enemy.hitsTaken[t]
 }
 let diedBuiltSum = 0
+let diedHitsSum = 0
 let bleedDecayedAll = 0
 let diedWithBleedCount = 0
 let diedWithBleedSum = 0
@@ -780,6 +782,7 @@ export function readBleedPeak(): {
   diedWithAvg: number
   diedWithMax: number
   diedBuiltAvg: number
+  diedHitsAvg: number
 } {
   return {
     any: bleedPeak,
@@ -792,6 +795,8 @@ export function readBleedPeak(): {
     diedWithMax: diedWithBleedMax,
     /** 🩸 그 적들에게 **쌓았던** 총량의 평균 — 남은 것과 견주면 식은 몫이 나옵니다. */
     diedBuiltAvg: diedWithBleedCount > 0 ? diedBuiltSum / diedWithBleedCount : 0,
+    /** 🩸 그 적들이 **죽기까지 맞은 횟수**의 평균 — 쌓은 총량의 분모. */
+    diedHitsAvg: diedWithBleedCount > 0 ? diedHitsSum / diedWithBleedCount : 0,
     boss: bossBleedPeak,
     bossPops: bossBleedPops,
     bossApplied: bossBleedApplied,
@@ -807,6 +812,7 @@ export function resetBleedPeak(): void {
   diedWithBleedSum = 0
   diedWithBleedMax = 0
   diedBuiltSum = 0
+  diedHitsSum = 0
   bleedPeak = 0
   bossBleedPeak = 0
   bossBleedPops = 0
@@ -1421,6 +1427,8 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       Status.snareT[t] = Math.max(Status.snareT[t], spec.snare)
     }
 
+    // 🩸 맞은 횟수 — 「쌓은 총량」의 분모입니다(components.ts `hitsTaken`).
+    if (!targetIsPlayer && hasComponent(Enemy, t)) Enemy.hitsTaken[t]++
     const killed = Health.hp[t] <= 0
     // 🩸 죽는 순간 게이지에 남은 몫 — 「0회」의 이유를 가르는 값입니다.
     if (killed && !targetIsPlayer && hasComponent(Enemy, t)) noteDeathWithBleed(t)
