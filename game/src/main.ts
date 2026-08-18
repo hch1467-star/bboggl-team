@@ -6,6 +6,7 @@ import {
   SKILLS,
   WEAPONS,
   runningStep,
+  stepFor,
   rollingStep,
   plungeStep,
   heavyStep,
@@ -284,6 +285,8 @@ class Game {
   /** 💥 이번 판에 터진 통 수 · 그 폭발에 휘말린 몸 수 — 벤치·프로브가 읽습니다. */
   private barrelsBlown = 0
   private barrelsCaught = 0
+  /** 💥 **불붙일 때** 반경 안에 있던 적의 합계 — 터질 때와의 차이가 「걸어 나간 수」. */
+  private barrelsLitCaught = 0
   private treasureTotal = 0
   private treasuresFound = 0
   private regions: LevelRegion[] = []
@@ -741,6 +744,7 @@ class Game {
     this.treasureTotal = 0
     this.barrelsBlown = 0
     this.barrelsCaught = 0
+    this.barrelsLitCaught = 0
     this.hitsDealt = 0
     this.damageDealt = 0
     this.backHits = 0
@@ -1708,6 +1712,7 @@ class Game {
       sfx.impact(true, true, blast.x, blast.z)
       this.barrelsBlown++
       this.barrelsCaught += blast.caught
+      this.barrelsLitCaught += blast.litCaught
       this.visuals.detach(blast.entity)
       destroyEntity(blast.entity)
     }
@@ -4280,6 +4285,17 @@ class Game {
     rollAttacks: number
     /** 🪂 낙하 공격 — 떨어진 값을 위력으로 바꾼 횟수 */
     plungeAttacks: number
+    /**
+     * 💥 이번 판에 **터진 통** 수와 그 폭발에 **휘말린 몸** 수.
+     *
+     * 봇에게 이 동사를 가르치기 전에는 둘 다 0 이고, 그 0 은 *"안 쓸
+     * 만하다"* 가 아니라 **"안 가르쳤다"** 입니다 — 이 저장소가 여러 번
+     * 데인 자리라 벤치가 볼 수 있게 내보냅니다.
+     */
+    barrelsBlown: number
+    barrelsCaught: number
+    /** 💥 불붙일 때 담겼던 적의 합계 — 터질 때와의 차이가 「걸어 나간 수」. */
+    barrelsLitCaught: number
     /** 이어짐 눈금 — 선입력이 실제로 일했는가 (playerControl.ts readInputFlow) */
     inputUsed: number
     inputExpired: number
@@ -4348,6 +4364,9 @@ class Game {
       runAttacks: readRhythm().runAttacks,
       rollAttacks: readRhythm().rollAttacks,
       plungeAttacks: readRhythm().plungeAttacks,
+      barrelsBlown: this.barrelsBlown,
+      barrelsCaught: this.barrelsCaught,
+      barrelsLitCaught: this.barrelsLitCaught,
       inputUsed: readInputFlow().used,
       inputExpired: readInputFlow().expired,
       inputExpiredAttack: readInputFlow().expiredAttack,
@@ -5184,6 +5203,16 @@ class Game {
      * 봇만 옛 값을 쓰므로 게임이 알려 줍니다.
      */
     runReach: number
+    /**
+     * 🗡 **평타가 닿는 거리**(1타 사거리 + 파고들기).
+     *
+     * 봇이 여기에 2.2 같은 리터럴을 들고 있으면 무기를 바꾸거나 사거리를
+     * 손보는 날 **봇만 옛 값**을 씁니다. 실제로 그렇게 데였습니다 —
+     * 폭발통 가지에 2.2 를 적어 뒀더니, 정작 통은 그보다 **먼 거리에서
+     * 평타에 우연히** 터지고 있었고(가장 가까이 3.1m) 전용 가지는 한 번도
+     * 안 걸렸습니다. 계측기가 자기 문턱 때문에 기회를 못 본 것입니다.
+     */
+    hitReach: number
     /** 🪂 낙하 공격 창의 남은 시간(초) */
     plungeWindowT: number
     /** 🪂 이번 낙하가 몇 단이었는가(창이 닫히면 의미 없음) */
@@ -5231,6 +5260,7 @@ class Game {
       sprinting: isSprinting(p),
       rollWindow: PLAYER_CFG.contextAttack.rollWindow,
       runReach: Number((runningStep(w).range + runningStep(w).lunge).toFixed(2)),
+      hitReach: Number((stepFor(w, 0, 0, 0).range + stepFor(w, 0, 0, 0).lunge).toFixed(2)),
       plungeWindowT: Number(Player.plungeT[p].toFixed(3)),
       plungeSteps: Player.plungeSteps[p],
       plungeWindow: PLAYER_CFG.contextAttack.plungeWindow,
@@ -5601,6 +5631,7 @@ declare global {
         sprinting: boolean
         rollWindow: number
         runReach: number
+        hitReach: number
         plungeWindowT: number
         plungeSteps: number
         plungeWindow: number

@@ -280,6 +280,7 @@ export function spawnBarrel(x: number, z: number): number {
    * 규칙: **spawn 함수는 자기가 쓰는 칸을 하나도 빼지 않고 초기화합니다.**
    */
   Barrel.lit[e] = 0
+  Barrel.litCaught[e] = 0
   Renderable.kind[e] = KIND_BARREL
   return e
 }

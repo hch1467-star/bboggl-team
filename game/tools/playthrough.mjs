@@ -65,6 +65,20 @@ const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
  */
 const RECOVERY_ONLY = process.env.PLAY_RECOVERY_ONLY === '1'
 
+/**
+ * 💥 **폭발통을 쓸 것인가** — A/B 를 위한 정책 스위치(`PLAY_NO_BARREL=1` 이면 끔).
+ *
+ * 통을 넣고 나서 벤치는 판당 **0회**를 찍었습니다. 그 0 은 *"안 쓸 만하다"*
+ * 가 아니라 **"봇이 그 동사를 모른다"** 입니다 — 이 저장소가 취소 회피에서
+ * 여덟 판을 태우고 배운 자리입니다(*"넣어 두고 안 쓰이면 «효과가 없다»와
+ * «쓰이질 않았다»를 못 가립니다"*).
+ *
+ * 스위치로 남기는 이유: 가르친 뒤의 숫자는 **가르치기 전과 나란히 놓아야**
+ * 뜻이 생깁니다. 끄고 켠 같은 판을 비교할 수 있어야 *"통이 무엇을
+ * 바꿨는가"* 를 물을 수 있습니다.
+ */
+const USE_BARREL = process.env.PLAY_NO_BARREL !== '1'
+
 const TIME_LIMIT = Number(process.env.PLAY_LIMIT ?? 420)
 /**
  * ── 벽시계 안전줄(초) ──────────────────────────────────────────────
@@ -125,7 +139,7 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND]) => {
+  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND, BARREL_ON]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -657,6 +671,8 @@ try {
      * 변경입니다.
      */
     let act = '시작'
+    /** 💥 통마다: 가장 가까이 간 거리 · 사거리 안이었던 프레임 · 조건까지 맞은 프레임. */
+    const barrelChance = {}
     /** 최근 90 프레임의 가지 — 막혔을 때 되감아 봅니다. */
     const recentActs = []
     const actTotals = new Map()
@@ -705,6 +721,37 @@ try {
       const st = G.state()
       const vi = G.vialInfo()
       const p = st.player
+
+      /**
+       * ── 💥 **안 쓴 통의 사연을 남깁니다** ──────────────────────────
+       *
+       * 판이 끝나고 *"통 2개 남음"* 만 보면 처방이 안 나옵니다. 남은 이유가
+       * 둘이나 되기 때문입니다:
+       *   · **곁에 간 적이 없다** → 배치가 동선에서 멀다 (지도 문제)
+       *   · **곁에 갔는데 조건이 안 맞았다** → 둘 이상이 안 담겼다 (조건 문제)
+       * 둘은 고치는 곳이 다릅니다. 그러니 **가장 가까이 간 거리**와
+       * *"사거리 안에 있었던 프레임 수 / 그중 둘 이상 담긴 프레임 수"* 를
+       * 통마다 따로 셉니다.
+       *
+       * ⚠️ 통이 터지면 목록에서 사라지므로, **키는 좌표**로 잡습니다.
+       */
+      if (BARREL_ON) {
+        const bi0 = G.barrelInfo()
+        const chanceReach = G.moveInfo().hitReach
+        for (const b of bi0.barrels) {
+          const key = `${b.x},${b.z}`
+          const rec = (barrelChance[key] ??= { near: Infinity, inReach: 0, ready: 0 })
+          const d = Math.hypot(b.x - p.x, b.z - p.z)
+          if (d < rec.near) rec.near = d
+          if (d <= chanceReach && b.fuseT <= 0) {
+            rec.inReach++
+            const caught = G.threats(bi0.blast + 2).filter(
+              (t) => Math.hypot(t.x - b.x, t.z - b.z) <= bi0.blast,
+            ).length
+            if (caught >= 2) rec.ready++
+          }
+        }
+      }
 
       /**
        * ── 막힘 감지 — **모든 가지에서** 봅니다 ────────────────────────
@@ -1419,6 +1466,44 @@ try {
        * 지금은 게임이 선입력을 받아 콤보 다음 타를 처형으로 바꿔 주므로,
        * 사람처럼 **그냥 누릅니다.**
        */
+      /**
+       * ── 💥 **불붙은 통 안에 있으면 나갑니다 — 무엇보다 먼저** ──────────
+       *
+       * 통이 만드는 것은 🟡 이고, 🟡 의 답은 *"걸어서 이탈"* 입니다. 이
+       * 봇의 원칙(*"게임이 화면에 띄워 주는 것은 읽는다"*)대로 하면 여기서
+       * 다른 선택지는 없습니다 — 노란 원이 차오르는 것은 화면 한가운데
+       * 크게 뜨고, 사람이라면 반드시 봅니다.
+       *
+       * **처형보다도 먼저** 둡니다. 처형은 0.5초짜리 확정 보상이지만,
+       * 그 0.5초를 쓰다 휘말리면 스태미나 두 번 분을 잃고 **그 뒤로 아무
+       * 답도 못 합니다.** 이 게임에서 스태미나는 다음 몇 초의 선택지
+       * 그 자체입니다.
+       *
+       * ⚠️ 반경도 통의 자리도 **게임에게 묻습니다**(`barrelInfo`). 봇이
+       *    4m 를 들고 있으면 값을 바꾸는 날 봇만 옛 규칙으로 도망칩니다.
+       * ⚠️ 여유 1m: 경계에 정확히 서면 몸 굵기 때문에 걸립니다
+       *    (폭발 판정이 `반경 + 대상 굵기` 라 — combat.ts `explodeBarrel`).
+       */
+      if (BARREL_ON) {
+        const bi = G.barrelInfo()
+        let flee = null
+        for (const b of bi.barrels) {
+          if (b.fuseT <= 0) continue
+          const d = Math.hypot(b.x - p.x, b.z - p.z)
+          if (d > bi.blast + 1) continue
+          if (!flee || d < flee.d) flee = { b, d }
+        }
+        if (flee) {
+          markAct('통대피')
+          release('ShiftLeft')
+          // 통의 반대쪽으로 **곧장** 걷습니다. 길찾기를 태우지 않는 이유:
+          // 도화선은 1초뿐이고, 그 안에 통하는 것은 직선뿐입니다.
+          moveToward(p.x - flee.b.x, p.z - flee.b.z)
+          await sleep()
+          continue
+        }
+      }
+
       if (G.finisherInfo().ready) {
         markAct('처형')
         const t = G.finisherInfo().target
@@ -1792,6 +1877,66 @@ try {
           markAct('구르기대기')
           await sleep()
           continue
+        }
+
+        /**
+         * ── 💥 **곁에 통이 있고 둘 이상이 담기면 칩니다** ────────────────
+         *
+         * 조건을 셋으로 좁혔습니다.
+         *
+         *   · **사거리 안에 있을 때만** — 통을 쓰러 일부러 걸어가지
+         *     않습니다. 그건 "가는 길에 있으면 쓴다"가 아니라 **곁길**이고,
+         *     곁길은 봇에게 따로 예산이 걸린 별개의 판단입니다. v1 은
+         *     *"눈앞에 있으면 쓴다"* 라는 **초보자의 하한선**만 잽니다.
+         *     이 조건으로 한 번도 안 쓰이면, 그건 봇이 아니라 **배치가
+         *     동선에서 멀다**는 뜻이고 그것도 하나의 답입니다.
+         *   · **둘 이상 담길 때만** — 통은 존에 셋뿐입니다. 한 마리는
+         *     그냥 때리는 편이 싸고, 그래야 이 자원이 자원으로 남습니다.
+         *   · **아직 안 붙었을 때만** — 붙은 통을 또 치면 그건 낭비된
+         *     한 대이고, 위 대피 가지가 곧바로 나를 밀어냅니다.
+         *
+         * ── ⚠️ **가지 순서를 올렸습니다 — 재고 나서** ────────────────
+         * 처음엔 이 가지를 「등 뒤로 돌기」와 「접근」 사이에 뒀습니다.
+         * 첫 판에서 통 셋 전부 *"조건까지 맞았다"* 인데(사거리 안 459·16·117
+         * 프레임) 실제 터뜨림은 **1회**였습니다. 기회가 없던 것이 아니라
+         * **앞의 가지들이 매 프레임 `continue` 로 가로채고** 있었습니다.
+         * (없는 행동은 보상을 붙여도 안 일어난다 — 이 저장소가 백어택에서
+         *  배운 것과 같은 모양입니다.)
+         *
+         * 그래서 「등 뒤로 돌기」보다 **위**로 올렸습니다. 등 뒤를 잡는 것은
+         * 한 마리에게 배수를 얹는 일이고, 통은 **둘 이상을 한꺼번에
+         * 무너뜨리는** 일입니다. 다만 피해를 피하는 답들(🔴 구르기 · 🛡 가드 ·
+         * 🟢 반격)보다는 **아래**에 둡니다 — 예고가 떠 있는데 통을 치는 것은
+         * 사람이 하는 판단이 아닙니다.
+         *
+         * ⚠️ 반경은 게임에서 읽습니다. 적의 자리도 `threats` 에서 읽습니다 —
+         *    봇이 자기 계산으로 "담긴다"를 정하면, 폭발 판정을 손보는 날
+         *    봇만 옛 규칙으로 통을 칩니다.
+         */
+        if (BARREL_ON) {
+          const bi = G.barrelInfo()
+          // 🗡 문턱은 **게임이 답합니다**(평타 사거리 + 파고들기).
+          const reach = G.moveInfo().hitReach
+          let best = null
+          for (const b of bi.barrels) {
+            if (b.fuseT > 0) continue
+            const d = Math.hypot(b.x - p.x, b.z - p.z)
+            if (d > reach) continue
+            const caught = threats.filter(
+              (t) => Math.hypot(t.x - b.x, t.z - b.z) <= bi.blast,
+            ).length
+            if (caught < 2) continue
+            if (!best || caught > best.caught) best = { b, caught }
+          }
+          if (best) {
+            markAct('통점화')
+            release('ShiftLeft')
+            releaseAll()
+            G.aimAtWorld(best.b.x, best.b.z)
+            tap('Mouse0')
+            await sleep()
+            continue
+          }
         }
 
         /**
@@ -2964,6 +3109,19 @@ try {
        * 누른 것과 나간 것은 다르고(기력·상태가 막습니다), 이 프로젝트에서
        * 잡은 계기 버그 열둘이 전부 그 틈에서 나왔습니다.
        */
+      barrelsBlown: G.runStats().barrelsBlown ?? 0,
+      barrelsCaught: G.runStats().barrelsCaught ?? 0,
+      barrelsLitCaught: G.runStats().barrelsLitCaught ?? 0,
+      /**
+       * 💥 **통을 겨눠 누른 프레임 수** — 「터뜨린 횟수」가 아닙니다.
+       *
+       * 처음엔 이걸 *"일부러 터뜨린 횟수"* 로 적었다가 145 vs 3 이 나와서
+       * 라벨이 틀렸다는 걸 알았습니다. 누른다고 다 나가지 않습니다
+       * (후딜·선입력·조준 보정). 세는 것을 **세는 그대로** 부릅니다.
+       */
+      barrelLitByBot: actTotals.get('통점화') ?? 0,
+      barrelLeft: G.barrelInfo().barrels.length,
+      barrelChance: Object.entries(barrelChance).map(([k, v]) => ({ at: k, ...v })),
       runAttacks: G.runStats().runAttacks ?? 0,
       rollAttacks: G.runStats().rollAttacks ?? 0,
       plungeAttacks: G.runStats().plungeAttacks ?? 0,
@@ -3378,7 +3536,7 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET, SPEND_BUDGET])
+  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET, SPEND_BUDGET, USE_BARREL])
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
@@ -3703,6 +3861,31 @@ try {
   console.log(
     `             ⚔️ 상황 모션 — 달리기 ${log.runAttacks ?? 0}회 · 구르기 ${log.rollAttacks ?? 0}회 · 낙하 ${log.plungeAttacks ?? 0}회`,
   )
+  /**
+   * 💥 **터진 통 · 휘말린 몸 · 남은 통** 셋을 같이 찍습니다.
+   *
+   * 터진 수만 보면 *"켰는데 아무도 안 담겼다"* 를 놓칩니다. 남은 수까지
+   * 봐야 *"쓸 기회가 아예 없었다"* 와 *"쓰고도 헛돌았다"* 가 갈립니다.
+   */
+  console.log(
+    `             💥 폭발통 — 터뜨림 ${log.barrelsBlown ?? 0}회` +
+      ` (통을 겨눠 누른 프레임 ${log.barrelLitByBot ?? 0})` +
+      ` · 안 쓰고 남긴 통 ${log.barrelLeft ?? 0}개\n` +
+      `                불붙일 때 담긴 적 ${log.barrelsLitCaught ?? 0} → 터질 때 휘말린 몸 ${log.barrelsCaught ?? 0}` +
+      ` (걸어 나간 수 ${Math.max(0, (log.barrelsLitCaught ?? 0) - (log.barrelsCaught ?? 0))})`,
+  )
+  for (const c of log.barrelChance ?? []) {
+    const why =
+      c.ready > 0
+        ? '조건까지 맞았다'
+        : c.inReach > 0
+          ? '곁엔 갔지만 **둘 이상이 안 담겼다**'
+          : '**곁에 간 적이 없다**'
+    console.log(
+      `                통(${c.at}) — 가장 가까이 ${Number.isFinite(c.near) ? c.near.toFixed(1) : '?'}m` +
+        ` · 사거리 안 ${c.inReach}프레임(그중 조건 ${c.ready}) — ${why}`,
+    )
+  }
   const distTotal =
     log.boss.fought && log.boss.dist
       ? log.boss.dist.near + log.boss.dist.mid + log.boss.dist.far + log.boss.dist.away

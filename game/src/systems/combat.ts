@@ -928,7 +928,13 @@ export const justGuardEvents: BreakEvent[] = []
 /** 💥 통에 불이 붙은 순간. 소리와 연출이 읽습니다. */
 export const barrelLitEvents: BreakEvent[] = []
 /** 💥 통이 터진 순간. `radius` 는 **실제로 쓴 반경** 입니다(그림이 규칙을 베끼지 않게). */
-export const barrelBlastEvents: (BreakEvent & { radius: number; caught: number })[] = []
+export const barrelBlastEvents: (BreakEvent & {
+  radius: number
+  /** 터질 때 담긴 몸 수(적 + 나) */
+  caught: number
+  /** **불붙일 때** 반경 안에 있던 적의 수 — 둘의 차이가 「걸어 나간 수」입니다. */
+  litCaught: number
+})[] = []
 
 const barrels = defineQuery(Barrel, Transform, Health)
 
@@ -970,6 +976,7 @@ export function barrelSystem(dt: number): void {
       Barrel.lit[b] = 1
       Barrel.fuseT[b] = barrelFuse()
       Barrel.fuseTotal[b] = Barrel.fuseT[b]
+      Barrel.litCaught[b] = Math.min(255, countInBlast(Transform.x[b], Transform.z[b]))
       barrelLitEvents.push({
         entity: b,
         x: Transform.x[b],
@@ -984,6 +991,20 @@ export function barrelSystem(dt: number): void {
     if (Barrel.fuseT[b] <= 0) blown.push(b)
   }
   for (const b of blown) explodeBarrel(b)
+}
+
+/** 💥 이 자리에서 지금 터지면 몇 **마리**가 담기는가 (플레이어·통은 뺍니다). */
+function countInBlast(bx: number, bz: number): number {
+  const tids = targets.run()
+  let n = 0
+  for (let j = 0; j < targets.count; j++) {
+    const t = tids[j]
+    if (!hasComponent(Enemy, t)) continue
+    if (Actor.state[t] === ActorState.Dead) continue
+    if (Math.hypot(Transform.x[t] - bx, Transform.z[t] - bz) > BARREL.blast + Body.radius[t]) continue
+    n++
+  }
+  return n
 }
 
 function explodeBarrel(b: number): void {
@@ -1061,6 +1082,7 @@ function explodeBarrel(b: number): void {
     z: bz,
     radius: BARREL.blast,
     caught,
+    litCaught: Barrel.litCaught[b],
   })
 }
 
@@ -1860,6 +1882,39 @@ export function assistAim(px: number, pz: number, aimRot: number, reach: number)
       bestDist = dist
     }
   }
+
+  /**
+   * ── 💥 **통을 겨눴으면 손을 안 돌립니다** ────────────────────────
+   *
+   * 위 주석이 이미 규칙을 적어 뒀습니다: *"거리순으로 하면 겨눈 적을 두고
+   * 옆의 다른 적을 치는 **배신**이 일어납니다."* 폭발통이 생기면서 같은
+   * 배신이 한 종류 더 생겼습니다 — **통을 클릭했는데 옆의 적을 칩니다.**
+   *
+   * 자동 플레이가 그대로 보여 줬습니다. 봇이 통을 겨눠 누른 프레임이
+   * 145 인데 터진 통은 3 개였습니다. 사람에게는 *"분명히 통을 눌렀는데
+   * 안 터진다"* 로 보입니다 — 조준 보정이 만든 결함이지 통의 결함이
+   * 아닙니다.
+   *
+   * 새 원칙을 만들지 않습니다. **같은 원칙(조준선에 가장 가까운 것)** 을
+   * 통에도 적용할 뿐입니다: 조준선에 통이 적보다 가까우면 보정을
+   * **끕니다**(적 쪽으로 돌리지 않습니다). 통 쪽으로 억지로 돌리지도
+   * 않습니다 — 통은 안 움직이므로 겨누기 쉬운 대상이고, 도와줄 이유가
+   * 없습니다. 필요한 것은 **방해하지 않는 것**뿐입니다.
+   */
+  const bids = barrels.run()
+  for (let i = 0; i < barrels.count; i++) {
+    const b = bids[i]
+    if (Health.hp[b] <= 0) continue
+    const dx = Transform.x[b] - px
+    const dz = Transform.z[b] - pz
+    const dist = Math.hypot(dx, dz)
+    if (dist < 0.0001 || dist > maxDist + Body.radius[b]) continue
+    let off = Math.atan2(dx, dz) - aimRot
+    while (off > Math.PI) off -= Math.PI * 2
+    while (off < -Math.PI) off += Math.PI * 2
+    if (Math.abs(off) < bestOff) return { rot: aimRot, dist: Infinity }
+  }
+
   return { rot: bestRot, dist: bestDist }
 }
 
