@@ -92,9 +92,28 @@
       }
       #vials { margin-top: 6px; font-size: 12px; color: #d8e2f0; letter-spacing: 0.02em; }
       #vials .dim { color: #7d8798; font-size: 11px; }
+      /*
+        ── 🔥 **화톳불/모루 안내를 아래에서 왼쪽으로** ────────────────────
+        `bottom: 148px` 이었고, 스킬바를 **273×63px 만큼 덮고** 있었습니다.
+        시작 화면 스크린샷에서 「성수병 강화 — 불티 0/60」이 Q·E·R·F 버튼에
+        잘려 있는 것이 그것입니다.
+
+        아래 가운데는 이미 꽉 찼습니다 — `colorHint`(bottom 262px)와
+        `loadout`(top 509px) 사이에 남는 띠가 **39px** 인데 이 패널은
+        110px 입니다. **자리를 옮기는 것 말고는 답이 없습니다.**
+
+        왼쪽 위, 체력·스태미나·성수병·불티 아래로 y 108 부터가 통째로
+        비어 있습니다. 그리고 이 패널이 말하는 것(성수병 강화 · 무기 강화 ·
+        남은 불티)은 **전부 그 자원들의 이야기**라, 같은 기둥에 모이는 것이
+        오히려 맞습니다.
+
+        ⚠️ 전투 중에 읽는 패널이 아닙니다 — 화톳불/모루 앞에 **서 있을 때만**
+           뜹니다. 그래서 주변 시야로 밀어도 잃는 것이 없습니다. 전투 중에
+           읽어야 하는 것(4색 대응 안내)은 가운데 그대로 둡니다.
+      */
       #restHint {
-        position: absolute; left: 50%; bottom: 148px; transform: translateX(-50%);
-        display: none; text-align: center; font-size: 12px; color: #ffd9a0;
+        position: absolute; left: 18px; top: 120px;
+        display: none; text-align: left; font-size: 12px; color: #ffd9a0;
         background: rgba(12,14,20,0.72); padding: 6px 14px; border-radius: 8px;
         border: 1px solid rgba(255,169,60,0.35); pointer-events: none;
       }

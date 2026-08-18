@@ -148,40 +148,80 @@ try {
     await page.evaluate(async () => {
       await window.__t.runFor(0.4)
     })
-    const idle = await panelsNow()
-    const bossAt = await page.evaluate(async () => {
-      const G = window.__game
-      const boss = G.levelFoes().find((f) => f.kind === 'boss')
-      G.teleportPlayer(boss.x - 6, boss.z)
-      await window.__t.runFor(2.5)
-      return document.getElementById('bossBar')?.style.display === 'block'
-    })
-    const fight = await panelsNow()
-    const idleBad = overlapsOf(idle)
-    const fightBad = overlapsOf(fight)
-    console.log(
-      `  [${size.name}] 평소 조각 ${idle.length}개 · 보스전 ${fight.length}개(보스 바 ${bossAt ? '떠 있음' : '안 뜸'})` +
-        ` — 겹침 ${idleBad.length} / ${fightBad.length}`,
-    )
-    for (const o of [...idleBad, ...fightBad].slice(0, 4)) {
-      console.log(`      ❗ ${o.a} ↔ ${o.b} — ${o.w}×${o.h}px 겹침`)
+    /**
+     * ── 🎬 **패널이 뜨는 상황을 하나씩 만들어 봅니다** ──────────────────
+     *
+     * ⚠️ 첫 판은 「평소」와 「보스전」 둘만 봤고 **10/10 초록**이었습니다.
+     *    그런데 시작 화면 스크린샷을 보니 **화톳불 안내가 스킬바에 잘려**
+     *    있었습니다. 그 패널은 화톳불 앞에서만 뜨는데, 프로브가 그 상황을
+     *    한 번도 안 만들었던 것입니다.
+     *
+     *    HUD 의 조각은 **대부분 조건부로 뜹니다.** 안 띄워 놓고 "안 겹친다"
+     *    를 확인하는 것은 **없는 것을 재는 것**입니다. 이 저장소가 계속
+     *    적어 온 그대로 — 못 잰 것은 통과가 아닙니다.
+     */
+    const states = [
+      { name: '평소', go: async () => {} },
+      {
+        name: '화톳불 앞',
+        go: async () => {
+          const G = window.__game
+          // 자리는 게임에게 묻습니다 — 좌표를 여기 적으면 지도를 손보는 날
+          // 이 상황이 조용히 안 만들어지고, 검사는 초록인 채로 남습니다.
+          const f = G.nearestBonfire()
+          if (f) G.teleportPlayer(f.x, f.z)
+          await window.__t.runFor(1.2)
+        },
+      },
+      {
+        name: '모루 앞',
+        go: async () => {
+          const G = window.__game
+          const a = G.anvils()[0]
+          G.teleportPlayer(a.x, a.z)
+          await window.__t.runFor(1.2)
+        },
+      },
+      {
+        name: '보스전',
+        go: async () => {
+          const G = window.__game
+          const b = G.levelFoes().find((f) => f.kind === 'boss')
+          G.teleportPlayer(b.x - 6, b.z)
+          await window.__t.runFor(2.5)
+        },
+      },
+    ]
+    const seen = []
+    for (const st of states) {
+      await page.evaluate(st.go)
+      const panels = await panelsNow()
+      seen.push({ name: st.name, panels, bad: overlapsOf(panels) })
     }
-    check(
-      idle.length >= 5 && fight.length >= 5,
-      `🚧 [${size.name}] HUD 조각을 실제로 읽었다 (비교의 게이트)`,
-      `평소 ${idle.length}개 · 보스전 ${fight.length}개`,
+    console.log(
+      `  [${size.name}] ${seen.map((r) => `${r.name} ${r.panels.length}개(겹침 ${r.bad.length})`).join(' · ')}`,
     )
+    for (const r of seen) {
+      for (const o of r.bad.slice(0, 3)) {
+        console.log(`      ❗ [${r.name}] ${o.a} ↔ ${o.b} — ${o.w}×${o.h}px 겹침`)
+      }
+    }
+    /**
+     * 🚧 **패널이 실제로 늘어났는지** 봅니다. 조건부 패널이 안 떴는데
+     *    "안 겹친다"가 나오면 그건 초록이 아니라 **빈 화면**입니다.
+     */
+    const idleCount = seen[0].panels.length
+    const grew = seen.slice(1).filter((r) => r.panels.length > idleCount).length
     check(
-      bossAt,
-      `🚧 [${size.name}] **보스 바가 실제로 떠 있는 상태**에서 쟀다 (안 뜨면 그 자리를 영영 못 봅니다)`,
-      bossAt ? '떠 있음' : '안 뜸',
+      seen.every((r) => r.panels.length >= 4) && grew >= 2,
+      `🚧 [${size.name}] **상황마다 패널이 실제로 늘었다** (안 띄워 놓고 통과하지 않게)`,
+      seen.map((r) => `${r.name} ${r.panels.length}`).join(' · '),
     )
+    const allBad = seen.flatMap((r) => r.bad.map((o) => ({ ...o, at: r.name })))
     check(
-      idleBad.length === 0 && fightBad.length === 0,
+      allBad.length === 0,
       `🖥 [${size.name}] **HUD 조각이 서로 안 가린다**`,
-      idleBad.length + fightBad.length === 0
-        ? '겹침 없음'
-        : [...idleBad, ...fightBad].map((o) => `${o.a}↔${o.b}`).join(' · '),
+      allBad.length === 0 ? '겹침 없음' : allBad.map((o) => `[${o.at}] ${o.a}↔${o.b}`).join(' · '),
     )
     // 다음 크기를 재기 전에 되돌립니다 — 보스전 상태가 남으면 "평소"가 평소가 아닙니다.
     await page.evaluate(() => window.__game.resetProgress())
