@@ -417,7 +417,7 @@ async function main() {
         const t0 = G.state().elapsed
         while (G.state().elapsed - t0 < 2) {
           const m = G.moveInfo()
-          if (m.rollWindowT > 0) {
+          if (m.rollWindowOpen) {
             opened = m
             break
           }
@@ -436,7 +436,15 @@ async function main() {
         const t1 = G.state().elapsed
         while (G.state().elapsed - t1 < 4) {
           const m = G.moveInfo()
-          if (m.rollWindowT === 0) {
+          /**
+           * ⚠️ **`rollWindowT === 0` 으로 묻지 않습니다.** 그 값은 보기 좋으라고
+           *    `toFixed(3)` 으로 깎여 나옵니다 — 남은 창이 0.0004초면 정확히
+           *    0 으로 보이는데, `pending` 은 깎지 않은 원본을 보므로 아직
+           *    「구르기 공격」입니다. 한 번의 호출 안에서 두 값이 모순된
+           *    말을 하고, 그래서 이 검사가 판마다 오갔습니다(129 → 128 → …).
+           *    **게임이 반올림한 숫자로 게임에게 되묻고 있었습니다.**
+           */
+          if (!m.rollWindowOpen) {
             closed = m
             break
           }
@@ -446,13 +454,13 @@ async function main() {
       })
       check(
         '구른 직후엔 **구르기 공격**이 열린다',
-        rollWin.opened?.pending === '구르기 공격' && rollWin.opened?.rollWindowT > 0,
+        rollWin.opened?.pending === '구르기 공격' && rollWin.opened?.rollWindowOpen === true,
         `"${rollWin.opened?.pending}" · 창 ${rollWin.opened?.rollWindowT}초`,
       )
       check(
         '창이 지나면 도로 1타 (상시 기술이 아니다)',
         rollWin.closed?.pending === '1타',
-        `"${rollWin.closed?.pending}"`,
+        `"${rollWin.closed?.pending}" · 남은 창 ${rollWin.closed?.rollWindowT}초`,
       )
 
       // ④ 달리는 중 — 거리를 좁히는 기술로 바뀝니다.

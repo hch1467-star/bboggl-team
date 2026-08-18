@@ -5034,6 +5034,8 @@ class Game {
     current: string
     /** 🤸 구르기 공격 창의 남은 시간(초) */
     rollWindowT: number
+    /** 🎲 창이 열려 있는가 — 반올림한 `rollWindowT` 로 규칙을 되묻지 않게. */
+    rollWindowOpen: boolean
     /** 🏃 달리는 중인가 */
     sprinting: boolean
     /** 규칙값 — 프로브가 베끼지 않게 */
@@ -5073,6 +5075,24 @@ class Game {
       pending: nameOf(contextComboIndex(p, isSprinting(p))),
       current: st === ActorState.Attack ? nameOf(Actor.comboIndex[p]) : '',
       rollWindowT: Number(Player.rollAttackT[p].toFixed(3)),
+      /**
+       * ── 🎲 **창이 열려 있는가 — 반올림한 숫자로 되묻지 않게** ────────────
+       *
+       * `rollWindowT` 는 보기 좋으라고 `toFixed(3)` 으로 깎아서 냅니다.
+       * 그런데 남은 창이 0.0004초면 그 값이 **정확히 0** 이 됩니다. 반면
+       * `pending` 은 `contextComboIndex` 가 **깎지 않은 원본**을 보므로
+       * 아직 「구르기 공격」입니다. 두 값이 한 번의 호출 안에서 서로
+       * **모순된 말**을 하는 셈입니다.
+       *
+       * `verify` 의 *"창이 지나면 도로 1타"* 가 판마다 오가던 것이
+       * 이것이었습니다(129 → 128 → 129 → 128). 게임은 멀쩡했고, **계측기가
+       * 자기가 반올림해 놓은 숫자로 규칙을 되물었습니다.**
+       *
+       * 그래서 게임이 직접 답합니다. 프로브가 `=== 0` 으로 규칙을 다시
+       * 만들 필요가 없어집니다 — 이 저장소가 여러 번 배운 그 규칙입니다:
+       * **재는 쪽이 규칙을 다시 쓰면 언젠가 갈라집니다.**
+       */
+      rollWindowOpen: Player.rollAttackT[p] > 0,
       sprinting: isSprinting(p),
       rollWindow: PLAYER_CFG.contextAttack.rollWindow,
       runReach: Number((runningStep(w).range + runningStep(w).lunge).toFixed(2)),
@@ -5441,6 +5461,8 @@ declare global {
         pending: string
         current: string
         rollWindowT: number
+        /** 🎲 창이 열려 있는가 — 반올림한 숫자로 규칙을 되묻지 않게. */
+        rollWindowOpen: boolean
         sprinting: boolean
         rollWindow: number
         runReach: number

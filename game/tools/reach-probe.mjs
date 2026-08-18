@@ -239,7 +239,8 @@ try {
         G.press('Space')
         G.release('Space')
         const t = G.state().elapsed + 2
-        while (G.state().elapsed < t && G.moveInfo().rollWindowT === 0) await sleep2()
+        // 🎲 반올림한 값이 아니라 게임의 판단으로 기다립니다.
+        while (G.state().elapsed < t && !G.moveInfo().rollWindowOpen) await sleep2()
         const i = G.enemyInfo(e)
         if (i) {
           G.teleportPlayer(i.x - 1.2, i.z)

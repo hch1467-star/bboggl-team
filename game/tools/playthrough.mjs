@@ -1935,7 +1935,9 @@ try {
           await sleep()
           continue
         }
-        if (mv.rollWindowT > 0 && near.dist <= 2.6) {
+        // 🎲 창의 열림은 **게임이 답합니다** — 반올림한 `rollWindowT` 로
+        // 되물으면 부동소수 찌꺼기에서 어긋납니다(guard 가 봅니다).
+        if (mv.rollWindowOpen && near.dist <= 2.6) {
           markAct('구르기공격')
           G.aimAtWorld(near.x, near.z)
           tap('Mouse0')

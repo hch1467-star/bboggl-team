@@ -572,5 +572,63 @@ check(
   )
 }
 
+/**
+ * ── 🎲 **반올림한 값으로 규칙을 되묻지 않는가** ────────────────────────
+ *
+ * ── 여기서 검사 하나가 몇 판씩 거짓말을 했습니다 ──────────────────────
+ * `moveInfo().rollWindowT` 는 보기 좋으라고 `toFixed(3)` 으로 깎여 나옵니다.
+ * `verify` 는 그 값이 `=== 0` 이면 창이 닫혔다고 읽었습니다. 그런데 같은
+ * 호출의 `pending` 은 **깎지 않은 원본**을 봅니다. 둘이 어긋나는 자리가
+ * 실제로 있었습니다:
+ *
+ *     창 0.35초를 dt 0.05 로 일곱 번 빼면 부동소수 찌꺼기 3e-17 이 남습니다.
+ *     `Math.max(0, …)` 는 그 찌꺼기를 **그대로 둡니다.**
+ *     → `toFixed(3)` 은 "0.000" · `> 0` 은 **참**.
+ *
+ * 이 컨테이너는 프레임 dt 가 정확히 0.05 로 잘려서 이 일이 **자주** 납니다.
+ * 그래서 *"창이 지나면 도로 1타"* 가 판마다 오갔습니다(129 → 128 → …).
+ * 게임은 멀쩡했고, 프로브가 **게임이 반올림해 준 숫자로 게임에게 되물은**
+ * 것이 원인이었습니다.
+ *
+ * 고친 방법은 이 저장소의 규칙 그대로입니다 — 판단을 게임에게 맡깁니다
+ * (`rollWindowOpen`). 그리고 다시 그러지 않도록 기계가 봅니다.
+ *
+ * ⚠️ 못 잡는 것: 다른 이름의 반올림 값에 같은 짓을 하는 것. 기계가 볼 수
+ *    있는 것은 **데인 자리**뿐이고, 완벽한 검사보다 그게 먼저입니다.
+ */
+{
+  const files = []
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (f.name === 'node_modules' || f.name.startsWith('.')) continue
+      const full = path.join(dir, f.name)
+      if (f.isDirectory()) walk(full)
+      else if (/\.mjs$/.test(f.name)) files.push(full)
+    }
+  }
+  walk(HERE)
+  const bad = []
+  let seen = 0
+  for (const f of files) {
+    /**
+     * ⚠️ **주석은 뺍니다.** 안 빼면 *"이렇게 쓰지 마세요"* 라고 적어 둔
+     *    설명글까지 위반으로 셉니다 — 실제로 그렇게 한 번 빨개졌습니다.
+     *    검사가 자기를 설명하는 글을 잡으면, 다음 사람은 설명을 지웁니다.
+     */
+    const src = readFileSync(f, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '')
+    for (const m of src.matchAll(/rollWindowT\s*(===|==|!==|!=|>|<)\s*0/g)) {
+      seen++
+      bad.push(`${path.basename(f)}: rollWindowT ${m[1]} 0`)
+    }
+  }
+  check(
+    bad.length === 0,
+    '🎲 반올림해 낸 값(`rollWindowT`)으로 **창의 열림을 판단하지 않는다** (게임에게 물어보십시오 — `rollWindowOpen`)',
+    bad.length ? `${bad.length}곳 — ${[...new Set(bad)].slice(0, 3).join(' | ')}` : `프로브 ${files.length}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)
