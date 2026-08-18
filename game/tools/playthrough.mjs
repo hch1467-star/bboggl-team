@@ -262,6 +262,24 @@ try {
     let stuckSince = t0
     let lastPos = G.state().player
     let lastKills = 0
+    /**
+     * ── 🧭 **끼인 것과 왔다 갔다 한 것은 다릅니다** ─────────────────────
+     *
+     * 막힘 판정은 `moved > 1.5`, 즉 **순 이동**만 봅니다. 그래서 두 가지가
+     * 같은 기록으로 남습니다:
+     *
+     *   · 지형에 **끼여** 한 발도 못 뗀 것        → 지도·충돌의 이야기
+     *   · 두 목표 사이를 **왕복**한 것(제자리걸음) → 봇 정책의 이야기
+     *
+     * 처방이 정반대인데 로그가 같으면 고를 수가 없습니다. 실제로 무너진
+     * 회랑에서 25초 막힘이 **여섯 판**이나 났는데, `[보물이동×76 강화이동×14]`
+     * 라는 기록만으로는 "길이 없다"인지 "목표가 진동한다"인지 몰랐습니다.
+     *
+     * 그래서 **걸은 거리**를 따로 더합니다. 순 이동과 나란히 놓으면 갈립니다:
+     * 걸은 거리도 0에 가까우면 끼인 것이고, 걸은 거리만 크면 왕복입니다.
+     */
+    let walkedSince = 0
+    let prevPos = G.state().player
     const regionLog = []
     /** 구역별 받은 피해와 머문 시간 — 난이도 곡선을 보기 위해 */
     const regionDanger = {}
@@ -700,12 +718,15 @@ try {
        * **"움직이지도, 아무것도 죽이지도 못한 시간"** 을 봅니다.
        */
       {
+        walkedSince += Math.hypot(p.x - prevPos.x, p.z - prevPos.z)
+        prevPos = p
         const moved = Math.hypot(p.x - lastPos.x, p.z - lastPos.z)
         const kills = G.runStats().kills
         if (moved > 1.5 || kills > lastKills) {
           lastPos = p
           lastKills = kills
           stuckSince = now()
+          walkedSince = 0
         } else if (now() - stuckSince > 25) {
           const recent = new Map()
           for (const a of recentActs) recent.set(a, (recent.get(a) ?? 0) + 1)
@@ -719,6 +740,8 @@ try {
             x: p.x,
             z: p.z,
             detail:
+              `순 이동 ${moved.toFixed(1)}m 인데 **걸은 거리 ${walkedSince.toFixed(1)}m**` +
+              ` (걸은 거리도 0에 가까우면 **끼임**, 크면 **왕복**) · ` +
               `직전 ${recentActs.length}프레임 [${[...recent.entries()]
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, v]) => `${k}×${v}`)
@@ -2952,6 +2975,7 @@ try {
       bleedDiedWithMax: G.runStats().bleedDiedWithMax,
       bleedDiedBuiltAvg: G.runStats().bleedDiedBuiltAvg,
       bleedDiedHitsAvg: G.runStats().bleedDiedHitsAvg,
+      bossTime: G.runStats().bossTime,
       inputExpired: G.runStats().inputExpired,
       // 버려진 것을 **종류별로** 나눠 적습니다 — 셋의 처방이 서로 다릅니다
       // (근거: playerControl.ts `inputFlow`).
@@ -3778,6 +3802,30 @@ try {
     `                 손익분기 간격 — ${(log.bleedBreakEven ?? [])
       .map((w) => `${w.id} ${w.gap}초`)
       .join(' · ')}  ← 평균 간격이 이보다 크면 **영원히 안 찹니다**\n` +
+    /**
+     * ── ⚔️ **보스전에서 내 시간이 어디로 갔는가** ──────────────────────
+     *
+     * 적 쪽 분해(`적이 실제로 한 일`)는 오래전부터 있었는데 **내 쪽이
+     * 없었습니다.** 그래서 "보스 타격 간격이 판마다 1.0초와 3.20초를
+     * 오간다"까지만 알고 이유를 못 물었습니다.
+     *
+     * 읽는 법 — 큰 칸이 곧 처방입니다:
+     *   · 구르기·가드가 크면 → **창 설계**(예고가 잦거나 창이 짧다)
+     *   · 닿는데 대기가 크면 → 그중 **기력** 몫을 보십시오(경제 이야기)
+     *   · 접근이 크면       → 보스가 자꾸 멀어지거나 내 이동이 느립니다
+     *   · 마심이 크면       → 회복 규칙이 전투를 끊고 있습니다
+     */
+    `              ⚔️ 그동안 나는 — ${(() => {
+      const bt = log.bossTime ?? {}
+      const T = bt.total ?? 0
+      if (T <= 0) return '보스전 없음'
+      const pct = (v) => `${Math.round(((v ?? 0) / T) * 100)}%`
+      return (
+        `깨어 ${T.toFixed(1)}초 중 공격 ${pct(bt.attack)} · 구르기 ${pct(bt.dodge)}` +
+        ` · 가드 ${pct(bt.guard)} · 경직 ${pct(bt.stagger)} · 마심 ${pct(bt.drink)}` +
+        ` · 접근 ${pct(bt.chase)} · 닿는데 대기 ${pct(bt.ready)}(그중 기력 ${pct(bt.readyNoStamina)})`
+      )
+    })()}\n` +
     `              📊 보스를 녹인 것 (1/2/3단계) — ${Object.entries(log.bossDamageBySource ?? {})
       .filter(([, v]) => v.reduce((a, b) => a + b, 0) > 0)
       .sort((a, b) => b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0))

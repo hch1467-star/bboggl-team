@@ -311,6 +311,51 @@ class Game {
   private readonly foeLastSwing = new Map<number, string>()
 
   /**
+   * ── ⚔️ **보스전에서 나는 무엇을 하고 있었나** ────────────────────────
+   *
+   * ── 왜 이게 없어서 막혔는가 ──────────────────────────────────────
+   * 적이 무엇을 했는지는 이미 잽니다 — *"보스 깨어 75.6초 중 공격 50% ·
+   * 경직 1% · 쿨 22% · 접근 7% · 사거리 안 대기 17%"*. 그런데 **내가**
+   * 무엇을 했는지는 한 줄도 없습니다.
+   *
+   * 그래서 출혈을 쫓다가 막혔습니다. 보스 타격 간격이 판마다 **1.0초와
+   * 3.20초** 사이를 오가는데(그 차이가 출혈이 터지느냐 마느냐를 가릅니다),
+   * *"왜 어떤 판은 못 붙어 있는가"* 에 답할 값이 없었습니다. 후보는 넷이고
+   * 처방이 전부 다릅니다 — 예고를 피하느라(창 설계) · 기력이 없어서(경제) ·
+   * 거리가 멀어서(이동·보스 이동) · 마시느라(회복 규칙).
+   *
+   * ── 적 쪽과 **같은 모양**으로 나눕니다 ────────────────────────────
+   * 위 `foeSwingLog` 가 적의 시간을 코드의 분기 그대로 갈랐듯이, 여기서도
+   * 플레이어 상태 기계의 분기 그대로 가릅니다. 추측한 이름으로 나누면
+   * 숫자가 나와도 어느 코드를 고쳐야 할지 모릅니다.
+   *
+   * ⚠️ 시뮬레이션 시간으로 더합니다 — 벽시계로 재면 10fps 컨테이너에서
+   *    **프레임 수를 재는 것**이 됩니다.
+   */
+  private bossTime: {
+    total: number
+    attack: number
+    dodge: number
+    guard: number
+    stagger: number
+    drink: number
+    chase: number
+    /** 닿는 거리인데 안 때린 시간 — 그중 기력이 없던 몫을 따로 셉니다. */
+    ready: number
+    readyNoStamina: number
+  } = {
+    total: 0,
+    attack: 0,
+    dodge: 0,
+    guard: 0,
+    stagger: 0,
+    drink: 0,
+    chase: 0,
+    ready: 0,
+    readyNoStamina: 0,
+  }
+
+  /**
    * ── 🩸 **피격 장부** — 맞은 한 대마다 "공정했는가"를 적습니다 ──────
    *
    * DESIGN.md 기둥 2의 합격 기준은 프로젝트 내내 여섯 군데에 적혀 있습니다:
@@ -714,6 +759,18 @@ class Game {
     this.hurtWatch.clear()
     this.justGuards = 0
     this.bleedPops = 0
+    // ⚔️ 보스전 시간 분해도 판마다 비웁니다 — 안 비우면 두 판이 섞입니다.
+    this.bossTime = {
+      total: 0,
+      attack: 0,
+      dodge: 0,
+      guard: 0,
+      stagger: 0,
+      drink: 0,
+      chase: 0,
+      ready: 0,
+      readyNoStamina: 0,
+    }
     resetBleedPeak()
     resetPoiseDealt()
     resetFocusFlow()
@@ -1926,6 +1983,36 @@ class Game {
     this.hud.setEmbers(Player.embers[p])
     if (this.bossEntity >= 0 && isAlive(this.bossEntity) && Health.hp[this.bossEntity] > 0) {
       const b = this.bossEntity
+      /**
+       * ⚔️ **내 시간의 분해** — 적 쪽(`foeSwingLog`)과 같은 모양입니다.
+       * 설계 근거는 `bossTime` 선언부에 적어 뒀습니다. 한 줄로: 보스에게
+       * 못 붙는 이유의 후보가 넷인데 처방이 전부 달라서, 코드의 분기
+       * 그대로 갈라 놔야 숫자가 처방이 됩니다.
+       */
+      if (playerAlive) {
+        const bt = this.bossTime
+        bt.total += time.dt
+        const st = Actor.state[p] as ActorState
+        if (st === ActorState.Attack || st === ActorState.Skill) bt.attack += time.dt
+        else if (st === ActorState.Dodge) bt.dodge += time.dt
+        else if (st === ActorState.Stagger) bt.stagger += time.dt
+        else if (st === ActorState.Drink) bt.drink += time.dt
+        else if (Player.guardT[p] > 0) bt.guard += time.dt
+        else {
+          // 남은 시간을 **거리로 한 번 더 가릅니다** — 적 쪽과 같은 이유로.
+          // 뭉쳐 놓으면 "멀어서 못 때림"과 "닿는데 안 때림"이 섞이는데,
+          // 처방이 정반대입니다(배치·이동 vs 창·기력).
+          const d = Math.hypot(Transform.x[b] - Transform.x[p], Transform.z[b] - Transform.z[p])
+          if (d > longestPlayerReach() + Body.radius[b]) bt.chase += time.dt
+          else {
+            bt.ready += time.dt
+            // 닿는데 안 때린 그 시간 중 **기력이 없던 몫**. 이게 크면
+            // 창 설계가 아니라 경제 이야기입니다.
+            if (!canAffordAttack(p, WEAPONS[Loadout.weapon[p]].combo[0].staminaCost))
+              bt.readyNoStamina += time.dt
+          }
+        }
+      }
       this.hud.setBoss(
         enemyDef(Enemy.kind[b]).name,
         Health.hp[b] / Math.max(1, Health.max[b]),
@@ -4003,6 +4090,21 @@ class Game {
     bleedDiedBuiltAvg: number
     /** 🩸 죽기까지 맞은 횟수의 평균 — 쌓은 총량의 **분모**. */
     bleedDiedHitsAvg: number
+    /**
+     * ⚔️ **보스전에서 내가 무엇을 했는가.** 적 쪽 분해는 이미 있었는데
+     * 내 쪽이 없어서, "왜 못 붙어 있는가"에 답할 값이 없었습니다.
+     */
+    bossTime: {
+      total: number
+      attack: number
+      dodge: number
+      guard: number
+      stagger: number
+      drink: number
+      chase: number
+      ready: number
+      readyNoStamina: number
+    }
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
     bossBleedPeak: number
     bossBleedPops: number
@@ -4062,6 +4164,8 @@ class Game {
       bleedDiedWithMax: Number(readBleedPeak().diedWithMax.toFixed(1)),
       bleedDiedBuiltAvg: Number(readBleedPeak().diedBuiltAvg.toFixed(1)),
       bleedDiedHitsAvg: Number(readBleedPeak().diedHitsAvg.toFixed(1)),
+      /** ⚔️ 보스전에서 **내** 시간이 어디로 갔는가 (초, 시뮬레이션 시간). */
+      bossTime: { ...this.bossTime },
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
       bossBleedPops: readBleedPeak().bossPops,
