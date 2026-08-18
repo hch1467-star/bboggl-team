@@ -482,6 +482,28 @@ try {
      */
     let lastFireWallet = { embers: -1, stones: -1 }
     let fireCooldownUntil = 0
+    /**
+     * ── 💰 **무기 몫** — 규칙을 **한 곳에만** 둡니다 ────────────────────
+     *
+     * 정련석이 다음 단계에 충분하면, 그 단계의 불티는 성수병에 안 씁니다
+     * (근거는 아래 구매 블록의 「정련석을 쥐고 있으면」 주석).
+     *
+     * ⚠️ 이 함수가 생긴 이유가 곧 사고 기록입니다. 예전에는 이 규칙이
+     *    **구매 블록에만** 있었고, *"갈 이유가 있는가"* 를 정하는 위쪽
+     *    관문은 그 규칙을 몰랐습니다. 그래서:
+     *
+     *      관문 : 불티 68 ≥ 성수병 60 → **갈 이유 있음**
+     *      구매 : 68 − 무기몫 80 = −12 → **아무것도 못 삼**
+     *
+     *    봇은 모루에 도착해서 아무것도 못 사고, 관문은 여전히 참이라
+     *    2.5초마다 다시 도착했습니다 — 한 판에서 **25초**를 그 자리에
+     *    서 있었고(막힘 감지가 그제서야 잡았습니다), 그 25초는 그 판의 8%
+     *    입니다. 벤치의 판별력을 통째로 갉아먹던 자리입니다.
+     *
+     *    이 저장소가 몇 번이나 적어 둔 그 모양입니다 — **같은 판단을 두 곳에
+     *    적으면 언젠가 갈라집니다.** 갈라지면 사이에서 봇이 진동합니다.
+     */
+    const emberReserveOf = (w) => (w.nextCost > 0 && w.stones >= w.nextStoneCost ? w.nextCost : 0)
     /** 직전에 접은 소비처 — 같은 것을 연달아 접는 것은 한 사건입니다. */
     let lastSkipKey = ''
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
@@ -2331,7 +2353,11 @@ try {
       // 도착해서 아무것도 못 하고 그 자리를 맴돕니다.
       const canUpgradeWeapon =
         wu.nextCost > 0 && em.embers >= wu.nextCost && wu.stones >= wu.nextStoneCost
-      const canUpgrade = (em.upgradeCost > 0 && em.embers >= em.upgradeCost) || canUpgradeWeapon
+      // ⚠️ 성수병도 **구매와 같은 규칙**으로 봅니다(무기 몫을 빼고 남는 것으로).
+      //    안 그러면 "갈 이유"와 "살 수 있음"이 갈라져 봇이 소비처 위에서 진동합니다.
+      const canUpgradeVial =
+        em.upgradeCost > 0 && em.embers - emberReserveOf(wu) >= em.upgradeCost
+      const canUpgrade = canUpgradeVial || canUpgradeWeapon
       const needsSupply = vi.vials === 0 || p.hp < 45
       // ⚠️ **보급은 화톳불에서만** 됩니다. 모루로 걸어가서 성수병을 기다리면
       // 영원히 안 찹니다 — 물건이 나뉘었으니 목적지도 나뉘어야 합니다.
@@ -2919,8 +2945,8 @@ try {
            */
           const em2 = G.emberInfo()
           const w3 = G.weaponUpgradeInfo()
-          const reserve =
-            w3.nextCost > 0 && w3.stones >= w3.nextStoneCost ? w3.nextCost : 0
+          // 규칙은 위 `emberReserveOf` 한 곳에만 — 여기서 다시 쓰면 갈라집니다.
+          const reserve = emberReserveOf(w3)
           if (reserve > 0) visit.reserved = reserve
           if (
             em2.upgradeCost > 0 &&
