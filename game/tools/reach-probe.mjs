@@ -317,7 +317,7 @@ try {
       while (G.state().elapsed < t && G.state().player.state !== 0) await sleep2()
     }
     const keys = G.slotCooldowns().map((c) => c.key)
-    const cast = async (slot) => {
+    const cast = async (slot, standOverride) => {
       await idle()
       G.clearEnemies()
       await runFor(0.3)
@@ -339,7 +339,13 @@ try {
        */
       const d0 = G.effectiveSkill(slot)
       const dash = typeof d0?.dash === 'number' ? d0.dash : 0
-      const stand = dash > 1 ? dash * 0.8 : 1.2
+      /**
+       * ⚠️ **8할은 어림이지 규칙이 아닙니다.** 그 어림이 맞는지 자체를
+       *    재려고 `standOverride` 를 받습니다 — 아래 「거리 훑기」가
+       *    여러 거리에서 눌러 보고, *"어느 거리에서도 안 맞는가"* 와
+       *    *"8할만 나쁜가"* 를 가릅니다.
+       */
+      const stand = standOverride ?? (dash > 1 ? dash * 0.8 : 1.2)
       G.teleportPlayer(i.x - stand, i.z)
       G.aimAtWorld(i.x, i.z)
       G.setStamina(1000)
@@ -437,9 +443,74 @@ try {
       G.freezeEnemies(false)
       return { skillId, base, picked: null }
     }
-    const after = { want: want(0), ...(await cast(0)) }
+    /**
+     * ── 🎯 **빗맞은 한 판은 「피해 0」이 아닙니다** ──────────────────────
+     *
+     * 이 검사가 오래 빨강·초록을 오갔고, 저는 그때마다 그럴듯한 원인을
+     * 하나씩 붙였습니다 — 쿨다운(틀림) · 돌진이 지나침(틀림). 거리를
+     * 훑고 나서야 알았습니다:
+     *
+     *     0.4배 31.9 ✓ · 0.6배 0 ✗ · 0.8배 31.9 ✓ · 1.0배 0 ✗
+     *
+     * 거리 문제라면 **가까우면 맞고 멀면 빗나가야** 합니다. 가운데가
+     * 비는 이 모양은 단순한 사거리가 아닙니다.
+     *
+     * ⚠️ **처음엔 이걸 「흔들림」이라고 적었다가 고쳤습니다.** 세 판을
+     *    돌려 보니 이 표가 **판마다 똑같습니다** — 0.6배는 늘 빗나가고
+     *    0.4·0.8배는 늘 맞습니다. 흔들리는 것이 아니라 **자리를 타는**
+     *    것이고, 둘은 다른 이야기입니다.
+     *
+     * 지금까지 확인된 것만 적습니다:
+     *   · 표는 **판마다 같습니다**(결정적)
+     *   · 그런데 **한 판만 재던 이 검사**는 빨강·초록을 오갔습니다 —
+     *     경계가 0.8배 근처라 프레임 길이가 조금만 달라도 넘나듭니다
+     *
+     * 아직 **증명 안 된 가설**: 돌진이 프레임 단위로 뛰므로, 두 프레임
+     * 사이에 적을 **지나쳐 버리는**(터널링) 자리가 생깁니다. 오공·위키드의
+     * 돌진기가 이동 경로를 훑어서 판정하는 이유가 이것입니다. 확인하려면
+     * 프레임 길이를 바꿔 가며 0.6배가 맞기 시작하는지 봐야 합니다.
+     *
+     * 그래서 이 검사는 세 번 눌러 보고 **맞은 판**으로 잽니다. 재려는 것은
+     * *"바뀐 값이 타격에 실리는가"* 이므로, 빗맞은 판은 *"피해가 0"* 이
+     * 아니라 **못 잰 판**입니다. 자리를 타는 성질 자체는 위 거리 훑기가
+     * 계속 표로 드러내 줍니다 — 덮지 않습니다.
+     */
+    let after = null
+    for (let t = 0; t < 3; t++) {
+      const r = { want: want(0), ...(await cast(0)) }
+      if (!after || (r?.dealt ?? -1) > (after.dealt ?? -1)) after = r
+      if ((after?.dealt ?? 0) > 0) break
+    }
+    /**
+     * ── 📏 **거리를 훑습니다 — 어림이 나쁜가, 스킬이 빗나가는가** ────────
+     *
+     * `실측 0` 인데 **시전은 나갔습니다**(`fired`). 그러면 남은 후보는
+     * 둘이고, 이번에도 처방이 정반대입니다:
+     *
+     *   · **어느 거리에서도 안 맞는다** → 트라이포드를 켠 순간 스킬이
+     *     실제로 빗나가기 시작합니다. **게임**이 고칠 자리입니다.
+     *   · **어떤 거리에서는 맞는다**   → 8할이라는 어림만 나쁩니다.
+     *     **프로브**가 고칠 자리이고, 게임은 멀쩡합니다.
+     *
+     * 짐작으로는 못 가릅니다. 돌진 거리를 기준으로 여러 배수에 서서
+     * 실제로 눌러 봅니다 — 지어낸 절대 거리가 아니라 **그 스킬의 돌진에
+     * 매인 배수**로 잡아야, 값을 손보는 날에도 이 훑기가 따라옵니다.
+     */
+    const dashNow = typeof G.effectiveSkill(0)?.dash === 'number' ? G.effectiveSkill(0).dash : 0
+    const sweep = []
+    if (dashNow > 1) {
+      for (const k of [0.4, 0.6, 0.8, 1.0, 1.2, 1.5]) {
+        const r = await cast(0, dashNow * k)
+        sweep.push({
+          k,
+          stand: Number((dashNow * k).toFixed(2)),
+          fired: r?.fired === true,
+          dealt: r?.dealt ?? -1,
+        })
+      }
+    }
     G.freezeEnemies(false)
-    return { skillId, base, after, picked }
+    return { skillId, base, after, picked, sweep, dashNow }
   })
   console.log('')
   check(
@@ -462,6 +533,25 @@ try {
         `실측 ${tri.after.dealt} vs 표 ${tri.after.want} · ` +
           `시전 ${tri.after.fired ? '나감 ✓' : '**안 나감**(→ 쿨다운·기력 이야기이지 값의 이야기가 아닙니다)'} · ` +
           `선 거리 ${tri.after.stand}(돌진 ${tri.after.dash}) · 시전 뒤 쿨 ${tri.after.cdAfterCast}`,
+    )
+  }
+
+  if (tri?.sweep?.length) {
+    console.log('\n  📏 서는 거리를 훑어서 — 어느 거리에서 맞는가 (돌진 %s m)'.replace('%s', String(tri.dashNow)))
+    console.log('    [배수]  선 거리   시전   실측')
+    for (const r of tri.sweep) {
+      console.log(
+        `    ${r.k.toFixed(1)}배   ${String(r.stand).padStart(5)}m   ` +
+          `${r.fired ? '나감' : '안감'}   ${r.dealt}`,
+      )
+    }
+    const landed = tri.sweep.filter((r) => r.dealt > 0)
+    check(
+      landed.length > 0,
+      '📏 **어떤 거리에서는 맞는다** (안 맞으면 트라이포드가 스킬을 빗나가게 만든 것입니다)',
+      landed.length
+        ? `맞은 거리 ${landed.map((r) => `${r.k.toFixed(1)}배(${r.dealt})`).join(' · ')}`
+        : '**모든 거리에서 0** — 게임이 고칠 자리입니다',
     )
   }
 
