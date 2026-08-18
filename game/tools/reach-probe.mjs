@@ -379,15 +379,37 @@ try {
        * 누른 뒤 **한 번이라도 쉬는 자세를 벗어났는가.**
        */
       let fired = false
+      /**
+       * ── 📍 **얼마나 가까이 갔는가 — 짐작 대신 자취** ────────────────────
+       *
+       * 「0.6배는 늘 빗나가고 0.4·0.8배는 늘 맞는다」를 설명하려고 가설을
+       * 또 세울 뻔했습니다(돌진이 지나친다 / 부채꼴 밖으로 나간다). 둘 다
+       * *"가까울수록 더 지나친다"* 를 함의하는데 표는 그 반대입니다.
+       *
+       * 그래서 설명을 만들지 않고 **자취를 남깁니다** — 시전하는 동안
+       * 적까지의 거리를 계속 재서, **가장 가까웠던 거리**와 **맞은 순간의
+       * 거리**를 같이 냅니다. 판정 반경과 견주면 답이 나옵니다:
+       *
+       *   · 가장 가까웠던 거리가 판정 반경보다 **크다**  → 아예 안 닿았습니다
+       *   · 닿을 만큼 갔는데 안 맞았다                  → 각도·프레임의 이야기
+       */
+      let minDist = Infinity
+      let hitDist = -1
+      const distNow = () => {
+        const pp = G.state().player
+        const ei = G.enemyInfo(e)
+        return ei ? Math.hypot(ei.x - pp.x, ei.z - pp.z) : Infinity
+      }
       G.press(keys[slot])
       G.release(keys[slot])
       {
         const tf = G.state().elapsed + 1
         while (G.state().elapsed < tf) {
-          if (G.state().player.state !== 0) {
-            fired = true
-            break
-          }
+          const d = distNow()
+          if (d < minDist) minDist = d
+          if (hitDist < 0 && G.state().hitsDealt !== h0) hitDist = d
+          if (!fired && G.state().player.state !== 0) fired = true
+          if (fired && G.state().player.state === 0) break
           await sleep2()
         }
       }
@@ -412,6 +434,8 @@ try {
          * 이 저장소가 이름 때문에 잘못 읽은 적이 있습니다.
          */
         fired,
+        minDist: Number(minDist.toFixed(2)),
+        hitDist: Number(hitDist.toFixed(2)),
         cdAfterCast: G.slotCooldowns()[slot]?.cd ?? -1,
         stateAfter: G.state().player.state,
         stand: Number(stand.toFixed(2)),
@@ -500,12 +524,30 @@ try {
     const sweep = []
     if (dashNow > 1) {
       for (const k of [0.4, 0.6, 0.8, 1.0, 1.2, 1.5]) {
+        /**
+         * ⚠️ **훑기 사이에도 쿨다운을 기다립니다.**
+         *
+         * 안 기다렸더니 여섯 칸 중 넷이 **아예 시전이 안 된 판**이었고,
+         * 그 0 들이 *"이 거리에서는 빗나간다"* 로 표에 앉았습니다. 그 표를
+         * 보고 저는 「자리를 타는 성질」이라는 결론까지 적었습니다 —
+         * **없는 현상에 이름을 붙인 것**입니다.
+         *
+         * 들킨 방법: 자취를 남기고 나서 `가장 가까웠던 거리 = 선 거리` 인
+         * 줄이 넷이었습니다. 한 발도 안 움직였다는 뜻이고, 안 움직였으면
+         * 빗나간 것이 아니라 **안 나간 것**입니다.
+         */
+        {
+          const tk = G.state().elapsed + 25
+          while (G.state().elapsed < tk && (G.slotCooldowns()[0]?.cd ?? 0) > 0) await sleep2()
+        }
         const r = await cast(0, dashNow * k)
         sweep.push({
           k,
           stand: Number((dashNow * k).toFixed(2)),
           fired: r?.fired === true,
           dealt: r?.dealt ?? -1,
+          minDist: r?.minDist ?? -1,
+          hitDist: r?.hitDist ?? -1,
         })
       }
     }
@@ -538,20 +580,36 @@ try {
 
   if (tri?.sweep?.length) {
     console.log('\n  📏 서는 거리를 훑어서 — 어느 거리에서 맞는가 (돌진 %s m)'.replace('%s', String(tri.dashNow)))
-    console.log('    [배수]  선 거리   시전   실측')
+    console.log('    [배수]  선 거리   시전   실측   가장 가까웠던 거리   맞은 순간')
     for (const r of tri.sweep) {
       console.log(
         `    ${r.k.toFixed(1)}배   ${String(r.stand).padStart(5)}m   ` +
-          `${r.fired ? '나감' : '안감'}   ${r.dealt}`,
+          `${r.fired ? '나감' : '안감'}   ${String(r.dealt).padStart(5)}   ` +
+          `${String(r.minDist).padStart(10)}m   ${r.hitDist < 0 ? '        —' : `${r.hitDist}m`}` +
+          `${r.minDist >= r.stand - 0.1 ? '   ← 안 움직임(못 잼)' : ''}`,
       )
     }
-    const landed = tri.sweep.filter((r) => r.dealt > 0)
+    /**
+     * ── 🚪 **움직이지도 않은 판은 표본이 아닙니다** ────────────────────
+     *
+     * `가장 가까웠던 거리 ≈ 선 거리` 면 돌진이 아예 안 일어난 것입니다.
+     * 그건 *"이 거리에서 빗나갔다"* 가 아니라 **못 잰 판**입니다. 게이트를
+     * 안 세우면 못 잰 판이 빗나간 판인 척 표에 앉고, 거기서 없는 현상에
+     * 이름이 붙습니다(실제로 한 번 붙였습니다).
+     */
+    const moved = tri.sweep.filter((r) => r.minDist >= 0 && r.minDist < r.stand - 0.1)
     check(
-      landed.length > 0,
-      '📏 **어떤 거리에서는 맞는다** (안 맞으면 트라이포드가 스킬을 빗나가게 만든 것입니다)',
+      moved.length >= 3,
+      '📏 훑은 거리 중 **실제로 돌진이 일어난 판**이 셋 이상이다 (비교의 게이트)',
+      `${moved.length}/${tri.sweep.length}칸 — 안 움직인 칸은 빗나감이 아니라 못 잼입니다`,
+    )
+    const landed = moved.filter((r) => r.dealt > 0)
+    check(
+      moved.length >= 3 && landed.length > 0,
+      '📏 **돌진이 일어난 거리에서는 맞는다** (안 맞으면 트라이포드가 스킬을 빗나가게 만든 것입니다)',
       landed.length
         ? `맞은 거리 ${landed.map((r) => `${r.k.toFixed(1)}배(${r.dealt})`).join(' · ')}`
-        : '**모든 거리에서 0** — 게임이 고칠 자리입니다',
+        : '**돌진했는데 모든 거리에서 0** — 게임이 고칠 자리입니다',
     )
   }
 
