@@ -3859,6 +3859,15 @@ class Game {
     sprintViewScale: number
     cameraViewSize: number
     cameraZoom: number
+    /**
+     * 🎥 커서 쪽으로 카메라가 밀리는 **최대 거리(m)**.
+     *
+     * `notice` 프로브가 *"알아채는 적이 화면 안인가"* 를 물을 때, 걸을 때의
+     * 여유가 이 값에서 나옵니다 — 가는 쪽을 보면 그만큼 더 보입니다.
+     * 프로브가 3.2 를 베껴 적으면, 이 값을 손보는 날 검사만 옛 카메라를
+     * 지킵니다.
+     */
+    aimLeadMax: number
     attackTempo: number
     /**
      * 선입력 창(초)과 구르기 시간 — 템포 프로브가 숫자를 베껴 적지 않도록.
@@ -3927,6 +3936,7 @@ class Game {
       sprintViewScale: CAMERA.sprintViewScale,
       cameraViewSize: CAMERA.viewSize,
       cameraZoom: this.cam.currentZoom(),
+      aimLeadMax: CAMERA.aimLeadMax,
       attackTempo: PLAYER_CFG.tempo.attackScale,
       inputBuffer: PLAYER_CFG.tempo.inputBuffer,
       dodgeDuration: PLAYER_CFG.dodge.duration,
@@ -5836,6 +5846,7 @@ declare global {
         sprintViewScale: number
         cameraViewSize: number
         cameraZoom: number
+        aimLeadMax: number
         attackTempo: number
         /** 선입력 창(초) — 템포 프로브가 0.55 를 베껴 적지 않게 */
         inputBuffer: number

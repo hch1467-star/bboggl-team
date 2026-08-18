@@ -341,6 +341,115 @@ try {
     }
   }
 
+  /**
+   * ── 🎥 **화면 밖에서 시작되는 일은 없어야 합니다** ──────────────────
+   *
+   * ── 왜 이 검사가 필요한가 ──────────────────────────────────────
+   * 이 프로브의 나머지는 *"게임이 신호를 그리는가"* 를 봅니다. 그런데
+   * 신호가 **화면 밖에서** 그려지면 그린 적도 없는 것과 같습니다.
+   *
+   * 이 게임에는 서로 모르는 두 숫자가 있습니다:
+   *   · `CAMERA.viewSize` — 화면이 담는 세계의 크기 (읽기 쉬움이 정한 값)
+   *   · 존의 시야 거리 — 적이 나를 알아채는 거리 (전투 리듬이 정한 값)
+   * 둘은 **다른 이유로** 정해졌는데, 지켜야 할 관계가 하나 있습니다:
+   * *"적이 나를 알아채는 순간, 그 적이 화면 안에 있어야 한다."*
+   * 안 그러면 「들킴」 파문도 「못 본 적」 표시도 안 보이는 곳에서
+   * 소비되고, 플레이어에게는 적이 **이미 화난 채로 등장**합니다.
+   *
+   * 아무도 이 관계를 안 적어 뒀고, 재 보니 **2% 차이로 어긋나** 있었습니다.
+   * 우연히 맞거나 틀리는 자리를 그대로 두면, viewSize 나 시야 거리를
+   * 손보는 날 아무 말 없이 깨집니다.
+   *
+   * ── 무엇을 어떻게 재는가 ──────────────────────────────────────
+   * 카메라 행렬은 **게임에게 물어봅니다**(`screenPos`). 여기서 직교 투영을
+   * 흉내 내면, 카메라를 손보는 날 이 검사만 옛 카메라를 지킵니다.
+   * 360 방향으로 한 도씩 걸어 나가며 화면을 벗어나는 거리를 찾습니다.
+   *
+   * ⚠️ 커서는 **플레이어 위에** 둡니다 — 가장 불리한 자리입니다.
+   *    카메라는 커서 쪽으로 최대 `aimLeadMax` 만큼 밀리므로, 실제
+   *    플레이에서는 가는 쪽을 보면 그만큼 더 보입니다. 그 여유를
+   *    **기본값으로 세면 안 됩니다**(플레이어가 안 쓸 수도 있습니다).
+   *
+   * ── 문턱을 둘로 나눈 이유 ─────────────────────────────────────
+   *   ① **달릴 때는 커서 없이도** 모든 방향이 들어와야 합니다. 달리기는
+   *      모르는 땅을 가장 빨리 지나는 상태이고, 시간이 가장 없습니다.
+   *      (그래서 카메라도 달릴 때 넓어집니다 — 그 장치가 정말 갚는지를
+   *       여기서 확인하는 셈입니다.)
+   *   ② **걸을 때는 커서 리드까지 써서** 들어오면 됩니다. 걸음은
+   *      느리고, 가는 쪽을 보는 것은 플레이어가 실제로 쓸 수 있는 수단입니다.
+   * 걷기의 맨눈 수치는 **걸지 않고 장부로만** 남깁니다 — 지금 값이
+   * 아슬아슬하다는 사실 자체를 숨기지 않으려는 것입니다.
+   */
+  {
+    const view = await page.evaluate(async () => {
+      const G = window.__game
+      G.teleportPlayer(0, 0)
+      await new Promise((r) => setTimeout(r, 400))
+      const p = G.state().player
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const seeAlong = (dx, dz) => {
+        let last = 0
+        for (let d = 0.5; d <= 60; d += 0.25) {
+          const s = G.screenPos(p.x + dx * d, p.y, p.z + dz * d)
+          if (!s || s.sx < 0 || s.sx > vw || s.sy < 0 || s.sy > vh) break
+          last = d
+        }
+        return last
+      }
+      const rows = []
+      for (let deg = 0; deg < 360; deg++) {
+        const a = (deg * Math.PI) / 180
+        rows.push({ deg, see: seeAlong(Math.sin(a), Math.cos(a)) })
+      }
+      const t = G.terrainInfo()
+      const roster = G.enemyRoster()
+      return {
+        rows,
+        aggro: t.levelAggroRange,
+        sprintViewScale: t.sprintViewScale,
+        aimLeadMax: t.aimLeadMax,
+        // 몸의 굵기까지 들어와야 "보인다"입니다. 보스는 몰래 다가오지
+        // 않으므로(전용 영역) 잡몹 중 가장 굵은 것으로 잽니다.
+        bodyR: Math.max(...roster.filter((r) => r.id !== 'boss').map((r) => r.radius)),
+      }
+    })
+    const worst = view.rows.reduce((a, b) => (a.see <= b.see ? a : b))
+    const need = view.aggro + view.bodyR
+    const bare = view.rows.filter((r) => r.see < need).length
+    const sprint = view.rows.filter((r) => r.see * view.sprintViewScale < need).length
+    const lead = view.rows.filter((r) => r.see + view.aimLeadMax < need).length
+    console.log(
+      `\n  [시야] 화면이 담는 거리 ${worst.see}~${view.rows.reduce((a, b) => (a.see >= b.see ? a : b)).see}m ` +
+        `(가장 좁은 방향 ${worst.deg}°) · 적이 알아채는 거리 ${view.aggro}m + 몸 ${view.bodyR}m = ${need}m`,
+    )
+    console.log(
+      `  [장부] 맨눈으로 걸을 때 몸이 화면에 걸치는 방향 ${bare}/360 (${(bare / 3.6).toFixed(1)}%) ` +
+        `— 재되 걸지는 않습니다 (아래 두 줄이 문턱입니다)\n`,
+    )
+    check(
+      // ⚠️ `.every` 만 쓰면 **빈 배열이 통과합니다.** 표본 수를 같이 걸어야
+      //    이 줄이 게이트가 됩니다 (`npm run guard` 가 이걸 잡습니다).
+      view.rows.length === 360 && view.rows.every((r) => r.see > 0),
+      '🎥 360 방향을 실제로 재 봤다 (한 방향도 0으로 세지 않게)',
+      `가장 좁은 ${worst.see}m · 가장 넓은 ${view.rows.reduce((a, b) => (a.see >= b.see ? a : b)).see}m`,
+    )
+    check(
+      sprint === 0,
+      '🎥 **달릴 때는 커서를 안 써도** 알아채는 적이 화면 안이다 (가장 빠른 상태에 시간이 가장 없습니다)',
+      sprint === 0
+        ? `달릴 때 화면 ×${view.sprintViewScale} → 가장 좁은 방향 ${(worst.see * view.sprintViewScale).toFixed(1)}m ≥ ${need}m`
+        : `${sprint}/360 방향이 화면 밖`,
+    )
+    check(
+      lead === 0,
+      '🎥 걸을 때는 **가는 쪽을 보면** 알아채는 적이 화면 안이다 (커서 리드가 실제로 갚는다)',
+      lead === 0
+        ? `가장 좁은 ${worst.see}m + 커서 리드 ${view.aimLeadMax}m = ${(worst.see + view.aimLeadMax).toFixed(1)}m ≥ ${need}m`
+        : `${lead}/360 방향이 커서를 써도 화면 밖`,
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
   console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
