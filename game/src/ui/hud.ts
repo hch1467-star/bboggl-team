@@ -272,6 +272,23 @@ export class Hud {
       html += `<i class="${on ? 'on' : half ? 'half' : ''}" style="${half ? `opacity:${(0.25 + partial * 0.5).toFixed(2)}` : ''}"></i>`
     }
     if (this.focusPips.innerHTML !== html) this.focusPips.innerHTML = html
+    /**
+     * 🥋 **가득 참은 좋은 상태가 아니라 낭비가 시작된 상태입니다.**
+     *
+     * 근거는 계측입니다 — 한 판에 태운 21.0 vs 가득 차서 흘린 **29.7**.
+     * 쓴 것보다 버린 것이 많으면 "모을까 태울까"가 결정이 아니게 됩니다.
+     * 그런데 화면은 3/3 을 그냥 "다 켜짐"으로만 보여 줬고, 그건 *잘 되고
+     * 있다* 로 읽힙니다. 오공의 봉세가 최대 단계에서 요란해지는 이유가
+     * 정확히 이것입니다.
+     *
+     * ⚠️ **값은 하나도 안 건드립니다.** 신호만 답니다 — 균형을 손대는 것과
+     *    안 보이던 것을 보이게 하는 것은 다른 일이고, 섞으면 나중에
+     *    "무엇이 효과가 있었나"를 못 가립니다.
+     */
+    const wasting = full >= max
+    if (this.focusPips.classList.contains('full') !== wasting) {
+      this.focusPips.classList.toggle('full', wasting)
+    }
   }
 
   setVials(left: number, max: number): void {

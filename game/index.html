@@ -68,6 +68,30 @@
       }
       #focusPips i.on { background: radial-gradient(circle at 35% 30%, #ffe9a8, #f0a83c); border-color: #ffd479; }
       #focusPips i.half { background: #f0a83c; }
+      /*
+        🥋 **가득 찼을 때만 스스로 알립니다.**
+
+        재 보니 한 판에 **태운 집중 21.0 · 가득 차서 흘린 집중 29.7** 이었습니다.
+        쓴 것보다 버린 것이 더 많습니다. 그러면 "모을까 태울까"는 결정이 아니라
+        그냥 **늘 가득 찬 상태**이고, 자원이 자원이 아니게 됩니다.
+
+        그런데 화면에는 그 사실이 **한 글자도** 없었습니다. 3/3 일 때 구슬은
+        "다 켜짐"으로만 보이고, 그건 *잘 되고 있다* 처럼 읽힙니다 — 실제로는
+        그 순간부터 때리는 족족 버려지는 중인데요.
+
+        오공의 봉세가 최대 단계에서 요란해지는 이유가 이것입니다: 가득 참은
+        **좋은 상태가 아니라 낭비가 시작된 상태**입니다. 값은 하나도 안
+        건드립니다 — 신호만 답니다.
+      */
+      #focusPips.full i.on {
+        border-color: #fff2c8;
+        box-shadow: 0 0 6px 1px rgba(255,200,90,0.75);
+        animation: focusFull 900ms ease-in-out infinite;
+      }
+      @keyframes focusFull {
+        0%, 100% { box-shadow: 0 0 4px 0 rgba(255,200,90,0.55); }
+        50%      { box-shadow: 0 0 9px 2px rgba(255,214,120,0.95); }
+      }
       #vials { margin-top: 6px; font-size: 12px; color: #d8e2f0; letter-spacing: 0.02em; }
       #vials .dim { color: #7d8798; font-size: 11px; }
       #restHint {

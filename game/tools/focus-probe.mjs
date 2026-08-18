@@ -342,6 +342,52 @@ try {
   )
 
   console.log('')
+  /**
+   * ── 🥋 **가득 찼을 때 화면이 그걸 말하는가** ────────────────────────
+   *
+   * 계측이 먼저 있었습니다 — 한 판에 태운 21.0 vs **가득 차서 흘린 29.7**.
+   * 쓴 것보다 버린 것이 많은데, 화면에는 그 사실이 한 글자도 없었습니다.
+   * 3/3 은 그냥 "다 켜짐"으로 보이고 그건 *잘 되고 있다* 로 읽힙니다.
+   *
+   * ⚠️ **규칙을 다시 계산하지 않습니다.** `full >= max` 를 프로브가 또
+   *    적으면, 화면까지 물려 있지 않아도 통과합니다 — 이 저장소가 여러 번
+   *    당한 모양입니다. **실제 DOM 에 표시가 붙었는지**만 봅니다.
+   */
+  {
+    const cfgMax = await page.evaluate(() => window.__game.focusInfo?.().max ?? 3)
+    const marks = await page.evaluate(async ([max]) => {
+      const G = window.__game
+      const nap = () => new Promise((r) => setTimeout(r, 16))
+      const pips = () => document.getElementById('focusPips')
+      const read = async (v) => {
+        G.setFocus(v)
+        // HUD 는 프레임에서 갱신됩니다 — 넣자마자 읽으면 옛 화면을 봅니다.
+        for (let i = 0; i < 12; i++) await nap()
+        return pips()?.classList.contains('full') === true
+      }
+      return { empty: await read(0), nearly: await read(max - 1), full: await read(max) }
+    }, [cfgMax])
+
+    console.log(
+      `\n  🥋 집중 구슬의 「가득 참」 표시 — 0점 ${marks.empty ? '켜짐' : '꺼짐'} · ` +
+        `${cfgMax - 1}점 ${marks.nearly ? '켜짐' : '꺼짐'} · ${cfgMax}점 ${marks.full ? '켜짐' : '꺼짐'}`,
+    )
+    check(
+      marks.full === true,
+      '🥋 **가득 차면 집중 구슬이 스스로 알린다** (버려지기 시작한 것을 화면이 말합니다)',
+      `${cfgMax}점에서 ${marks.full ? '표시됨' : '**표시 안 됨**'}`,
+    )
+    /**
+     * 아래 검사가 없으면 *"항상 켜 두기"* 로도 위 검사를 통과합니다.
+     * 늘 켜진 신호는 신호가 아닙니다 — 꺼질 때가 있어야 켜짐이 뜻을 갖습니다.
+     */
+    check(
+      marks.empty === false && marks.nearly === false,
+      '🥋 그런데 **가득 차기 전에는 안 알린다** (늘 켜진 신호는 신호가 아닙니다)',
+      `0점 ${marks.empty ? '켜짐(잘못)' : '꺼짐'} · ${cfgMax - 1}점 ${marks.nearly ? '켜짐(잘못)' : '꺼짐'}`,
+    )
+  }
+
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
