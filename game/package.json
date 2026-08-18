@@ -62,7 +62,8 @@
     "blame": "node tools/blame-probe.mjs",
     "punish": "node tools/punish-probe.mjs",
     "parry": "node tools/parry-probe.mjs",
-    "reach": "node tools/reach-probe.mjs"
+    "reach": "node tools/reach-probe.mjs",
+    "stuck": "node tools/stuck-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

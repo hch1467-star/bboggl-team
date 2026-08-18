@@ -3792,7 +3792,26 @@ class Game {
     const step = this.terrain.nextStepToward(Transform.x[p], Transform.z[p])
     const dist = this.terrain.pathDistance(Transform.x[p], Transform.z[p])
     if (!step) return dist === 0 ? { x: toX, z: toZ, dist: 0 } : null
-    return { x: step.x, z: step.z, dist: dist ?? 0 }
+    /**
+     * ── ⚠️ **`?? 0` 이 「못 간다」를 「다 왔다」로 바꾸고 있었습니다** ──────
+     *
+     * `pathDistance` 는 닿을 수 없는 칸에 **null** 을 냅니다(terrain.ts).
+     * 그런데 여기서 `dist ?? 0` 으로 받아서, 닿을 수 없는 자리가 **0m** 로
+     * 나갔습니다. 0m 은 이 함수에서 *"이미 도착했다"* 는 뜻입니다 —
+     * 하필 정반대의 뜻으로 뭉개진 셈입니다.
+     *
+     * 그 결과가 자동 플레이의 **25초 막힘**이었습니다. 봇은 강화대까지
+     * "0m" 를 보고 도착했다고 믿어 그 자리에 서고, 매 프레임 다시
+     * 강화이동을 고릅니다. 기록에 `[강화이동×90]` 인데 위치는 그대로인
+     * 그 모양입니다. 일곱 건 중 여섯이 같은 구역이었던 것도 설명됩니다 —
+     * 거기서 강화대가 실제로 안 닿습니다.
+     *
+     * 못 가는 것은 **못 간다고** 말해야 합니다. 이 함수에는 이미 그 신호가
+     * 있습니다 — `null`. 없는 값을 그럴듯한 숫자로 채우면, 부르는 쪽은
+     * 틀린 것을 **확신을 갖고** 합니다.
+     */
+    if (dist == null) return null
+    return { x: step.x, z: step.z, dist }
   }
 
   /**
