@@ -4427,6 +4427,28 @@ class Game {
     return this.terrain?.canWalk(fromX, fromZ, toX, toZ) ?? false
   }
 
+  /** 🗺 이 월드 좌표의 지형 단(段) — 프로브가 낙차 경계를 찾는 데 씁니다. */
+  debugTerrainLevelAt(x: number, z: number): number {
+    return this.terrain ? this.terrain.levelAtWorld(x, z) : 0
+  }
+
+  /**
+   * 🗺 이 월드 좌표가 **어느 구역인가**(없으면 빈 문자열).
+   *
+   * 바닥 밝기를 두 점에서 견주는 검사에 필요합니다 — 구역마다 색조가
+   * 달라서, 경계를 넘어 두 점을 찍으면 **그림자가 아니라 색조**를
+   * 재게 됩니다(`npm run depth` 의 게이트가 실제로 그렇게 걸렸습니다).
+   */
+  debugRegionAt(x: number, z: number): string {
+    if (!this.terrain) return ''
+    const { w, h } = this.terrain.level
+    const cell = worldToCell(x, z, w, h)
+    const r = this.regions.find(
+      (g) => cell.cx >= g.x0 && cell.cx <= g.x1 && cell.cz >= g.z0 && cell.cz <= g.z1,
+    )
+    return r?.name ?? ''
+  }
+
   debugTerrainInfo(): {
     maxClimb: number
     heightStep: number
@@ -6520,6 +6542,10 @@ declare global {
         toZ: number,
         pts: { x: number; z: number }[],
       ) => { player: number; points: number[] } | null
+      /** 🗺 이 월드 좌표의 지형 단(段). 낭떠러지는 -1. */
+      terrainLevelAt: (x: number, z: number) => number
+      /** 🗺 이 월드 좌표의 구역 이름(없으면 ''). 구역마다 바닥 색조가 다릅니다. */
+      regionAt: (x: number, z: number) => string
       terrainInfo: () => {
         maxClimb: number
         heightStep: number
@@ -7405,6 +7431,9 @@ window.__game = {
   pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
   distancesToward: (toX, toZ, pts) => game.debugDistancesToward(toX, toZ, pts),
   terrainInfo: () => game.debugTerrainInfo(),
+  /** 🗺 이 월드 좌표의 지형 단(段). 프로브가 낙차를 **찾아내는** 데 씁니다. */
+  terrainLevelAt: (x, z) => game.debugTerrainLevelAt(x, z),
+  regionAt: (x, z) => game.debugRegionAt(x, z),
   entityState: (e) => game.debugEntityState(e),
   teleportEntity: (e, x, z) => {
     if (!isAlive(e)) return
