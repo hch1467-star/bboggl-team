@@ -566,12 +566,21 @@ async function main() {
         !!heavy && !!light && heavy.poiseScale > light.poiseScale && heavy.bleedScale < light.bleedScale,
         `대검 강인도 ${heavy?.poiseScale}·출혈 ${heavy?.bleedScale} vs 단검 ${light?.poiseScale}·${light?.bleedScale}`,
       )
-      // ② 무기마다 "몇 바퀴면 터지는가"가 실제로 다른가.
-      const laps = (w) => rule.max / w.perCombo
+      /**
+       * ② 무기마다 "몇 바퀴면 터지는가"가 실제로 다른가.
+       *
+       * ⚠️ 문턱이 **적마다 다르므로**(enemies.ts `bleedMaxOf`) 어느 적을
+       *    두고 세는지 정해야 합니다. **잡몹**을 씁니다 — 무기 정체성이
+       *    실제로 드러나는 자리가 거기이고, 이 존에서 가장 많이 만나는
+       *    상대이기 때문입니다. 숫자는 게임이 냅니다(프로브가 안 적습니다).
+       */
+      const gruntMax = (rule.maxByKind ?? []).find((m) => m.id === 'grunt')?.max ?? 0
+      const laps = (w) => gruntMax / w.perCombo
       check(
         '무기마다 **터지기까지의 바퀴 수**가 크게 다르다 (선택이 되게)',
         !!heavy && !!light && laps(heavy) > laps(light) * 2,
-        rule.weapons.map((w) => `${w.id} ${(rule.max / w.perCombo).toFixed(1)}바퀴`).join(' · '),
+        `잡몹 문턱 ${gruntMax} — ` +
+          rule.weapons.map((w) => `${w.id} ${(gruntMax / w.perCombo).toFixed(1)}바퀴`).join(' · '),
       )
 
       /**
@@ -725,7 +734,7 @@ async function main() {
       check(
         '때리면 출혈이 **쌓인다** (측정이 성립했다 — 쌍단검으로 쟀다)',
         popped.weaponOk && popped.peak > 0,
-        `무기 교체 ${popped.weaponOk ? 'O' : 'X'} · 때린 횟수 ${popped.hits} · 최고 ${popped.peak} / ${rule.max}`,
+        `무기 교체 ${popped.weaponOk ? 'O' : 'X'} · 때린 횟수 ${popped.hits} · 최고 ${popped.peak} / ${gruntMax}`,
       )
       check('가득 차면 **터진다**', popped.pops > 0, `${popped.pops}회`)
       /**
@@ -779,8 +788,10 @@ async function main() {
       check(
         '차 있는 만큼만 **길이가 맞는다** (숫자와 그림이 같은 것을 말한다)',
         shown.length > 0 &&
-          shown.every((b) => Math.abs(b.fill - b.bleed / rule.max) < 0.05),
-        shown.map((b) => `${b.bleed}/${rule.max} vs ${(b.fill * 100) | 0}%`).join(' · ') || '**표본 없음**',
+          // 🩸 문턱은 **적마다 다릅니다** — 바가 자기 문턱을 같이 냅니다
+          // (enemies.ts `bleedMaxOf`). 전역값으로 나누면 잡몹에서 어긋납니다.
+          shown.every((b) => Math.abs(b.fill - b.bleed / b.max) < 0.05),
+        shown.map((b) => `${b.bleed}/${b.max} vs ${(b.fill * 100) | 0}%`).join(' · ') || '**표본 없음**',
       )
 
       /**

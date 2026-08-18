@@ -23,7 +23,7 @@ import {
   Velocity,
 } from '../core/components'
 import { BOSS_PHASES } from '../config/bossPhases'
-import { enemyDef } from '../config/enemies'
+import { bleedMaxOf, enemyDef } from '../config/enemies'
 import { AttackIntent, attackAt, crossfirePause } from '../config/enemyAttacks'
 import { defineQuery, hasComponent } from '../core/ecs'
 import { combatRng } from '../core/rng'
@@ -566,13 +566,16 @@ function applyBleed(t: number, spec: AttackSpec): void {
   }
   Enemy.bleedIdleT[t] = 0
   Enemy.bleed[t] += BLEED.perHit * w
+  // 🩸 쌓은 총량은 따로 셉니다 — 식어서 날아간 몫을 나중에 되돌려 볼 수 있게.
+  Enemy.bleedBuilt[t] += BLEED.perHit * w
   if (onBoss) {
     bossBleedApplied += BLEED.perHit * w
     bossEverBled = true
   }
   if (Enemy.bleed[t] > bleedPeak) bleedPeak = Enemy.bleed[t]
   if (onBoss && Enemy.bleed[t] > bossBleedPeak) bossBleedPeak = Enemy.bleed[t]
-  if (Enemy.bleed[t] < BLEED.max) return
+  // 🩸 문턱은 적마다 다릅니다 — 근거는 enemies.ts `bleedMaxOf`.
+  if (Enemy.bleed[t] < bleedMaxOf(Enemy.kind[t])) return
 
   if (onBoss) bossBleedPops++
   Enemy.bleed[t] = 0
@@ -754,7 +757,10 @@ export function noteDeathWithBleed(t: number): void {
   diedWithBleedCount++
   diedWithBleedSum += left
   if (left > diedWithBleedMax) diedWithBleedMax = left
+  // 이 적에게 **쌓은 총량**도 같이 — 둘의 차이가 「식어서 날아간 몫」입니다.
+  diedBuiltSum += Enemy.bleedBuilt[t]
 }
+let diedBuiltSum = 0
 let bleedDecayedAll = 0
 let diedWithBleedCount = 0
 let diedWithBleedSum = 0
@@ -773,6 +779,7 @@ export function readBleedPeak(): {
   diedWith: number
   diedWithAvg: number
   diedWithMax: number
+  diedBuiltAvg: number
 } {
   return {
     any: bleedPeak,
@@ -783,6 +790,8 @@ export function readBleedPeak(): {
     /** 🩸 그 적들이 남기고 간 게이지의 평균과 최고 */
     diedWithAvg: diedWithBleedCount > 0 ? diedWithBleedSum / diedWithBleedCount : 0,
     diedWithMax: diedWithBleedMax,
+    /** 🩸 그 적들에게 **쌓았던** 총량의 평균 — 남은 것과 견주면 식은 몫이 나옵니다. */
+    diedBuiltAvg: diedWithBleedCount > 0 ? diedBuiltSum / diedWithBleedCount : 0,
     boss: bossBleedPeak,
     bossPops: bossBleedPops,
     bossApplied: bossBleedApplied,
@@ -797,6 +806,7 @@ export function resetBleedPeak(): void {
   diedWithBleedCount = 0
   diedWithBleedSum = 0
   diedWithBleedMax = 0
+  diedBuiltSum = 0
   bleedPeak = 0
   bossBleedPeak = 0
   bossBleedPops = 0

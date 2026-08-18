@@ -70,7 +70,7 @@ import {
 } from './config/enemyAttacks'
 import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
-import { ENEMY_DEFS, enemyDef, kindFromId } from './config/enemies'
+import { ENEMY_DEFS, bleedMaxOf, enemyDef, kindFromId } from './config/enemies'
 import {
   Actor,
   ActorState,
@@ -3999,6 +3999,8 @@ class Game {
     bleedDiedWith: number
     bleedDiedWithAvg: number
     bleedDiedWithMax: number
+    /** 🩸 그 적들에게 **쌓았던** 총량의 평균 — 남은 것과 견주면 식은 몫. */
+    bleedDiedBuiltAvg: number
     /** 🩸 보스에게만 — 이 축이 사는지 죽는지를 가르는 자리 */
     bossBleedPeak: number
     bossBleedPops: number
@@ -4056,6 +4058,7 @@ class Game {
       bleedDiedWith: readBleedPeak().diedWith,
       bleedDiedWithAvg: Number(readBleedPeak().diedWithAvg.toFixed(1)),
       bleedDiedWithMax: Number(readBleedPeak().diedWithMax.toFixed(1)),
+      bleedDiedBuiltAvg: Number(readBleedPeak().diedBuiltAvg.toFixed(1)),
       // 🩸 보스에게만 따로 — 잡몹의 0이 보스의 값을 덮지 않게(combat.ts 주석).
       bossBleedPeak: Number(readBleedPeak().boss.toFixed(1)),
       bossBleedPops: readBleedPeak().bossPops,
@@ -5289,7 +5292,7 @@ declare global {
       bleedBars: () => { entity: number; visible: boolean; fill: number; bleed: number }[]
       /** 🩸 출혈 규칙 — 문턱과 무기별 배율을 게임이 알려 줍니다 */
       bleedInfo: () => {
-        max: number
+        maxByKind: { id: string; max: number }[]
         perHit: number
         decayDelay: number
         decayPerSec: number
@@ -6128,7 +6131,16 @@ window.__game = {
    */
   bleedBars: () => game.debugBleedBars(),
   bleedInfo: () => ({
-    max: BLEED.max,
+    /**
+     * 🩸 **문턱은 적마다 다릅니다**(enemies.ts `bleedMaxOf`). 예전에는
+     * 전역 `BLEED.max` 하나를 내보냈는데, 그 값은 이제 **아무것도 정하지
+     * 않습니다.** 안 정하는 값을 계속 내보내면 프로브가 그걸로 판정하다가
+     * 조용히 틀립니다 — 그래서 지웠고, 대신 적별 표를 냅니다.
+     */
+    maxByKind: Object.keys(ENEMY_DEFS).map((key) => {
+      const k = Number(key) as EnemyKind
+      return { id: enemyDef(k).id, max: bleedMaxOf(k) }
+    }),
     perHit: BLEED.perHit,
     decayDelay: BLEED.decayDelay,
     decayPerSec: BLEED.decayPerSec,

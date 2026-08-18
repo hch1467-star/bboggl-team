@@ -2950,6 +2950,7 @@ try {
       bleedDiedWith: G.runStats().bleedDiedWith,
       bleedDiedWithAvg: G.runStats().bleedDiedWithAvg,
       bleedDiedWithMax: G.runStats().bleedDiedWithMax,
+      bleedDiedBuiltAvg: G.runStats().bleedDiedBuiltAvg,
       inputExpired: G.runStats().inputExpired,
       // 버려진 것을 **종류별로** 나눠 적습니다 — 셋의 처방이 서로 다릅니다
       // (근거: playerControl.ts `inputFlow`).
@@ -3725,10 +3726,22 @@ try {
   console.log(
     `  백어택      ${log.backHits}/${log.hitsDealt}회 (${Math.round((log.backHits / Math.max(1, log.hitsDealt)) * 100)}%)` +
       ` — 때릴 거리에서 등 뒤를 잡고 있던 시간 ${Math.round((log.behindOk / Math.max(1, log.behindSamples)) * 100)}%\n` +
-    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0}/100)\n` +
-    // 🩸 「0회」의 이유를 가릅니다 — 죽어서인가 식어서인가. 처방이 정반대입니다.
-    `              그 0회의 이유 — 게이지를 남긴 채 죽은 적 ${log.bleedDiedWith ?? 0}마리` +
+    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0})\n` +
+    /**
+     * 🩸 **못 터진 것들.** 「죽어서」인가 「식어서」인가 — 처방이 정반대입니다.
+     *
+     * ⚠️ `/100` 을 지웠습니다. 문턱은 이제 **적마다 다릅니다**
+     *    (enemies.ts `bleedMaxOf` — 잡몹 30 · 보스 105). 없어진 분모를
+     *    계속 찍으면 읽는 사람이 *"38.4/100 이면 한참 남았네"* 로 잘못
+     *    읽습니다. 실제로 그 38.4 는 잡몹 문턱을 **넘긴** 값입니다.
+     */
+    `              못 터진 것들 — 게이지를 남긴 채 죽은 적 ${log.bleedDiedWith ?? 0}마리` +
     ` (평균 ${log.bleedDiedWithAvg ?? 0} · 최고 ${log.bleedDiedWithMax ?? 0}) · 식어서 날아간 총량 ${log.bleedDecayedAll ?? 0}\n` +
+    // 🩸 **쌓은 총량과 남은 게이지를 나란히** 둡니다. 둘이 비슷하면
+    // "차기 전에 죽었다"(문턱 이야기)이고, 쌓은 쪽이 훨씬 크면
+    // "쌓아 놓고 딴 데 갔다 왔다"(식는 속도 이야기)입니다.
+    `              그 적들에게 쌓았던 총량 평균 ${log.bleedDiedBuiltAvg ?? 0}` +
+    ` → 죽을 때 남은 ${log.bleedDiedWithAvg ?? 0} (식어서 잃은 ${Math.round(((log.bleedDiedBuiltAvg ?? 0) - (log.bleedDiedWithAvg ?? 0)) * 10) / 10})\n` +
     `              그중 **보스에게** — 터짐 ${log.bossBleedPops ?? 0}회 · 최고 ${log.bossBleedPeak ?? 0}/100\n` +
     `                 쌓은 총량 ${log.bossBleedApplied ?? 0} · 식어서 날아간 것 ${log.bossBleedDecayed ?? 0}\n` +
     `                 타격 간격 평균 ${log.bossBleedGapAvg ?? 0}초 · 최대 ${log.bossBleedGapMax ?? 0}초 · 유예 안에 이어진 비율 ${Math.round((log.bossBleedGapInsideRate ?? 0) * 100)}%\n` +

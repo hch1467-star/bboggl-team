@@ -19,7 +19,6 @@ import {
 } from '../config/enemyAttacks'
 import {
   AWARE,
-  BLEED,
   BOSS,
   COMBAT,
   FOCUS,
@@ -32,7 +31,7 @@ import {
 } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { isTimingAnswer } from '../config/punish'
-import { ENEMY_DEFS, enemyDef } from '../config/enemies'
+import { ENEMY_DEFS, bleedMaxOf, enemyDef } from '../config/enemies'
 import {
   Actor,
   ActorState,
@@ -1277,7 +1276,10 @@ export class Visuals {
       }
 
       if (v.bleedFill && v.bleedBg && hasComponent(Enemy, e)) {
-        const t = BLEED.max > 0 ? Math.min(1, Enemy.bleed[e] / BLEED.max) : 0
+        // 🩸 화면도 **그 적의 문턱**으로 나눕니다 — 규칙과 그림이 갈라지면
+        // 게이지가 가득 찼는데 안 터지는(또는 그 반대) 그림이 나옵니다.
+        const bMax = bleedMaxOf(Enemy.kind[e])
+        const t = bMax > 0 ? Math.min(1, Enemy.bleed[e] / bMax) : 0
         const barW = v.group.userData.barWidth as number
         // 0이면 통째로 숨깁니다 — 안 쓰는 축의 빈 칸은 정보가 아니라 소음입니다.
         const on = t > 0.001 && Actor.state[e] !== ActorState.Dead
@@ -1382,8 +1384,21 @@ export class Visuals {
    * 안 뜨면 없는 것이고, 이 저장소는 그 실패를 여러 번 겪었습니다
    * (인지 규칙 · 처형 안내 · 초록 예고).
    */
-  debugBleedBars(): { entity: number; visible: boolean; fill: number; bleed: number }[] {
-    const out: { entity: number; visible: boolean; fill: number; bleed: number }[] = []
+  debugBleedBars(): {
+    entity: number
+    visible: boolean
+    fill: number
+    bleed: number
+    /** 🩸 **이 적의** 문턱 — 문턱이 적마다 다르므로 바가 자기 것을 같이 냅니다. */
+    max: number
+  }[] {
+    const out: {
+      entity: number
+      visible: boolean
+      fill: number
+      bleed: number
+      max: number
+    }[] = []
     for (const [e, v] of this.items.entries()) {
       if (!v.bleedFill) continue
       const barW = (v.group.userData.barWidth as number) || 1
@@ -1393,6 +1408,7 @@ export class Visuals {
         // 0~1 로 정규화 — 프로브가 바 너비를 알 필요가 없게.
         fill: Number((v.bleedFill.scale.x / barW).toFixed(3)),
         bleed: Number((Enemy.bleed[e] ?? 0).toFixed(1)),
+        max: bleedMaxOf(Enemy.kind[e]),
       })
     }
     return out
