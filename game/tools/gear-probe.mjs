@@ -22,6 +22,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { decodePng, deltaE } from './png.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5243
@@ -307,6 +308,280 @@ try {
     chests.out.length > 0 && chests.out.every((c, i) => i === 0 || c.luck >= chests.out[i - 1].luck - 0.001),
     '🎁 뒤에 있는 상자일수록 **진행도가 높다** (등급을 미는 값이 실제로 커진다)',
     chests.out.map((c) => `${(c.luck * 100).toFixed(0)}%`).join(' → '),
+  )
+
+
+  /**
+   * ---- ✨ **등급이 걸어다닐 때도 보이는가** ----
+   *
+   * ── 이 검사가 왜 픽셀까지 내려가는가 ──────────────────────────────
+   * 등급을 눈에 보이게 하려고 두 번 실패했습니다. 두 번 다 **코드는
+   * 옳았고 화면에 없었습니다**:
+   *   1. 무기 모델의 발광 — 이 줌에서 칼은 몇 픽셀이라 안 보였습니다
+   *   2. 휘두른 자국 물들임 — 보이지만 **휘두를 때만** 보입니다
+   *
+   * 그래서 세 번째(알갱이)는 *"몇 개 만들었는가"* 로 끝내지 않고
+   * **화면이 실제로 밝아졌는가**까지 봅니다.
+   *
+   * ── 🚧 게이트가 먼저입니다 ────────────────────────────────────────
+   * 두 장의 차이를 세는 계측기는 **장면이 가만히 있을 때만** 뜻이 있습니다.
+   * 실제로 처음 만든 판이 그래서 틀렸습니다 — 첫 장이 그림자·셰이더가
+   * 덜 올라온 어두운 장이라, **일반과 일반을 비교해도 5,300 픽셀**이
+   * 밝아진 것으로 나왔습니다. 그 눈금으로는 무엇을 재도 초록입니다.
+   *
+   * 그래서 순서가 이렇습니다:
+   *   ① 예열 한 장을 버리고
+   *   ② **일반을 두 번 찍어 그 차이가 0인지** 먼저 확인하고 (게이트)
+   *   ③ 그 다음에야 등급별 차이를 셉니다
+   *
+   * ── 한 장으로 안 세는 이유 ────────────────────────────────────────
+   * 알갱이는 오르내리므로 **순간마다 밝은 개수가 다릅니다.** 한 장만
+   * 보면 전설(10개)이 유니크(5개)보다 어두운 장이 나옵니다 — 실제로
+   * 첫 측정에서 97 대 104 로 뒤집혔습니다. 한 바퀴를 세 조각으로 나눠
+   * 찍어 더합니다. **한 칸 차이의 초록은 기준선이 아니라 운입니다.**
+   */
+  console.log('\n  ── ✨ 등급 불티 — 만든 개수가 아니라 **밝아진 화면**을 셉니다')
+  await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
+  await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  await page.evaluate(() => {
+    window.__t = {
+      runFor: async (s) => {
+        const G = window.__game
+        const t = G.state().elapsed + s
+        const d = Date.now() + 60000
+        while (G.state().elapsed < t && Date.now() < d) await new Promise((r) => setTimeout(r, 8))
+      },
+    }
+  })
+  /**
+   * ---- 🗡️ **무기마다 불티의 성격이 다른가** ----
+   *
+   * 사용자가 요청한 것은 *"무기마다 다른 이펙트"* 였습니다. 그런데 이
+   * 차이를 **새 설정값으로 적지 않았습니다** — 무기가 이미 가진
+   * `moveSpeedScale`("가벼움")에서 유도합니다. 새 표를 만들면 무기를
+   * 무겁게 고쳤을 때 불티만 여전히 빠른 그림이 남습니다.
+   *
+   * 그래서 여기서 확인할 것은 *"두 무기가 다른가"* 가 아니라
+   * **"무거운 쪽이 크고 느린가"** 입니다 — 방향이 맞아야 유도가 맞습니다.
+   */
+  const byWeapon = await page.evaluate(async () => {
+    const G = window.__game
+    const out = []
+    for (let w = 0; w < 3; w++) {
+      // 무기 교체는 **사람과 같은 길**로 합니다(숫자키). 전용 통로를 만들면
+      // 창에만 있는 조건을 안 지나가고, 그건 이 저장소가 여러 번 데인 함정입니다.
+      G.press(`Digit${w + 1}`)
+      G.release(`Digit${w + 1}`)
+      G.setGear(w, 4, 4242)
+      await window.__t.runFor(0.6)
+      const a1 = G.auraInfo()
+      const y1 = a1.motes.map((m) => m.y)
+      await window.__t.runFor(0.2)
+      const a2 = G.auraInfo()
+      // 같은 번호의 알갱이가 0.2초 동안 얼마나 올랐는가 = 오르는 속도.
+      // (꼭대기에서 되돌아온 알갱이는 음수가 되므로 버립니다.)
+      const ups = a2.motes.map((m, i) => m.y - (y1[i] ?? m.y)).filter((d) => d > 0)
+      out.push({
+        weapon: G.gearInfo().weapons[w].name,
+        // ⚠️ **그림이 실제로 쓴 무기 번호**를 같이 적습니다. 이게 없으면
+        //    무기가 안 바뀌어도 세 줄이 얌전히 찍히고, 값이 셋 다 같은
+        //    이유를 못 찾습니다(첫 실행에서 정확히 그랬습니다).
+        drawn: a1.weapon,
+        hp: G.state().player.hp,
+        size: a1.motes.length ? a1.motes.reduce((s, m) => s + m.size, 0) / a1.motes.length : 0,
+        rise: ups.length ? ups.reduce((s, d) => s + d, 0) / ups.length / 0.2 : 0,
+      })
+    }
+    return out
+  })
+  for (const w of byWeapon) {
+    console.log(
+      `    ${w.weapon.padEnd(5)} (그린 무기 ${w.drawn} · 체력 ${w.hp}) 알갱이 크기 ${w.size.toFixed(3)}m · 오르는 속도 ${w.rise.toFixed(2)}m/s`,
+    )
+  }
+  check(
+    byWeapon.length === 3 && byWeapon.every((w, i) => w.drawn === i),
+    '🚧 **무기가 실제로 바뀌었다** (안 바뀌면 아래 두 줄은 같은 무기를 세 번 잰 것입니다)',
+    byWeapon.map((w) => `${w.weapon}→${w.drawn}`).join(' · '),
+  )
+  const heavy = byWeapon.find((w) => w.weapon === '대검') ?? byWeapon[1]
+  const quick = byWeapon[2]
+  check(
+    byWeapon.length === 3 && byWeapon.every((w) => w.size > 0 && w.rise > 0),
+    '🗡️ 세 무기 모두 불티가 실제로 오른다 (검사의 게이트)',
+    byWeapon.map((w) => `${w.weapon} ${w.rise.toFixed(2)}m/s`).join(' · '),
+  )
+  check(
+    !!heavy && !!quick && heavy.size > quick.size && heavy.rise < quick.rise,
+    '🗡️ **무거운 무기의 불티가 더 크고 더 느리다** (무기의 무게에서 유도했다는 증거)',
+    `${heavy?.weapon} ${heavy?.size.toFixed(2)}m/${heavy?.rise.toFixed(2)}m/s vs ${quick?.weapon} ${quick?.size.toFixed(2)}m/${quick?.rise.toFixed(2)}m/s`,
+  )
+
+  /**
+   * 🔥 **오래 예열합니다.**
+   *
+   * 처음엔 7초만 기다렸고, 아래 게이트가 바로 잡았습니다 —
+   * `일반 다시 재기 → 밝아진 픽셀 6,549`. 즉 첫 장이 아직 어두웠고,
+   * 그 뒤 장들은 전부 *"등급 때문에 밝아진 것"* 으로 세어지고 있었습니다.
+   * (그 눈금으로는 신화와 일반이 6,960 대 6,549 로 **거의 같습니다.**)
+   * 게이트가 없었으면 이 초록을 그대로 믿었을 것입니다.
+   */
+  /**
+   * ── 🧟 **적을 먼저 치웁니다 — 안 그러면 시체를 재게 됩니다** ────────
+   *
+   * 이 구역은 정적인 장면이 필요합니다(아래 픽셀 비교). 그런데 훈련장의
+   * 허수아비들은 가만히 서 있는 플레이어를 **실제로 죽입니다.** 처음엔
+   * 그대로 뒀고, 결과가 조용히 이상했습니다:
+   *
+   *   · 픽셀 게이트는 **통과했습니다** — 이미 죽어서 장면이 안 움직였으니까
+   *   · 그런데 그 아래 무기 검사가 세 무기 다 `그린 무기 0` 으로 나왔습니다
+   *
+   * 원인은 `playerControl` 의 첫 줄입니다 — **죽은 자는 무기를 못 바꿉니다.**
+   * 즉 이 프로브는 40초 동안 시체 옆에서 등급 효과를 재고 있었습니다.
+   * 두 번째 게이트(무기가 실제로 바뀌었는가)가 없었으면 못 봤을 것입니다.
+   */
+  await page.evaluate(async () => {
+    const G = window.__game
+    G.clearEnemies()
+    /**
+     * ⚠️ **첫 무기로 되돌립니다.** 바로 위 검사가 쌍단검(신화)으로 끝내
+     * 놓기 때문입니다. 안 되돌리면 `setGear(0, ...)` 이 **안 든 무기**의
+     * 등급만 바꾸고, 화면에는 계속 신화 16개가 떠 있습니다 —
+     * 실제로 그렇게 나와서 아래 다섯 줄이 전부 빨갛게 찍혔습니다.
+     */
+    G.press('Digit1')
+    G.release('Digit1')
+    G.setGear(0, 0, 4242)
+    await window.__t.runFor(8)
+  })
+  /** 알갱이가 도는 반경(≈0.85m)이 화면에서 55px 안쪽입니다. 그 밖은 볼 이유가 없습니다. */
+  const AURA_R = 55
+  const auraRows = []
+  let auraBase = null
+  for (const [tier, label] of [[0, '예열'], [0, '일반'], [2, '유니크'], [3, '전설'], [4, '신화'], [0, '일반(다시)']]) {
+    let lit = 0
+    const addSum = [0, 0, 0]
+    let count = 0
+    let motes = 0
+    let color = 0
+    let drawnWeapon = -1
+    for (let k = 0; k < 3; k++) {
+      const info = await page.evaluate(async ([t, first]) => {
+        const G = window.__game
+        // 첫 조각에서 등급을 끼우고 **배너가 사라질 때까지** 기다립니다.
+        // 배너 글자가 크롭 안에 들어오면 그 글자를 등급 효과로 셉니다.
+        if (first) {
+          G.setGear(0, t, 4242)
+          await window.__t.runFor(7)
+        } else {
+          await window.__t.runFor(0.45)
+        }
+        const p = G.state().player
+        return { aura: G.auraInfo(), sp: G.screenPos(p.x, p.y + 0.9, p.z) }
+      }, [tier, k === 0])
+      motes = info.aura.count
+      color = info.aura.color
+      drawnWeapon = info.aura.weapon
+      const cx = Math.round(info.sp.sx)
+      const cy = Math.round(info.sp.sy)
+      const img = decodePng(
+        await page.screenshot({ clip: { x: cx - 70, y: cy - 70, width: 140, height: 140 } }),
+      )
+      if (label === '예열') break
+      if (!auraBase) {
+        auraBase = img
+        break
+      }
+      for (let i = 0; i < img.data.length; i += 4) {
+        const px = (i / 4) % img.width
+        const py = Math.floor(i / 4 / img.width)
+        if (Math.hypot(px - 70, py - 70) > AURA_R) continue
+        const d = [
+          img.data[i] - auraBase.data[i],
+          img.data[i + 1] - auraBase.data[i + 1],
+          img.data[i + 2] - auraBase.data[i + 2],
+        ]
+        // 알갱이는 **더하기 합성**이라 어둡게 만들 수 없습니다. 밝아진 것만 셉니다.
+        if (d[0] + d[1] + d[2] > 24) {
+          lit++
+          /**
+           * ── 🎨 **색은 포화되지 않은 픽셀에서만 읽습니다** ──────────
+           *
+           * 더하기 합성은 255 에서 잘립니다. 알갱이의 한가운데는 세 채널이
+           * 다 255 에 붙어서 **무슨 색을 더했든 흰색**이 됩니다. 그 픽셀까지
+           * 평균에 넣으면 색이 늘 흰 쪽으로 끌려가고, 실제로 그래서 이
+           * 검사가 ΔE 32~45 로 흔들렸습니다 — **색 배선이 아니라 클리핑을
+           * 재고 있었습니다.**
+           *
+           * 개수(밝아진 픽셀)는 그대로 다 셉니다. 잘린 픽셀도 "밝아진 것"은
+           * 맞으니까요. 나뉘는 것은 *"얼마나"* 와 *"무슨 색"* 입니다.
+           */
+          if (img.data[i] < 250 && img.data[i + 1] < 250 && img.data[i + 2] < 250) {
+            addSum[0] += d[0]
+            addSum[1] += d[1]
+            addSum[2] += d[2]
+            count++
+          }
+        }
+      }
+    }
+    if (label === '예열') continue
+    const mean = count ? addSum.map((v) => v / count) : [0, 0, 0]
+    const mx = Math.max(1, ...mean)
+    // 밝기는 합성 결과라 제각각입니다 — **색조**만 견주려고 정규화합니다.
+    const norm = mean.map((v) => Math.round((v * 255) / mx))
+    const tgt = [(color >> 16) & 255, (color >> 8) & 255, color & 255]
+    auraRows.push({ label, motes, lit, norm, weapon: drawnWeapon, dE: count ? deltaE(norm, tgt) : Infinity })
+    console.log(
+      `    ${label.padEnd(9)} 알갱이 ${String(motes).padStart(2)}개 · 밝아진 픽셀 ${String(lit).padStart(4)}` +
+        (count ? ` · 더해진 빛 ${JSON.stringify(norm)} (등급색과 ΔE ${deltaE(norm, tgt).toFixed(1)})` : ''),
+    )
+  }
+  const auraOf = (l) => auraRows.find((r) => r.label === l)
+  check(
+    auraRows.length > 0 && auraRows.every((r) => r.weapon === 0),
+    '🚧 **이 구역 내내 같은 무기를 들고 있었다** (무기가 섞이면 등급 차이가 아니라 무기 차이를 잽니다)',
+    auraRows.map((r) => `${r.label}:${r.weapon}`).join(' · '),
+  )
+  const again = auraOf('일반(다시)')
+  check(
+    !!again && again.lit === 0,
+    '🚧 **같은 등급을 두 번 찍으면 차이가 0이다** (이게 아니면 아래 숫자는 조명을 잰 것입니다)',
+    again ? `일반 다시 재기 → 밝아진 픽셀 ${again.lit}` : '못 쟀습니다',
+  )
+  const tiered = ['유니크', '전설', '신화'].map(auraOf).filter(Boolean)
+  check(
+    !!auraOf('일반') && auraOf('일반').motes === 0,
+    '✨ **일반에는 아무것도 안 붙는다** (장식이 기본값이면 특별함이 사라집니다)',
+    `일반 알갱이 ${auraOf('일반')?.motes}개`,
+  )
+  check(
+    tiered.length === 3 && tiered.every((r, i) => i === 0 || r.motes > tiered[i - 1].motes),
+    '✨ 등급이 오를수록 **알갱이가 는다**',
+    tiered.map((r) => `${r.label} ${r.motes}`).join(' → '),
+  )
+  check(
+    again !== undefined && tiered.length === 3 && tiered.every((r, i) => r.lit > (i === 0 ? again.lit : tiered[i - 1].lit)),
+    '✨ **화면이 실제로 그만큼 밝아진다** (설정이 아니라 그려진 픽셀로)',
+    `${again?.lit ?? '?'} → ${tiered.map((r) => r.lit).join(' → ')}`,
+  )
+  /**
+   * 🎨 **문턱 40 의 근거 — 두 무리 사이입니다.**
+   *
+   * 이 값은 눈대중이 아니라 **양쪽을 다 본 뒤**에 골랐습니다:
+   *   · 배선이 맞을 때  ΔE **6 ~ 22** (여러 판에서 실제로 나온 범위)
+   *   · 배선이 틀렸을 때 ΔE **63 ~ 102** (계측기가 흰빛을 읽던 판들)
+   * 두 무리가 멀리 떨어져 있어 그 사이 어디를 잡아도 됩니다. 40 은
+   * 양쪽에 다 여유를 둔 자리입니다.
+   *
+   * ⚠️ 판마다 6~22 로 흔들리는 이유는 **찍는 순간마다 밝은 알갱이가
+   *    다르기 때문**입니다. 그래서 22 에 딱 붙여 잡지 않습니다 —
+   *    한 칸 차이의 초록은 기준선이 아니라 운입니다.
+   */
+  check(
+    tiered.length === 3 && tiered.every((r) => r.dE < 40),
+    '🎨 더해진 빛이 **그 등급의 색**이다 (색을 배선했는데 흰빛이 도는 일이 없게)',
+    tiered.map((r) => `${r.label} ΔE ${r.dE.toFixed(1)}`).join(' · '),
   )
 
   console.log('')

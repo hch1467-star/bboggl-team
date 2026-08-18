@@ -80,9 +80,9 @@ export interface GearTierDef {
 export const GEAR_TIERS: readonly GearTierDef[] = [
   { id: GearTier.Common, name: '일반', color: 0xb9c2cc, affixes: 0, scale: 1.0, glow: 0, sparkle: 0, weight: 20 },
   { id: GearTier.Rare, name: '레어', color: 0x4aa3ff, affixes: 1, scale: 1.0, glow: 0.25, sparkle: 0, weight: 9 },
-  { id: GearTier.Unique, name: '유니크', color: 0xb46bff, affixes: 2, scale: 1.15, glow: 0.5, sparkle: 3, weight: 5 },
-  { id: GearTier.Legendary, name: '전설', color: 0xffa02a, affixes: 3, scale: 1.3, glow: 0.85, sparkle: 6, weight: 2 },
-  { id: GearTier.Mythic, name: '신화', color: 0xff5d4a, affixes: 4, scale: 1.5, glow: 1.3, sparkle: 10, weight: 1 },
+  { id: GearTier.Unique, name: '유니크', color: 0xb46bff, affixes: 2, scale: 1.15, glow: 0.5, sparkle: 5, weight: 5 },
+  { id: GearTier.Legendary, name: '전설', color: 0xffa02a, affixes: 3, scale: 1.3, glow: 0.85, sparkle: 10, weight: 2 },
+  { id: GearTier.Mythic, name: '신화', color: 0xff5d4a, affixes: 4, scale: 1.5, glow: 1.3, sparkle: 16, weight: 1 },
 ]
 
 export function tierDef(t: number): GearTierDef {

@@ -4148,6 +4148,16 @@ class Game {
     return this.vfx.debugSwingColor()
   }
 
+  /** ✨ 지금 화면에 놓인 등급 불티 — 프로브가 규칙을 베끼지 않게 그린 값을 줍니다. */
+  debugAura(): {
+    count: number
+    color: number
+    weapon: number
+    motes: { x: number; y: number; z: number; size: number; opacity: number }[]
+  } {
+    return this.visuals.debugAura()
+  }
+
   debugSetGear(weaponIndex: number, tier: number, seed: number): void {
     const p = this.playerEntity
     if (weaponIndex === 1) {
@@ -6412,6 +6422,13 @@ declare global {
       }[]
       /** 🏆 지금 떠 있는 검격 자국의 색(0xRRGGBB). 없으면 -1. */
       swingColor: () => number
+      /** ✨ 지금 화면에 놓인 등급 불티(개수·색·좌표). 그린 값을 그대로 묻습니다. */
+      auraInfo: () => {
+        count: number
+        color: number
+        weapon: number
+        motes: { x: number; y: number; z: number; size: number; opacity: number }[]
+      }
       /** 🧪 실험대 전용 — 등급/시드를 직접 끼웁니다. */
       setGear: (weaponIndex: number, tier: number, seed: number) => void
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
@@ -6558,6 +6575,7 @@ window.__game = {
   setPaused: (paused) => game.debugSetPaused(paused),
   swingVisible: () => game.debugSwingVisible(),
   swingColor: () => game.debugSwingColor(),
+  auraInfo: () => game.debugAura(),
   telegraphs: () => game.debugTelegraphs(),
   spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),

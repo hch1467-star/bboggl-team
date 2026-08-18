@@ -32,6 +32,7 @@ import {
 } from '../config/balance'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { tierDef } from '../config/gear'
+import { GearAura, type AuraMote } from './gearAura'
 import { isTimingAnswer } from '../config/punish'
 import { ENEMY_DEFS, bleedMaxOf, enemyDef } from '../config/enemies'
 import {
@@ -450,11 +451,20 @@ export class Visuals {
   private readonly bonfireFlames: THREE.Mesh[] = []
   private readonly ladderGroups: THREE.Group[] = []
   private readonly dropRings: THREE.Mesh[] = []
+  /**
+   * ✨ 등급의 불티 — **플레이어 하나에만** 답니다.
+   *
+   * 적에게는 등급이 없고(장비 시스템은 플레이어의 것입니다), 무엇보다
+   * 이 신호가 말하려는 것은 *"**내** 무기가 특별하다"* 입니다. 화면에
+   * 같은 알갱이가 여럿이면 그 문장이 흐려집니다.
+   */
+  private readonly gearAura: GearAura
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly camera: THREE.Camera,
   ) {
+    this.gearAura = new GearAura(scene)
     this.geos = {
       [KIND_PLAYER]: new THREE.CapsuleGeometry(PLAYER.radius, PLAYER.height - PLAYER.radius * 2, 6, 14),
       [KIND_TREASURE]: new THREE.OctahedronGeometry(0.42),
@@ -1070,6 +1080,21 @@ export class Visuals {
       }
     }
     this.syncBonfires()
+    /**
+     * ✨ **발밑에서 놓습니다** — 캐릭터 그룹의 자식으로 달지 않습니다.
+     *
+     * 자식으로 달면 알갱이가 몸의 회전을 따라 돕니다. 그러면 위치가
+     * `time.elapsed` 만의 함수가 아니게 되고(=마우스를 돌리면 그림이
+     * 달라지고), 스크린샷 비교가 다시 **타이밍이 아니라 조준 방향**을
+     * 재게 됩니다. 이 저장소가 등급 물들임에서 이미 밟은 함정입니다.
+     */
+    this.gearAura.update(
+      Transform.x[player],
+      Transform.y[player],
+      Transform.z[player],
+      weaponTier(player),
+      Loadout.weapon[player],
+    )
     /**
      * 🥋 이번 강타가 깎을 강인도를 **한 번만** 구합니다.
      *
@@ -1851,6 +1876,11 @@ export class Visuals {
    * 부르면, 그 값을 여기까지 안 물려 놨어도 통과합니다 — 이 저장소가
    * 여러 번 당한 모양입니다(규칙은 맞는데 배선이 끊김).
    */
+  /** ✨ 지금 화면에 놓인 등급 불티 — 규칙이 아니라 **그려진 것**을 묻습니다. */
+  debugAura(): { count: number; color: number; weapon: number; motes: AuraMote[] } {
+    return this.gearAura.debugMotes()
+  }
+
   debugSwingPose(e: number): { x: number; y: number } | null {
     const v = this.items.get(e)
     if (!v?.swingPivot) return null
@@ -2128,5 +2158,6 @@ export class Visuals {
     for (const geo of Object.values(this.backZoneGeos)) geo.dispose()
     this.hpBarGeo.dispose()
     this.pillarGeo.dispose()
+    this.gearAura.dispose()
   }
 }
