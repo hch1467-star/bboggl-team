@@ -656,6 +656,16 @@ try {
     let guardSawWindow = 0
     let guardOpens = 0
     let guardWhiffs = 0
+    /** 🛡 읽기는 맞았는데 예고가 끊겨 **벌을 면제받은** 창의 수. */
+    let guardSpared = 0
+    let guardSparedOn = false
+    /** 🛡 빈 창이 닫힌 이유별 횟수 — 처방이 갈리므로 합쳐 세지 않습니다. */
+    const guardWhy = {}
+    const guardWhyLog = []
+    /** 🛡 누를 때 내가 읽고 있던 적 — 창이 닫힐 때 그 적의 상태를 봅니다. */
+    let guardTarget = null
+    /** 🛡 게임이 센 성공 횟수의 직전 값 — 성공한 창을 이유 표에서 빼는 데 씁니다. */
+    let guardCountSeen = 0
     let guardWindowOpen = false
     let guardLockOn = false
     let guardBlockedByState = 0
@@ -1662,6 +1672,65 @@ try {
          * 그게 사실이면 고칠 곳은 게임(창·값)이 아니라 **봇이 언제 누르는가**
          * 입니다. 연 횟수 ≫ 성공이면 스팸이고, 연 횟수 ≈ 성공이면 아닙니다.
          */
+        /**
+         * 🛡 **면제받은 창을 따로 셉니다.**
+         *
+         * *"창을 연 것 19회 · 헛친 것 19회"* 였을 때, 그 19가 **내가 늦게
+         * 눌러서**인지 **읽은 예고가 끊겨서**인지 가를 자료가 없었습니다.
+         * 처방이 정반대인데(봇을 고칠 것인가 · 게임을 고칠 것인가) 합쳐
+         * 두면 영영 모릅니다. 이제 게임이 표시를 붙여 주므로 그 표시가
+         * 올라가는 순간을 셉니다.
+         */
+        if (gi.spared && !guardSparedOn) guardSpared++
+        guardSparedOn = gi.spared
+        /**
+         * ── 🛡 **빈 창이 왜 비었는지를 그 자리에서 적습니다** ─────────
+         *
+         * 한 판이 이렇게 나왔습니다 — `창을 연 것 15회 · 헛친 것 15회 ·
+         * **끊겨서 면제 0회** · 성공 0회`. 즉 *"내가 무너뜨려 예고가
+         * 끊겼다"* 는 가설은 **틀렸습니다**(면제가 0이니까). 그런데
+         * `npm run parry` 의 ⑥ 은 봇의 **같은 규칙**으로 1:1 에서 2/3 을
+         * 막습니다. 창도 규칙도 멀쩡한데 실전에서만 0 입니다.
+         *
+         * 남은 후보가 여럿이고 처방이 다 다릅니다 — 적이 죽었다 · 아직
+         * 예고 중인데 일찍 눌렀다 · 이미 판정이 지나갔다 · 멀어졌다.
+         * **합쳐 두면 영영 모릅니다.** 그래서 창이 닫히는 순간에 내가
+         * 읽고 있던 그 적의 상태를 그대로 찍습니다.
+         */
+        if (guardWindowOpen && gi.windowT === 0 && guardTarget) {
+          const t = guardTarget
+          /**
+           * ⚠️ **성공한 창은 빼고 셉니다.**
+           *
+           * 막으면 combat.ts 가 `guardT` 를 0 으로 **지웁니다**. 즉 성공도
+           * 창이 닫히는 사건이라, 처음엔 성공까지 *"빈 창이 닫힌 이유"* 로
+           * 세고 있었습니다 — `헛친 것 2회` 옆에 이유가 **10회**로 찍혀서
+           * 들켰습니다. 눈금이 자기가 세는 것을 잘못 알고 있었던 것이고,
+           * 이 저장소가 계속 잡아 온 그 모양입니다.
+           *
+           * 성공 여부는 **게임의 카운터**로 가릅니다 — 봇이 따로 판단하면
+           * 판정과 눈금이 갈라집니다.
+           */
+          const won = gi.count > guardCountSeen
+          guardCountSeen = gi.count
+          const cur = won ? null : G.enemyInfo(t.entity)
+          if (!won) {
+            const p2 = G.state().player
+            let why
+            if (!cur || cur.hp <= 0) why = '적이죽음'
+            else if (cur.winding) why = '아직예고중'
+            else if (cur.attacking) why = '판정지나감'
+            else why = '예고가사라짐'
+            const d = cur ? Math.hypot(cur.x - p2.x, cur.z - p2.z) : -1
+            guardWhy[why] = (guardWhy[why] ?? 0) + 1
+            if (guardWhyLog.length < 8) {
+              guardWhyLog.push(
+                `${why} (누를때 남은예고 ${t.left}초 · 거리 ${t.dist}→${d < 0 ? '?' : d.toFixed(1)}m)`,
+              )
+            }
+          }
+          guardTarget = null
+        }
         if (gi.windowT > 0 && !guardWindowOpen) guardOpens++
         guardWindowOpen = gi.windowT > 0
         if (gi.lockT > 0 && !guardLockOn) guardWhiffs++
@@ -1739,8 +1808,42 @@ try {
         if (strike) G.aimAtWorld(strike.x, strike.z)
         if (strike && strike.timer <= gi.window && strike.facing && gi.canGuard) {
           markAct('가드')
+          // 🛡 **누른 순간의 사실**을 적어 둡니다 — 창이 닫힐 때 견줍니다.
+          guardTarget = {
+            entity: strike.entity,
+            left: Number(strike.timer.toFixed(3)),
+            dist: Number(strike.dist.toFixed(1)),
+          }
           // 키도 **게임에게 묻습니다** — 옮겨도 봇이 따라옵니다(balance.ts `GUARD.key`).
           tap(gi.key)
+          await sleep()
+          continue
+        }
+        /**
+         * ── 🛡 **연 창은 지킵니다 — 굴러 나가지 않습니다** ────────────
+         *
+         * ── 계측기가 찾아 준 구멍 ──────────────────────────────────
+         * 창이 닫힌 이유를 찍어 보니 **판정지나감 11회**였고, 옆에 붙은
+         * 거리가 전부 이랬습니다:
+         *
+         *     1.7 → **3.8m** · 1.8 → **3.4m** · 1.2 → **3.4m**
+         *
+         * 0.18초 동안 2m 씩 멀어집니다. 걷기(5.4m/s)로는 안 나오는 값이고,
+         * 구르기(4.2m)면 정확히 이만큼입니다. 즉 봇은 **가드를 열어 놓고
+         * 곧바로 굴러 나가** 자기 창을 스스로 비우고 있었습니다.
+         *
+         * 원인은 바로 위 가지의 조건입니다: 창이 열려 있는 동안
+         * `gi.canGuard` 는 **거짓**입니다(이미 내고 있으니까). 그래서 위
+         * 두 가지가 다 안 걸리고 아래 **구르기**로 떨어집니다. 조건이
+         * *"낼 수 있는가"* 만 보고 *"이미 냈는가"* 를 안 본 탓입니다.
+         *
+         * 사람은 이렇게 안 합니다 — 막기로 마음먹고 눌렀으면 **그 자리에
+         * 서서 결과를 봅니다.** 그 서 있는 0.18초가 이 기술의 값입니다.
+         */
+        if (gi.windowT > 0) {
+          markAct('가드유지')
+          // 이동 키를 놓습니다. 안 놓으면 걸어서라도 사거리 밖으로 나갑니다.
+          releaseAll()
           await sleep()
           continue
         }
@@ -3181,6 +3284,9 @@ try {
       guardBlockedByState,
       guardOpens,
       guardWhiffs,
+      guardSpared,
+      guardWhy,
+      guardWhyLog,
       guards: G.guardInfo().count,
       greenSwung: G.runStats().greenSwung,
       greenDied: G.runStats().greenDied,
@@ -3836,6 +3942,14 @@ try {
       `             🛡 저스트 가드 — 붙잡은 🔴 ${log.guardTries ?? 0}회 · 창을 본 것 ${log.guardSawWindow ?? 0}회` +
       ` · 그중 **못 낸 자리** ${log.guardBlockedByState ?? 0}회\n` +
       `                          창을 연 것 ${log.guardOpens ?? 0}회 · 헛친 것 ${log.guardWhiffs ?? 0}회` +
+      ` · **끊겨서 면제 ${log.guardSpared ?? 0}회**` +
+      (Object.keys(log.guardWhy ?? {}).length
+        ? `\n                          빈 창이 닫힌 이유 — ${Object.entries(log.guardWhy)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `${k} ${v}회`)
+            .join(' · ')}` +
+          (log.guardWhyLog?.length ? `\n                            ${log.guardWhyLog.slice(0, 4).join('\n                            ')}` : '')
+        : '') +
       ` · **성공 ${log.guards ?? 0}회**`,
   )
   /**

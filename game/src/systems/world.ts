@@ -83,6 +83,18 @@ export function spawnPlayer(x = 0, z = 0): number {
   Player.dashSpeed[e] = 0
   Player.faceRot[e] = 0
   Player.dodgeCooldownT[e] = 0
+  /**
+   * 🛡 가드의 세 칸을 **여기서 지웁니다.**
+   *
+   * ⚠️ 앞의 둘(`guardT`·`guardLockT`)은 원래 여기 없었습니다. 이 저장소는
+   *    엔티티 번호를 **재사용**하고 컴포넌트 배열은 남아 있어서, 초기화를
+   *    빠뜨린 칸은 *"앞사람이 두고 간 값"* 으로 태어납니다. 폭발통이
+   *    정확히 그 버그를 낸 적이 있습니다(`Barrel.lit` 을 안 지워서 태어나자마자
+   *    불이 붙은 통). 새 칸을 넣는 김에 셋 다 지웁니다.
+   */
+  Player.guardT[e] = 0
+  Player.guardLockT[e] = 0
+  Player.guardSpared[e] = 0
   Player.castX[e] = 0
   Player.castZ[e] = 0
   Player.vials[e] = VIAL.charges

@@ -836,6 +836,192 @@ try {
       ` — ${inside.map((r) => `${r.left}초${r.gained > 0 ? '✅' : '❌'}`).join(' · ')}`,
   )
   /**
+   * ── ⑥ **봇의 규칙 그대로 눌러 봅니다** ──────────────────────────
+   *
+   * ⑤ 는 *"창 안에서 누르면 막힌다"* 를 8/8 로 확인합니다. 그런데 자동
+   * 플레이는 **창을 19번 열어 19번 다 헛칩니다.** 두 숫자가 같은 게임을
+   * 두고 정반대를 말하고 있고, 그러면 둘 중 하나는 **다른 것을 재고**
+   * 있습니다.
+   *
+   * ⑤ 와 봇의 차이는 셋입니다:
+   *   · ⑤ 는 `enemyInfo(그 적)` 을, 봇은 `threats()` 목록을 읽습니다
+   *   · ⑤ 는 조건이 참이 되면 **그 자리에서** 누릅니다(같은 tick)
+   *   · 봇은 8ms 마다 돌며 `willReach`·`facing`·`canGuard` 를 같이 봅니다
+   *
+   * 그래서 여기서는 **봇이 쓰는 목록과 봇이 쓰는 조건 그대로** 누르고,
+   * 그 사이의 시간표를 남깁니다 — 누른 순간의 남은 예고, 창이 열린 순간,
+   * 맞은 순간. 어디서 어긋나는지는 그 표가 말합니다.
+   *
+   * ⚠️ 이건 봇을 고치려는 것이 아니라 **어느 쪽을 고칠지 가르는** 자료입니다.
+   *    여기서 통하면 문제는 1:1 이 아니라 **여럿이 붙은 상황**에 있고,
+   *    여기서도 헛치면 게임(창·판정)의 이야기입니다.
+   */
+  console.log('')
+  const botRule = []
+  for (let round = 0; round < 3; round++) {
+    const r = await page.evaluate(async () => {
+      const G = window.__game
+      const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 1.8)
+      const hp0 = G.state().player.hp
+      const c0 = G.guardInfo().count
+      G.forceAttack(e, idx)
+      let pressedAt = -1
+      let openedAt = -1
+      let hurtAt = -1
+      let lockAt = -1
+      const seen = []
+      const t0 = G.state().simElapsed
+      // 봇과 **같은 주기**로 돕니다(8ms).
+      for (let i = 0; i < 400; i++) {
+        const now = G.state().simElapsed - t0
+        const gi = G.guardInfo()
+        // 봇이 읽는 **바로 그 목록**에서 고릅니다.
+        const t = G.threats(9).find(
+          (x) => x.winding && x.intent === 0 && x.willReach && x.timer <= gi.window * 2.5,
+        )
+        if (t) seen.push({ at: Number(now.toFixed(3)), left: t.timer, facing: t.facing })
+        if (pressedAt < 0 && t && t.timer <= gi.window && t.facing && gi.canGuard) {
+          pressedAt = Number(now.toFixed(3))
+          G.aimAtWorld(t.x, t.z)
+          G.press(gi.key)
+          G.release(gi.key)
+        }
+        if (openedAt < 0 && gi.windowT > 0) openedAt = Number(now.toFixed(3))
+        if (lockAt < 0 && gi.lockT > 0) lockAt = Number(now.toFixed(3))
+        if (hurtAt < 0 && G.state().player.hp < hp0) hurtAt = Number(now.toFixed(3))
+        if (hurtAt >= 0 && lockAt >= 0) break
+        await new Promise((res) => setTimeout(res, 8))
+      }
+      return {
+        pressedAt,
+        openedAt,
+        hurtAt,
+        lockAt,
+        gained: G.guardInfo().count - c0,
+        hurt: Number((hp0 - G.state().player.hp).toFixed(1)),
+        // 누르기 직전까지 본 남은 예고들 — **관측할 수 있었던 값들**입니다.
+        lefts: seen.slice(-6).map((x) => x.left),
+      }
+    })
+    botRule.push(r)
+    console.log(
+      `  [봇 규칙 ${round + 1}] 누른 때 ${r.pressedAt}초 · 창 열림 ${r.openedAt}초 · 맞은 때 ${r.hurtAt}초` +
+        ` · ${r.gained > 0 ? '✅ 막음' : `❌ 헛침(피해 ${r.hurt})`} · 본 남은예고 [${r.lefts.join(' ')}]`,
+    )
+  }
+  const botOk = botRule.filter((r) => r.gained > 0).length
+  check(
+    botRule.length === 3 && botRule.every((r) => r.pressedAt >= 0),
+    '🚧 세 판 모두 **봇의 조건이 실제로 참이 됐다** (비교의 게이트 — 안 누르면 창 이야기가 아닙니다)',
+    botRule.map((r) => `${r.pressedAt}초`).join(' · '),
+  )
+  check(
+    botOk >= 2,
+    '⑥ **봇의 규칙으로도 1:1 에서는 막힌다** (헛치면 창이 아니라 봇/상황의 이야기입니다)',
+    `${botOk}/3 성공`,
+  )
+
+  /**
+   * ── ⑦ **읽기가 맞았는데 예고가 끊기면 벌하지 않는가** ─────────────
+   *
+   * ⑥ 이 가른 결론이 *"창도 규칙도 멀쩡하고, 실전에서 예고가 끊긴다"*
+   * 였습니다. 그런데 끊긴 창도 **헛친 것과 똑같이** 벌받고 있었습니다 —
+   * 잠김 0.35초 + 기력 18. 플레이어는 정확히 읽었는데도요.
+   *
+   * 세키로의 쳐내기는 적의 공격이 취소돼도 아무 대가가 없습니다. 벌은
+   * *"틀린 때 눌렀을 때"* 붙는 것이지 *"맞게 눌렀는데 상대가 사라졌을
+   * 때"* 붙는 것이 아닙니다.
+   *
+   * ⚠️ 두 판을 **나란히** 잽니다. 면제만 재면 *"가드가 원래 공짜"* 인지
+   *    *"이 경우에만 공짜"* 인지 못 가릅니다 — 면제가 공짜가 되면
+   *    「일단 누르기」가 최적해가 됩니다.
+   */
+  console.log('')
+  const spare = await page.evaluate(async () => {
+    const G = window.__game
+    const out = {}
+    // ① 아무 예고도 없을 때 누른다 — **진짜 헛침**. 벌이 그대로여야 합니다.
+    {
+      const { e } = await window.__t.duel('grunt', 'grunt_jab', 6)
+      G.freezeEnemies(true)
+      G.setStamina(999)
+      const st0 = G.state().player.stamina
+      G.press(G.guardInfo().key)
+      G.release(G.guardInfo().key)
+      await window.__t.runFor(G.guardInfo().window + 0.25)
+      const gi = G.guardInfo()
+      out.plain = {
+        lock: Number(gi.lockT.toFixed(3)),
+        spent: Number((st0 - G.state().player.stamina).toFixed(1)),
+      }
+      G.freezeEnemies(false)
+      G.clearEnemies()
+      await window.__t.runFor(0.2)
+      void e
+    }
+    // ② 🔴 예고를 보고 열어 둔 뒤, 그 예고를 **무너뜨려 끊는다**.
+    {
+      const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 1.8)
+      G.setStamina(999)
+      G.forceAttack(e, idx)
+      await window.__t.until(() => {
+        const i = G.enemyInfo(e)
+        return !!i && i.winding
+      }, 4)
+      const st0 = G.state().player.stamina
+      G.press(G.guardInfo().key)
+      G.release(G.guardInfo().key)
+      /**
+       * ⚠️ **창이 실제로 열린 뒤에 끊습니다.**
+       *
+       * 처음엔 누르자마자 끊었고 표시가 안 붙었습니다. 당연합니다 —
+       * 입력은 다음 tick 에 소비되므로 그 순간 `guardT` 는 아직 0 이고,
+       * 표시를 붙이는 조건(`guardT > 0`)이 거짓입니다. **누른 것과 창이
+       * 열린 것은 같은 순간이 아닙니다.**
+       */
+      await window.__t.runFor(0.06)
+      const opened = G.guardInfo().windowT
+      // 창이 열린 채로 예고를 끊습니다 — 게임의 **같은 경로**(강인도 붕괴)로.
+      G.breakEnemy(e)
+      const sparedSeen = G.guardInfo().spared
+      await window.__t.runFor(G.guardInfo().window + 0.25)
+      const gi = G.guardInfo()
+      out.cut = {
+        opened: Number(opened.toFixed(3)),
+        spared: sparedSeen,
+        lock: Number(gi.lockT.toFixed(3)),
+        spent: Number((st0 - G.state().player.stamina).toFixed(1)),
+      }
+      G.clearEnemies()
+    }
+    return out
+  })
+  console.log(
+    `  [예고 없이 누름] 잠김 ${spare.plain.lock}초 · 기력 -${spare.plain.spent}` +
+      `   |   [🔴 를 읽고 눌렀는데 끊김] 창 ${spare.cut.opened}초 열림 · 표시 ${spare.cut.spared ? 'O' : 'X'} · 잠김 ${spare.cut.lock}초 · 기력 -${spare.cut.spent}`,
+  )
+  check(
+    spare.plain.lock > 0 && spare.plain.spent > 0,
+    '🚧 아무 예고 없이 누르면 **벌이 그대로다** (비교의 게이트 — 면제가 공짜가 되지 않게)',
+    `잠김 ${spare.plain.lock}초 · 기력 -${spare.plain.spent}`,
+  )
+  check(
+    spare.cut.opened > 0,
+    '🚧 끊기 전에 **창이 실제로 열려 있었다** (비교의 게이트 — 안 열렸으면 아무것도 잰 게 아닙니다)',
+    `${spare.cut.opened}초 남아 있었음`,
+  )
+  check(
+    spare.cut.spared === true,
+    '🛡 예고가 끊긴 창에 **면제 표시가 붙는다** (끊은 그 자리에서 기록합니다)',
+    `표시 ${spare.cut.spared ? 'O' : 'X'}`,
+  )
+  check(
+    spare.cut.lock === 0 && spare.cut.spent === 0,
+    '🛡 **읽기가 맞았으면 벌하지 않는다** (내가 무너뜨려 끊은 예고에 벌이 붙지 않게)',
+    `잠김 ${spare.cut.lock}초 · 기력 -${spare.cut.spent}`,
+  )
+
+  /**
    * ⚠️ **위쪽 경계는 여기서 못 잽니다 — ②가 잽니다.**
    *
    * 처음엔 이 절에서 창의 6배까지 올려 "창 밖" 표본을 잡으려 했습니다.

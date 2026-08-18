@@ -5551,6 +5551,8 @@ class Game {
     whiffStamina: number
     refund: number
     poise: number
+    /** 🛡 지금 이 창이 **면제 표시**를 달고 있는가(읽기는 맞았는데 예고가 끊김). */
+    spared: boolean
   } {
     const p = this.playerEntity
     return {
@@ -5566,6 +5568,7 @@ class Game {
       whiffStamina: GUARD.whiffStamina,
       refund: GUARD.refund,
       poise: GUARD.poise,
+      spared: Player.guardSpared[p] === 1,
     }
   }
 

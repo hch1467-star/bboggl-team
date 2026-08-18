@@ -879,6 +879,33 @@ export function breakPoise(t: number): void {
    */
   const duringWindup =
     Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
+  /**
+   * ── 🛡 **읽기가 맞았는데 답할 것이 사라진 경우** ────────────────────
+   *
+   * 예고를 보고 가드를 열어 뒀는데, 그 예고를 **내가 무너뜨려서** 끊어
+   * 버리면 창은 아무것도 못 만나고 닫힙니다. 그리고 지금까지는 그것도
+   * *"헛친 것"* 으로 벌했습니다 — 잠김 0.35초 + 기력 18.
+   *
+   * 자동 플레이가 이 모양을 그대로 찍었습니다: **창을 연 것 19회 ·
+   * 헛친 것 19회 · 성공 0회.** 그런데 `npm run parry` 의 ⑥ 은 봇의
+   * **같은 규칙**으로 1:1 에서 2/3 을 막습니다. 창도 규칙도 멀쩡하니,
+   * 남는 것은 *"여럿이 붙은 실전에서 예고가 자꾸 끊긴다"* 입니다.
+   *
+   * 여기가 그 끊는 자리이므로, 여기서 표시합니다. 판단을 나중에 다시
+   * 하려면 *"이 창이 왜 비었는가"* 를 복원해야 하는데, 그건 이미 지나간
+   * 정보입니다 — **사건은 사건이 일어난 자리에서 기록합니다**(바로 위
+   * `duringWindup` 이 같은 이유로 여기 있습니다).
+   *
+   * ⚠️ 🔴 만 표시합니다. 다른 색은 애초에 못 막으므로 그 예고가 끊긴 것은
+   *    가드와 아무 상관이 없고, 표시하면 **진짜 헛침이 공짜가 됩니다.**
+   */
+  if (duringWindup && attackAt(Enemy.kind[t], Enemy.attackIndex[t]).intent === AttackIntent.Strike) {
+    const ps = players.run()
+    for (let i = 0; i < players.count; i++) {
+      const p = ps[i]
+      if (Player.guardT[p] > 0) Player.guardSpared[p] = 1
+    }
+  }
   Enemy.poise[t] = cfg.poiseMax
   Enemy.poiseIdleT[t] = 0
   /**
@@ -955,6 +982,8 @@ export const barrelBlastEvents: (BreakEvent & {
 })[] = []
 
 const barrels = defineQuery(Barrel, Transform, Health)
+/** 🛡 예고를 끊은 자리에서 플레이어의 가드 창을 봐야 합니다(`breakPoise`). */
+const players = defineQuery(Player, Stamina)
 
 /**
  * ── 💥 **도화선을 굴리고, 다 타면 터뜨립니다** ──────────────────────

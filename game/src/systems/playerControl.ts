@@ -1079,20 +1079,41 @@ export function playerControlSystem(ctx: ControlContext): void {
       if (Player.guardT[p] > 0) {
         Player.guardT[p] = Math.max(0, Player.guardT[p] - dt)
         if (Player.guardT[p] === 0) {
-          Player.guardLockT[p] = GUARD.whiffLock
           /**
-           * 🛡 헛친 벌은 **구르기 한 번 분 위에서만** 깎습니다
-           * (balance.ts `whiffKeepsDodge` — 근거는 그 주석에).
-           * 벌은 그대로 두되, 다음 예고에 답할 수단까지 가져가지 않습니다.
+           * ── 🛡 **읽기가 맞았으면 벌하지 않습니다** ────────────────────
+           *
+           * 창이 열려 있는 동안 **막을 수 있었던 예고가 끊겼다면**(내가
+           * 무너뜨렸거나 적이 죽었거나) 이 창은 헛친 것이 아닙니다.
+           * 플레이어는 정확히 읽었고, 읽은 대상이 사라졌을 뿐입니다.
+           * 표시는 끊긴 그 자리에서 붙습니다(combat.ts `breakPoise`).
+           *
+           * 참고 게임이 여기서 하는 것: 세키로의 쳐내기는 적의 공격이
+           * 취소되어도 **아무 대가가 없습니다**(그냥 막기 자세로 남습니다).
+           * 벌은 *"틀린 때 눌렀을 때"* 붙는 것이지 *"맞게 눌렀는데 상대가
+           * 사라졌을 때"* 붙는 것이 아닙니다.
+           *
+           * ⚠️ **공짜 가드가 되지 않습니다.** 면제는 *"🔴 예고가 실제로
+           *    끊겼을 때"* 만 붙습니다. 아무 때나 누르면 끊길 예고가
+           *    없으므로 벌은 그대로입니다.
            */
-          {
-            const keep = GUARD.whiffKeepsDodge
-              ? PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
-              : 0
-            const room = Math.max(0, Stamina.value[p] - keep)
-            spendStamina(p, Math.min(GUARD.whiffStamina, room), '헛친가드')
+          if (Player.guardSpared[p] === 1) {
+            Player.guardSpared[p] = 0
+          } else {
+            Player.guardLockT[p] = GUARD.whiffLock
+            /**
+             * 🛡 헛친 벌은 **구르기 한 번 분 위에서만** 깎습니다
+             * (balance.ts `whiffKeepsDodge` — 근거는 그 주석에).
+             * 벌은 그대로 두되, 다음 예고에 답할 수단까지 가져가지 않습니다.
+             */
+            {
+              const keep = GUARD.whiffKeepsDodge
+                ? PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
+                : 0
+              const room = Math.max(0, Stamina.value[p] - keep)
+              spendStamina(p, Math.min(GUARD.whiffStamina, room), '헛친가드')
+            }
+            sfx.deny()
           }
-          sfx.deny()
         }
       }
       Player.guardLockT[p] = Math.max(0, Player.guardLockT[p] - dt)
@@ -1308,6 +1329,9 @@ export function playerControlSystem(ctx: ControlContext): void {
     const guardLocked = Player.guardLockT[p] > 0
     if (guardLocked) moveScale = Math.min(moveScale, 0.25)
     if (guardPressed && !guardLocked && Player.guardT[p] <= 0) {
+      // 🛡 새 창을 열 때 면제 깃발을 **지웁니다.** 안 지우면 한 번 면제받은
+      //    상태가 남아서 그 뒤의 진짜 헛침까지 공짜가 됩니다.
+      Player.guardSpared[p] = 0
       if (canGuardNow(p)) {
         // 커밋을 뚫고 여는 것이면 여기서 값을 냅니다(서서 내면 0).
         const cost = guardOpenCost(p)

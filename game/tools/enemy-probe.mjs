@@ -219,7 +219,7 @@ try {
       `  [사다리 면제] 답이 같은 쌍 — ${ratios.map((x) => `${x.label} 키 ${x.h.toFixed(2)}배 · 굵기 ${x.r.toFixed(2)}배`).join(' · ')}`,
     )
     check(
-      ratios.every((x) => x.h >= 1.2 || x.r >= 1.2),
+      ratios.length > 0 && ratios.every((x) => x.h >= 1.2 || x.r >= 1.2),
       '🛡️ 사다리를 면제받은 쌍도 **덩치로는 확실히 갈린다** (면제가 공짜가 아니게)',
       ratios.map((x) => `${x.label} ${Math.max(x.h, x.r).toFixed(2)}배`).join(' · '),
     )
