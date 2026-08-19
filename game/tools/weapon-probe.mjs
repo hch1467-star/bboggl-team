@@ -380,6 +380,17 @@ try {
         let burstFin = 0
         let burstBrk = 0
         /**
+         * 💢 **창 안에서 깎은 강인도**도 같은 순간에 잡아 둡니다.
+         *
+         * 지금까지 창 표는 **피해 하나만** 재고 있었습니다. 그래서
+         * *"표준 반격 창은 평평하다(26 · 26 · 24)"* 는 관찰이 나왔는데,
+         * 이 게임이 무기를 가르는 축은 셋입니다 — **폭발 · 효율 · 강인도.**
+         * 축 하나만 보고 "평평하다"고 적으면, 실제로는 갈려 있는데도
+         * 갈리지 않는다고 말하게 됩니다. (그 결론으로 피해 수치를
+         * 만졌다면 멀쩡한 밸런스를 망가뜨릴 뻔했습니다.)
+         */
+        let burstPoise = 0
+        /**
          * ⚠️ **깎은 쪽에게 묻습니다.**
          *
          * 예전엔 `enemyInfo().poise` 를 훑어 *"줄어든 만큼"* 을 더했습니다.
@@ -430,6 +441,7 @@ try {
             // (위 `burstFinishers` 설계 노트 참고).
             burstFin = G.runStats().finishers - finStart
             burstBrk = breaks
+            burstPoise = (G.runStats().poiseDealt ?? 0) - poiseStart
           }
           const info = G.enemyInfo(e)
           if (!info) break
@@ -482,6 +494,7 @@ try {
           burstDps: Number((burstDealt / burstSeconds).toFixed(1)),
           /** 그 구간에 **실제로 넣은 피해 총량** — 창 길이별 비교에 씁니다. */
           burstDealt: Number(burstDealt.toFixed(1)),
+          burstPoise: Number(burstPoise.toFixed(1)),
           /**
            * 그 구간에 들어간 **처형 횟수·붕괴 횟수**.
            *
@@ -999,6 +1012,7 @@ try {
       const r = {
         burstFinishers: medOf(reps.map((x) => x.burstFinishers)),
         burstDealt: medOf(reps.map((x) => x.burstDealt)),
+        burstPoise: medOf(reps.map((x) => x.burstPoise)),
         span: `${Math.min(...reps.map((x) => x.burstDealt))}~${Math.max(...reps.map((x) => x.burstDealt))}`,
       }
       /**
@@ -1019,6 +1033,7 @@ try {
         fin: r.burstFinishers,
         span: r.span,
         dealt: Number(Math.max(0, r.burstDealt - r.burstFinishers * finDmg).toFixed(1)),
+        poise: Number(r.burstPoise.toFixed(1)),
       })
     }
     byWindow.push(row)
@@ -1040,7 +1055,7 @@ try {
     console.log(
       `    ${row.name.padEnd(12)} ${row.sec.toFixed(2)}초 — ` +
         row.dealt
-          .map((d) => `${d.name} ${d.dealt}(${d.span})${d.fin ? `[처형 ${d.fin} 뺌]` : ''}`)
+          .map((d) => `${d.name} 피해 ${d.dealt} · 강인도 ${d.poise}${d.fin ? `[처형 ${d.fin} 뺌]` : ''}`)
           .join(' · ') +
         `   → ${best === '동률' ? '**동률**' : `1등 **${best}**`}`,
     )
@@ -1103,13 +1118,35 @@ try {
    * 니오·오공은 여기서도 갈리게 만듭니다(빠른 무기는 여러 대, 무거운
    * 무기는 한 대 크게). 숫자를 적어 두고 다음 라운드로 넘깁니다.
    */
-  if (byWindow[0] && winnerOf(byWindow[0]) === '동률') {
-    console.log(
-      `  📋 [관찰] 표준 반격 창(${byWindow[0].sec.toFixed(2)}초)은 **평평합니다** — ` +
-        byWindow[0].dealt.map((d) => `${d.name} ${d.dealt}`).join(' · ') +
-        ' (동사는 다른데 결과가 같습니다)',
-    )
+  /**
+   * ── 💢 **"평평하다"를 축 하나로 말하지 않습니다** ────────────────────
+   *
+   * 지난 라운드에 *"표준 반격 창은 평평합니다(26 · 26 · 24)"* 를 관찰로
+   * 적어 두고 다음 라운드로 넘겼습니다. 그런데 그 줄은 **피해만** 재고
+   * 있었습니다. 이 게임이 무기를 가르는 축은 셋인데(폭발 · 효율 · 강인도)
+   * 하나만 보고 평평하다고 적은 것입니다.
+   *
+   * 축 하나로 결론을 내고 피해 수치를 만졌다면, **갈려 있던 것을 제 손으로
+   * 뭉갤 뻔했습니다.** 그래서 이제 창마다 **피해와 강인도를 같이** 적고,
+   * *"어느 축에서도 안 갈리는 창이 있는가"* 를 묻습니다.
+   *
+   * 니오·오공이 짧은 틈에서도 무기를 가르는 방법이 정확히 이것입니다 —
+   * 빠른 무기는 **여러 대**, 무거운 무기는 **한 대 크게(그리고 무너뜨리게)**.
+   */
+  const flatOn = (row, key) => {
+    const sorted = [...row.dealt].sort((a, b) => b[key] - a[key])
+    return sorted[0][key] < sorted[1][key] * MARGIN
   }
+  const flatBoth = byWindow.filter((r) => flatOn(r, 'dealt') && flatOn(r, 'poise'))
+  check(
+    flatBoth.length === 0,
+    '💢 **어느 창에도 "두 축 모두 평평한" 자리가 없다** (가장 흔한 상황에서 무기가 사실상 하나가 되지 않게)',
+    flatBoth.length === 0
+      ? byWindow
+          .map((r) => `${r.name} → ${flatOn(r, 'dealt') ? '강인도로' : '피해로'} 갈림`)
+          .join(' · ')
+      : `평평한 창: ${flatBoth.map((r) => r.name).join(' · ')}`,
+  )
 
   /**
    * ── 🕐 **경계가 종이 한 장인가** ────────────────────────────────
