@@ -475,6 +475,9 @@ function beginAttack(p: number, index: number, aimRot: number): void {
   else if (index === PLUNGE_COMBO) plungeAttacks++
   Actor.hitsLeft[p] = 0
   Actor.nextHitT[p] = 0
+  // ⚡ 새 휘두름은 **아직 아무것도 못 맞혔습니다.** 안 지우면 한 번 맞힌
+  //    뒤로 영영 캔슬이 열려서, 허공을 갈라도 손이 빨라집니다.
+  Player.hitConfirm[p] = 0
   /**
    * ── ⌨️ **눌러 둔 것이 여기서 일합니다 — 세는 곳도 여기 하나** ────────
    *
@@ -551,6 +554,8 @@ function beginSkill(
   Actor.nextHitT[p] = 0
   Actor.comboIndex[p] = 0
   Actor.bufferedAttack[p] = 0
+  // ⚡ 평타와 같은 규칙 — 새 시전은 아직 아무것도 못 맞혔습니다.
+  Player.hitConfirm[p] = 0
   // 무적 프레임 타이밍은 회피와 같은 필드를 씁니다(동시에 일어나지 않으므로 안전).
   Player.dodgeElapsed[p] = 0
   // 기본 공격과 같은 규칙 — 스냅하지 않고 선행동작 동안 수렴합니다.
@@ -1281,6 +1286,54 @@ export function playerControlSystem(ctx: ControlContext): void {
      */
     const cancelCost =
       PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) + PLAYER.dodge.cancelExtraCost
+    /**
+     * ── ⚡ **적중 캔슬이 지금 열려 있는가** ──────────────────────────────
+     *
+     * 규칙은 balance.ts `PLAYER.tempo.hitCancel` 에 한 곳으로 적혀 있고,
+     * 여기는 *"그 조건이 지금 맞는가"* 만 봅니다. 두 가지를 함께 봅니다:
+     *
+     *   ① `hitConfirm` — 이번 동작이 **실제로 적중**했다(combat.ts 가 씀).
+     *   ② `hitsLeft === 0` — 남은 타격이 없다.
+     *
+     * ②가 없으면 3연타 스킬을 **첫 타에 끊을 수 있게** 됩니다. 그건
+     * 손맛이 아니라 함정입니다 — 좋으라고 넣은 기능이 모르고 쓰면 피해를
+     * 깎아 먹는 물건이 되고, 알고 쓰면 아무도 3연타를 끝까지 안 씁니다.
+     * 다단 히트는 다 나가고 나서 열립니다.
+     */
+    const hitCancelOpen = (): boolean =>
+      Player.hitConfirm[p] === 1 && Actor.hitsLeft[p] === 0
+    /**
+     * 후딜의 **남은 비율이 이 아래**면 다음 공격으로 넘어갈 수 있습니다.
+     * 맞혔으면 `hitCancel`(=1, 후딜 전 구간), 헛쳤으면 원래 문턱 그대로.
+     */
+    const cancelGate = (base: number): number =>
+      hitCancelOpen() ? PLAYER.tempo.hitCancel : base
+    /**
+     * ⚡ 적중 캔슬로 **다음 공세를 냅니다.** 낼 것이 있었으면 true.
+     *
+     * 여는 것은 **공격 계열뿐**입니다(스킬·평타·처형). 구르기·성수병은
+     * 여기 없습니다 — 근거는 balance.ts `hitCancel` 의 "빠져나가는 길에는
+     * 안 겁니다".
+     *
+     * ⚠️ 후딜에서 쓰는 것과 **같은 조건**(`hasNext || canFinish`)을 겁니다.
+     *    안 그러면 콤보 마지막 타에서도 판정이 잘려 나가고, 마무리의 긴
+     *    후딜이 만드는 **콤보의 마침표**가 사라집니다 — 후딜 쪽 주석이
+     *    이미 한 번 데인 자리입니다.
+     */
+    /**
+     * ⚡ 적중 캔슬로 **스킬을 냅니다.** 눌러 둔 스킬이 있었으면 true.
+     *
+     * 스킬**만** 냅니다. 평타·구르기·성수병은 여기 없습니다 —
+     * 근거는 balance.ts `hitCancel` 의 두 경고문입니다(평타를 열면 초당
+     * 피해가 폭등하고, 구르기를 열면 4색 예고를 읽을 이유가 사라집니다).
+     */
+    const skillCancelOut = (): boolean => {
+      const queued = takeBufferedSkill()
+      if (!queued) return false
+      beginSkill(p, queued.slot, queued.def, aimRot, ctx)
+      return true
+    }
+
     const tryDodgeCancel = (): boolean => {
       if (Actor.bufferedDodge[p] !== 1) return false
       // 쿨다운은 그대로 지킵니다 — 기력만 있으면 무한히 구르는 길이 되면 안 됩니다.
@@ -1503,6 +1556,20 @@ export function playerControlSystem(ctx: ControlContext): void {
             }
             sfx.deny()
           }
+        } else if (phase === AttackPhase.Active && hitCancelOpen() && skillCancelOut()) {
+          /**
+           * ── ⚡ **평캔** — 맞은 순간 평타 모션이 스킬로 끊깁니다 ──────────
+           *
+           * 여기가 그 손맛이 실제로 나는 자리입니다. 예전에는 칼이 몸을
+           * 지나가고 피가 튀고 히트스톱까지 끝난 뒤에도 **판정이 끝나기를
+           * 기다려야** 스킬이 나갔습니다. 맞은 것은 이미 다 맞았는데 손만
+           * 묶여 있었던 것입니다. 롱소드 기준 0.08초, 대검이면 0.11초 —
+           * 짧아 보여도 이어 치는 리듬에서는 이 한 박자가 전부입니다.
+           *
+           * **적중했을 때만** 열립니다(hitCancelOpen). 허공을 가른 사람은
+           * 판정이 끝날 때까지 그대로 묶여 있습니다.
+           */
+          break
         } else if (tryDodgeCancel()) {
           // 선행동작·판정 중 취소 회피. 값은 위 tryDodgeCancel 설계 노트 참고.
           break
@@ -1574,6 +1641,9 @@ export function playerControlSystem(ctx: ControlContext): void {
             canAffordAttack(p, FINISHER.staminaCost) && finisherTarget(p) >= 0
           if (
             (hasNext || canFinish) &&
+            // ⚡ 여기는 **적중 캔슬 밖**입니다 — 평타로 평타를 끊는 것까지 열면
+            //    쿨다운이라는 문지기가 없어서 초당 피해가 폭등합니다
+            //    (balance.ts `hitCancel` 의 실측 55~62% 이야기).
             Actor.timer[p] <= combo.recovery * tempoOf(p) * PLAYER.tempo.comboCancel
           )
             endAttack(p, aimRot)
@@ -1608,7 +1678,8 @@ export function playerControlSystem(ctx: ControlContext): void {
         if (
           phase === AttackPhase.Recovery &&
           Actor.bufferedAttack[p] === 1 &&
-          Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5
+          // ⚡ 평타로 나가는 길은 적중 캔슬 밖입니다(balance.ts `hitCancel`).
+          Actor.timer[p] <= def.recovery * tempoOf(p) * PLAYER.tempo.skillChain
         ) {
           /**
            * 스킬 후딜에서도 **처형**이 나갑니다 — 콤보 후딜과 같은 규칙입니다.
@@ -1634,7 +1705,10 @@ export function playerControlSystem(ctx: ControlContext): void {
         // 후딜 후반에는 **다음 스킬로 바로 이어갈 수 있습니다.**
         // 스킬 3개를 엮는 것이 이 게임의 리듬이므로, 이어치기가 안 되면
         // 슬롯을 늘린 의미가 없습니다. 전반부는 못 빠지므로 커밋은 유지됩니다.
-        if (phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5) {
+        if (
+          phase === AttackPhase.Recovery &&
+          Actor.timer[p] <= def.recovery * tempoOf(p) * cancelGate(PLAYER.tempo.skillChain)
+        ) {
           const queued = takeBufferedSkill()
           if (queued) {
             beginSkill(p, queued.slot, queued.def, aimRot, ctx)
@@ -1652,7 +1726,13 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 회피·스킬 이어가기와 **같은 규칙**(후딜 절반 이후)을 씁니다 —
          * 규칙이 하나면 외울 것도 하나입니다.
          */
-        if (drinkPressed && phase === AttackPhase.Recovery && Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5) {
+        // ⚡ 여기는 **적중 캔슬을 안 겁니다.** 성수병은 빠져나가는 길이고,
+        //    적중 캔슬이 파는 것은 공세를 잇는 속도입니다(balance.ts hitCancel).
+        if (
+          drinkPressed &&
+          phase === AttackPhase.Recovery &&
+          Actor.timer[p] <= def.recovery * tempoOf(p) * PLAYER.tempo.skillChain
+        ) {
           if (Player.vials[p] > 0) {
             beginDrink(p)
             break
@@ -1665,7 +1745,9 @@ export function playerControlSystem(ctx: ControlContext): void {
           phase === AttackPhase.Recovery &&
           Actor.bufferedDodge[p] === 1 &&
           canDodge &&
-          Actor.timer[p] <= def.recovery * tempoOf(p) * 0.5
+          // ⚡ 구르기도 적중 캔슬 밖입니다 — 한 대 치고 무적으로 빠지는 것이
+          //    모든 상황의 정답이 되면 4색 예고를 읽을 이유가 사라집니다.
+          Actor.timer[p] <= def.recovery * tempoOf(p) * PLAYER.tempo.skillChain
         ) {
           takeBufferedDodge()
           const [dx, dz] = dodgeDir()
@@ -1681,6 +1763,16 @@ export function playerControlSystem(ctx: ControlContext): void {
          * 못 외우고, "이번엔 왜 안 나가지"만 남습니다. 쿨다운을 날린다는
          * 손해 자체가 이미 스킬 쪽 추가 대가입니다.
          */
+        /**
+         * ⚡ 스킬도 **맞은 순간 다음 공세로 이어집니다**(평타와 같은 규칙).
+         *
+         * 로스트아크의 스킬 연계가 시원한 이유가 정확히 이것입니다 —
+         * 판정이 끝나기를 기다리는 것이 아니라 **맞은 것을 확인하고** 다음
+         * 스킬을 겹칩니다. 다단 히트 스킬은 타수가 다 나가기 전에는 안 열립니다
+         * (위 `hitCancelOpen` 의 ② 조건).
+         */
+        if (phase === AttackPhase.Active && hitCancelOpen() && skillCancelOut()) break
+
         if (phase !== AttackPhase.Recovery && tryDodgeCancel()) break
 
         if (phase === AttackPhase.Windup) {

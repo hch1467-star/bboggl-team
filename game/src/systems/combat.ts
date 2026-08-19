@@ -2095,6 +2095,20 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      */
     if (!attackerIsPlayer && targetIsPlayer) Enemy.whiffing[a] = 0
     /**
+     * ⚡ **적중 캔슬의 깃발** — 플레이어가 맞혔다는 사실을 여기서 적습니다.
+     *
+     * 적의 `whiffing` 과 **같은 자리에 나란히** 둡니다. 둘은 같은 사건의
+     * 양면이고(누가 맞혔는가), 이 저장소가 계속 적어 온 그대로
+     * **사건은 사건이 일어난 자리에서 기록합니다.** 조작 쪽(playerControl)
+     * 에서 "아마 맞았겠지"를 추측하면, 무적 프레임·통·실험대 무적 같은
+     * 예외가 생길 때마다 두 곳이 갈라집니다.
+     *
+     * ⚠️ 위 무적 프레임 처리가 `continue` 로 빠지므로, **잘 구른 적을 친
+     *    것은 여기에 안 옵니다.** 그게 맞습니다 — 상대가 무적으로 흘린
+     *    것은 맞힌 것이 아닙니다.
+     */
+    if (attackerIsPlayer && !targetIsPlayer) Player.hitConfirm[a] = 1
+    /**
      * 🌀 **마무리를 맞혔으면 기력을 일부 갚습니다** (니오의 기 펄스와 같은
      * 자리 — 설계 근거는 balance.ts `COMBO_FINISH_REFUND`).
      *

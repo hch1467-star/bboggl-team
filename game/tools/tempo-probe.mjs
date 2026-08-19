@@ -406,6 +406,73 @@ try {
     comboLoop.ok ? `${comboLoop.n}타 무기 · 누르고 ${comboLoop.delay.toFixed(2)}초 뒤 1타` : '끝내 안 이어짐',
   )
 
+  /**
+   * ── ⚡ **적중 캔슬(평캔)** — 맞혔을 때만 스킬이 일찍 나가는가 ─────────
+   *
+   * 규칙은 balance.ts `PLAYER.tempo.hitCancel` 에 있고, 이 검사는 그
+   * 규칙의 **양쪽 면**을 봅니다. 한쪽만 재면 아무 말도 안 하는 검사가
+   * 됩니다 — "맞히면 빨리 나간다"만 재면 *그냥 후딜을 줄인 것*과 구분이
+   * 안 되고, "헛치면 안 나간다"만 재면 기능이 아예 죽어 있어도 초록입니다.
+   *
+   * 고정 스텝으로 돌립니다. 이 검사가 세는 것은 **프레임 몇 개** 차이라,
+   * 벽시계로 재면 프레임률에 묻힙니다.
+   */
+  const hitCancel = await page.evaluate(() => {
+    const G = window.__game
+    // 판정(Active)에 들어간 그 자리에서 스킬을 눌러 두고, 스킬이 실제로
+    // 시작될 때까지 몇 프레임이 걸리는지 셉니다.
+    const run = (withFoe) => {
+      G.reset()
+      G.setPaused(true)
+      const me = G.state().player
+      // 사거리 안(1.2m)에 세우면 맞고, 아예 안 세우면 허공을 가릅니다.
+      if (withFoe) G.spawnTestEnemy(me.x, me.z + 1.2, 0, false)
+      G.step(10, 1 / 60, true)
+      G.press('Mouse0')
+      G.release('Mouse0')
+      let f = 0
+      while (f < 120) {
+        G.step(1, 1 / 60)
+        f++
+        const s = G.state().player
+        if (s.state === 1 && s.phase === 1) break // 1=Attack · phase 1=판정
+      }
+      const enteredActive = f < 120
+      G.press('KeyQ')
+      G.release('KeyQ')
+      let g = 0
+      while (g < 120 && G.state().player.state !== 5) {
+        G.step(1, 1 / 60)
+        g++
+      } // 5=Skill
+      return { enteredActive, frames: g, gotSkill: G.state().player.state === 5 }
+    }
+    return { hit: run(true), miss: run(false) }
+  })
+  console.log(
+    `  [적중 캔슬] 맞힘 ${hitCancel.hit.frames}프레임 만에 스킬 · 헛침 ${hitCancel.miss.frames}프레임`,
+  )
+  // 🚧 두 판 다 **판정까지 실제로 갔고 스킬이 나왔는지**부터 봅니다.
+  //    안 그러면 아래 비교가 "안 나간 것끼리 비교"가 됩니다.
+  check(
+    hitCancel.hit.enteredActive &&
+      hitCancel.miss.enteredActive &&
+      hitCancel.hit.gotSkill &&
+      hitCancel.miss.gotSkill,
+    '🚧 두 판 다 판정까지 가고 스킬이 실제로 나왔다 (빈 것끼리 비교하지 않게)',
+    `맞힘 판정 ${hitCancel.hit.enteredActive} · 스킬 ${hitCancel.hit.gotSkill} / 헛침 판정 ${hitCancel.miss.enteredActive} · 스킬 ${hitCancel.miss.gotSkill}`,
+  )
+  check(
+    hitCancel.hit.gotSkill && hitCancel.hit.frames < hitCancel.miss.frames,
+    '⚡ **맞히면 판정 도중에도 스킬로 끊긴다** (평캔)',
+    `${hitCancel.hit.frames} < ${hitCancel.miss.frames}프레임`,
+  )
+  check(
+    hitCancel.miss.gotSkill && hitCancel.miss.frames > hitCancel.hit.frames,
+    '⚡ **헛치면 그 자리에서 못 끊는다** (캔슬이 실력의 상이지 기본값이 아니게)',
+    `헛침은 ${hitCancel.miss.frames}프레임 기다림`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
