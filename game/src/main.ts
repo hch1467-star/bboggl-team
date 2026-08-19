@@ -98,6 +98,7 @@ import { AttackPhase } from './core/components'
 import { defineQuery, destroyEntity, hasComponent, isAlive, resetWorld } from './core/ecs'
 import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
+import { vfxRng } from './core/rng'
 import { requestHitstop, resetTime, tick, time } from './core/time'
 import {
   CELL_SIZE,
@@ -1172,7 +1173,7 @@ class Game {
         const a = (i / 10) * Math.PI * 2
         this.vfx.spawnHitSpark(
           ev.x + Math.cos(a) * 1.9,
-          0.6 + Math.random() * 1.8,
+          0.6 + vfxRng.next() * 1.8,
           ev.z + Math.sin(a) * 1.9,
           1.5,
         )
@@ -2029,10 +2030,10 @@ class Game {
         // 처치 순간 파편을 여러 개 흩뿌립니다 — 한 개보다 훨씬 시원합니다.
         for (let i = 0; i < 4; i++) {
           this.vfx.spawnHitSpark(
-            death.x + (Math.random() - 0.5) * 0.9,
-            Transform.y[death.entity] + 0.5 + Math.random() * 1.1,
-            death.z + (Math.random() - 0.5) * 0.9,
-            0.8 + Math.random() * 0.7,
+            death.x + (vfxRng.next() - 0.5) * 0.9,
+            Transform.y[death.entity] + 0.5 + vfxRng.next() * 1.1,
+            death.z + (vfxRng.next() - 0.5) * 0.9,
+            0.8 + vfxRng.next() * 0.7,
           )
         }
         // ⚠️ 지우기 **전에** 예약을 셉니다 — 이 자리를 빠뜨려서 잔액이 남았습니다.
@@ -2881,6 +2882,42 @@ class Game {
    */
   debugSetPaused(paused: boolean): void {
     this.paused = paused
+  }
+
+  /**
+   * ⏱ **고정 걸음** — 프레임을 정확히 `dtSec` 초씩 `frames` 번 진행합니다.
+   *
+   * ── 왜 필요한가 (재현성 검사가 866픽셀에서 막혀 있었습니다) ──────────
+   * 이 저장소의 검사 여럿이 *"같은 시각이면 같은 그림"* 위에 서 있습니다.
+   * 그런데 **같은 시각에 설 방법이 없었습니다.** 프로브는 `elapsed` 가 6초를
+   * 넘을 때까지 8ms 마다 들여다보다가 사진을 찍는데, 그 사이에도 프레임은
+   * 계속 돌아갑니다. 그래서 실제로 찍히는 시각은 6.00초가 아니라
+   * **6.00 + 그때그때 다른 나머지**입니다.
+   *
+   * 그 나머지가 픽셀로 새어 나옵니다 — 보물상자는 `time.elapsed` 로 위아래
+   * 흔들리고(visuals.ts) 화톳불도 `time.elapsed` 로 맥동합니다. 즉 두 판이
+   * 다른 것은 **난수가 남아서가 아니라 시각이 달라서**였습니다. 씨앗을 아무리
+   * 심어도 이 차이는 안 없어집니다.
+   *
+   * 해결은 값을 만지는 쪽이 아니라 **계측기를 고치는 쪽**입니다. 벽시계 대신
+   * 걸음 수로 시간을 주면 두 판이 **정확히 같은 시각**에 섭니다. 게임 쪽
+   * 규칙(연출이 `realDt` 로 흐른다)은 하나도 안 건드립니다 — 그건 의도된
+   * 설계이고(core/time.ts), 고쳐야 할 것은 그걸 못 재던 자 쪽이었습니다.
+   *
+   * ⚠️ **검증 도구 전용입니다.** 부르기 전에 `setPaused(true)` 로 rAF 루프를
+   *    세워야 합니다. 안 세우면 걸음 사이사이에 벽시계 프레임이 끼어들어
+   *    이 함수가 주는 정확한 델타가 다시 흐트러집니다.
+   *
+   * @param fromZero 시계를 0으로 되돌리고 시작합니다. 페이지가 뜨기까지
+   *   걸린 시간이 판마다 달라서, 안 되돌리면 첫 걸음의 시각부터 어긋납니다.
+   */
+  debugStep(frames: number, dtSec: number, fromZero = false): void {
+    if (fromZero) resetTime()
+    const was = this.paused
+    this.paused = false
+    // 여기는 동기 루프라 rAF 가 중간에 끼어들 수 없습니다(자바스크립트는 한 줄).
+    for (let i = 0; i < frames; i++) this.frame(this.lastFrameMs + dtSec * 1000)
+    this.paused = was
   }
 
   debugSwingVisible(): boolean {
@@ -5869,6 +5906,7 @@ declare global {
       tuning: () => { backArcDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
+      step: (frames: number, dtSec: number, fromZero?: boolean) => void
       /** 지금 검격 궤적이 떠 있는가 — 캡처 타이밍을 페이지 안에서 잡기 위한 것. */
       swingVisible: () => boolean
       /** ⏱ 예고 도형이 지금 **화면에 어떻게 그려져 있는가** (visuals `debugTelegraphs`) */
@@ -6673,6 +6711,8 @@ window.__game = {
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
+  /** ⏱ 고정 걸음 — 벽시계 대신 걸음 수로 시간을 줍니다(설계 근거는 debugStep 주석). */
+  step: (frames, dtSec, fromZero) => game.debugStep(frames, dtSec, fromZero),
   swingVisible: () => game.debugSwingVisible(),
   swingColor: () => game.debugSwingColor(),
   auraInfo: () => game.debugAura(),

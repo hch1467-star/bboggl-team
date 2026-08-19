@@ -27,6 +27,8 @@
  * 합니다. 소리가 안 나는 것과 게임이 멈추는 것은 전혀 다른 문제입니다.
  */
 
+import { audioRng } from './rng'
+
 /** 예고 색(AttackIntent)과 1:1로 맞춘 소리 종류 */
 export const enum SfxIntent {
   Strike = 0,
@@ -315,7 +317,7 @@ class Sfx {
     this.beatT += beat
 
     // 박마다 낮은 북. 4박에 한 번은 조금 높게 — 마디가 잡힙니다.
-    const accent = Math.random() < 0.25
+    const accent = audioRng.next() < 0.25
     try {
       const t0 = this.ctx.currentTime
       const osc = this.ctx.createOscillator()
@@ -721,6 +723,20 @@ class Sfx {
     const len = Math.floor(ctx.sampleRate * 0.5)
     const buf = ctx.createBuffer(1, len, ctx.sampleRate)
     const data = buf.getChannelData(0)
+    /**
+     * ── 🎲 **여기만 `Math.random()` 을 씁니다 — 유일한 예외입니다** ────
+     *
+     * 이 저장소의 규칙은 *"난수는 씨앗에서"* 입니다(core/rng.ts). 그런데
+     * 백색 잡음은 **선택이 아니라 잡음 그 자체**입니다 — 무엇을 고른
+     * 결과가 아니라, 재현해도 알아들을 사람이 없는 0.5초짜리 파형입니다.
+     * 씨앗을 걸어도 아무 검사가 좋아지지 않고, 4만 번 도는 루프만
+     * 느려집니다.
+     *
+     * ⚠️ 예외를 **여기 한 줄로 못박아 둡니다.** `npm run guard` 가 이
+     *    주석을 보고 통과시키므로, 다른 곳에 `Math.random()` 을 쓰면
+     *    그때는 반드시 걸립니다.
+     */
+    // guard-allow: Math.random — 백색 잡음 파형 자체(위 주석)
     for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1
     return buf
   }
@@ -868,7 +884,7 @@ class Sfx {
       const src = ctx.createBufferSource()
       src.buffer = this.noise
       // 같은 버퍼를 매번 같은 지점부터 읽으면 반복이 귀에 걸립니다.
-      const offset = Math.random() * 0.3
+      const offset = audioRng.next() * 0.3
 
       const filter = ctx.createBiquadFilter()
       filter.type = 'bandpass'

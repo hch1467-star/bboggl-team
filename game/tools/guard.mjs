@@ -630,5 +630,68 @@ check(
   )
 }
 
+/**
+ * ── 🎲 **`Math.random()` 은 금지 — 그런데 아무도 안 지키고 있었습니다** ──
+ *
+ * 이 규칙은 `core/rng.ts` 머리말에 있고, `config/gear.ts` 와
+ * `systems/enemyAI.ts` 와 `render/gearAura.ts` 가 각자 *"금지입니다"* 라고
+ * 다시 적어 두었습니다. **네 파일이 같은 규칙을 설명하는데 지키게 하는
+ * 것은 하나도 없었습니다.** 그래서 게임 코드 안에 살아 있는 위반이
+ * 세 곳 있었습니다(연출 불꽃 · 데미지 숫자 흔들림 · 보스 페이즈 파편).
+ *
+ * ── 장식이라서 괜찮은 것 아닌가 ────────────────────────────────────
+ * 원래 근거 둘(맵 시드 · 버그 재현)은 판정의 이야기라 그렇게 보였습니다.
+ * 그런데 이 저장소에는 세 번째가 생겼습니다 — **스크린샷 비교**입니다.
+ * `depth` · `gear` · `verify` 가 *"같은 시각이면 같은 그림"* 위에 서
+ * 있는데, 타격마다 불꽃이 무작위면 전투 장면은 원리적으로 못 잽니다.
+ *
+ * ── 예외는 **한 줄로 못박아** 둡니다 ───────────────────────────────
+ * `guard-allow: Math.random` 주석이 붙은 줄만 봐줍니다. 지금은 백색 잡음
+ * 파형 하나뿐입니다(잡음은 선택이 아니라 잡음 그 자체라 씨앗이 아무
+ * 검사도 좋게 만들지 않습니다). 목록을 이 파일에 적지 않고 **쓰는 자리**에
+ * 두는 이유: 예외의 근거는 그 코드 옆에 있어야 다음 사람이 읽습니다.
+ */
+{
+  const SRC = path.join(HERE, '..', 'src')
+  const files = []
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, f.name)
+      if (f.isDirectory()) walk(full)
+      else if (/\.ts$/.test(f.name)) files.push(full)
+    }
+  }
+  walk(SRC)
+  const bad = []
+  for (const f of files) {
+    const lines = readFileSync(f, 'utf8').split('\n')
+    let inBlock = false
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i]
+      // 블록 주석을 건너뜁니다 — 규칙을 설명하는 글이 위반으로 잡히면
+      // 다음 사람은 설명을 지웁니다(위 `rollWindowT` 검사와 같은 이유).
+      if (inBlock) {
+        if (raw.includes('*/')) inBlock = false
+        continue
+      }
+      if (/^\s*\/\*/.test(raw) && !raw.includes('*/')) {
+        inBlock = true
+        continue
+      }
+      const code = raw.replace(/\/\/.*$/, '')
+      if (!/Math\s*\.\s*random\s*\(/.test(code)) continue
+      // 바로 윗줄 또는 같은 줄의 면제 표시
+      const near = `${lines[i - 1] ?? ''}\n${raw}`
+      if (near.includes('guard-allow: Math.random')) continue
+      bad.push(`${path.relative(SRC, f)}:${i + 1}`)
+    }
+  }
+  check(
+    bad.length === 0,
+    '🎲 게임 코드에 **`Math.random()` 이 없다** (씨앗 난수만 — core/rng.ts · 면제는 `guard-allow` 주석으로)',
+    bad.length ? `${bad.length}곳 — ${bad.slice(0, 3).join(' | ')}` : `소스 ${files.length}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

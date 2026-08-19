@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { vfxRng } from '../core/rng'
 import { time } from '../core/time'
 
 /**
@@ -333,7 +334,8 @@ export class Vfx {
     item.life = DAMAGE_LIFE
     item.vy = 3.1
     // 같은 자리에 여러 숫자가 겹쳐 안 보이는 것을 막기 위해 옆으로 살짝 흩뿌립니다.
-    const a = Math.random() * Math.PI * 2
+    // 🎲 씨앗 난수입니다 — 장식이어도 그렇습니다(core/rng.ts `vfxRng` 주석).
+    const a = vfxRng.next() * Math.PI * 2
     item.driftX = Math.cos(a) * 1.1
     item.driftZ = Math.sin(a) * 1.1
   }
