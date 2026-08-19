@@ -74,7 +74,8 @@
     "hud": "node tools/hud-probe.mjs",
     "repro": "node tools/repro-probe.mjs",
     "landmark": "node tools/landmark-probe.mjs",
-    "track": "node tools/track-probe.mjs"
+    "track": "node tools/track-probe.mjs",
+    "rhythm": "node tools/rhythm-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

@@ -4136,7 +4136,10 @@ try {
         `                          · 무너짐 ${bud.broken}초(${log.boss.breaks}회) · 페이즈전환 ${bud.transition}초 · 대기·이동 ${bud.idle}초\n` +
         `                          → 실제로 공격에 쓴 시간 ${actPct}% · ${swingRate}초에 한 번 휘두름\n` +
         `              보스에게 들어간 처형 ${log.boss.finishers}회 · 연계 예약 ${log.boss.chainsArmed}회 · 발동 ${log.boss.chainsFired ?? 0}회` +
-          ` · 무너져서 끊긴 연계 ${(log.boss.chainsLost ?? []).reduce((a, b) => a + b, 0)}회`          + ` [예고 ${log.boss.chainsLost?.[0] ?? 0} · 휘두름 ${log.boss.chainsLost?.[1] ?? 0} · 후딜 ${log.boss.chainsLost?.[2] ?? 0}]`,
+          ` · 무너져서 끊긴 연계 ${(log.boss.chainsLost ?? []).slice(0, 3).reduce((a, b) => a + b, 0)}회` +
+          ` [예고 ${log.boss.chainsLost?.[0] ?? 0} · 휘두름 ${log.boss.chainsLost?.[1] ?? 0} · 후딜 ${log.boss.chainsLost?.[2] ?? 0}]` +
+          // 💢 무거운 적은 무너져도 예약을 들고 일어납니다 — **잃은 것이 아닙니다**.
+          ` · 일어나며 이어 냄 ${log.boss.chainsLost?.[3] ?? 0}회`,
     )
     for (const a of log.bossSwings) {
       console.log(

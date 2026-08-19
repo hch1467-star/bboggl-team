@@ -204,8 +204,16 @@ export function readChainsFired(): number {
  * 추측으로 고르지 않으려고 세는 한 줄입니다.
  */
 const chainsLost: [number, number, number] = [0, 0, 0]
-export function readChainsLost(): [number, number, number] {
-  return [chainsLost[0], chainsLost[1], chainsLost[2]]
+/**
+ * 💢 **무너졌지만 안 잃은** 연계 — 무거운 적이 일어나면서 이어서 낸 횟수.
+ *
+ * "지우기 전에 세라"는 이 저장소의 규칙입니다. 무거운 적의 연계는 이제
+ * 무너져도 안 지워지므로, **끊김**으로 세면 거짓말이고 아예 안 세면 어디로
+ * 갔는지 모릅니다. 그래서 칸을 따로 둡니다 — 다른 사건은 다른 칸에.
+ */
+let chainsResumed = 0
+export function readChainsLost(): [number, number, number, number] {
+  return [chainsLost[0], chainsLost[1], chainsLost[2], chainsResumed]
 }
 
 /**
@@ -462,6 +470,7 @@ export function resetChainLedger(): void {
   chainsLost[0] = 0
   chainsLost[1] = 0
   chainsLost[2] = 0
+  chainsResumed = 0
   chainsDropped.phase = 0
   chainsDropped.leash = 0
   chainsDropped.death = 0
@@ -1137,13 +1146,45 @@ export function enemyAiSystem(
        * `Actor.phase` 는 breakPoise 가 건드리지 않아서 끊긴 순간의 값이
        * 그대로 남아 있습니다(combat.ts breakPoise 참고).
        */
-      if (Enemy.chainNext[e] !== NO_CHAIN) {
+      /**
+       * ── 💢 **무거운 적은 예약을 들고 일어납니다** ────────────────────
+       *
+       * 자동 플레이에서 보스의 연계가 **예약 16회 · 발동 3회 · 무너져서
+       * 끊김 10회**로 나왔습니다. 주력기에 후속을 붙여 박자를 고치려 했는데,
+       * 붙인 만큼 그대로 무너져서 증발했습니다.
+       *
+       * 원래 여기서 지운 이유는 설계가 아니라 **셈의 청결**이었습니다
+       * (*"예약이 살아 있는데 영원히 안 나가는 상태가 셈을 흐린다"*).
+       * 그런데 그 청결이 보스의 차례를 통째로 지우고 있었습니다.
+       *
+       * 참고한 게임들은 전부 반대로 합니다 — 오공의 보스는 무너진 뒤
+       * **일어나면서 반격**하고, 엘든 링도 경직에서 회복하는 즉시 다음
+       * 타를 냅니다. 플레이어는 무방비 동안 이미 값을 받았습니다(처형까지).
+       * 일어난 뒤까지 공짜일 이유는 없습니다.
+       *
+       * ⚠️ **잡몹은 그대로 지웁니다.** 잡몹을 계속 무너뜨려 흐름을 끊는 것은
+       *    군중을 다루는 재미이고, 잡몹이 일어나며 반격하면 다대일이 그냥
+       *    벌이 됩니다. 이 규칙도 무거운 적에게만 뜻이 있습니다.
+       */
+      const holdsChain = cfg.heavy === true && Enemy.chainNext[e] !== NO_CHAIN
+      if (!holdsChain && Enemy.chainNext[e] !== NO_CHAIN) {
         const at = Actor.phase[e]
         chainsLost[at === 0 ? 0 : at === 1 ? 1 : 2]++
         Enemy.chainNext[e] = NO_CHAIN
       }
       Actor.timer[e] -= dt
-      if (Actor.timer[e] <= 0) Actor.state[e] = ActorState.Idle
+      if (Actor.timer[e] <= 0) {
+        Actor.state[e] = ActorState.Idle
+        if (holdsChain) {
+          // 일어나면서 곧바로 이어 냅니다 — 쿨다운도 토큰도 안 봅니다
+          // (연계는 이미 시작한 하나의 공격이 이어지는 것이라는 같은 근거).
+          const next = Enemy.chainNext[e]
+          Enemy.chainNext[e] = NO_CHAIN
+          Actor.cooldownT[e] = 0
+          chainsResumed++
+          commitAttack(e, kind, next, ph.windupScale, true)
+        }
+      }
       decayVelocity(e, dt, 9)
       continue
     }

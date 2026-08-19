@@ -4795,7 +4795,8 @@ class Game {
     /** 예약이 실제로 쓰인 횟수 — 예약과 같은 자리에서 셉니다(enemyAI 설계 노트). */
     chainsFired: number
     /** 예약된 연계가 무너짐으로 끊긴 횟수 — `[예고, 휘두름, 후딜]` 박자별 */
-    chainsLost: [number, number, number]
+    /** [예고 · 휘두름 · 후딜 · **일어나며 이어 냄**] — 마지막 칸은 잃은 것이 아닙니다. */
+    chainsLost: [number, number, number, number]
     /** 무너짐 말고 다른 이유로 사라진 예약 — 장부가 맞아떨어지게(enemyAI 설계 노트). */
     chainsDropped: { phase: number; leash: number; death: number; overwrite: number }
     /** 판이 끝나는 순간 아직 예약을 안고 있는 적 수. */
@@ -6743,7 +6744,7 @@ declare global {
         bossFinishers: number
         chainsArmed: number
         chainsFired: number
-        chainsLost: [number, number, number]
+        chainsLost: [number, number, number, number]
         dodgeStamina: number
         staminaSpent: number
         skillCasts: number[]
