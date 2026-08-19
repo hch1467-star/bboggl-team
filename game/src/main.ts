@@ -100,6 +100,7 @@ import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
 import { vfxRng } from './core/rng'
 import { requestHitstop, resetTime, tick, time } from './core/time'
+import { buildProps, type PropsInfo } from './render/props'
 import {
   CELL_SIZE,
   HEIGHT_STEP,
@@ -312,6 +313,9 @@ class Game {
   private treasureTotal = 0
   private treasuresFound = 0
   private regions: LevelRegion[] = []
+  /** 🏛 폐허 잔해 그룹 — 지형과 따로 답니다(render/props.ts). */
+  private props: THREE.Group | null = null
+  private propsInfo: PropsInfo | null = null
   private currentRegion = ''
   private levelW = 0
   private levelH = 0
@@ -763,6 +767,15 @@ class Game {
     this.anvils = []
     this.levelData = null
 
+    if (this.props) {
+      this.scene.remove(this.props)
+      this.props.traverse((o) => {
+        const m = o as THREE.Mesh
+        if (m.geometry) m.geometry.dispose()
+      })
+      this.props = null
+      this.propsInfo = null
+    }
     if (this.terrain) {
       this.scene.remove(this.terrain.group)
       this.terrain.dispose()
@@ -849,6 +862,14 @@ class Game {
       this.levelH = level.h
       this.terrain = new Terrain(level)
       this.scene.add(this.terrain.group)
+      /**
+       * 🏛 폐허 잔해 — 지형과 **따로** 붙입니다(render/props.ts 머리말).
+       * 플레이어가 설 수 없는 칸에만 서므로 이동·전투에는 손대지 않습니다.
+       */
+      const props = buildProps(this.terrain)
+      this.props = props.group
+      this.propsInfo = props.info
+      this.scene.add(this.props)
       setTerrain(this.terrain)
       this.arena.visible = false
 
@@ -2880,6 +2901,30 @@ class Game {
    * 전투 중 스크린샷은 여러 이펙트가 겹쳐 있어서, 어느 것이 잘못 그려지는지
    * 구분할 수가 없습니다. 하나씩 떼어놓고 봐야 원인이 특정됩니다.
    */
+  /**
+   * 🏛 **잔해 장부** — 프로브가 좌표를 베껴 적지 않게 게임이 내보냅니다.
+   *
+   * `candidates` 를 같이 내보내는 이유: 상한(`MAX_PROPS`)에 걸려 잘렸는지
+   * 여기서만 보입니다. 잘린 것을 모르면 *"이 구역엔 원래 잔해가 없구나"* 로
+   * 읽게 되는데, 실은 **앞에서 다 써 버린 것**입니다.
+   */
+  debugShowProps(on: boolean): void {
+    if (this.props) this.props.visible = on
+  }
+
+  debugProps(): PropsInfo {
+    return (
+      this.propsInfo ?? {
+        pillars: 0,
+        rubble: 0,
+        pillarSpots: 0,
+        rubbleSpots: 0,
+        unreachable: 0,
+        byRegion: {},
+      }
+    )
+  }
+
   debugSetPaused(paused: boolean): void {
     this.paused = paused
   }
@@ -5906,6 +5951,15 @@ declare global {
       tuning: () => { backArcDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
+      showProps: (on: boolean) => void
+      props: () => {
+        pillars: number
+        rubble: number
+        pillarSpots: number
+        rubbleSpots: number
+        unreachable: number
+        byRegion: Record<string, number>
+      }
       step: (frames: number, dtSec: number, fromZero?: boolean) => void
       /** 지금 검격 궤적이 떠 있는가 — 캡처 타이밍을 페이지 안에서 잡기 위한 것. */
       swingVisible: () => boolean
@@ -6711,6 +6765,13 @@ window.__game = {
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
+  /** 🏛 폐허 잔해 장부 — 몇 개가 어느 구역에 섰는가. */
+  props: () => game.debugProps(),
+  /**
+   * 🏛 잔해를 통째로 껐다 켭니다 — **"세어서 있다"와 "화면에 보인다"는
+   * 다른 말**이라, 프로브가 끄고 한 장 더 찍어 견주려고 씁니다.
+   */
+  showProps: (on) => game.debugShowProps(on),
   /** ⏱ 고정 걸음 — 벽시계 대신 걸음 수로 시간을 줍니다(설계 근거는 debugStep 주석). */
   step: (frames, dtSec, fromZero) => game.debugStep(frames, dtSec, fromZero),
   swingVisible: () => game.debugSwingVisible(),

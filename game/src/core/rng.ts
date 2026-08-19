@@ -10,15 +10,41 @@
  */
 export class Rng {
   private state: number
+  /** 씨앗 자체 — `at()` 이 스트림과 **따로** 쓰려고 들고 있습니다. */
+  private readonly seed: number
 
   constructor(seed: number) {
     // 0 시드는 mulberry32에서 품질이 나빠서 항상 홀수 오프셋을 더합니다.
-    this.state = (seed | 0) + 0x6d2b79f5
+    this.seed = (seed | 0) + 0x6d2b79f5
+    this.state = this.seed
   }
 
   /** 0 이상 1 미만 */
   next(): number {
     let t = (this.state += 0x6d2b79f5)
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+
+  /**
+   * 🔑 **자리에서 바로 뽑는 값** — 스트림을 굴리지 않습니다.
+   *
+   * ── 왜 따로 필요한가 ──────────────────────────────────────────────
+   * `next()` 는 **부른 순서**가 값을 정합니다. 그래서 지도 위에 무언가를
+   * 흩뿌릴 때 이걸 쓰면, 칸을 하나 늘리거나 훑는 순서를 바꾸는 것만으로
+   * **그 뒤가 전부 밀립니다.** 지도를 서쪽으로 두 칸 넓혔더니 동쪽 폐허가
+   * 통째로 달라지는 식입니다 — 시드를 고정한 의미가 없어집니다.
+   *
+   * 그래서 배치용으로는 **좌표를 열쇠로 넣어** 값을 만듭니다. 같은 칸이면
+   * 언제 물어도 같은 값이고, 이웃 칸과는 상관이 없습니다. (마인크래프트가
+   * 청크를 어디서부터 만들든 같은 세계가 나오는 것과 같은 이유입니다.)
+   *
+   * ⚠️ **판정에 쓰지 마십시오.** 같은 열쇠면 늘 같은 값이라, 공격 명중처럼
+   *    "매번 새로 굴려야 하는" 것에 쓰면 결과가 굳어 버립니다.
+   */
+  at(key: number): number {
+    let t = (key | 0) + this.seed
     t = Math.imul(t ^ (t >>> 15), t | 1)
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
@@ -91,3 +117,11 @@ export const vfxRng = new Rng(0x5eed)
  * 훨씬 쉬워집니다.
  */
 export const audioRng = new Rng(0xa0d10)
+
+/**
+ * 🏛 **배치 전용 스트림** — 폐허 잔해가 어디에 서는가(render/props.ts).
+ *
+ * 이쪽은 거의 전부 `at(좌표)` 로 씁니다. 지도를 손봐도 이미 있던 폐허가
+ * 그 자리에 남아야 하기 때문입니다 — 위 `at()` 주석에 그 이유가 있습니다.
+ */
+export const propRng = new Rng(0xb00c)
