@@ -72,6 +72,25 @@ try {
     }
   })
 
+  /**
+   * ── 🚧 **HUD 를 끕니다 — 안 그러면 글자를 잽니다** ─────────────────
+   *
+   * 표본 하나가 밝기 **237**(거의 흰색)로 찍혀서 들켰습니다. 바닥에 그런
+   * 밝기는 없습니다 — 순간이동할 때마다 뜨는 **구역 이름 배너**(커다란
+   * 흰 글자)를 찍고 있었습니다. 지형을 재는 검사가 UI 를 재고 있었던
+   * 것이고, 그 값으로 *"가장자리가 −66% 어둡다"* 는 결론까지 나왔습니다.
+   *
+   * 이 검사는 **지형만** 봅니다. 화면 위의 것은 볼 이유가 없으므로 끕니다.
+   */
+  await page.evaluate(() => {
+    // ⚠️ `#hud` 만 껐다가 또 237 이 나왔습니다 — 구역 이름 배너(`#banner`)는
+    //    HUD 밖에 있습니다. **캔버스만 남기고 다 끕니다.** 나중에 어떤
+    //    오버레이가 늘어도 이 검사는 안 흔들립니다.
+    for (const el of document.body.children) {
+      if (el.tagName !== 'CANVAS') el.style.display = 'none'
+    }
+  })
+
   console.log('\n🌑 높이가 화면에서 읽히는가 — 벽이 아니라 **발치의 바닥**을 봅니다\n')
 
   /**
@@ -86,8 +105,8 @@ try {
     const rises = []
     const flats = []
     // 존을 성기게 훑습니다. 촘촘히 돌 이유가 없습니다 — 몇 자리면 충분합니다.
-    for (let x = -60; x <= 70; x += cell) {
-      for (let z = -60; z <= 60; z += cell) {
+    for (let x = -59; x <= 69; x += cell) {
+      for (let z = -59; z <= 59; z += cell) {
         const here = G.terrainLevelAt(x, z)
         if (here < 0) continue
         // 네 방향 중 **한 칸 옆이 더 높은** 자리 = 벽의 발치
@@ -111,10 +130,10 @@ try {
            * 둘 중 하나가 나옵니다. 실제로 첫 실행이 `71% · 1% · 68% · 0%` 로
            * 딱 번갈아 찍혔습니다. 반 칸씩 밀어 **칸의 평균**을 봅니다.
            */
-          const nx2 = x - dx * cell * 0.5
-          const nz2 = z - dz * cell * 0.5
-          const fx = x - dx * cell * 4.5
-          const fz = z - dz * cell * 4.5
+          const nx2 = x
+          const nz2 = z
+          const fx = x - dx * cell * 4
+          const fz = z - dz * cell * 4
           if (G.terrainLevelAt(fx, fz) !== here) continue
           let clean = true
           for (let k = 1; k <= 5; k++) {
@@ -139,8 +158,8 @@ try {
       }
     }
     // 평지 — 반경 8m 안에 단이 하나뿐인 자리
-    for (let x = -60; x <= 70; x += cell) {
-      for (let z = -60; z <= 60; z += cell) {
+    for (let x = -59; x <= 69; x += cell) {
+      for (let z = -59; z <= 59; z += cell) {
         const here = G.terrainLevelAt(x, z)
         if (here < 0) continue
         /**
@@ -158,8 +177,8 @@ try {
           }
         }
         if (!flat) continue
-        const nx3 = x + cell * 0.5
-        const fx3 = x - cell * 3.5
+        const nx3 = x
+        const fx3 = x - cell * 4
         /**
          * ⚠️ **같은 구역 안에서만** 두 점을 찍습니다.
          *
@@ -293,6 +312,140 @@ try {
     riseRows.length >= 5 && riseRows.filter((r) => r.drop >= 0.08).length >= riseRows.length - 1,
     '🌑 **거의 모든 낙차에서** 그림자가 잡힌다 (한두 곳만 되는 것은 지형의 우연입니다)',
     `${riseRows.filter((r) => r.drop >= 0.08).length}/${riseRows.length}곳`,
+  )
+
+  /**
+   * ---- 🪨 **내려가면 못 올라오는 가장자리는 밝은가** ----
+   *
+   * 위 그림자의 거울상입니다. 그림자는 **아래에 서서 위를 볼 때** 쓰이고,
+   * 이 테두리 빛은 **위에 서서 아래를 볼 때** 쓰입니다 — 발밑이 끝나는
+   * 자리를 알려 줍니다. 「성벽 좁은 길 — 밀리면 아래로 떨어진다」가
+   * 화면에서 그냥 평평한 띠로 보이던 것이 이유입니다.
+   *
+   * ⚠️ 문턱은 `MAX_CLIMB`(게임의 레벨 문법)에서 가져옵니다 — 1단은 걸어
+   *    내려갔다 올라올 수 있으니 경고가 아닙니다. 프로브도 게임에게
+   *    물어봅니다(`terrainInfo().maxClimb`).
+   */
+  const edgeSpots = await page.evaluate(() => {
+    const G = window.__game
+    const info = G.terrainInfo()
+    const cell = info.cellSize
+    const out = []
+    for (let x = -59; x <= 69; x += cell) {
+      for (let z = -59; z <= 59; z += cell) {
+        const here = G.terrainLevelAt(x, z)
+        if (here < 0) continue
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const down = G.terrainLevelAt(x + dx * cell, z + dz * cell)
+          // 내려가면 못 올라오는 이웃 — 낭떠러지(<0)는 그 극단.
+          if (!(down < 0 || here - down > info.maxClimb)) continue
+          // 반대쪽 네 칸 반이 같은 단이고 가장자리가 아니어야 "안쪽" 표본입니다.
+          const fx = x - dx * cell * 4.5
+          const fz = z - dz * cell * 4.5
+          if (G.terrainLevelAt(fx, fz) !== here) continue
+          let clean = true
+          for (let k = 1; k <= 5; k++) {
+            if (G.terrainLevelAt(x - dx * cell * k, z - dz * cell * k) !== here) clean = false
+          }
+          if (!clean) continue
+          if (G.regionAt(x, z) !== G.regionAt(fx, fz)) continue
+          /**
+           * ⚠️ **안쪽 표본이 자기도 가장자리면 안 됩니다.**
+           *
+           * 처음엔 축 방향으로만 평평한지 봤고, 결과가 `98 대 98`·`75 대 75`
+           * 처럼 **차이 0** 으로 나왔습니다. 당연합니다 — 「성벽 좁은 길」은
+           * 폭이 **두 칸**이라 그 위의 모든 칸이 가장자리입니다. 밝은 것과
+           * 밝은 것을 견주고 있었습니다. 안쪽 표본은 네 이웃이 전부 같은
+           * 단이어야 합니다.
+           */
+          let innerFlat = true
+          for (const [ix, iz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            if (G.terrainLevelAt(fx + ix * cell, fz + iz * cell) !== here) innerFlat = false
+          }
+          if (!innerFlat) continue
+          /**
+           * ⚠️ **위쪽 이웃을 낀 가장자리는 뺍니다.**
+           *
+           * 벽과 낭떠러지 사이의 통로가 그렇습니다. 그림자(어둡게)와
+           * 테두리(밝게)가 같은 칸에서 서로를 지워서 `-13%`·`-22%` 같은
+           * 값이 나왔습니다. 두 신호가 겹치는 자리는 이 검사가 답할 수 있는
+           * 질문이 아닙니다 — 섞인 것을 재면 어느 쪽도 못 잽니다.
+           */
+          let noRise = true
+          for (const [ix, iz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nb = G.terrainLevelAt(x + ix * cell, z + iz * cell)
+            if (nb > here) noRise = false
+          }
+          if (!noRise) continue
+          /**
+           * ⚠️ **칸 한가운데를 찍습니다 — 그림자 검사와 같은 자리.**
+           *
+           * 한 번 1/4칸(경계 쪽)으로 밀어 봤습니다. *"테두리는 바깥쪽
+           * 절반에 있으니 거기를 찍자"* 였는데, 그러면 격자 경계에 너무
+           * 붙어서 **옆 칸으로 넘어갑니다**(이 프로브가 위에서 이미 한 번
+           * 밟은 함정입니다 — 격자점을 그대로 찍어 값이 번갈아 나온 그것).
+           * 가운데는 밝은 두 꼭짓점과 보통인 두 꼭짓점의 평균이라 신호가
+           * 절반으로 묽어지지만, **묽어진 신호를 재는 것이 엉뚱한 칸을
+           * 재는 것보다 낫습니다.**
+           */
+          out.push({
+            x,
+            z,
+            fx,
+            fz,
+            level: here,
+            drop: down < 0 ? 99 : here - down,
+            region: G.regionAt(x, z),
+          })
+          break
+        }
+      }
+    }
+    return out
+  })
+  /**
+   * ⚠️ **구역 안만 씁니다 — 지도 바깥 테두리를 재고 있었습니다.**
+   *
+   * 처음엔 훑은 순서대로 앞 여덟 곳을 썼는데, 찍어 보니 **여덟 곳 전부가
+   * `구역밖`**(지도 서쪽 끝, x −41~−37)이었습니다. 아무도 안 가는 자리에서
+   * 재고 있었던 것입니다. 이 신호가 필요한 곳은 **플레이어가 걷는 구역**
+   * 입니다.
+   *
+   * 🧾 그리고 이 검사가 **못 재는 자리**를 적어 둡니다: 「성벽 좁은 길」
+   *    처럼 폭이 두 칸인 통로는 **모든 칸이 가장자리**라 "안쪽" 표본이
+   *    아예 없습니다. 거기서 테두리가 도는지는 아래 A/B(끄고 켜기)와
+   *    스크린샷이 답합니다. 못 재는 것을 잰 척하지 않습니다.
+   */
+  const inRegion = edgeSpots.filter((sp) => sp.region)
+  console.log(
+    `  [가장자리] 찾음 ${edgeSpots.length}곳 — 구역 안 ${inRegion.length}곳 · 구역 밖(지도 테두리) ${edgeSpots.length - inRegion.length}곳`,
+  )
+  const edgeRows = []
+  for (const sp of (inRegion.length >= 5 ? inRegion : edgeSpots).slice(0, 8)) {
+    const r = await measure(sp)
+    // 여기서는 **밝아지는** 것이 정답이라 부호를 뒤집어 읽습니다.
+    if (r) edgeRows.push({ ...r, gain: r.far > 0 ? r.near / r.far - 1 : 0, drop: sp.drop, at: `${sp.x.toFixed(0)},${sp.z.toFixed(0)}`, region: sp.region })
+  }
+  for (const r of edgeRows) {
+    console.log(
+      `    ${r.drop === 99 ? '낭떠러지' : `${r.drop}단 아래`} (${r.at}${r.region ? ' ' + r.region : ' 구역밖'}) — 가장자리 ${r.near.toFixed(0)} · 안쪽 ${r.far.toFixed(0)} → **${(r.gain * 100).toFixed(0)}% 밝음**`,
+    )
+  }
+  const edgeGain = edgeRows.length ? edgeRows.reduce((a, r) => a + r.gain, 0) / edgeRows.length : -1
+  check(
+    inRegion.length >= 5 && edgeRows.length >= 5 && edgeRows.every((r) => r.region),
+    '🚧 **플레이어가 걷는 구역 안에서** 가장자리를 읽었다 (지도 테두리를 재지 않게)',
+    `구역 안 ${inRegion.length}곳 · 잰 곳 ${edgeRows.length}곳`,
+  )
+  check(
+    edgeRows.length >= 5 && edgeGain >= 0.12,
+    '🪨 **가장자리가 눈에 띄게 밝다** (발밑이 끝나는 자리가 보입니다)',
+    `평균 ${(edgeGain * 100).toFixed(0)}% 밝음 (체크무늬 잡음 ±7%)`,
+  )
+  check(
+    edgeRows.length >= 5 && edgeRows.filter((r) => r.gain >= 0.08).length >= edgeRows.length - 1,
+    '🪨 **거의 모든 가장자리에서** 테두리가 잡힌다',
+    `${edgeRows.filter((r) => r.gain >= 0.08).length}/${edgeRows.length}곳`,
   )
 
   console.log('')
