@@ -203,6 +203,24 @@ export function readChainsFired(): number {
  *
  * 추측으로 고르지 않으려고 세는 한 줄입니다.
  */
+/**
+ * 🔎 **적이 안 때리고 서 있는 프레임의 이유** — 문 앞에서 셉니다.
+ *
+ * `npm run rhythm` 이 *"방해가 없어도 보스가 5.1초에 한 번만 휘두른다"* 를
+ * 재 놨습니다(설정값으로 계산한 한 주기는 3.0초). 2초가 어디로 가는지
+ * 짐작으로 두 번 고쳐 봤고 두 번 다 틀렸습니다.
+ *
+ * 커밋 문에는 조건이 셋 붙어 있습니다 — **토큰 · 쿨다운 · 조준**. 어느
+ * 것이 몇 프레임을 잡아먹는지는 **그 문 앞에서 세는 수밖에** 없습니다.
+ * 밖에서 상태를 훑으면 프레임 사이에 열렸다 닫힌 것을 놓칩니다.
+ */
+const idleReasons = { token: 0, cooldown: 0, facing: 0, noPattern: 0, committed: 0 }
+export function readIdleReasons(): typeof idleReasons {
+  const out = { ...idleReasons }
+  for (const k of Object.keys(idleReasons) as (keyof typeof idleReasons)[]) idleReasons[k] = 0
+  return out
+}
+
 const chainsLost: [number, number, number] = [0, 0, 0]
 /**
  * 💢 **무너졌지만 안 잃은** 연계 — 무거운 적이 일어나면서 이어서 낸 횟수.
@@ -1615,6 +1633,14 @@ export function enemyAiSystem(
     //
     // **공격 토큰**이 있어야 커밋할 수 있습니다(enemyAttacks.ts 설계 노트).
     // 토큰이 없는 적은 그냥 다음 판정으로 흘러가 노려보며 기다립니다.
+    /**
+     * 🔎 문 앞에서 셉니다 — **순서가 곧 뜻**입니다(먼저 막는 것이 범인).
+     * 위 `idleReasons` 주석에 왜 여기서 세는지 적어 두었습니다.
+     */
+    if (!tokens.has(e)) idleReasons.token++
+    else if (Actor.cooldownT[e] > 0) idleReasons.cooldown++
+    else if (facingError > ATTACK_FACING_TOLERANCE) idleReasons.facing++
+
     if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       const list = attacksFor(kind)
       /**
@@ -1662,7 +1688,9 @@ export function enemyAiSystem(
         picked = list.find((a) => a.arcDeg < WIDE_ARC_DEG && dist >= a.minRange && dist <= a.maxRange) ?? null
       }
       notePick(e, kind, dist, wantReach, list, weights, rolled, picked)
+      if (!picked) idleReasons.noPattern++
       if (picked) {
+        idleReasons.committed++
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)

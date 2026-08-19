@@ -110,6 +110,7 @@ try {
       G.forceAttack(e, 0)
       G.step(120, dt, true)
       G.swings() // 예열분은 버립니다
+      G.idleReasons() // 이유 장부도 예열분을 버립니다
       const frames = Math.round(seconds / dt)
       const t0 = G.state().simElapsed
       for (let i = 0; i < frames; i++) {
@@ -122,11 +123,13 @@ try {
       }
       const elapsed = G.state().simElapsed - t0
       const rows = G.swings().filter((r) => String(r.attackId).startsWith('boss_'))
+      const why = G.idleReasons()
       const info = G.enemyInfo(e)
       G.clearEnemies()
       return {
         swings: rows.length,
         hits: rows.filter((r) => r.hit).length,
+        why,
         elapsed: Number(elapsed.toFixed(2)),
         hpLeft: info ? Math.round((info.hp / info.max) * 100) : 0,
       }
@@ -141,17 +144,48 @@ try {
     async ([s, dt]) => window.__rhythm({ attacking: true, seconds: s, dt }),
     [SECONDS, STEP_DT],
   )
-  const per = (r) => (r.swings > 0 ? r.elapsed / r.swings : Infinity)
+  /**
+   * ⚠️ **박자는 "커밋 횟수"로 셉니다 — 장부의 줄 수가 아닙니다.**
+   *
+   * 처음엔 `swingRecords` 의 줄 수로 셌고 *"5.1초에 한 번"* 이 나왔습니다.
+   * 설정값 3.0초와 2초나 차이가 나서, 그 2초가 어디로 가는지 두 번이나
+   * 짐작으로 고쳐 봤습니다(둘 다 틀렸습니다).
+   *
+   * 범인은 게임이 아니라 **제 자**였습니다. 그 장부는 **근접 부채꼴만**
+   * 적습니다(combat.ts `swingRecords` — 각도로 빗나간 이유를 세려고 만든
+   * 것이라 원형·투사체는 애초에 대상이 아닙니다). 그래서 🟡 광역처럼
+   * 부채꼴이 아닌 패턴은 **한 줄도 안 남고**, 보스가 그만큼 덜 휘두른
+   * 것처럼 보였습니다.
+   *
+   * 실제로 이 판에서 커밋은 7회인데 장부는 5줄이었습니다. 7회로 세면
+   * 3.6초에 한 번 — 설정값 3.0초에 자리 잡는 시간을 더한 값과 맞습니다.
+   * **보스의 박자는 처음부터 설계대로였습니다.**
+   */
+  const per = (r) => (r.why.committed > 0 ? r.elapsed / r.why.committed : Infinity)
   const say = (r) =>
-    `${r.swings}회 / ${r.elapsed}초 = **${per(r) === Infinity ? '∞' : per(r).toFixed(1)}초에 한 번** · 적중 ${r.hits}회 · 보스 체력 ${r.hpLeft}%`
+    `커밋 ${r.why.committed}회 / ${r.elapsed}초 = **${per(r) === Infinity ? '∞' : per(r).toFixed(1)}초에 한 번** · ` +
+    `그중 부채꼴 판정 ${r.swings}회(적중 ${r.hits}) · 보스 체력 ${r.hpLeft}%`
   console.log(`  ① 가만히 서 있을 때 — ${say(still)}`)
   console.log(`  ② 계속 때릴 때     — ${say(busy)}\n`)
+  /**
+   * 🔎 **안 때리고 서 있던 프레임의 이유** — 커밋 문 앞에서 센 것입니다.
+   *    순서가 곧 뜻입니다: 먼저 막는 것이 범인입니다.
+   */
+  const whyLine = (w) => {
+    const total = w.token + w.cooldown + w.facing
+    const pct = (n) => (total > 0 ? `${Math.round((n / total) * 100)}%` : '—')
+    return `토큰없음 ${w.token}(${pct(w.token)}) · 쿨다운 ${w.cooldown}(${pct(w.cooldown)}) · 조준못맞춤 ${w.facing}(${pct(
+      w.facing,
+    )}) · 골랐는데 패턴없음 ${w.noPattern} · 실제 커밋 ${w.committed}`
+  }
+  console.log(`  🔎 ① 막힌 이유 — ${whyLine(still.why)}`)
+  console.log(`  🔎 ② 막힌 이유 — ${whyLine(busy.why)}\n`)
 
   /**
    * 🚧 게이트 — 가만히 있을 때 **실제로 휘둘렀어야** 아래 비교가 뜻을 가집니다.
    *    0회를 "박자가 느리다"로 읽으면 고칠 곳을 영영 못 찾습니다.
    */
-  check(still.swings >= 3, '🚧 가만히 서 있어도 보스가 휘둘렀다 (아래 비교의 게이트)', `${still.swings}회`)
+  check(still.why.committed >= 3, '🚧 가만히 서 있어도 보스가 휘둘렀다 (아래 비교의 게이트)', `커밋 ${still.why.committed}회`)
   /**
    * 🥁 **설계대로 낼 수 있는 박자.**
    *
@@ -162,20 +196,17 @@ try {
    * (소울류 지역 보스의 체감 간격도 대체로 2~4초입니다.)
    */
   /**
-   * ⚠️ 이 줄은 **지금 빨갛고, 그게 이번 라운드의 결론입니다.**
+   * ── 🔎 세 가설을 세웠고 **셋 다 틀렸습니다** ─────────────────────────
    *
-   * 실측 5.1초 vs 설정값 3.0초 — 방해가 없는데도 한 주기마다 **2초가
-   * 어디론가 갑니다.** 두 가설을 세웠고 둘 다 재서 버렸습니다:
+   *   ❌ 강인도 붕괴 때문 → ②가 ①과 큰 차이가 없습니다. 때리지 않아도
+   *      느렸습니다.
+   *   ❌ 전역 커밋 간격(0.4초) 때문 → 1:1 에서 안 걸리게 고쳤더니 결과가
+   *      **비트 단위로 같았습니다**. 애초에 안 걸리고 있었습니다. 되돌렸습니다.
+   *   ❌ 토큰·조준 때문 → 문 앞에서 세 보니 **쿨다운 100% · 토큰 0% ·
+   *      조준 0%** 였습니다. 그리고 그 쿨다운 총합은 설정값(1.05초 × 커밋
+   *      횟수)과 정확히 같습니다.
    *
-   *   ❌ 강인도 붕괴 때문 → ②(계속 때릴 때)가 6.2초로 ①과 큰 차이가
-   *      없습니다. 때리지 않아도 느립니다.
-   *   ❌ 전역 커밋 간격(`ATTACK_COMMIT_GAP` 0.4초) 때문 → 1:1 에서 안
-   *      걸리게 고쳐 봤더니 결과가 **비트 단위로 같았습니다**(고정 걸음이라
-   *      같으면 정말 같은 것입니다). 애초에 안 걸리고 있었습니다. 되돌렸습니다.
-   *
-   * 남은 후보는 토큰 발급 주기 · `Enemy.waitT` · `pickAttack` 이 사거리
-   * 밴드 밖이라 null 을 돌려주는 경우입니다. **짐작으로 고치지 않습니다** —
-   * 이 검사가 그 자리를 지키고 있고, `npm run rhythm` 이 그대로 재현합니다.
+   * 남은 답은 하나뿐이었습니다 — **자가 틀렸다.** 위 `per()` 주석 참고.
    */
   check(
     per(still) <= 4.0,

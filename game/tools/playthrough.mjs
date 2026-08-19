@@ -3927,6 +3927,9 @@ try {
     (() => {
       const rows = log.swings ?? []
       if (rows.length === 0) return '  📒 휘두름 장부  비어 있습니다 — 아래 결론을 세우지 마십시오'
+      // ⚠️ 이 표는 **근접 부채꼴만** 담습니다(combat.ts `swingRecords`).
+      //    왼쪽의 "휘두름 N회"와 줄 수가 다른 것은 그래서입니다 — 🟡 광역·🏹
+      //    화살은 각도로 빗나갈 수가 없어서 애초에 대상이 아닙니다.
       const cut = rows.length >= 400 ? ' ⚠️ 장부 상한(400)에 걸려 **끝에서 400번만** 셌습니다' : ''
       const by = new Map()
       for (const r of rows) {
@@ -3958,7 +3961,7 @@ try {
       const far = rows.filter((r) => !r.hit && !r.invuln && r.dist > r.reach).length
       const wide = tot - hit - inv - far
       return (
-        `  📒 빗나간 이유 ${tot}회${cut}\n` +
+        `  📒 빗나간 이유 ${tot}회 (근접 부채꼴만 — 광역·화살 제외)${cut}\n` +
         `               합계 — 적중 ${hit}(${Math.round((hit / tot) * 100)}%) · 사거리 ${far}(${Math.round(
           (far / tot) * 100,
         )}%) · 각도 ${wide}(${Math.round((wide / tot) * 100)}%) · 무적 ${inv}(${Math.round((inv / tot) * 100)}%)\n` +

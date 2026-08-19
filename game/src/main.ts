@@ -172,6 +172,7 @@ import {
   resetPickLog,
   type PickRecord,
   readChainsLost,
+  readIdleReasons,
   setAggroRangeOverride,
   spotEvents,
   setReachDistance,
@@ -5972,6 +5973,7 @@ declare global {
       tuning: () => { backArcDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
+      idleReasons: () => { token: number; cooldown: number; facing: number; noPattern: number; committed: number }
       poiseRule: (kindId: string, breaks: number) => number
       swings: () => {
         attackId: string
@@ -6808,6 +6810,8 @@ window.__game = {
    *    **규칙만** 봅니다. 둘을 한 검사에 욱여넣지 않습니다.
    */
   poiseRule: (kindId, breaks) => game.debugPoiseRule(kindId, breaks),
+  /** 🔎 적이 안 때리고 서 있던 프레임의 이유 — 읽으면서 비웁니다. */
+  idleReasons: () => readIdleReasons(),
   /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */
   swings: () => {
     // 아직 열려 있는 휘두름을 먼저 닫습니다 — 안 그러면 마지막 한 줄이 빕니다.
