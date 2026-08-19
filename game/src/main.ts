@@ -2406,7 +2406,7 @@ class Game {
     this.sideHintT -= time.dt
     if (this.sideHintT <= 0) {
       this.sideHintT = 0.75
-      const side = this.findSideHint(px, pz)
+      const side = this.findSideHint(px, pz, objective)
       this.sideHintText = side ? `${side.dir} ${side.dist.toFixed(0)}m — 보물` : ''
       // 어느 보물을 가리켰는지도 남깁니다 — 프로브가 "몇 개가 알려지는가"를 셀 수 있게.
       this.sideHintAt = side ? { x: side.x, z: side.z } : null
@@ -2456,6 +2456,7 @@ class Game {
   private findSideHint(
     px: number,
     pz: number,
+    goal: { x: number; z: number } | null,
   ): { dir: string; dist: number; x: number; z: number } | null {
     const ids = pickups.run()
     /**
@@ -2481,7 +2482,28 @@ class Game {
       cands.push({ x, z })
     }
     if (cands.length === 0) return null
-    let best: { x: number; z: number; walk: number } | null = null
+    /**
+     * ── 🧭 **"저기까지 얼마" 가 아니라 "원래 길보다 얼마나 더"** ──────────
+     *
+     * 근거는 balance.ts `NAV.sideHintRange` 에 적어 뒀습니다. 요약: 편도로
+     * 재면 **편도 낙하 + 복귀 램프**로 만든 곁길(이 존의 「남쪽 함몰지」)을
+     * 못 읽습니다 — 들어갔다 나오는 길이 원래 가던 길과 거의 같은데도
+     * "46m 나 떨어져 있다"고 재서 안 알려 줍니다.
+     *
+     * 목표 쪽 흐름장을 **한 번만** 세워서 두 값을 한꺼번에 뽑습니다
+     * (나→목표 · 보물→목표). 후보마다 다시 세우지 않습니다.
+     */
+    let meToGoal = 0
+    const goalDist = new Map<{ x: number; z: number }, number>()
+    if (goal && this.terrain) {
+      this.terrain.buildFlowField(goal.x, goal.z)
+      meToGoal = this.terrain.pathDistance(px, pz) ?? 0
+      for (const c of cands) {
+        const d = this.terrain.pathDistance(c.x, c.z)
+        if (d !== null) goalDist.set(c, d)
+      }
+    }
+    let best: { x: number; z: number; walk: number; extra: number } | null = null
     for (const c of cands) {
       /**
        * ⚠️ **걸어야 하는 거리로 거릅니다.** 직선으로 재면 벽 너머 18m 짜리
@@ -2495,10 +2517,37 @@ class Game {
         if (d === null) continue
         walk = d
       }
+      /**
+       * 목표가 없으면(다 끝났으면) 견줄 「원래 길」이 없습니다. 그때는
+       * 편도가 곧 더 걷는 거리입니다 — 되돌아올 이유가 없으니까요.
+       */
+      const toGoal = goalDist.get(c)
+      const extra = goal && toGoal !== undefined ? walk + toGoal - meToGoal : walk
+      /**
+       * ── **문턱이 둘인 이유** (하나로 하려다 다른 규칙을 깼습니다) ──────
+       *
+       * 처음엔 편도 문턱을 **더 걷는 거리로 갈아 끼웠습니다.** 그랬더니
+       * `npm run secret` 의 「멀면 안 알려 준다」가 바로 빨개졌습니다 —
+       * 시작 지점에서 **"남동 52m — 보물"**. 가는 길에 있는 보물은 더
+       * 걷는 거리가 작아서, 존 반대편에 있어도 계속 권하게 됩니다.
+       * *"갈 수 없는 것을 알려 주는 것은 놀리는 것"* 이라는 규칙 그대로였습니다.
+       *
+       * 두 문턱은 **다른 질문**이었습니다:
+       *   · 편도 ≤ 예산  — *"지금 이 근처인가"*  (놀리지 않기)
+       *   · 더 걷는 ≤ 예산 — *"값이 싼가"*        (헛걸음 시키지 않기)
+       * 그래서 갈아 끼우지 않고 **둘 다** 겁니다. 새로 거르는 것은
+       * 「북쪽 단상」의 보물(편도 32m 인데 **더 걷는 56m**)입니다 — 봇은
+       * 예산 밖이라 영영 안 가는데 사람에게는 권하고 있던 자리입니다.
+       * balance.ts 가 적어 둔 *"사람에게는 권하고 계측기는 안 가는 틈"* 이
+       * 값이 아니라 **자** 때문에 다시 열려 있었습니다.
+       */
       if (walk > NAV.sideHintRange) continue
+      if (extra > NAV.sideHintRange) continue
       // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
+      // (이 문턱만은 **편도**로 봅니다: 물어보는 것이 *"이미 보이는가"* 라서.)
       if (walk < NAV.sideHintNear) continue
-      if (!best || walk < best.walk) best = { x: c.x, z: c.z, walk }
+      // 고르는 기준도 **더 걷는 거리**입니다 — 가장 싸게 얻는 것을 권합니다.
+      if (!best || extra < best.extra) best = { x: c.x, z: c.z, walk, extra }
     }
     if (!best) return null
     const DIRS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서']

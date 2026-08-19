@@ -299,9 +299,60 @@ try {
     return ok.length ? Math.min(...ok) : -1
   }
 
+  /**
+   * ── 🧭 **곁길의 값은 "가는 거리"가 아니라 "더 걷는 거리"입니다** ─────
+   *
+   * ── 이 자가 정확히 반대로 말하고 있었습니다 ──────────────────────
+   * 위 `walkNear` 는 **동선에서 보물까지의 편도**를 잽니다. 그 자로는
+   * 이 존의 「남쪽 함몰지」를 읽을 수가 없습니다 — 거긴 **2단 낙하로
+   * 내려가면 못 올라오고, 대신 복귀 램프가 계단으로 이어지는** 곳입니다
+   * (생성기가 일부러 그렇게 만들었습니다). 즉 들어갔다 나오는 길이
+   * **원래 가던 길과 거의 같습니다.**
+   *
+   * 두 자로 같은 다섯 보물을 재면 순위가 통째로 뒤집힙니다:
+   *
+   *                    편도(옛 자)      더 걷는 거리(이 자)
+   *     (13, 47)        46m ❌ 예산 밖      **20m** ✅  ← 가장 싼 축
+   *     (17,-57)        32m ✅             **56m** ❌  ← 유일하게 예산 밖
+   *     (-27, 19)       18m               32m
+   *     (27,-43)        14m               28m
+   *     (25,-19)         4m                8m
+   *
+   * 빨갛던 것이 실은 가장 싼 곁길이었고, 초록이던 것이 유일한 문제였습니다.
+   * 이 자로 빨간 것을 보고 지도를 고쳤다면 **잘 만들어진 구조를 부수고**
+   * 진짜 문제는 그대로 뒀을 것입니다.
+   *
+   *     더 걷는 거리 = (스폰→보물) + (보물→보스) − (스폰→보스)
+   *
+   * 세 값 다 게임의 통행 규칙으로 잰 거리라, 편도 낙하도 지름길도 저절로
+   * 반영됩니다. 곁길이 "가는 길에 있으면" 0 에 가깝게 나옵니다 — 그게
+   * 엘든 링·오공이 비밀을 배치하는 방식이고, 이 자는 그걸 읽을 수 있습니다.
+   */
+  const detour = async (tx, tz) => {
+    const r = await page.evaluate(
+      ([x, z, s, bx, bz]) => {
+        const G = window.__game
+        const toBoss = G.distancesToward(bx, bz, [s, { x, z }])
+        const toT = G.distancesToward(x, z, [s])
+        if (!toBoss || !toT) return null
+        return { sb: toBoss.points[0], tb: toBoss.points[1], st: toT.points[0] }
+      },
+      // 끝점은 **동선의 마지막 걸음**입니다 — 보스 좌표를 따로 묻지 않는 이유는
+      // 이 자취가 곧 "이 게임이 실제로 걷게 하는 길"이기 때문입니다.
+      [tx, tz, { x: trail[0].x, z: trail[0].z }, trail[trail.length - 1].x, trail[trail.length - 1].z],
+    )
+    if (!r || ![r.sb, r.tb, r.st].every((v) => Number.isFinite(v) && v >= 0)) return -1
+    return r.st + r.tb - r.sb
+  }
+
   const seen = []
   for (const v of walk.treasures) {
-    seen.push({ ...v, d: nearest(v.x, v.z), walk: await walkNear(v.x, v.z) })
+    seen.push({
+      ...v,
+      d: nearest(v.x, v.z),
+      walk: await walkNear(v.x, v.z),
+      extra: await detour(v.x, v.z),
+    })
   }
   const hidden = seen.filter((v) => v.d > t.cameraViewSize)
   console.log('')
@@ -309,7 +360,8 @@ try {
     const ok = v.d <= t.cameraViewSize
     console.log(
       `    ${ok ? '·' : '⚠️'} (${Math.round(v.x)}, ${Math.round(v.z)})` +
-        `  눈으로 ${v.d.toFixed(1)}m · **발로 ${v.walk < 0 ? '?' : `${v.walk.toFixed(0)}m`}**` +
+        `  눈으로 ${v.d.toFixed(1)}m · 발로 ${v.walk < 0 ? '?' : `${v.walk.toFixed(0)}m`}` +
+        ` · **더 걷는 ${v.extra < 0 ? '?' : `${v.extra.toFixed(0)}m`}**` +
         `${ok ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
     )
   }
@@ -326,14 +378,14 @@ try {
    * ⚠️ 예산은 봇에서 **읽어 옵니다.** 여기 40을 적으면 예산을 바꾸는 날
    *    이 검사만 옛 값으로 통과합니다.
    */
-  const far = seen.filter((v) => v.walk < 0 || v.walk > DETOUR_BUDGET)
+  const far = seen.filter((v) => v.extra < 0 || v.extra > DETOUR_BUDGET)
   check(
-    far.length === 0,
-    `모든 보물이 **걸어서** 곁길 예산 안에 있다 (${DETOUR_BUDGET}m)`,
+    seen.length > 0 && far.length === 0,
+    `모든 보물이 곁길 예산 안에 있다 — **원래 길보다 더 걷는 거리**로 (${DETOUR_BUDGET}m)`,
     far.length === 0
-      ? `가장 먼 것이 발로 ${Math.max(...seen.map((v) => v.walk)).toFixed(0)}m`
+      ? `가장 비싼 것이 더 걷는 ${Math.max(...seen.map((v) => v.extra)).toFixed(0)}m`
       : far
-          .map((v) => `(${Math.round(v.x)}, ${Math.round(v.z)}) 발로 ${v.walk.toFixed(0)}m`)
+          .map((v) => `(${Math.round(v.x)}, ${Math.round(v.z)}) 더 걷는 ${v.extra.toFixed(0)}m`)
           .join(' · '),
   )
 
@@ -493,10 +545,23 @@ try {
    *    있었습니다. 이 저장소가 빈 표본으로 다섯 번 데인 것과 같은 모양입니다 —
    *    **몇 개가 알려지는가**로 물어야 합니다.
    */
+  /**
+   * ⚠️ **"모든 보물"이 아니라 "예산 안의 보물"입니다.**
+   *
+   * 게임은 곁길 예산(더 걷는 거리)을 넘는 보물을 **일부러 안 알려 줍니다** —
+   * 봇이 규칙상 안 가는 자리를 사람에게만 권하면, balance.ts 가 적어 둔
+   * *"사람에게는 권하고 계측기는 안 가는 틈"* 이 다시 열립니다. 그러니
+   * 그런 보물이 안 알려지는 것은 **실패가 아니라 규칙이 지켜진 것**입니다.
+   * 예산 밖까지 세면 이 검사는 게임에게 규칙을 어기라고 요구하게 됩니다.
+   */
+  const inBudget = seen.filter((v) => v.extra >= 0 && v.extra <= DETOUR_BUDGET)
+  const budgetKeys = new Set(inBudget.map((v) => `${Math.round(v.x)},${Math.round(v.z)}`))
+  const toldInBudget = along.told.filter((k) => budgetKeys.has(k))
   check(
-    along.told.length === along.total,
-    '🧭 **동선을 걷는 동안 모든 보물이 한 번은 알려진다** (규칙이 아니라 도달한 것)',
-    `${along.told.length}/${along.total}개 — 알려진 자리 ${along.told.join(' · ') || '없음'}`,
+    inBudget.length > 0 && toldInBudget.length === inBudget.length,
+    '🧭 **예산 안의 보물은 동선을 걷는 동안 한 번은 알려진다** (규칙이 아니라 도달한 것)',
+    `${toldInBudget.length}/${inBudget.length}개 — 알려진 자리 ${toldInBudget.join(' · ') || '없음'}` +
+      ` · 예산 밖이라 안 알려 준 것 ${seen.length - inBudget.length}개`,
   )
 
   check(
