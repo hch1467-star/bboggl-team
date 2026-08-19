@@ -148,6 +148,7 @@ import {
   debugApplyBleed,
   swingRecords,
   flushSwingRecords,
+  poiseDamage,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -2910,6 +2911,17 @@ class Game {
    * 여기서만 보입니다. 잘린 것을 모르면 *"이 구역엔 원래 잔해가 없구나"* 로
    * 읽게 되는데, 실은 **앞에서 다 써 버린 것**입니다.
    */
+  /**
+   * 💢 한 대가 깎는 강인도 — **판정이 쓰는 그 함수**(`poiseDamage`)를 그대로
+   * 부릅니다. 프로브가 식을 베껴 적으면 규칙의 사본이 생깁니다.
+   */
+  debugPoiseRule(kindId: string, breaks: number): number {
+    const kind = kindFromId(kindId)
+    if (kind === null || kind === undefined) return -1
+    const def = enemyDef(kind)
+    return Number(poiseDamage(def.trauma, 1, POISE.basicMultiplier, kind, 0, breaks).toFixed(4))
+  }
+
   debugShowProps(on: boolean): void {
     if (this.props) this.props.visible = on
   }
@@ -5959,6 +5971,7 @@ declare global {
       tuning: () => { backArcDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
+      poiseRule: (kindId: string, breaks: number) => number
       swings: () => {
         attackId: string
         hit: boolean
@@ -6782,6 +6795,18 @@ window.__game = {
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
+  /**
+   * 💢 **강인도 규칙을 그대로 물어봅니다** — 판정과 **같은 함수**입니다.
+   *
+   * ⚠️ 처음엔 프로브가 실제로 보스를 세 번 무너뜨려 "몇 대 들었나"를 셌습니다.
+   *    맞는 방향이지만 SwiftShader 에서 프레임 수천 장을 그려야 해서 한 판이
+   *    10분을 넘겼습니다 — **검사가 너무 느리면 아무도 안 돌립니다.**
+   *
+   *    규칙이 참인지는 순수 함수 하나로 답할 수 있습니다. *효과*(붕괴가
+   *    실제로 줄었는가)는 `npm run play` 가 이미 세고 있으니, 여기서는
+   *    **규칙만** 봅니다. 둘을 한 검사에 욱여넣지 않습니다.
+   */
+  poiseRule: (kindId, breaks) => game.debugPoiseRule(kindId, breaks),
   /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */
   swings: () => {
     // 아직 열려 있는 휘두름을 먼저 닫습니다 — 안 그러면 마지막 한 줄이 빕니다.

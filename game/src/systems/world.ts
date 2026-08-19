@@ -211,6 +211,8 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   //    죽은 적이 쌓아 둔 대기 시간을 새로 태어난 적이 물려받습니다.
   Enemy.waitT[e] = 0
   Enemy.brokenT[e] = 0
+  // 💢 재활용된 번호가 앞 판의 저항을 물려받지 않게(components.ts `breaks`).
+  Enemy.breaks[e] = 0
   Enemy.homeX[e] = x
   Enemy.homeZ[e] = z
   Enemy.encounter[e] = 0

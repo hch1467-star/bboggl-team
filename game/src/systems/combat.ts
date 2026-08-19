@@ -488,11 +488,21 @@ export function poiseDamage(
   multiplier: number,
   kind: number,
   phase: number,
+  breaks = 0,
 ): number {
   // 무기 성격(poiseScale)이 여기서 곱해집니다 — 대검은 무너뜨리고 단검은 못 합니다.
   const dmg = trauma * POISE.fromTrauma * multiplier * poiseScale
-  if (kind !== EnemyKind.Boss) return dmg
-  return dmg / (BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, phase)].poiseResist ?? 1)
+  /**
+   * 💢 **무너질수록 단단해집니다** — 무거운 적만(balance.ts `breakResistStep`).
+   *
+   * 화면(강인도 바의 눈금)도 이 함수를 부르므로, 저항이 오르면 눈금도 같이
+   * 물러납니다 — *"여기까지 깎으면 무너진다"* 가 계속 참말입니다.
+   * 규칙을 여기 두는 이유가 그것입니다.
+   */
+  const heavy = enemyDef(kind).heavy === true
+  const worn = heavy ? 1 + POISE.breakResistStep * Math.min(breaks, POISE.breakResistMax) : 1
+  if (kind !== EnemyKind.Boss) return dmg / worn
+  return dmg / worn / (BOSS_PHASES[Math.min(BOSS_PHASES.length - 1, phase)].poiseResist ?? 1)
 }
 
 /**
@@ -598,7 +608,14 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
         : behind
           ? POISE.backMultiplier
           : POISE.basicMultiplier
-  const dmg = poiseDamage(spec.trauma, spec.poiseScale ?? 1, multiplier, Enemy.kind[t], Enemy.phase[t])
+  const dmg = poiseDamage(
+    spec.trauma,
+    spec.poiseScale ?? 1,
+    multiplier,
+    Enemy.kind[t],
+    Enemy.phase[t],
+    Enemy.breaks[t],
+  )
   /**
    * 🔨 **깎은 쪽이 셉니다.**
    *
@@ -694,7 +711,7 @@ function applyBleed(t: number, spec: AttackSpec): void {
    * 몫이고, 여기서 크게 주면 두 축이 같은 결과로 수렴합니다.
    */
   Enemy.poiseIdleT[t] = 0
-  Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t])
+  Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t], Enemy.breaks[t])
   if (Enemy.poise[t] <= 0) breakPoise(t)
 }
 
@@ -959,6 +976,13 @@ export function resetBleedPeak(): void {
  */
 export function breakPoise(t: number): void {
   const cfg = enemyDef(Enemy.kind[t])
+  /**
+   * 💢 **몇 번째 붕괴인지 셉니다** — 다음 붕괴를 어렵게 만드는 근거입니다
+   * (balance.ts `POISE.breakResistStep`). 세는 자리를 여기 두는 이유는
+   * 하나입니다: 붕괴는 여러 경로(평타 누적 · 강타 · 출혈 폭발 · 반격)로
+   * 들어오는데, **이 함수만은 전부가 지나갑니다.**
+   */
+  Enemy.breaks[t] += 1
   /**
    * **끊긴 순간이 예고 중이었는가** — 상태를 바꾸기 전에 잡아 둡니다.
    *
