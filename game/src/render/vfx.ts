@@ -19,6 +19,83 @@ const SWING_POOL = 8
 const GROUND_POOL = 20
 
 const DAMAGE_LIFE = 0.75
+/**
+ * 🔢 숫자가 떠오르는 속도(m/초). **일정 속도**입니다 — 여기가 핵심입니다.
+ *
+ * 예전에는 `vy = 3.1` 로 튀어 올랐다가 중력 7.5 로 떨어지는 **포물선**이었습니다.
+ * 보기에는 그쪽이 활기찬데, 포물선은 **나이마다 속도가 다릅니다.** 갓 뜬 숫자는
+ * 3.1m/s 로 올라가고 0.5초 된 숫자는 0.65m/s 로 떨어지는 중이라, 뒤에 뜬 숫자가
+ * 앞의 숫자를 **따라잡아 관통합니다.** 실제로 롱소드 콤보 간격(0.25초)에서
+ * 계산하면 0.55초쯤에 둘의 높이 차가 0.19m 까지 좁혀집니다 — 글자 높이(0.4)의
+ * 절반이라 그대로 겹칩니다.
+ *
+ * 속도가 모두 같으면 **뜰 때 벌려 놓은 간격이 수명 내내 그대로 유지됩니다.**
+ * 그래서 아래 `stackY` 를 스폰 때 딱 한 번만 풀면 됩니다 — 매 프레임 다시
+ * 밀어내면 숫자가 덜덜 떨립니다.
+ *
+ * 사라진 "팡" 하는 맛은 **크기**로 옮겼습니다(`DAMAGE_POP`). 크기는 위치를
+ * 건드리지 않으므로 겹침 계산을 깨지 않습니다.
+ */
+const DAMAGE_RISE = 1
+/**
+ * ⚠️ **떠오르는 방향도, 쌓는 방향도 월드의 위(+y)가 아니라 카메라의 위입니다.**
+ *
+ * 이 함정에 한 번 걸렸고, 계측기가 없었으면 못 찾았을 종류입니다. 쌓기를
+ * 월드 +y 로 0.5m 씩 올렸더니 `npm run hud` 은 두 숫자가 **월드에서 1.00m**
+ * 떨어져 있다고 찍는데 **화면에서는 9px** 밖에 안 벌어져 있었습니다.
+ * 글자 높이가 12~19px 이니 그대로 겹칩니다.
+ *
+ * 쿼터뷰 카메라는 아래를 내려다봅니다. 그래서 월드에서 1m 를 올려도 화면에서는
+ * cos(내려다보는 각) 만큼만, 즉 **절반쯤만** 올라갑니다. 그런데 겹침을 재는
+ * 자(글자 크기)는 스프라이트 크기 — **카메라 평면 위의 길이**입니다.
+ * 서로 다른 자를 같은 자로 알고 비교하고 있었습니다.
+ *
+ * 그래서 흩뿌림·쌓기·떠오름을 전부 **카메라의 오른쪽·위 축** 위에서 합니다.
+ * 그러면 길이 단위가 글자 크기와 같아지고, 화면에서 벌어지는 양이 계산한
+ * 그대로 나옵니다.
+ */
+/**
+ * 🔢 옆으로 흩뿌리는 폭(m). **속도가 아니라 뜰 때 한 번 주는 치우침**입니다.
+ *
+ * ── 왜 속도를 버렸는가 (재 보고 알았습니다) ──────────────────────────
+ * 처음엔 예전 그대로 1.1m/s 로 옆으로 밀었습니다. 그런데 `npm run hud` 이
+ * 여전히 **53% 겹침**을 찍었고, 상자 좌표를 보니 두 숫자의 화면 세로 차이가
+ * 겨우 5px 이었습니다 — 아래 `stackY` 가 월드에서 0.5m 씩 올려 놨는데도요.
+ *
+ * 쿼터뷰라서 그렇습니다. **월드의 위(+y)도, 카메라 쪽으로 다가오는 것(깊이)도
+ * 화면에서는 둘 다 세로로 움직입니다.** 그래서 옆으로 흩뿌린 속도가 깊이 성분을
+ * 갖는 순간, 그게 쌓아 올린 높이를 **도로 깎아 먹습니다.** 겹침을 막는 장치가
+ * 둘이었고 서로를 무효로 만들고 있었습니다 — 이 저장소가 계속 적어 온 그대로:
+ * **규칙은 한 곳에만.**
+ *
+ * 그래서 흩뿌리기는 ① 속도가 아니라 **뜰 때 한 번**만 주고, ② 방향도 아무
+ * 쪽이 아니라 **카메라의 오른쪽 축**으로만 줍니다. 그러면 뜰 때 벌려 둔
+ * 간격이 수명 내내 정확히 유지됩니다.
+ */
+const DAMAGE_SPREAD = 0.45
+/** 뜨는 순간 이만큼 커졌다가 제 크기로 줄어듭니다 — 타격의 "팡". */
+const DAMAGE_POP = 1.3
+/** 그 줄어듦이 끝나는 시간(초). 수명 0.75초의 1/5 — 읽는 동안은 크기가 고정입니다. */
+const DAMAGE_POP_T = 0.15
+/**
+ * 겹칠 때 한 칸 올리는 높이(m). 글자 잉크 높이가 보통 0.40, 가장 큰
+ * 「백어택 치명타!」가 0.75 입니다. 0.5 는 보통 숫자를 한 칸에 확실히
+ * 떼어 놓고, 큰 숫자는 두 칸 만에 떨어집니다(아래 반복문이 다시 재 봅니다).
+ */
+const STACK_STEP = 0.5
+/**
+ * 최대 몇 칸까지 올릴 것인가. 4칸 = 2m — 적 키(1.7~2.9m)만큼이라 아직
+ * *"저 적의 숫자"* 로 보입니다. 더 올리면 겹침은 풀리지만 **누구를 때린
+ * 숫자인지**를 잃습니다. 그때는 차라리 겹치게 두는 편이 낫습니다.
+ */
+const STACK_MAX = 4
+/**
+ * 황금비의 소수부(≈0.618). 여기에 1, 2, 3… 을 곱해 소수부만 취하면
+ * **연속한 값끼리 서로 가장 멀리 떨어지는** 수열이 나옵니다(해바라기 씨앗과
+ * 같은 원리의 1차원 판). 매번 독립 난수로 뽑으면 연달아 뜬 둘이 같은 자리에
+ * 걸리는 일이 드물지 않은데, 이 수열은 그런 일이 없습니다.
+ */
+const GOLDEN_FRAC = 0.6180339887
 const SPARK_LIFE = 0.22
 /**
  * 궤적은 짧아야 잔상처럼 보입니다. 길면 지면에 눌어붙은 장판처럼 보입니다.
@@ -40,9 +117,30 @@ interface DamageItem {
   canvas: HTMLCanvasElement
   texture: THREE.CanvasTexture
   life: number
-  vy: number
-  driftX: number
-  driftZ: number
+  /**
+   * 화면 가로/세로 좌표 — 정확히는 위치를 **카메라의 오른쪽·위 축에 투영한 값**.
+   * 겹침은 이 두 값으로 잽니다(위 DAMAGE_RISE 아래 주석: 월드 축으로 재면
+   * 자가 서로 달라서 계산이 통째로 어긋납니다).
+   */
+  lateral: number
+  vert: number
+  /** 팡 하는 크기 연출이 곱해지기 **전**의 제 크기. 매 프레임 여기서 다시 계산합니다. */
+  baseW: number
+  baseH: number
+  /**
+   * 🔢 **글자가 실제로 차지하는 비율**(스프라이트 크기에 대한 0~1).
+   *
+   * 스프라이트는 220×112 캔버스 전체이고, 두 자리 숫자는 그 안에서
+   * 가로 1/3 · 세로 절반쯤만 씁니다. 나머지는 투명입니다. 겹침을
+   * 스프라이트 크기로 재면 **안 겹치는 것도 겹쳤다고** 세게 됩니다 —
+   * 그러면 아래 쌓기가 필요 없는 자리에서도 숫자를 밀어 올립니다.
+   *
+   * 크기가 아니라 **비율**로 들고 있는 이유: 숫자는 뜰 때 DAMAGE_POP 배로
+   * 부풀었다가 줄어듭니다. 크기를 굳혀 두면 *"지금 화면에 얼마만 한가"* 를
+   * 물었을 때 **한 순간의 값을 수명 내내 되풀이하게** 됩니다.
+   */
+  inkRatioW: number
+  inkRatioH: number
 }
 
 interface SparkItem {
@@ -144,7 +242,19 @@ function styleOf(style: DamageStyle): { color: string; label: string; scale: num
   return { color: '#ffffff', label: '', scale: 1 }
 }
 
-function drawDamage(canvas: HTMLCanvasElement, text: string, color: string, label: string): void {
+/**
+ * @returns 글자가 실제로 차지한 상자 — 캔버스 크기에 대한 **비율** 0~1.
+ *          이걸 그리는 자리에서 돌려주는 이유는, 폰트나 자릿수가 바뀌면
+ *          상자도 같이 바뀌어야 하기 때문입니다. 어딘가에 0.33 이라고
+ *          적어 두면 다음에 폰트를 키우는 날 조용히 거짓말이 됩니다
+ *          (이 저장소가 계속 적어 온 그대로: 사건은 사건이 일어난 자리에서).
+ */
+function drawDamage(
+  canvas: HTMLCanvasElement,
+  text: string,
+  color: string,
+  label: string,
+): { w: number; h: number } {
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.textAlign = 'center'
@@ -152,6 +262,7 @@ function drawDamage(canvas: HTMLCanvasElement, text: string, color: string, labe
 
   const numY = label ? canvas.height * 0.62 : canvas.height / 2
   ctx.font = 'bold 58px system-ui, -apple-system, "Segoe UI", sans-serif'
+  const m = ctx.measureText(text)
   // 검은 테두리 — 밝은 바닥 위에서도 숫자가 읽히게 합니다.
   ctx.lineWidth = 9
   ctx.strokeStyle = 'rgba(0,0,0,0.88)'
@@ -166,6 +277,15 @@ function drawDamage(canvas: HTMLCanvasElement, text: string, color: string, labe
     ctx.strokeText(label, canvas.width / 2, canvas.height * 0.2)
     ctx.fillStyle = color
     ctx.fillText(label, canvas.width / 2, canvas.height * 0.2)
+  }
+
+  // 테두리(lineWidth 9)는 양옆으로 절반씩 삐져나오므로 폭·높이에 9 를 더합니다.
+  // 세로는 폰트 실측이 없는 브라우저를 대비해 글자 크기의 0.72(대문자 높이)로 뒷받침합니다.
+  const ascent = m.actualBoundingBoxAscent || 58 * 0.72
+  const descent = m.actualBoundingBoxDescent || 0
+  return {
+    w: (m.width + 9) / canvas.width,
+    h: (ascent + descent + 9) / canvas.height,
   }
 }
 
@@ -194,7 +314,18 @@ export class Vfx {
       sprite.visible = false
       sprite.renderOrder = 20
       scene.add(sprite)
-      this.damages.push({ sprite, canvas, texture, life: 0, vy: 0, driftX: 0, driftZ: 0 })
+      this.damages.push({
+        sprite,
+        canvas,
+        texture,
+        life: 0,
+        lateral: 0,
+        vert: 0,
+        baseW: 1.5,
+        baseH: 0.75,
+        inkRatioW: 0,
+        inkRatioH: 0,
+      })
     }
 
     const sparkGeo = new THREE.PlaneGeometry(1, 1)
@@ -325,19 +456,137 @@ export class Vfx {
 
     const look = styleOf(style)
     const text = (style.heal ? '+' : '') + String(Math.round(amount))
-    drawDamage(item.canvas, text, look.color, look.label)
+    const ink = drawDamage(item.canvas, text, look.color, look.label)
     item.texture.needsUpdate = true
-    item.sprite.position.set(x, y, z)
-    item.sprite.scale.set(1.7 * look.scale, 0.87 * look.scale, 1)
+    item.baseW = 1.7 * look.scale
+    item.baseH = 0.87 * look.scale
+    item.inkRatioW = ink.w
+    item.inkRatioH = ink.h
+    item.sprite.scale.set(item.baseW * DAMAGE_POP, item.baseH * DAMAGE_POP, 1)
+
+    // 옆으로 살짝 흩뿌립니다 — **카메라 오른쪽 축으로만**(DAMAGE_SPREAD 주석).
+    // 🎲 씨앗 난수입니다 — 장식이어도 그렇습니다(core/rng.ts `vfxRng` 주석).
+    //    난수는 무늬가 판마다 달라 보이라고 얹는 흔들림이고, 실제로 벌리는
+    //    일은 황금비 수열이 합니다. (뽑는 횟수는 예전과 같은 1회입니다 —
+    //    난수 흐름이 달라지면 `npm run repro` 가 재현하는 화면이 통째로 바뀝니다.)
+    this.damageSpin = (this.damageSpin + GOLDEN_FRAC) % 1
+    const spread = (this.damageSpin * 2 - 1) * DAMAGE_SPREAD + (vfxRng.next() - 0.5) * 0.12
+    const r = this.camRight
+    const u = this.camUp
+    item.lateral = x * r.x + y * r.y + z * r.z + spread
+    item.vert = this.stackVert(item, x * u.x + y * u.y + z * u.z, x, z)
+    // 화면 가로·세로를 정한 뒤 월드 좌표로 되돌립니다. 두 축은 서로 수직이라
+    // 각각의 이동량을 그냥 더하면 됩니다.
+    const lift = item.vert - (x * u.x + y * u.y + z * u.z)
+    item.sprite.position.set(
+      x + r.x * spread + u.x * lift,
+      y + r.y * spread + u.y * lift,
+      z + r.z * spread + u.z * lift,
+    )
     item.sprite.visible = true
     item.sprite.material.opacity = 1
     item.life = DAMAGE_LIFE
-    item.vy = 3.1
-    // 같은 자리에 여러 숫자가 겹쳐 안 보이는 것을 막기 위해 옆으로 살짝 흩뿌립니다.
-    // 🎲 씨앗 난수입니다 — 장식이어도 그렇습니다(core/rng.ts `vfxRng` 주석).
-    const a = vfxRng.next() * Math.PI * 2
-    item.driftX = Math.cos(a) * 1.1
-    item.driftZ = Math.sin(a) * 1.1
+  }
+
+  /**
+   * 🔢 **숫자를 위로 쌓습니다** — 이미 떠 있는 숫자와 겹치면 한 칸 올립니다.
+   *
+   * ── 스크린샷이 잡은 것 ────────────────────────────────────────────
+   * 보스 처형 장면에서 「12」와 「27」이 **완전히 포개져** 있었습니다.
+   * 원래 코드는 흩뿌리기를 **속도로만** 줬습니다(위 driftX/driftZ).
+   * 그런데 속도는 0초에 아무것도 벌려 주지 않습니다 — 같은 프레임에 뜬
+   * 두 숫자는 **시작점이 글자 그대로 같은 점**입니다.
+   *
+   * 그리고 이건 드문 경우가 아닙니다. 롱소드 콤보는 1타 0.15초 · 2타 0.40초 ·
+   * 3타 0.67초에 꽂히고(`npm run weapons` 시간표), 숫자 수명은 0.75초입니다.
+   * 즉 **콤보를 넣을 때마다 세 숫자가 한 적 위에 동시에** 떠 있습니다.
+   * 가장 잘 되는 순간의 피드백이 가장 안 읽히고 있었습니다.
+   *
+   * ── 왜 옆이 아니라 "위"인가 ───────────────────────────────────────
+   * 옆으로 크게 밀면 *"이 숫자는 이 적의 것"* 이라는 연결이 끊깁니다.
+   * 숫자 잉크는 가로로 넓고 세로로 납작해서(대략 1.4 : 0.4), 겹침을 푸는 데
+   * **세로가 3배 이상 싸게** 먹힙니다. 디아블로·로스트아크가 연타 숫자를
+   * 세로로 쌓아 올리는 이유가 이것입니다.
+   *
+   * ── 왜 **뜰 때 딱 한 번**만 풀어도 되는가 ────────────────────────
+   * 숫자는 뜬 뒤에 오직 위로, 그것도 **전부 같은 속도**로만 움직입니다
+   * (`DAMAGE_RISE`). 옆으로 치우침도 속도가 아니라 뜰 때 한 번 주는
+   * 고정값입니다(`DAMAGE_SPREAD`). 그래서 서로의 상대 위치가 **수명 내내
+   * 얼어붙습니다** — 한 번 벌려 놓으면 다시 붙을 길이 없습니다.
+   * 매 프레임 다시 밀어내는 방식이었다면 숫자가 덜덜 떨렸을 겁니다.
+   *
+   * 가로·세로 모두 **카메라 축 위의 좌표**로 잽니다(`lateral` · `vert`).
+   * 월드 좌표로 재면 겹침을 재는 자(글자 크기)와 단위가 달라집니다 —
+   * 위 DAMAGE_RISE 아래 주석의 그 함정입니다.
+   */
+  private stackVert(self: DamageItem, vert: number, wx: number, wz: number): number {
+    // ⚠️ 자리를 잡을 때는 **가장 부풀었을 때(DAMAGE_POP)** 의 크기로 잽니다.
+    //    제 크기로 재서 딱 붙여 놓으면, 뜨는 순간의 "팡" 에서 다시 겹칩니다.
+    const sw = self.inkRatioW * self.baseW * DAMAGE_POP
+    const sh = self.inkRatioH * self.baseH * DAMAGE_POP
+    let out = vert
+    for (let step = 0; step < STACK_MAX; step++) {
+      let clash = false
+      for (const d of this.damages) {
+        if (d === self || d.life <= 0) continue
+        // 저 멀리 다른 적 위에 뜬 숫자까지 피해 다니면 안 됩니다 — 화면에서
+        // 스칠 뿐인데 하늘로 올라갑니다. 가까운 것들끼리만 풉니다.
+        const p = d.sprite.position
+        if (Math.hypot(p.x - wx, p.z - wz) >= 6) continue
+        // 잉크 상자 두 개가 겹치려면 가로·세로가 **둘 다** 붙어야 합니다.
+        if (Math.abs(d.lateral - self.lateral) >= (d.inkRatioW * d.baseW * DAMAGE_POP + sw) / 2)
+          continue
+        if (Math.abs(d.vert - out) >= (d.inkRatioH * d.baseH * DAMAGE_POP + sh) / 2) continue
+        clash = true
+        break
+      }
+      if (!clash) break
+      out += STACK_STEP
+    }
+    return out
+  }
+  /** 황금비 수열의 현재 위치(0~1). 흩뿌릴 자리를 정합니다. */
+  private damageSpin = 0
+  /** 카메라의 오른쪽·위 축. `update` 가 매 프레임 갱신합니다. */
+  private readonly camRight = new THREE.Vector3(1, 0, 0)
+  private readonly camUp = new THREE.Vector3(0, 1, 0)
+
+  /**
+   * 🔢 지금 떠 있는 숫자들의 **잉크 상자** — `npm run hud` 이 겹침을 재는 자입니다.
+   *
+   * 두 가지를 일부러 지킵니다.
+   *   ① 스프라이트가 아니라 **글자** 크기 (위 `inkRatioW` 주석).
+   *   ② 굳혀 둔 값이 아니라 **지금 화면에 그려진** 크기 — 팡 하며 줄어드는
+   *      중이면 줄어든 크기가 나옵니다. 계측기가 실제보다 큰 상자를 돌려주면
+   *      *"겹쳤다"* 가 부풀어 나오고, 그 값을 보고 게임을 고치면 엉뚱한 데를
+   *      만지게 됩니다.
+   */
+  debugDamages(): {
+    x: number
+    y: number
+    z: number
+    w: number
+    h: number
+    lateral: number
+    age: number
+  }[] {
+    const out = []
+    for (const d of this.damages) {
+      if (d.life <= 0) continue
+      const p = d.sprite.position
+      out.push({
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        w: d.inkRatioW * d.sprite.scale.x,
+        h: d.inkRatioH * d.sprite.scale.y,
+        // 겹쳤을 때 **쌓기가 몇 칸 걸렸는지**를 되짚으려면 이 둘이 필요합니다.
+        // 화면 좌표만 보면 "안 올라갔다"와 "올라갔는데 모자랐다"가 같아 보입니다.
+        lateral: d.lateral,
+        age: DAMAGE_LIFE - d.life,
+      })
+    }
+    return out
   }
 
   spawnHitSpark(x: number, y: number, z: number, scale = 1): void {
@@ -446,6 +695,11 @@ export class Vfx {
   update(camera: THREE.Camera): void {
     const dt = time.realDt
 
+    // 카메라의 오른쪽·위 축 — 데미지 숫자를 **화면 가로/세로로** 흩뿌리고
+    // 쌓기 위한 것(DAMAGE_RISE 아래 주석: 월드 축으로 하면 단위가 어긋납니다).
+    this.camRight.setFromMatrixColumn(camera.matrixWorld, 0)
+    this.camUp.setFromMatrixColumn(camera.matrixWorld, 1)
+
     for (const d of this.damages) {
       if (d.life <= 0) continue
       d.life -= dt
@@ -454,10 +708,17 @@ export class Vfx {
         continue
       }
       const t = 1 - d.life / DAMAGE_LIFE
-      d.vy -= 7.5 * dt // 위로 튀었다가 중력으로 떨어지는 곡선
-      d.sprite.position.y += d.vy * dt
-      d.sprite.position.x += d.driftX * dt
-      d.sprite.position.z += d.driftZ * dt
+      // 화면 위로만, 그것도 **전부 같은 속도**로 — 뜰 때 벌려 둔 간격이
+      // 그대로 유지됩니다(DAMAGE_RISE 주석: 포물선이면 뒤에 뜬 숫자가 앞을
+      // 관통하고, 월드 축으로 올리면 화면에서 절반밖에 안 올라갑니다).
+      const rise = DAMAGE_RISE * dt
+      d.sprite.position.addScaledVector(this.camUp, rise)
+      d.vert += rise
+      // 위치 대신 **크기**로 튑니다. 크기는 이웃과의 간격을 건드리지 않습니다.
+      const age = DAMAGE_LIFE - d.life
+      const pop =
+        age < DAMAGE_POP_T ? 1 + (DAMAGE_POP - 1) * (1 - age / DAMAGE_POP_T) ** 2 : 1
+      d.sprite.scale.set(d.baseW * pop, d.baseH * pop, 1)
       // 마지막 35%에서만 사라지게 — 너무 일찍 흐려지면 숫자를 못 읽습니다.
       d.sprite.material.opacity = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35
     }

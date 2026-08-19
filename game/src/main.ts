@@ -4309,6 +4309,55 @@ class Game {
     return this.vfx.debugSwingColor()
   }
 
+  /**
+   * 🔢 지금 떠 있는 데미지 숫자들을 **화면 좌표의 상자**로 돌려줍니다.
+   *
+   * 월드가 아니라 화면으로 바꿔서 주는 이유: 겹침은 **보는 사람의 눈에서**
+   * 일어납니다. 월드에서 1m 떨어져 있어도 카메라 축에 따라 화면에서는
+   * 붙어 보일 수 있습니다. 프로브가 재야 하는 것은 후자입니다.
+   */
+  debugDamageBoxes(): {
+    cx: number
+    cy: number
+    w: number
+    h: number
+    wy: number
+    lateral: number
+    age: number
+  }[] {
+    const el = this.renderer.domElement
+    const cam = this.cam.camera
+    // 스프라이트는 카메라를 보고 서므로, 화면에서의 가로/세로는 **카메라의
+    // 오른쪽·위 축**입니다. 그 축으로 반지름만큼 옮긴 점을 같이 투영하면
+    // 화면 크기를 얻습니다 — 원근이면 거리에 따라 달라지는 것까지 알아서 반영됩니다.
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0)
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1)
+    const v = new THREE.Vector3()
+    const out = []
+    for (const d of this.vfx.debugDamages()) {
+      v.set(d.x, d.y, d.z).project(cam)
+      const ndcX = v.x
+      const ndcY = v.y
+      if (!Number.isFinite(ndcX) || !Number.isFinite(ndcY)) continue
+      v.set(d.x, d.y, d.z).addScaledVector(right, d.w / 2).project(cam)
+      const w = Math.abs(v.x - ndcX) * el.clientWidth
+      v.set(d.x, d.y, d.z).addScaledVector(up, d.h / 2).project(cam)
+      const h = Math.abs(v.y - ndcY) * el.clientHeight
+      out.push({
+        cx: ((ndcX + 1) / 2) * el.clientWidth,
+        cy: ((1 - ndcY) / 2) * el.clientHeight,
+        w,
+        h,
+        // 월드 높이·가로치우침·나이를 같이 넘깁니다 — 겹쳤을 때 *"안 쌓았다"* 와
+        // *"쌓았는데 모자랐다"* 를 가르는 데 화면 좌표만으로는 부족합니다.
+        wy: d.y,
+        lateral: d.lateral,
+        age: d.age,
+      })
+    }
+    return out
+  }
+
   /** ✨ 지금 화면에 놓인 등급 불티 — 프로브가 규칙을 베끼지 않게 그린 값을 줍니다. */
   debugAura(): {
     count: number
@@ -6646,6 +6695,16 @@ declare global {
       }[]
       /** 🏆 지금 떠 있는 검격 자국의 색(0xRRGGBB). 없으면 -1. */
       swingColor: () => number
+      /** 🔢 지금 떠 있는 데미지 숫자들의 **화면 상자**(글자가 실제로 차지한 크기). */
+      damageBoxes: () => {
+        cx: number
+        cy: number
+        w: number
+        h: number
+        wy: number
+        lateral: number
+        age: number
+      }[]
       /** ✨ 지금 화면에 놓인 등급 불티(개수·색·좌표). 그린 값을 그대로 묻습니다. */
       auraInfo: () => {
         count: number
@@ -6840,6 +6899,7 @@ window.__game = {
   step: (frames, dtSec, fromZero) => game.debugStep(frames, dtSec, fromZero),
   swingVisible: () => game.debugSwingVisible(),
   swingColor: () => game.debugSwingColor(),
+  damageBoxes: () => game.debugDamageBoxes(),
   auraInfo: () => game.debugAura(),
   telegraphs: () => game.debugTelegraphs(),
   spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),

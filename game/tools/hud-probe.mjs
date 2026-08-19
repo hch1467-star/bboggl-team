@@ -238,6 +238,124 @@ try {
     })
   }
 
+  /**
+   * ── 🔢 **데미지 숫자끼리도 HUD 다.** ─────────────────────────────────
+   *
+   * 위 검사는 DOM 패널만 봅니다. 그런데 보스 처형 스크린샷에서 「12」와
+   * 「27」이 **완전히 포개져** 있었습니다 — 겹침이 DOM 바깥에서 일어난
+   * 것입니다. 같은 규칙(*"조각은 서로 안 가린다"*)이 여기에도 걸립니다.
+   *
+   * 왜 흔한 일인가: 롱소드 콤보는 0.15 · 0.40 · 0.67초에 꽂히고 숫자 수명은
+   * 0.75초입니다. **콤보를 넣을 때마다** 한 적 위에 세 숫자가 동시에 뜹니다.
+   * 즉 가장 잘 되는 순간의 피드백이 가장 안 읽혔습니다.
+   *
+   * 고정 스텝(`step`)으로 돌립니다 — 이 검사는 *"운 좋게 안 겹친 판"* 이
+   * 아니라 **같은 판을 다시 재도 같은 답**이 나와야 합니다.
+   */
+  await page.evaluate(() => window.__game.resetProgress())
+  await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  const combo = await page.evaluate(() => {
+    const G = window.__game
+    G.setPaused(true)
+    /**
+     * 🧪 **실험대로 세웁니다** — 레벨에 놓인 보스를 찾아가는 대신 빈 자리에
+     * 새로 세웁니다(`npm run track` 과 같은 방식). 레벨의 보스를 쓰면
+     * 조우 연출이 시작됐는지에 따라 개체 번호를 못 잡는 판이 생기고,
+     * 그러면 아래 살려 두기가 조용히 안 걸립니다.
+     */
+    // ⚠️ **플레이어가 서 있는 자리 앞**에 세웁니다. (0,0) 에 세우고 거기로
+    //    순간이동시켰더니 판마다 결과가 87프레임 ↔ 2프레임으로 튀었습니다 —
+    //    그 좌표가 이 존에서 바닥인지 허공인지 실험대가 모르기 때문입니다.
+    //    발밑이 확실한 자리는 **지금 서 있는 자리**뿐입니다.
+    G.clearEnemies()
+    const me0 = G.state().player
+    const boss = G.spawnBoss(me0.x, me0.z + 1.6)
+    G.step(30, 1 / 60, true)
+    /**
+     * 🩸 **둘 다 살려 둡니다.** 코앞에서 240프레임을 때리는 동안 보스는
+     * 가만히 있지 않습니다. 첫 판에 87프레임이 나왔다가 다음 판에 2프레임이
+     * 나온 이유가 이것이었습니다 — **한쪽이 도중에 죽으면** 공격이 안 나가고
+     * 숫자도 안 뜹니다. 그러면 "안 겹쳤다"가 아니라 **"안 떴다"** 인데 숫자만
+     * 보면 구분이 안 됩니다. (`npm run pace` · `npm run track` 이 똑같은
+     * 함정에 이미 걸렸던 자리입니다.)
+     */
+    const me = G.playerEntity()
+    const keepAlive = () => {
+      G.setHp(me, 100)
+      G.setHp(boss, 400)
+    }
+    const frames = []
+    // 📋 **왜 안 떴는지**를 같이 들고 옵니다. 숫자가 안 뜨는 판이 나왔을 때
+    //    "겹칠 일이 없었다"인지 "때리질 못했다"인지 여기서 갈립니다.
+    const why = { swung: 0, spawned: 0, dead: 0, minStamina: 999 }
+    for (let i = 0; i < 240; i++) {
+      keepAlive()
+      G.press('Mouse0')
+      G.release('Mouse0')
+      G.step(1, 1 / 60)
+      const st = G.state().player
+      // 1=Attack · 4=Dead (core/components.ts ActorState)
+      if (st.state === 1) why.swung++
+      if (st.state === 4) why.dead++
+      why.minStamina = Math.min(why.minStamina, Math.round(st.stamina ?? 999))
+      const boxes = G.damageBoxes()
+      why.spawned = Math.max(why.spawned, boxes.length)
+      if (boxes.length >= 2) frames.push(boxes)
+    }
+    return { frames, why }
+  })
+  const { frames: comboFrames, why } = combo
+  /**
+   * 두 글자 상자가 겹친 넓이가 **작은 쪽의 1/3** 을 넘으면 못 읽는 것으로 봅니다.
+   *
+   * 0% 로 두지 않는 이유: 상자는 글자의 바깥 테두리라 자릿수 사이 여백까지
+   * 포함합니다. 모서리가 몇 픽셀 스치는 것은 눈에 안 걸립니다. 반대로 1/3 을
+   * 넘으면 한쪽 숫자의 **자릿수 하나가 통째로** 가려집니다 — 그때부터
+   * "37"이 "3"으로 읽히기 시작하고, 그건 피드백이 아니라 오보입니다.
+   */
+  const BURY = 1 / 3
+  let worst = 0
+  let worstAt = ''
+  for (const boxes of comboFrames) {
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i]
+        const b = boxes[j]
+        const ox = Math.min(a.cx + a.w / 2, b.cx + b.w / 2) - Math.max(a.cx - a.w / 2, b.cx - b.w / 2)
+        const oy = Math.min(a.cy + a.h / 2, b.cy + b.h / 2) - Math.max(a.cy - a.h / 2, b.cy - b.h / 2)
+        if (ox <= 0 || oy <= 0) continue
+        const ratio = (ox * oy) / Math.min(a.w * a.h, b.w * b.h)
+        if (ratio > worst) {
+          worst = ratio
+          // 겹친 넓이만 적으면 *"왜 겹쳤는지"* 를 알 수 없습니다. 두 상자의
+          // 자리와 크기를 같이 남겨야 **위로 안 밀린 건지, 밀렸는데 모자란
+          // 건지**가 보입니다.
+          const one = (n) =>
+            `화면(${Math.round(n.cx)},${Math.round(n.cy)}) ${Math.round(n.w)}×${Math.round(n.h)}px` +
+            ` · 월드높이 ${n.wy.toFixed(2)} · 가로 ${n.lateral.toFixed(2)} · 나이 ${n.age.toFixed(2)}초`
+          worstAt = `${Math.round(ox)}×${Math.round(oy)}px 겹침\n      A ${one(a)}\n      B ${one(b)}`
+        }
+      }
+    }
+  }
+  const most = comboFrames.reduce((m, f) => Math.max(m, f.length), 0)
+  console.log(
+    `  [숫자] 두 개 이상 떠 있던 프레임 ${comboFrames.length} · 한 화면 최다 ${most}개 · 최악 겹침 ${(worst * 100).toFixed(0)}%` +
+      `\n         (휘두른 프레임 ${why.swung} · 죽어 있던 프레임 ${why.dead} · 최저 스태미나 ${why.minStamina})`,
+  )
+  // 🚧 **재기 전에 잴 것이 있었는지**부터 봅니다. 숫자가 한 번도 겹칠 기회가
+  //    없었으면 아래 초록은 "안 겹쳤다"가 아니라 **"안 떴다"** 입니다.
+  check(
+    comboFrames.length >= 30 && most >= 3,
+    '🚧 콤보 중에 숫자가 **실제로 여러 개 동시에** 떴다 (빈 화면을 재고 통과하지 않게)',
+    `겹칠 기회 ${comboFrames.length}프레임 · 최다 ${most}개`,
+  )
+  check(
+    comboFrames.length >= 30 && most >= 3 && worst < BURY,
+    '🔢 **콤보 숫자끼리 서로 안 묻힌다** (가장 잘 되는 순간의 피드백이 가장 안 읽히지 않게)',
+    `최악 ${(worst * 100).toFixed(0)}% (문턱 ${(BURY * 100).toFixed(0)}%)${worst > 0 ? ` · ${worstAt}` : ''}`,
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
   console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
