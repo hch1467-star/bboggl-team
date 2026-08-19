@@ -550,6 +550,134 @@ try {
     }
   }
 
+  /**
+   * ── 🗂 **예고끼리 겹쳤을 때, 더 급한 색이 이기는가** ─────────────────
+   *
+   * ── 왜 이 검사가 없었는가 ────────────────────────────────────────
+   * 위 검사들은 전부 **예고 하나 vs 바탕**입니다. 그런데 실전에서 동시에
+   * 붙는 적이 최대 4마리이고(`npm run play` 실측), 그러면 부채꼴 넷이
+   * 한 자리에 포개집니다. 그 상태의 화면을 처음 찍어 봤더니 **한복판이
+   * 탁한 회갈색**이었습니다 — 색이 곧 답인 게임인데, 답이 가장 필요한
+   * 자리에서 색을 못 읽습니다.
+   *
+   * 원인은 그리는 순서에 규칙이 없던 것이었습니다(enemyAttacks.ts
+   * `INTENT_LAYER`). 그래서 지켜야 할 규칙은 *"안 겹친다"* 가 아니라
+   * **"겹치면 더 급한 것이 보인다"** 입니다 — 겹침 자체는 막을 수 없으니까요.
+   *
+   * ⚠️ 두 색을 **바꿔 가며 두 번** 잽니다. 한 번만 재면 *"규칙이 이겼다"*
+   *    와 *"어쩌다 그 적이 카메라에 가까웠다"* 가 구분되지 않습니다.
+   *    자리를 맞바꿔도 같은 색이 이겨야 규칙입니다.
+   */
+  {
+    const spot = await page.evaluate(() => {
+      const G = window.__game
+      G.freezeEnemies(false)
+      G.clearEnemies()
+      return G.state().player
+    })
+    const layerRun = async (swap) => {
+      const r = await page.evaluate(
+        ([px, pz, sw]) => {
+          const G = window.__game
+          G.clearEnemies()
+          /**
+           * 🟡 광역과 🔴 직격을 플레이어 양옆에 세웁니다. 둘 다 플레이어를
+           * 노리므로 부채꼴이 **플레이어 앞쪽에서 겹칩니다.**
+           * `sw` 로 자리를 맞바꿔 카메라 거리를 뒤집습니다.
+           */
+          const near = sw ? -3.4 : 3.4
+          const far = sw ? 3.4 : -3.4
+          const red = G.spawnEnemyKind('grunt', px + 0.6, pz + near)
+          const yellow = G.spawnEnemyKind('charger', px - 0.6, pz + far)
+          G.step(20, 1 / 60, true)
+          G.wakeEnemy(red)
+          G.wakeEnemy(yellow)
+          G.step(10, 1 / 60)
+          G.setHp(G.playerEntity(), 100)
+          for (const e of [red, yellow]) {
+            G.setHp(e, 400)
+            G.forceAttack(e, 0, 1)
+          }
+          G.step(30, 1 / 60)
+          const tg = G.telegraphs()
+          // 겹치는 자리 — 플레이어 바로 앞뒤 지면. 몸에 안 가리게 옆으로도 훑습니다.
+          const at = []
+          for (const dz of [-1.1, -0.6, 0.6, 1.1]) {
+            for (const dx of [-1.0, -0.5, 0.5, 1.0]) {
+              const p = G.screenPos(px + dx, 0.05, pz + dz)
+              if (p) at.push(p)
+            }
+          }
+          return { at, tg: tg.map((t) => ({ id: t.attackId, intent: t.intent, op: t.opacity })) }
+        },
+        [spot.x, spot.z, swap],
+      )
+      await page.evaluate(() => window.__game.setPaused(true))
+      const png = await page.screenshot()
+      return { ...r, png }
+    }
+    const runs = [await layerRun(false), await layerRun(true)]
+    const pick2 = (png, at) => {
+      const img = decodePng(png)
+      const x = Math.round(at.sx)
+      const y = Math.round(at.sy)
+      if (x < 0 || y < 0 || x >= img.width || y >= img.height) return null
+      const i = (y * img.width + x) * 4
+      // 밝으면 지면이 아니라 몸입니다 — 위 sampleTelegraph 와 같은 규칙.
+      if (img.data[i] > 150 && img.data[i + 1] > 150) return null
+      return [img.data[i], img.data[i + 1], img.data[i + 2]]
+    }
+    /**
+     * 🔴 와 🟡 의 **원색을 게임에게 묻습니다**(프로브가 색을 베끼지 않게).
+     *
+     * 절대 거리가 아니라 *"어느 쪽으로 기울었는가"* 만 봅니다. 예고는
+     * 투명도 0.x 로 지면에 얹히므로 화면색이 원색과 같아질 수 없습니다 —
+     * 위 🟢 주석의 *"계산으로는 33.6인데 화면에서는 23.3"* 이 그 이야기입니다.
+     * 방향만 물으면 그 왜곡이 양쪽에 똑같이 걸려 상쇄됩니다.
+     */
+    const hues = await page.evaluate(() => window.__game.intentColors())
+    const redRgb = hues[0].rgb // 🔴 직격 (INTENT_COLOR 의 첫 칸 = Strike)
+    const yellowRgb = hues[1].rgb // 🟡 광역
+    const scored = runs.map((r) => {
+      let red = 0
+      let yellow = 0
+      let n = 0
+      for (const q of r.at) {
+        const c = pick2(r.png, q)
+        if (!c) continue
+        n++
+        // 화면색이 어느 원색 쪽으로 **기울었는가**만 봅니다(색상 방향).
+        if (deltaE(c, redRgb) < deltaE(c, yellowRgb)) red++
+        else yellow++
+      }
+      return { red, yellow, n, tg: r.tg.length }
+    })
+    console.log(
+      `  [겹친 자리] ${scored
+        .map((s, i) => `${i === 0 ? '🔴가까움' : '🔴멀음'} 🔴쪽 ${s.red} · 🟡쪽 ${s.yellow} (표본 ${s.n})`)
+        .join(' · ')}`,
+    )
+    // 🚧 두 판 다 예고가 실제로 둘 떠 있었고 표본이 잡혔는지부터.
+    check(
+      runs.length === 2 &&
+        runs.every((r) => r.tg.length >= 2) &&
+        scored.length === 2 &&
+        scored.every((s) => s.n >= 6),
+      '🚧 두 판 다 예고가 **둘 다 떠 있고** 겹친 자리를 실제로 읽었다 (비교의 게이트)',
+      runs.map((r, i) => `${i + 1}판 예고 ${r.tg.length}개 · 표본 ${scored[i].n}`).join(' · '),
+    )
+    check(
+      // 길이를 먼저 못 박습니다 — `.every` 는 빈 배열에서 참입니다(npm run guard).
+      scored.length === 2 && scored.every((s) => s.n >= 6 && s.red > s.yellow),
+      '🗂 **예고가 겹치면 더 급한 색(🔴)이 보인다** (자리를 맞바꿔도 같게)',
+      scored.map((s, i) => `${i === 0 ? '🔴가까움' : '🔴멀음'} ${s.red}:${s.yellow}`).join(' · '),
+    )
+    await page.evaluate(() => {
+      window.__game.setPaused(false)
+      window.__game.clearEnemies()
+    })
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {

@@ -13,6 +13,7 @@ import {
 import {
   AttackIntent,
   INTENT_COLOR,
+  INTENT_LAYER,
   attackAt,
   attacksFor,
   telegraphRadius,
@@ -1276,6 +1277,12 @@ export class Visuals {
               v.telegraphMat.opacity *= 0.55 + 0.45 * Math.abs(Math.sin(time.elapsed * 11))
             }
             v.telegraphMat.color.setHex(INTENT_COLOR[def.intent])
+            /**
+             * 🗂 **겹치면 더 급한 색이 위로.** 규칙과 근거는 enemyAttacks.ts
+             * `INTENT_LAYER` 에 있습니다. 여기서는 그 순위를 1~2 사이로
+             * 눌러 담기만 합니다 — 다른 표시들과의 위아래를 안 건드리려고요.
+             */
+            v.telegraph.renderOrder = 1 + INTENT_LAYER[def.intent] * 0.1
             /**
              * ── ⏱ **「지금」 — 타이밍으로 푸는 색에만** ────────────────
              *
