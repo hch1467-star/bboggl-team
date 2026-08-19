@@ -13,6 +13,7 @@ import {
   COMBAT,
   COUNTER,
   FOCUS,
+  COMBO_FINISH_REFUND,
   GUARD,
   PLAYER,
   POISE,
@@ -171,6 +172,10 @@ export interface AttackSpec {
   noCrit?: boolean
   /** 처형인가 — 맞히면 무방비를 소모합니다. */
   finisher?: boolean
+  /** 🌀 콤보의 마지막 타인가 — 맞히면 기력을 일부 갚습니다. */
+  comboFinisher?: boolean
+  /** 🌀 그 타가 쓴 기력(갚을 몫의 분모). */
+  finisherCost?: number
   /** 무기별 강인도 배율 (arsenal.ts WeaponDef.poiseScale) */
   poiseScale?: number
   /**
@@ -390,6 +395,15 @@ function comboSpec(e: number, comboIndex: number): AttackSpec {
     hitstop: c.hitstop,
     trauma: c.trauma,
     heavy: situational ? c.trauma >= weapon.combo[weapon.combo.length - 1].trauma : comboIndex === weapon.combo.length - 1,
+    /**
+     * 🌀 **콤보의 마지막 타인가** — 맞히면 기력을 일부 갚습니다
+     * (balance.ts `COMBO_FINISH_REFUND`). `heavy` 와 따로 두는 이유:
+     * `heavy` 는 상황 공격(달리기·구르기 공격)에도 붙는 **손맛** 표시이고,
+     * 이것은 **콤보를 끝까지 이었는가**라는 다른 사실입니다. 한 칸에 두
+     * 사건을 담으면 언젠가 한쪽이 다른 쪽을 조용히 바꿉니다.
+     */
+    comboFinisher: !situational && comboIndex === weapon.combo.length - 1,
+    finisherCost: c.staminaCost,
     poiseScale: weapon.poiseScale,
     // 🩸 기본 콤보야말로 이 축의 주된 통로입니다 — 여기 빠뜨리면 무기별
     //    차이가 통째로 사라집니다(실제로 쌍단검이 배율 1.0으로 재졌습니다).
@@ -2042,6 +2056,19 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      *    대상은 *맞지 않은 사람*이지 *멀리 선 사람*이 아닙니다.
      */
     if (!attackerIsPlayer && targetIsPlayer) Enemy.whiffing[a] = 0
+    /**
+     * 🌀 **마무리를 맞혔으면 기력을 일부 갚습니다** (니오의 기 펄스와 같은
+     * 자리 — 설계 근거는 balance.ts `COMBO_FINISH_REFUND`).
+     *
+     * `!landed` 로 감싼 것이 요점입니다: 여럿을 때려도 **한 번만** 갚습니다.
+     * 안 그러면 군중 한복판에서 마무리 한 번에 기력이 가득 찹니다.
+     */
+    if (attackerIsPlayer && spec.comboFinisher && !landed && hasComponent(Stamina, a)) {
+      Stamina.value[a] = Math.min(
+        Stamina.max[a],
+        Stamina.value[a] + (spec.finisherCost ?? 0) * COMBO_FINISH_REFUND,
+      )
+    }
     landed = true
   }
   return landed
