@@ -3635,6 +3635,17 @@ try {
       avgAggro: Number((aggroSum / Math.max(1, aggroSamples)).toFixed(2)),
       multiRatio: Number(((multiSamples / Math.max(1, aggroSamples)) * 100).toFixed(0)),
       retreatRatio: Number(((retreatSamples / Math.max(1, engageSamples)) * 100).toFixed(0)),
+      /**
+       * 📒 **빗나간 이유** — 게임이 판정을 내린 그 자리에서 적은 장부입니다
+       * (`systems/combat.ts` `swingRecords`). 여기서 각도를 다시 재지
+       * 않는 것이 요점입니다 — 재면 판정의 사본이 생깁니다.
+       *
+       * ⚠️ 장부는 상한 400줄이라 **마지막 400번**만 남습니다. 존 전체를
+       *    도는 이 판에서는 잘릴 수 있으니, 아래 표는 "전부"가 아니라
+       *    **"끝에서 400번"** 입니다. 세는 대상이 잘렸다는 사실은 숫자
+       *    옆에 그대로 적습니다 — 조용히 자르지 않습니다.
+       */
+      swings: G.swings?.() ?? [],
       enemySwings: G.runStats().enemySwings,
       enemyHits: G.runStats().enemyHits,
       counters: G.counterCount(),
@@ -3900,6 +3911,60 @@ try {
   console.log(`  후퇴       근접(8m) 중 거리를 벌리던 시간 ${log.retreatRatio}%`)
   console.log(
     `  적의 공격   ${log.enemySwings}회 휘두름 · ${log.enemyHits}회 적중 (적중률 ${Math.round((log.enemyHits / Math.max(1, log.enemySwings)) * 100)}%)`,
+    /**
+     * ── 📒 **빗나갔다면 왜인가** ────────────────────────────────────
+     *
+     * 적중률 33% 만 봐서는 고칠 곳을 못 찾습니다. 후보가 셋이고 답이
+     * 셋 다 다릅니다:
+     *
+     *   · 사거리 밖 → 적이 너무 멀리서 휘두른다 (접근·커밋 판단)
+     *   · 각도 밖   → 적이 못 따라 돈다 (선회 속도 · 예고 중 추적 30%)
+     *   · 무적      → 플레이어가 제대로 굴렀다 (**고칠 것이 없습니다**)
+     *
+     * 셋째가 크면 이건 고장이 아니라 **설계대로**입니다. 그걸 모르고
+     * 적을 세게 만들면 잘 피한 사람을 벌주게 됩니다.
+     */
+    (() => {
+      const rows = log.swings ?? []
+      if (rows.length === 0) return '  📒 휘두름 장부  비어 있습니다 — 아래 결론을 세우지 마십시오'
+      const cut = rows.length >= 400 ? ' ⚠️ 장부 상한(400)에 걸려 **끝에서 400번만** 셌습니다' : ''
+      const by = new Map()
+      for (const r of rows) {
+        const k = r.attackId || '(이름없음)'
+        const e = by.get(k) ?? { n: 0, hit: 0, far: 0, wide: 0, invuln: 0, ang: 0, arc: 0 }
+        e.n++
+        if (r.hit) e.hit++
+        else if (r.invuln) e.invuln++
+        else if (r.dist > r.reach) e.far++
+        else e.wide++
+        e.ang += r.angleDeg
+        e.arc += r.halfArcDeg
+        by.set(k, e)
+      }
+      const lines = [...by.entries()]
+        .sort((a, b) => b[1].n - a[1].n)
+        .slice(0, 8)
+        .map(
+          ([id, e]) =>
+            `               ${id.padEnd(13)}${String(e.n).padStart(3)}회 · 적중 ${String(e.hit).padStart(3)}(${Math.round(
+              (e.hit / e.n) * 100,
+            )}%) · 사거리 ${String(e.far).padStart(3)} · 각도 ${String(e.wide).padStart(3)} · 무적 ${String(
+              e.invuln,
+            ).padStart(3)} · 평균 ${(e.ang / e.n).toFixed(0)}°/허용 ${(e.arc / e.n).toFixed(0)}°`,
+        )
+      const tot = rows.length
+      const hit = rows.filter((r) => r.hit).length
+      const inv = rows.filter((r) => !r.hit && r.invuln).length
+      const far = rows.filter((r) => !r.hit && !r.invuln && r.dist > r.reach).length
+      const wide = tot - hit - inv - far
+      return (
+        `  📒 빗나간 이유 ${tot}회${cut}\n` +
+        `               합계 — 적중 ${hit}(${Math.round((hit / tot) * 100)}%) · 사거리 ${far}(${Math.round(
+          (far / tot) * 100,
+        )}%) · 각도 ${wide}(${Math.round((wide / tot) * 100)}%) · 무적 ${inv}(${Math.round((inv / tot) * 100)}%)\n` +
+        lines.join('\n')
+      )
+    })(),
   )
   console.log(
     `  빈 시간     교전 사이 평균 ${log.gapAvg}초 · 최장 ${log.gapMax}초 · 8초 이상 ${log.gapLong}회 / ${log.gapCount}구간`,

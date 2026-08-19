@@ -146,6 +146,8 @@ import {
   resolveAttacks,
   setPlayerInvulnerable,
   debugApplyBleed,
+  swingRecords,
+  flushSwingRecords,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -5951,6 +5953,15 @@ declare global {
       tuning: () => { backArcDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
+      swings: () => {
+        attackId: string
+        hit: boolean
+        dist: number
+        angleDeg: number
+        halfArcDeg: number
+        reach: number
+        invuln: boolean
+      }[]
       showProps: (on: boolean) => void
       props: () => {
         pillars: number
@@ -6765,6 +6776,14 @@ window.__game = {
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
   setPaused: (paused) => game.debugSetPaused(paused),
+  /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */
+  swings: () => {
+    // 아직 열려 있는 휘두름을 먼저 닫습니다 — 안 그러면 마지막 한 줄이 빕니다.
+    flushSwingRecords()
+    const out = swingRecords.map((r) => ({ ...r }))
+    swingRecords.length = 0
+    return out
+  },
   /** 🏛 폐허 잔해 장부 — 몇 개가 어느 구역에 섰는가. */
   props: () => game.debugProps(),
   /**

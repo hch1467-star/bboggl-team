@@ -207,6 +207,96 @@ export interface AttackSpec {
 /** 현재 프레임에 발생한 타격들. 게임 루프가 읽고 비웁니다. */
 export const hitEvents: HitEvent[] = []
 
+/**
+ * 📒 **빗나간 이유 장부** — 적이 한 번 휘두를 때마다 한 줄.
+ *
+ * ── 왜 필요한가 (보스가 22초 동안 한 대만 때렸습니다) ─────────────
+ * 자동 플레이의 보스전이 이렇게 나왔습니다:
+ *
+ *     보스전 22.4초 · **받은 피해 38** (그 사이 최저 체력 78) · 처치
+ *     boss_cleave 3회 휘두름 · **0회 적중**
+ *
+ * 존의 마지막 시험이 플레이어 체력의 22%만 깎았습니다. 그런데 **왜**
+ * 빗나갔는지는 어디에도 안 남아 있었습니다. 후보가 넷이고 답이 넷 다
+ * 다릅니다:
+ *
+ *   · 사거리 밖이었다   → 보스가 너무 멀리서 휘두른다(접근 로직)
+ *   · 각도 밖이었다     → 보스가 못 따라 돈다(선회 속도 · 예고 중 추적)
+ *   · 무적이었다        → 플레이어가 제대로 굴렀다(고칠 것 없음)
+ *   · 맞았다            → 빗나간 게 아니다
+ *
+ * 짐작으로 하나를 고르면 나머지 셋을 망가뜨립니다. 그래서 **세어서**
+ * 고릅니다 — 이 저장소가 계속 치른 값입니다.
+ *
+ * ⚠️ 판정은 **`shapeDist` 가 내립니다.** 여기서 각도를 다시 계산하지
+ *    않습니다 — 그러면 판정의 사본이 생겨서, 한쪽만 고치는 날 장부가
+ *    게임이 아닌 것을 재게 됩니다. 아래 `angleDeg`·`dist` 는 **사람이
+ *    읽을 설명**이지 판단이 아닙니다.
+ */
+export interface SwingRecord {
+  attackId: string
+  hit: boolean
+  /** 판정 순간의 거리(m). */
+  dist: number
+  /** 정면에서 벗어난 각도(도). */
+  angleDeg: number
+  /** 그 거리에서 실제로 허용된 반각(도) — 굵기 보정까지 포함합니다. */
+  halfArcDeg: number
+  /** 판정 사거리(m) — 대상 반지름까지 더한 값입니다. */
+  reach: number
+  /** 대상이 무적(구르기 등)이었나. */
+  invuln: boolean
+}
+
+/**
+ * 게임 루프가 아니라 **프로브가** 비웁니다(`__game.swings()`).
+ * 매 프레임 비우면 실험대가 한 판을 다 돌고 나서 물어볼 수가 없습니다.
+ * 그래서 상한을 두고, 넘치면 **오래된 것부터** 버립니다.
+ */
+export const swingRecords: SwingRecord[] = []
+const SWING_LOG_MAX = 400
+
+/**
+ * ── ❌ **첫 판은 한 번의 휘두름을 여러 줄로 셌습니다** ────────────────
+ *
+ * 처음엔 `applyHit` 이 불릴 때마다 한 줄씩 적었습니다. 그랬더니 자동
+ * 플레이에서 **휘두름 62회인데 장부는 210줄**이 나왔고, 그중 165줄이
+ * `grunt_sweep` 하나였습니다. 결론은 *"71%가 사거리 밖"* — 적이 허공을
+ * 친다는 뜻으로 읽힙니다.
+ *
+ * 거짓말이었습니다. 🟡 는 **판정이 0.55초 머무는** 공격이라(`lingers`)
+ * active 내내 매 프레임 다시 검사합니다. 걸어서 빠져나간 플레이어는
+ * 나머지 프레임에서 전부 "사거리 밖"으로 찍힙니다 — 그건 고장이 아니라
+ * **설계된 정답**입니다(DESIGN.md 4색 표: 🟡 은 걸어서 이탈).
+ *
+ * 즉 장부가 *"잘 피했다"* 를 *"적이 허공을 친다"* 로 뒤집어 적고 있었습니다.
+ * 그 숫자를 믿고 적의 사거리를 늘렸다면 정답을 없앨 뻔했습니다.
+ *
+ * 그래서 **한 번의 휘두름에 한 줄**로 바꿉니다. 판정이 살아 있는 동안은
+ * 한 줄을 계속 고쳐 쓰고, 다음 휘두름이 시작될 때(또는 프로브가 읽을 때)
+ * 닫습니다. 빗나간 이유는 **가장 가까웠던 순간**으로 정합니다 — 그래야
+ * "사거리 밖"이 *"내내 한 번도 안 닿았다"* 를 뜻합니다.
+ */
+type OpenSwing = { rec: SwingRecord; minDist: number; frame: number }
+const openSwings = new Map<number, OpenSwing>()
+
+/** 열려 있던 줄을 장부에 옮깁니다. */
+function closeSwing(a: number): void {
+  const o = openSwings.get(a)
+  if (!o) return
+  openSwings.delete(a)
+  swingRecords.push(o.rec)
+  if (swingRecords.length > SWING_LOG_MAX) swingRecords.shift()
+}
+
+/**
+ * 프로브가 장부를 읽기 전에 부릅니다 — 마지막 휘두름이 아직 열려 있으면
+ * 그 한 줄이 통째로 빠집니다.
+ */
+export function flushSwingRecords(): void {
+  for (const a of [...openSwings.keys()]) closeSwing(a)
+}
+
 /** 처형이 들어간 순간 — 연출과 계측이 읽습니다. */
 export const finisherEvents: { entity: number; x: number; y: number; z: number }[] = []
 
@@ -1296,6 +1386,63 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       if (dot < Math.cos(Math.min(Math.PI, halfArc + slack))) return -1
     }
     return dist
+  }
+
+  /**
+   * ── 📒 **빗나간 이유를 여기서 적습니다** ────────────────────────────
+   *
+   * 적의 근접 부채꼴 한 번마다 한 줄. **사건이 일어난 자리에서** 적습니다 —
+   * 바깥에서 각도를 다시 재면 판정의 사본이 생기고, 한쪽만 고치는 날
+   * 장부가 게임이 아닌 것을 재게 됩니다(위 `swingRecords` 주석).
+   *
+   * 판정 자체는 아래 루프가 그대로 내립니다. 여기서 하는 일은 **같은
+   * `shapeDist`** 를 플레이어에게 한 번 더 물어 보고, 사람이 읽을 숫자를
+   * 곁들여 적는 것뿐입니다.
+   */
+  if (!attackerIsPlayer && spec.shape === 'cone' && !spec.projectile) {
+    const pids = players.run()
+    if (players.count > 0) {
+      const t = pids[0]
+      // 이름은 게임에게 묻습니다 — 아래 hitEvents 와 **같은 줄**입니다.
+      const id = attackAt(Enemy.kind[a], Enemy.attackIndex[a]).id
+      const dx = Transform.x[t] - originX
+      const dz = Transform.z[t] - originZ
+      const dist = Math.hypot(dx, dz)
+      const dot = dist > 0.0001 ? (dx * fx + dz * fz) / dist : 1
+      const slack = Math.atan2(Body.radius[t], Math.max(dist, 0.0001))
+      // 이 한 줄만이 "맞았는가"의 답입니다 — 나머지는 설명입니다.
+      const inShape = shapeDist(t) >= 0
+
+      /**
+       * 같은 휘두름인가 — **연속한 프레임의 같은 공격**이면 같은 것입니다.
+       * 한 프레임이라도 건너뛰면 그건 다음 휘두름입니다(머무는 판정은
+       * active 동안 매 프레임 불립니다).
+       */
+      const open = openSwings.get(a)
+      if (open && (open.rec.attackId !== id || time.frame - open.frame > 1)) closeSwing(a)
+      let cur = openSwings.get(a)
+      if (!cur) {
+        cur = {
+          rec: { attackId: id, hit: false, dist, angleDeg: 0, halfArcDeg: 0, reach: 0, invuln: false },
+          minDist: Infinity,
+          frame: time.frame,
+        }
+        openSwings.set(a, cur)
+      }
+      cur.frame = time.frame
+      if (inShape && Health.invulnT[t] <= 0) cur.rec.hit = true
+      // 무적은 **판정 도형 안에 있었을 때만** 셉니다 — 밖에서 구른 것은
+      // "무적으로 넘겼다"가 아니라 그냥 안 맞은 것입니다.
+      if (inShape && Health.invulnT[t] > 0) cur.rec.invuln = true
+      // 가장 가까웠던 순간을 남깁니다 — "사거리 밖"이 *내내 안 닿았다*를 뜻하게.
+      if (dist < cur.minDist) {
+        cur.minDist = dist
+        cur.rec.dist = dist
+        cur.rec.angleDeg = (Math.acos(Math.min(1, Math.max(-1, dot))) * 180) / Math.PI
+        cur.rec.halfArcDeg = (Math.min(Math.PI, halfArc + slack) * 180) / Math.PI
+        cur.rec.reach = spec.range + Body.radius[t]
+      }
+    }
   }
 
   /**

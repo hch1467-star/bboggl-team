@@ -419,7 +419,16 @@ try {
        * **나온 것**을 세야 합니다. 가중치는 의도이고, 이건 결과입니다.
        */
       const swings = G.bossSwingLog?.() ?? {}
+      /**
+       * 📒 **빗나간 이유** — 게임이 판정을 내린 그 자리에서 적은 장부입니다
+       * (`systems/combat.ts` `swingRecords`). 여기서 각도를 다시 재지
+       * 않는 것이 요점입니다 — 재면 판정의 사본이 생깁니다.
+       *
+       * 읽으면서 비워지므로 **판마다 깨끗합니다.**
+       */
+      const misses = G.swings?.() ?? []
       return {
+        misses,
         swingLog: Object.fromEntries(
           Object.entries(swings).map(([id, v]) => [id, v.byPhase ?? []]),
         ),
@@ -460,6 +469,60 @@ try {
     if (!byLevel.has(level)) byLevel.set(level, [])
     byLevel.get(level).push(r)
   }
+  }
+
+  /**
+   * ── 📒 **보스가 왜 빗나가는가** ──────────────────────────────────
+   *
+   * 자동 플레이에서 보스전이 *"22.4초 · 받은 피해 38"* 로 나왔습니다.
+   * 존의 마지막 시험이 플레이어 체력의 22%만 깎은 것입니다. 그런데
+   * **왜** 빗나갔는지는 어디에도 안 남아 있었고, 후보가 셋인데 답이
+   * 셋 다 다릅니다 — 사거리(접근) · 각도(선회) · 무적(잘 굴렀다).
+   *
+   * 짐작으로 하나를 고르면 나머지 둘을 망가뜨립니다. 그래서 셉니다.
+   */
+  const allSwings = runs.flatMap((r) => r.misses ?? [])
+  if (allSwings.length > 0) {
+    const byId = new Map()
+    for (const s of allSwings) {
+      const k = s.attackId || '(이름없음)'
+      const e = byId.get(k) ?? { n: 0, hit: 0, far: 0, wide: 0, invuln: 0, angSum: 0, arcSum: 0 }
+      e.n++
+      if (s.hit) e.hit++
+      else if (s.invuln) e.invuln++
+      // 사거리와 각도를 **둘 다** 셉니다 — 하나만 세면 겹친 경우를 놓칩니다.
+      else if (s.dist > s.reach) e.far++
+      else e.wide++
+      e.angSum += s.angleDeg
+      e.arcSum += s.halfArcDeg
+      byId.set(k, e)
+    }
+    console.log('\n  ── 📒 보스가 휘두른 것 — **빗나갔다면 왜인가** ──────')
+    console.log('     (사거리 = 너무 멀어서 · 각도 = 못 따라 돌아서 · 무적 = 잘 굴러서)')
+    for (const [id, e] of [...byId.entries()].sort((a, b) => b[1].n - a[1].n)) {
+      console.log(
+        `     ${id.padEnd(12)} ${String(e.n).padStart(3)}회 · 적중 ${String(e.hit).padStart(3)}회(${Math.round(
+          (e.hit / e.n) * 100,
+        )}%)` +
+          ` · 사거리 ${e.far} · **각도 ${e.wide}** · 무적 ${e.invuln}` +
+          ` · 평균 각도차 ${(e.angSum / e.n).toFixed(0)}° / 허용 ${(e.arcSum / e.n).toFixed(0)}°`,
+      )
+    }
+    const tot = allSwings.length
+    const wide = allSwings.filter((s) => !s.hit && !s.invuln && s.dist <= s.reach).length
+    const invuln = allSwings.filter((s) => !s.hit && s.invuln).length
+    const hit = allSwings.filter((s) => s.hit).length
+    console.log(
+      `     합계 ${tot}회 — 적중 ${hit}(${Math.round((hit / tot) * 100)}%) · ` +
+        `각도로 빗나감 ${wide}(${Math.round((wide / tot) * 100)}%) · 무적 ${invuln}(${Math.round((invuln / tot) * 100)}%)`,
+    )
+    /**
+     * 🚧 **장부가 비면 위 숫자는 아무것도 아닙니다.** 보스가 한 번도
+     *    안 휘두른 판을 "각도 문제 0%"로 읽으면 정확히 거꾸로 갑니다.
+     */
+    check(tot >= runs.length, '🚧 판마다 보스가 최소 한 번은 휘둘렀다 (빈 장부로 결론 내지 않게)', `${tot}회 / ${runs.length}판`)
+  } else {
+    check(false, '🚧 보스의 휘두름이 장부에 남았다 (빈 장부로 결론 내지 않게)', '한 줄도 없습니다')
   }
 
   console.log('\n  ── 강화 단계별 (한 변수만 다름) ──────')
