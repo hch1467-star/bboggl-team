@@ -69,6 +69,21 @@ try {
     })
     await sleep(500)
     await page.evaluate(() => {
+      /**
+       * ⚠️ **무적을 반드시 끕니다 — 앞 절이 켜 두고 갑니다.**
+       *
+       * 아래 오사 실험은 *"플레이어가 죽어서 관측이 끊기지 않게"* 무적을
+       * 켭니다. 그런데 끄지를 않아서, 그 뒤의 모든 판이 **안 맞는 플레이어**
+       * 로 돌았습니다. 그래서 「대응이 결과를 바꾸는가」 표가 몇 라운드 동안
+       * **가만히 100 · 걸어서 100** 이었고, 검사가 없어서 초록이었습니다.
+       *
+       * 게임은 멀쩡했습니다 — 같은 배치를 따로 돌려 보니 10초에 100 → 47
+       * 이었습니다. 실험대가 자기가 켠 것을 안 껐을 뿐입니다.
+       * 그래서 끄는 것을 **실험이 끝나는 자리가 아니라 시작하는 자리**에
+       * 둡니다. 앞에서 무엇을 하고 왔든 여기서 상태가 확정됩니다.
+       */
+      window.__game.setPlayerInvulnerable(false)
+      window.__game.freezeEnemies(false)
       window.__game.clearEnemies()
       const n = 5
       for (let i = 0; i < n; i++) {
@@ -96,12 +111,32 @@ try {
         window.__game.press('KeyS')
       })
     }
+    /**
+     * 🚧 **가장 가까운 적까지의 거리**도 같이 따라갑니다.
+     *
+     * 이 표가 「가만히 100/100 · 걸어서 100/100」 으로 찍혀 있었는데,
+     * 그건 *"대응이 결과를 안 바꾼다"* 가 아니라 **아무 일도 안 일어났다**
+     * 일 수 있습니다. 둘은 화면에서 똑같이 보이고, 결론은 정반대입니다.
+     * 적이 사거리 안까지 들어왔는지를 봐야 그 둘이 갈립니다.
+     */
+    let nearest = Infinity
+    /**
+     * ⚠️ **장부를 먼저 비웁니다.** 휘두름 장부는 게임 전체에서 하나이고
+     * 물어볼 때 비워집니다. 안 비우고 읽었더니 이 판의 숫자에 앞 절
+     * (7마리 틈 재기 · 오사 실험)의 휘두름이 통째로 섞여 들어와
+     * **「24회 휘둘러 23회 적중」인데 체력 100** 이라는 모순이 찍혔습니다.
+     * 모순이 눈에 띄지 않았으면 그대로 결론으로 썼을 값입니다.
+     */
+    await page.evaluate(() => window.__game.swings())
+    let lowHp = 100
     const t0 = Date.now()
     while (Date.now() - t0 < seconds * 1000) {
       const st = await page.evaluate(() => window.__game.state())
       hist.set(st.telegraphing, (hist.get(st.telegraphing) ?? 0) + 1)
       maxTele = Math.max(maxTele, st.telegraphing)
       maxWide = Math.max(maxWide, st.wideTelegraphs)
+      if (st.nearestEnemy) nearest = Math.min(nearest, st.nearestEnemy.dist)
+      lowHp = Math.min(lowHp, st.player.hp)
       if (st.player.hp <= 0) break
       await sleep(70)
     }
@@ -112,7 +147,20 @@ try {
       })
     }
     const st = await page.evaluate(() => window.__game.state())
-    return { hist, maxTele, maxWide, hp: st.player.hp }
+    /**
+     * 📒 **왜 안 맞았는지**를 게임의 장부에서 그대로 가져옵니다(combat.ts
+     * `swingRecords`). 체력이 안 깎였을 때 *"안 휘둘렀다"* 와 *"휘둘렀는데
+     * 빗나갔다"* 는 완전히 다른 이야기이고, 처방도 다릅니다.
+     */
+    const rows = await page.evaluate(() => window.__game.swings())
+    const why = { swings: rows.length, hit: 0, range: 0, angle: 0, invuln: 0 }
+    for (const r of rows) {
+      if (r.hit) why.hit++
+      else if (r.invuln) why.invuln++
+      else if (r.dist > r.reach) why.range++
+      else why.angle++
+    }
+    return { hist, maxTele, maxWide, hp: st.player.hp, lowHp, nearest, why }
   }
 
   /**
@@ -281,6 +329,9 @@ try {
       }
       await nap()
     }
+    // 🧹 켠 것은 켠 자리에서 끕니다. (아래 `setup` 도 다시 끄지만, 짝을
+    //    안 맞춘 채로 두면 다음에 이 절만 떼어 써도 같은 함정이 재생됩니다.)
+    G.setPlayerInvulnerable(false)
     return { hits: G.runStats().crossfireHits - before, watch }
   })
 
@@ -327,8 +378,38 @@ try {
   console.log('')
   const moving = await trial(true)
   console.log('대응이 결과를 바꾸는가 (20초 뒤 남은 체력)')
-  console.log(`  가만히 서 있음 : ${still.hp} / 100`)
-  console.log(`  계속 걸어서 이탈 : ${moving.hp} / 100`)
+  const tell = (r) =>
+    `${r.hp} / 100 (최저 ${r.lowHp}) · 가장 가까웠던 적 ${r.nearest.toFixed(1)}m · 적이 휘두른 ${r.why.swings}회` +
+    ` (적중 ${r.why.hit} · 사거리밖 ${r.why.range} · 각도밖 ${r.why.angle} · 무적 ${r.why.invuln})`
+  console.log(`  가만히 서 있음 : ${tell(still)}`)
+  console.log(`  계속 걸어서 이탈 : ${tell(moving)}`)
+  /**
+   * ── ⚠️ **이 표는 몇 라운드 동안 찍히기만 하고 검사가 없었습니다** ────
+   *
+   * 위 설계 노트가 이미 답을 적어 두었습니다 — *"그 차이가 없으면 그
+   * 전투는 실력이 개입할 여지가 없다는 뜻입니다."* 그런데 그 문장에
+   * 대응하는 `check()` 가 없어서, **가만히 100 · 걸어서 100** 이 찍혀도
+   * 프로브는 초록이었습니다.
+   *
+   * 그리고 그 두 줄은 **두 가지 다른 사실**을 똑같이 표시합니다:
+   *   ① 대응이 결과를 안 바꾼다 (게임의 문제)
+   *   ② 애초에 아무 일도 안 일어났다 (실험대의 문제)
+   * 그래서 게이트를 먼저 세웁니다 — 맞기는 맞았는가.
+   */
+  const reach = (await page.evaluate(() => window.__game.enemyRoster()))
+    .filter((r) => r.id === 'grunt')
+    .flatMap((r) => r.attacks.map((a) => a.reach))
+  const maxReach = reach.length > 0 ? Math.max(...reach) : 0
+  check(
+    maxReach > 0 && still.nearest <= maxReach && still.hp < 100,
+    '🚧 **가만히 서 있으면 실제로 맞는다** (비교의 게이트 — 아무 일도 안 일어난 판을 통과시키지 않게)',
+    `가장 가까웠던 적 ${still.nearest.toFixed(1)}m (사거리 ${maxReach}m) · 체력 ${still.hp}/100`,
+  )
+  check(
+    still.hp < 100 && moving.hp > still.hp,
+    '🕳 **걸어서 이탈하면 덜 맞는다** (포위가 실력이 개입할 수 있는 상황이게)',
+    `가만히 ${still.hp} vs 걸어서 ${moving.hp}`,
+  )
 } catch (err) {
   /**
    * 💥 **도중에 죽으면 반드시 소리를 냅니다.**

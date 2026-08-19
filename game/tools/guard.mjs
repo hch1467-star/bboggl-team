@@ -412,6 +412,52 @@ check(
     '🕳 프로브의 `.every(` 가 **빈 표본으로 통과하지 않는다** (증거 없는 초록 금지)',
     holes.length ? `${holes.length}곳 — ${holes.slice(0, 4).join(' | ')}` : `${probes.length}개 파일 확인`,
   )
+
+  /**
+   * ── 🧪 **켠 실험 스위치는 끄고 나간다** ──────────────────────────────
+   *
+   * ── 왜 생겼는가 (한 프로브가 몇 라운드 동안 거짓말을 했습니다) ──────
+   * `npm run crowd` 의 오사 실험이 *"플레이어가 죽어서 관측이 끊기지 않게"*
+   * `setPlayerInvulnerable(true)` 를 켰습니다. 그리고 **안 껐습니다.**
+   * 그 뒤의 모든 판이 **안 맞는 플레이어**로 돌았고, 「대응이 결과를
+   * 바꾸는가」 표는 이렇게 찍혔습니다:
+   *
+   *     가만히 서 있음 : 100 / 100
+   *     계속 걸어서 이탈 : 100 / 100
+   *
+   * 두 줄을 보고 *"다대일 전투가 위협이 아니다"* 라고 읽을 뻔했습니다.
+   * 같은 배치를 따로 돌려 보니 **10초에 100 → 47** 이었습니다 —
+   * 게임은 멀쩡했고 스위치 하나가 켜진 채였을 뿐입니다.
+   *
+   * 이 종류는 **한 번 새면 그 뒤 전부를 조용히 오염시킵니다.** 그래서
+   * 개별 프로브의 주의력이 아니라 규칙으로 막습니다: 켠 파일은 끄는 줄도
+   * 가지고 있어야 합니다. (끄는 줄이 없는데 켠 줄만 있으면 빨강입니다.)
+   *
+   * ── ⚠️ **처음엔 `freezeEnemies` 까지 넣었다가 뺐습니다** ──────────────
+   * 넣고 돌리니 네 곳이 빨개졌는데(aim · intent-preview · landmark ·
+   * place-treasures) 전부 **파일 맨 앞에서 한 번 얼리고 끝까지 그대로**
+   * 였습니다. 그건 새는 것이 아니라 그 프로브의 **모드**입니다.
+   * 규칙이 옳은 것을 빨갛게 만들면 사람이 규칙을 끄게 됩니다.
+   *
+   * 남긴 둘은 성격이 다릅니다 — 이름부터 *"이 한 번만"* 이라는 뜻이고,
+   * 켜진 채로 다음 측정에 넘어가면 그 측정이 **거짓이 되는데도 초록**
+   * 입니다(무적이면 체력이, 붙들린 기력이면 소모가 안 움직입니다).
+   */
+  const SWITCHES = ['setPlayerInvulnerable', 'pinStamina']
+  const leaks = []
+  for (const f of probes) {
+    const src = readFileSync(path.join(HERE, f), 'utf8')
+    for (const sw of SWITCHES) {
+      const on = new RegExp(`${sw}\\(\\s*(true|[0-9])`).test(src)
+      const off = new RegExp(`${sw}\\(\\s*(false|null)`).test(src)
+      if (on && !off) leaks.push(`${f} — ${sw} 를 켜기만 합니다`)
+    }
+  }
+  check(
+    leaks.length === 0,
+    '🧪 프로브가 **켠 실험 스위치를 끄고 나간다** (다음 판을 조용히 오염시키지 않게)',
+    leaks.length ? `${leaks.length}곳 — ${leaks.slice(0, 4).join(' | ')}` : `${probes.length}개 파일 · 스위치 ${SWITCHES.length}종 확인`,
+  )
 }
 
 /**
