@@ -3049,7 +3049,13 @@ class Game {
    * 그런데 어떤 색이 나올지는 거리와 난수가 정하므로, 그냥 기다려서는
    * 원하는 색을 잡을 수 없습니다. 그래서 직접 지정할 수단을 둡니다.
    */
-  debugForceAttack(entity: number, index: number): string {
+  /**
+   * @param windupScale 남길 예고의 비율. 기본 0.25 는 **사진용**입니다 —
+   *   예고 이펙트가 가장 진한 후반부에 세워 두려는 것이라, 이 값으로는
+   *   *"예고 동안 적이 얼마나 따라 도는가"* 를 잴 수 없습니다(시간의 4분의
+   *   1만 흐르니까요). 추적을 재는 실험대는 **1** 을 넣어 전체 예고를 씁니다.
+   */
+  debugForceAttack(entity: number, index: number, windupScale = 0.25): string {
     const kind = Enemy.kind[entity]
     const list = attacksFor(kind)
     const i = Math.min(Math.max(index, 0), list.length - 1)
@@ -3063,7 +3069,7 @@ class Game {
     // 예고 투명도는 **남은 시간 비율**로 계산됩니다(가득 찰수록 진해짐).
     // 그래서 타이머를 크게 넣으면 오히려 투명해져 아무것도 안 보입니다.
     // 잘 보이는 후반부(75% 지점)에 세워 둡니다.
-    Actor.timer[entity] = list[i].windup * 0.25
+    Actor.timer[entity] = list[i].windup * windupScale
     /**
      * ⏳ **세우는 쪽이 예고 길이도 적습니다.**
      *
@@ -5992,7 +5998,7 @@ declare global {
       freezeEnemies: (frozen: boolean) => void
       spawnVfx: (kind: 'spark' | 'damage' | 'swing') => void
       /** 적을 특정 공격 패턴의 예고 상태로 세워 둡니다(4색 확인용). */
-      forceAttack: (entity: number, index: number) => string
+      forceAttack: (entity: number, index: number, windupScale?: number) => string
       spawnBoss: (x: number, z: number) => number
       /** 플레이어에게 속박을 겁니다(파랑 상태 확인용). */
       applySnare: (seconds: number) => void
@@ -6800,7 +6806,7 @@ window.__game = {
   spawnTestEnemy: (x, z, rotY, asleep) => game.debugSpawnTestEnemy(x, z, rotY, asleep),
   freezeEnemies: (frozen) => setEnemyAiEnabled(!frozen),
   spawnVfx: (kind) => game.debugSpawnVfx(kind),
-  forceAttack: (entity, index) => game.debugForceAttack(entity, index),
+  forceAttack: (entity, index, windupScale) => game.debugForceAttack(entity, index, windupScale),
   spawnBoss: (x, z) => game.debugSpawnBoss(x, z),
   applySnare: (seconds) => game.debugApplySnare(seconds),
   grantTripod: (n) => {

@@ -71,6 +71,17 @@ const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 
 const STEP_DT = 1 / 60
 /** 재는 각속도들(°/초). 사람의 옆걸음은 이 중 어디쯤인지 아래에서 셉니다. */
+/**
+ * ⚠️ **180°를 넘게 도는 속도는 넣으면 안 됩니다.**
+ *
+ * 처음엔 구르기 몫으로 300·470°/s 를 넣었는데, 예고 0.78초 동안 234°·367°를
+ * 돌아 **한 바퀴를 감아** 버립니다. 그러면 각도차가 다시 작아져서 300°/s 가
+ * "맞음"으로 찍힙니다 — 표가 비단조가 되고, 빠를수록 안전하다는 거짓말이
+ * 됩니다. 지속 회전으로는 구르기를 흉내 낼 수 없습니다.
+ *
+ * 구르기는 **한 번 튀는 것**이지 계속 도는 것이 아니므로, 아래에 따로
+ * 시나리오를 둡니다(`rollMid`).
+ */
 const SPEEDS = [0, 20, 40, 60, 80, 100, 120, 150]
 
 let pass = 0
@@ -102,12 +113,29 @@ try {
    * 남아 있으면 "이번 각속도" 가 아니라 "지난 판의 나머지"를 재게 됩니다.
    */
   await page.evaluate(() => {
-    window.__track = ({ kind, atkIndex, degPerSec, radius, dt }) => {
+    window.__track = ({ kind, atkIndex, degPerSec, radius, dt, rollMid }) => {
       const G = window.__game
       G.setPaused(true)
       G.clearEnemies()
-      G.swings() // 앞 판의 장부를 비웁니다
       const e = kind === 'boss' ? G.spawnBoss(0, 0) : G.spawnTestEnemy(0, 0, 0, false)
+      /**
+       * 🩹 **플레이어를 살려 둡니다** — 그리고 이게 이 실험대의 첫 결론을
+       *    통째로 뒤집은 구멍이었습니다.
+       *
+       * 적을 코앞에 세워 두고 예열을 돌리면 플레이어가 **죽습니다.** 죽으면
+       * 적 AI 가 멈추고, 강제로 건 예고의 타이머가 **0.20초에 얼어붙은 채**
+       * 영영 판정까지 안 갑니다. 그 상태를 표는 "판정 안 남"으로 적었고,
+       * 저는 그걸 *"보스가 80°/s 부터 못 따라잡는다"* 로 읽었습니다.
+       *
+       * 실제로 자취를 찍어 보니 24걸음 내내 `1/0/0.20` — **타이머가 한 번도
+       * 안 줄었습니다.** 추적과는 아무 상관이 없었습니다.
+       *
+       * (`npm run pace` 가 똑같은 함정을 이미 적어 뒀습니다 — 받은 피해가
+       *  여덟 판 전부 정확히 100.0 이던 그 이야기입니다. 같은 실수를 다른
+       *  실험대에서 반복했습니다.)
+       */
+      const keepAlive = () => G.setHp(G.playerEntity(), 100)
+      keepAlive()
       // 플레이어를 적의 **정면**에 세웁니다(각도 0에서 출발).
       let ang = 0
       const px = () => Math.sin(ang) * radius
@@ -126,23 +154,55 @@ try {
       let waited = 0
       for (; waited < 600; waited++) {
         G.teleportPlayer(px(), pz())
+        keepAlive()
         G.step(1, dt)
         const st = G.enemyInfo(e)
         if (waited > 60 && st && st.state === 0) break
       }
-      G.forceAttack(e, atkIndex)
+      /**
+       * ⚠️ **장부는 예열이 끝난 뒤에 비웁니다.** 앞에서 비우면 예열 중에
+       *    적이 스스로 낸 휘두름이 장부에 남아, `rows[0]` 이 강제로 건
+       *    공격이 아니라 **예열의 잔재**가 됩니다.
+       */
+      G.swings()
+      /**
+       * ⚠️ **예고를 통째로 씁니다**(세 번째 인자 1).
+       *
+       * 기본값 0.25 는 스크린샷용입니다 — 예고가 가장 진한 후반부에 세워
+       * 두려는 것이라, 그대로 쓰면 *"예고 동안 얼마나 따라 도는가"* 를
+       * **시간의 4분의 1만** 재게 됩니다. 실제로 그 값으로는 보스가
+       * 150°/s 까지 다 따라잡는 것으로 나왔습니다.
+       */
+      const forced = G.forceAttack(e, atkIndex, 1)
       // 예고 + 판정이 끝날 만큼 굴립니다. 그동안 플레이어는 원을 그립니다.
       const w = (degPerSec * Math.PI) / 180
+      /**
+       * 🔬 **판정이 안 났을 때 옆에 적을 것** — 처음 몇 걸음의 상태입니다.
+       * "판정이 안 났다"만 있으면 원인이 후보 넷인데, 이 자취를 보면
+       * 예고 타이머가 도는지 · 상태가 바뀌는지가 바로 보입니다.
+       */
+      const trace = []
       for (let i = 0; i < 180; i++) {
         ang += w * dt
+        /**
+         * 🤸 **구르기 한 번** — 예고의 절반 지점에서 접선 방향으로 한 번
+         * 튑니다. 실제 구르기가 하는 일이 그것입니다(0.24초에 4m). 계속
+         * 도는 것으로 흉내 내면 한 바퀴를 감아 표가 거짓말을 합니다.
+         */
+        if (rollMid && i === rollMid.at) ang += rollMid.dist / radius
         G.teleportPlayer(px(), pz())
+        keepAlive()
         G.step(1, dt)
+        if (i < 24) {
+          const st = G.enemyInfo(e)
+          trace.push(st ? `${st.state}/${st.phase}/${st.timer.toFixed(2)}` : 'x')
+        }
       }
       const rows = G.swings()
       // 판정이 안 났을 때 **적이 무엇을 하고 있었는지**를 같이 봅니다 —
       // "빗나갔다"와 "휘두르다 말았다"는 고칠 곳이 정반대입니다.
       const info = G.enemyInfo(e)
-      return { rows, waited, turned: Math.round((ang * 180) / Math.PI), state: info?.state, phase: info?.phase, winding: info?.winding, alive: !!info }
+      return { rows, waited, forced, trace, turned: Math.round((ang * 180) / Math.PI), state: info?.state, phase: info?.phase, winding: info?.winding, alive: !!info }
     }
   })
 
@@ -185,6 +245,8 @@ try {
         deg,
         id: rec?.attackId ?? '',
         swung: !!rec,
+        forced: r.forced,
+        trace: r.trace,
         state: r.state,
         phase: r.phase,
         alive: r.alive,
@@ -198,7 +260,9 @@ try {
       const what = !r.swung ? '판정 안 남' : r.hit ? '맞음      ' : '각도로 빗나감'
       console.log(
         `     ${String(r.deg).padStart(3)}°/s → ${what}` +
-          (r.swung ? ` (각도차 ${String(r.ang).padStart(3)}° / 허용 ${r.arc}°)` : ` [적 상태 ${r.state} · 단계 ${r.phase} · 살아있음 ${r.alive}]`),
+          (r.swung
+            ? ` (각도차 ${String(r.ang).padStart(3)}° / 허용 ${r.arc}°)`
+            : `\n          🔬 건 공격 ${r.forced} · 상태/단계/남은시간 → ${(r.trace ?? []).slice(0, 14).join(' ')}`),
       )
     }
     const lastHit = [...rows].reverse().find((r) => r.hit)
@@ -232,12 +296,28 @@ try {
     )
     /**
      * 🗡 **그렇다고 전부 따라오면 안 됩니다** — 백어택(기둥 3)이 죽습니다.
-     *    가장 빠르게 도는 손은 반드시 놓쳐야 합니다.
+     *
+     * 시험은 **구르기 한 번**입니다. 옆걸음과 같은 속도로 돌다가 예고
+     * 중간에 접선으로 4m 튑니다 — 그게 실제 구르기가 하는 일입니다.
+     * (지속 회전으로 흉내 내면 한 바퀴를 감아 표가 거짓말을 합니다.)
      */
+    const rolled = await page.evaluate(
+      async ([k, d, rad, dt]) =>
+        window.__track({
+          kind: k,
+          atkIndex: 0,
+          degPerSec: d,
+          radius: rad,
+          dt,
+          rollMid: { at: 24, dist: 4 },
+        }),
+      [kind, Math.min(walkDeg, 150), RADIUS, STEP_DT],
+    )
+    const rrec = (rolled.rows ?? [])[0]
     check(
-      !rows[rows.length - 1].hit,
-      `🗡 [${kind}] **작정하고 돌면 놓친다** (백어택이 보상으로 남아야 합니다)`,
-      `${rows[rows.length - 1].deg}°/s 에서 ${rows[rows.length - 1].hit ? '맞음 — 등 뒤를 못 잡습니다' : '빗나감'}`,
+      !!rrec && rrec.hit !== true,
+      `🗡 [${kind}] **구르기 한 번이면 놓친다** (백어택이 보상으로 남아야 합니다)`,
+      rrec ? `각도차 ${Math.round(rrec.angleDeg)}° / 허용 ${Math.round(rrec.halfArcDeg)}° — ${rrec.hit ? '맞음' : '빗나감'}` : '판정이 안 났습니다',
     )
   }
 

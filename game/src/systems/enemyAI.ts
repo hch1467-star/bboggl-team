@@ -44,6 +44,7 @@ import {
   POISE,
   PUNISH_HEAL,
   hearDistance,
+  WINDUP_TURN_BUDGET_DEG,
 } from '../config/balance'
 import { sfx, SfxIntent } from '../core/audio'
 import { defineQuery, isAlive } from '../core/ecs'
@@ -1342,7 +1343,30 @@ export function enemyAiSystem(
       const atk = attackAt(kind, Enemy.attackIndex[e])
 
       if (phase === AttackPhase.Windup) {
-        turnToward(e, toPlayer, cfg.turnSpeedDeg * 0.3, dt)
+        /**
+         * 🎯 **예고당 각도**로 돕니다 — 규칙과 근거는 balance.ts
+         * `WINDUP_TURN_BUDGET_DEG` 에 한 곳으로 모아 두었습니다.
+         *
+         * 분모는 설정값이 아니라 **이번 공격에 실제로 건 예고 길이**입니다
+         * (`windupLen`) — 페이즈 배율과 뜸(`hold`)이 이미 반영돼 있어서,
+         * 뜸을 들인 만큼 천천히 돌게 됩니다. 그게 뜸의 값어치입니다.
+         */
+        /**
+         * ⚠️ **뜸(`hold`)은 분모에서 뺍니다.**
+         *
+         * `windupLen` 을 그대로 나누면 뜸을 들일수록 적이 **천천히** 돌게
+         * 됩니다 — 총 회전량이 45°로 고정되니까요. 그러면 "뜸 들이기"가
+         * 플레이어에게 **공짜 각도**를 주는 셈이라, 읽기 싸움으로 만들려던
+         * 장치가 거꾸로 적을 약하게 만듭니다(실측에서 150°/s 가 그렇게
+         * 빠져나갔습니다).
+         *
+         * 그래서 **평소 예고 길이**로 비율을 정하고, 뜸 동안에도 같은
+         * 속도로 계속 돕니다. 뜸의 값어치는 *"더 오래 볼 수 있다"* 이지
+         * *"더 쉽게 돌아 들어간다"* 가 아닙니다.
+         */
+        const base = Math.max(0.05, Enemy.windupLen[e] - Enemy.heldT[e])
+        const rate = Math.min(cfg.turnSpeedDeg, WINDUP_TURN_BUDGET_DEG / base)
+        turnToward(e, toPlayer, rate, dt)
       }
 
       /**
