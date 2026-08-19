@@ -123,6 +123,7 @@ import {
   bleedEvents,
   readBleedPeak,
   readBossDamageBySource,
+  readMobDamageBySource,
   readFocusFlow,
   resetFocusFlow,
   noteFocusDodge,
@@ -4860,6 +4861,8 @@ class Game {
     bossBleedGapInsideRate: number
     /** 📊 보스가 받은 피해 — 출처 × 페이즈. 무엇이 보스를 녹이는지 가릅니다 */
     bossDamageBySource: Record<string, number[]>
+    /** 📊 잡몹을 죽인 것 — 출처별 피해와 **마지막 한 방** 횟수. */
+    mobDamageBySource: Record<string, { dmg: number; kills: number }>
     /** 🥋 집중이 어디서 왔고 얼마나 흘렸고 얼마나 태웠는가 */
     focusFlow: { 평타: number; 완벽회피: number; 버림: number; 태움: number }
     /** 🍶 적이 회복을 노린 횟수 — 규칙이 실제로 도는가 */
@@ -4930,6 +4933,12 @@ class Game {
       bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
       focusFlow: readFocusFlow(),
       healPunished: readHealPunish(),
+      mobDamageBySource: Object.fromEntries(
+        Object.entries(readMobDamageBySource()).map(([k, v]) => [
+          k,
+          { dmg: Number(v.dmg.toFixed(1)), kills: v.kills },
+        ]),
+      ),
       bossDamageBySource: Object.fromEntries(
         Object.entries(readBossDamageBySource()).map(([k, v]) => [
           k,

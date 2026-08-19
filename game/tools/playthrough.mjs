@@ -3452,6 +3452,7 @@ try {
       bossBleedGapMax: G.runStats().bossBleedGapMax ?? 0,
       bossBleedGapInsideRate: G.runStats().bossBleedGapInsideRate ?? 0,
       bossDamageBySource: G.runStats().bossDamageBySource ?? {},
+      mobDamageBySource: G.runStats().mobDamageBySource ?? {},
       focusFlow: G.runStats().focusFlow ?? {},
       bossBleedPops: G.runStats().bossBleedPops ?? 0,
       breakHpAvg: G.runStats().breakHpAvg,
@@ -4155,6 +4156,37 @@ try {
   console.log(
     `  백어택      ${log.backHits}/${log.hitsDealt}회 (${Math.round((log.backHits / Math.max(1, log.hitsDealt)) * 100)}%)` +
       ` — 때릴 거리에서 등 뒤를 잡고 있던 시간 ${Math.round((log.behindOk / Math.max(1, log.behindSamples)) * 100)}%\n` +
+    /**
+     * ── 📊 **무엇이 잡몹을 죽이는가** ───────────────────────────────
+     *
+     * 출혈이 잡몹에게 안 터지는 이유를 두고 이 저장소가 스스로에게 남긴
+     * 질문이 있습니다 — *"문턱이 높은 게 아니라 쌓이는 타수가 적다.
+     * **왜 두 대뿐인가**를 먼저 재라"*(enemies.ts `bleedMaxOf`).
+     *
+     * 총 피해와 **마지막 한 방**을 나눠 적습니다. 둘은 다른 사실입니다:
+     * 평타가 총량의 절반을 넣고도 처형이 늘 마무리하면, 출혈이 찰 시간은
+     * 없습니다. 한 칸에 담으면 그 구분이 사라집니다.
+     */
+    (() => {
+      const rows = Object.entries(log.mobDamageBySource ?? {}).filter(([, v]) => v.dmg > 0)
+      if (rows.length === 0) return '  📊 잡몹 장부  비어 있습니다 — 아래 결론을 세우지 마십시오'
+      const total = rows.reduce((a, [, v]) => a + v.dmg, 0)
+      const kills = rows.reduce((a, [, v]) => a + v.kills, 0)
+      rows.sort((a, b) => b[1].dmg - a[1].dmg)
+      return (
+        `  📊 잡몹을 죽인 것 — 피해 ${Math.round(total)} · 마지막 한 방 ${kills}회\n` +
+        rows
+          .map(
+            ([k, v]) =>
+              `               ${k.padEnd(4)} 피해 ${String(Math.round(v.dmg)).padStart(4)}(${Math.round(
+                (v.dmg / total) * 100,
+              )}%) · 마무리 ${String(v.kills).padStart(2)}회(${
+                kills > 0 ? Math.round((v.kills / kills) * 100) : 0
+              }%)`,
+          )
+          .join('\n')
+      )
+    })(),
     `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0})\n` +
     /**
      * 🩸 **못 터진 것들.** 「죽어서」인가 「식어서」인가 — 처방이 정반대입니다.

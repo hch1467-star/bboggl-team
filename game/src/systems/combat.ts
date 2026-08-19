@@ -871,6 +871,36 @@ let bossEverBled = false
  * 얼추 같아야 정상입니다(회복이 없으므로). 크게 모자라면 세지 못한
  * 경로가 있다는 뜻이고, 그것 자체가 다음에 봐야 할 자리입니다.
  */
+/**
+ * 📊 **잡몹을 죽인 것** — 출처별 피해와, 그 출처가 마지막 한 방이었던 횟수.
+ *
+ * ── 왜 (이 저장소가 스스로에게 남긴 질문) ──────────────────────────
+ * 출혈이 잡몹에게 한 번도 안 터집니다. 문턱을 100 → 30 으로 내려 봤다가
+ * **되돌렸습니다** — 단검이 두 대 만에 터뜨려 세 창의 1등을 전부 가져가고,
+ * *"무기를 바꿀 이유"* 검사가 빨개졌기 때문입니다(enemies.ts `bleedMaxOf`
+ * 주석). 그때 적어 둔 다음 질문이 이것입니다:
+ *
+ *   > 문턱이 높은 것이 아니라 **쌓이는 타수가 적습니다** — 잡몹이 기본기
+ *   > 두 대 값어치만 받고 스킬·처형으로 죽습니다. 문턱을 내리는 대신
+ *   > **"왜 두 대뿐인가"** 를 먼저 재야 합니다.
+ *
+ * 그 질문에 답하려면 *"무엇이 잡몹을 죽이는가"* 를 알아야 하는데, 보스
+ * 쪽에만 장부가 있었습니다. 잡몹은 **한 번도 안 세어 봤습니다.**
+ *
+ * ⚠️ 피해 총량과 **마지막 한 방**을 따로 셉니다. 둘은 다른 사실입니다 —
+ *    평타가 총량의 절반을 넣고도 처형이 늘 마무리하면, 출혈이 찰 시간은
+ *    없습니다. 한 칸에 담으면 그 구분이 사라집니다.
+ */
+const mobDamageBySource: Record<string, { dmg: number; kills: number }> = {}
+function noteMobDamage(kind: string, dmg: number, killed: boolean): void {
+  const row = (mobDamageBySource[kind] ??= { dmg: 0, kills: 0 })
+  row.dmg += dmg
+  if (killed) row.kills += 1
+}
+export function readMobDamageBySource(): Record<string, { dmg: number; kills: number }> {
+  return mobDamageBySource
+}
+
 const bossDamageBySource: Record<string, [number, number, number]> = {
   평타: [0, 0, 0],
   상황: [0, 0, 0],
@@ -986,6 +1016,7 @@ export function resetBleedPeak(): void {
   bossGapMax = 0
   bossEverBled = false
   for (const k of Object.keys(bossDamageBySource)) bossDamageBySource[k] = [0, 0, 0]
+  for (const k of Object.keys(mobDamageBySource)) delete mobDamageBySource[k]
 }
 
 /**
@@ -1882,6 +1913,13 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     // 🩸 맞은 횟수 — 「쌓은 총량」의 분모입니다(components.ts `hitsTaken`).
     if (!targetIsPlayer && hasComponent(Enemy, t)) Enemy.hitsTaken[t]++
     const killed = Health.hp[t] <= 0
+    /**
+     * 📊 **잡몹 장부** — 보스가 아닌 적에게 들어간 것만(설계 근거는 위
+     * `mobDamageBySource`). 보스는 페이즈별로 따로 세므로 여기서 뺍니다.
+     */
+    if (hasComponent(Enemy, t) && Enemy.kind[t] !== EnemyKind.Boss && spec.source) {
+      noteMobDamage(spec.source, damage, killed)
+    }
     // 🩸 죽는 순간 게이지에 남은 몫 — 「0회」의 이유를 가르는 값입니다.
     if (killed && !targetIsPlayer && hasComponent(Enemy, t)) noteDeathWithBleed(t)
 
