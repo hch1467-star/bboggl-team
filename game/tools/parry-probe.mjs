@@ -326,20 +326,54 @@ try {
         await new Promise((r) => setTimeout(r, 200))
         G.pinStamina(null)
         G.setStamina(hp)
+        /**
+         * ── ⚠️ **여기부터는 고정 스텝입니다 — 그리고 기준선을 다시 잡습니다** ──
+         *
+         * 이 검사가 `100 → 88.8 (−11, 벌 18)` 로 빨갛게 떠 있었습니다.
+         * 게임은 멀쩡했고 **이 눈금이 틀렸습니다.** 원인을 두 번 잘못 짚은
+         * 기록을 남겨 둡니다 — 다음 사람이 같은 순서로 헤매지 않게.
+         *
+         *   ❌ ① *"읽는 시점이 늦어서 회복이 벌을 덮었다"* → 매 틱 **최저값**을
+         *        따라가게 고쳤습니다. **값이 하나도 안 바뀌었습니다.**
+         *   ❌ ② *"준비 구간에서 회복이 출발점을 밀어 올렸다"* → 누르는 순간의
+         *        값을 기준선으로 바꿨습니다. **역시 안 바뀌었습니다**(103.4 → 91.6).
+         *   ✅ ③ 벌은 창이 **닫히는** 순간에 붙습니다. 그래서 창이 열려 있는
+         *        0.18초 동안 회복이 기준선을 **6.2**(34/초 × 0.18) 밀어 올립니다.
+         *        실제로는 **109.6 에서 18 을 낸** 것이고, 벌은 처음부터
+         *        정확히 18 이었습니다.
+         *
+         * ①②가 왜 아무 값도 안 바꿨는지가 힌트였습니다 — 그건 **바닥**을 잘못
+         * 읽은 이야기인데, 틀린 것은 **꼭대기**였습니다. 그래서 아래에서
+         * 꼭대기와 바닥의 **낙차**를 봅니다.
+         *
+         * 고정 스텝으로 돌리는 이유는 따로입니다: 헤드리스에서 한 프레임이
+         * 0.2초쯤이라 회복이 프레임마다 6.8씩 붙어 값이 판마다 흔들립니다.
+         * 1/60초로 굴리면 한 프레임에 0.57 이라 답이 안정됩니다.
+         *
+         * ⚠️ 이 눈금이 어제까지 초록이었던 이유도 같은 뿌리입니다 — 회복 유예가
+         *    0.55초였습니다. 조작감 개선으로 0.35초가 되면서 **게임이 아니라
+         *    계측기가** 먼저 무너졌습니다. 값을 만지기 전에 자를 봐야 합니다.
+         */
+        G.setPaused(true)
+        G.step(6, 1 / 60)
+        const start = G.state().player.stamina
         // 적이 없으니 어떤 가드든 헛칩니다 — 그게 이 측정이 원하는 것입니다.
         G.press(gi.key)
-        await sleep()
         G.release(gi.key)
-        /**
-         * ⚠️ **잠금이 걸릴 때까지 기다립니다.** 벌은 창이 *닫히는* 순간에
-         *    붙습니다. 창이 열린 것만 보고 읽었더니 `100 → 100`,
-         *    즉 아직 아무것도 안 낸 시점이었습니다. 위 ③ 검사가 이미
-         *    `lockT > 0` 을 기다리고 있는데 저는 그걸 안 베끼고 새로 썼습니다.
-         */
-        await window.__t.until(() => G.guardInfo().windowT > 0, 1)
-        await window.__t.until(() => G.guardInfo().lockT > 0, 2)
+        // 벌은 한 프레임에 붙으므로 그 직전이 꼭대기입니다 — 낙차가 곧 벌입니다.
+        let low = start
+        let high = start
+        for (let i = 0; i < 90; i++) {
+          G.step(1, 1 / 60)
+          const now = G.state().player.stamina
+          if (G.guardInfo().lockT <= 0) high = Math.max(high, now)
+          low = Math.min(low, now)
+          if (G.guardInfo().lockT > 0) break
+        }
+        low = Math.min(low, G.state().player.stamina)
+        G.setPaused(false)
         const t0 = G.state().elapsed
-        const left = G.state().player.stamina
+        const left = low
         // 잠금이 풀릴 때까지 기다렸다가 구를 수 있는지 봅니다.
         while (G.state().elapsed - t0 < 3 && G.state().player.state !== 0) await sleep()
         const before = G.state().player.stamina
@@ -347,7 +381,12 @@ try {
         await sleep()
         G.release('Space')
         const rolled = await window.__t.until(() => G.state().player.state === 2, 0.6)
-        return { left: Number(left.toFixed(1)), before: Number(before.toFixed(1)), rolled }
+        return {
+          start: Number(high.toFixed(1)),
+          left: Number(left.toFixed(1)),
+          before: Number(before.toFixed(1)),
+          rolled,
+        }
       }
       // 넉넉한 자리(벌을 다 내야 함)와 빠듯한 자리(구르기 몫이 남아야 함).
       return {
@@ -360,12 +399,12 @@ try {
     check(
       edge.rich.rolled !== undefined && edge.tight.rolled !== undefined,
       '🛡 넉넉할 때와 빠듯할 때를 **둘 다** 재봤다 (비교의 게이트)',
-      `구르기 ${edge.cost} · 헛친 벌 ${edge.whiff} · 넉넉 100 → ${edge.rich.left} · 빠듯 ${edge.cost + 6} → ${edge.tight.left}`,
+      `구르기 ${edge.cost} · 헛친 벌 ${edge.whiff} · 넉넉 ${edge.rich.start} → ${edge.rich.left} · 빠듯 ${edge.tight.start} → ${edge.tight.left}`,
     )
     check(
-      100 - edge.rich.left >= edge.whiff - 1,
+      edge.rich.start - edge.rich.left >= edge.whiff - 1,
       '🛡 여유가 있으면 **벌을 다 낸다** (사라지면 "일단 눌러"가 됩니다)',
-      `100 → ${edge.rich.left} (−${(100 - edge.rich.left).toFixed(0)}, 벌 ${edge.whiff})`,
+      `${edge.rich.start} → ${edge.rich.left} (−${(edge.rich.start - edge.rich.left).toFixed(0)}, 벌 ${edge.whiff})`,
     )
     check(
       edge.tight.rolled,
@@ -1038,6 +1077,206 @@ try {
   console.log(
     `  [위쪽 경계는 ②가 잽니다] 남은 예고 ${early.leftAtPress}초(> 창 ${rule.window}초)에 눌러 ` +
       `${early.count === 0 ? '못 막음 ✅' : '막힘 ❌'} — forceAttack 은 예고 25% 지점부터라 여기선 못 잽니다`,
+  )
+
+  /**
+   * ── 📏 **창의 폭을 실제로 훑습니다** ─────────────────────────────────
+   *
+   * ── 왜 이게 더 필요했는가 (자동 플레이가 물어봤습니다) ──────────────
+   * `npm run play` 의 한 판이 이렇게 찍혔습니다:
+   *
+   *     🛡 저스트 가드 — 창을 연 것 6회 · **헛친 것 3회**
+   *        빈 창이 닫힌 이유 — 판정지나감 3회
+   *          판정지나감 (누를때 남은예고 0.167초)
+   *          판정지나감 (누를때 남은예고 0.180초)
+   *          판정지나감 (누를때 남은예고 0.147초)
+   *
+   * 창은 0.18초라고 적혀 있는데 **0.147초 남았을 때 눌러도 놓쳤습니다.**
+   * 그런데 위 ①은 초록이고 ②도 초록입니다 — ①은 창의 **한가운데**
+   * (0.6배)에서 누르고, ②는 창 **밖**에서 누르기 때문입니다.
+   * **가운데와 바깥만 재면 가장자리는 영영 안 보입니다.**
+   *
+   * 그래서 남은 예고 시간을 훑으면서 **어디부터 어디까지 막히는지**를
+   * 직접 잽니다. 그 폭이 곧 플레이어가 실제로 쓸 수 있는 창이고,
+   * 게임이 광고하는 `window` 와 같아야 합니다.
+   *
+   * 고정 스텝으로 돌립니다 — 재는 것이 0.02초 단위라 벽시계로는 못 잽니다.
+   * 그리고 예고를 **통째로**(windupScale 1) 걸어야 합니다. 기본값은 예고의
+   * 25% 지점부터라 0.138초보다 이른 시점을 아예 만들 수 없습니다(② 주석).
+   */
+  const winSweep = await page.evaluate(async () => {
+    const G = window.__game
+    const key = G.guardInfo().key
+    const at = async (leftAt) => {
+      const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 1.8)
+      const hp0 = G.state().player.hp
+      G.setPaused(true)
+      G.forceAttack(e, idx, 1) // 예고를 통째로 — 기본값(25%)이면 이른 쪽을 못 만듭니다
+      let left = -1
+      for (let i = 0; i < 400; i++) {
+        const inf = G.enemyInfo(e)
+        if (inf && inf.winding && inf.timer <= leftAt) {
+          left = inf.timer
+          break
+        }
+        G.step(1, 1 / 60)
+      }
+      if (left < 0) return { leftAt, left: -1, caught: 0, hurt: 0 }
+      const c0 = G.guardInfo().count
+      G.press(key)
+      G.release(key)
+      // 판정이 나고 창이 닫힐 때까지 넉넉히 굴립니다.
+      for (let i = 0; i < 90; i++) G.step(1, 1 / 60)
+      const out = {
+        leftAt,
+        left: Number(left.toFixed(3)),
+        caught: G.guardInfo().count - c0,
+        hurt: Number((hp0 - G.state().player.hp).toFixed(1)),
+      }
+      G.setPaused(false)
+      return out
+    }
+    const rows = []
+    for (let v = 30; v >= 2; v -= 2) rows.push(await at(v / 100))
+    return rows
+  })
+  const measured = winSweep.filter((r) => r.left >= 0)
+  const caught = measured.filter((r) => r.caught > 0)
+  console.log(
+    `  [창 훑기] ${measured.map((r) => `${r.left.toFixed(2)}${r.caught > 0 ? '○' : '·'}`).join(' ')}`,
+  )
+  // 🚧 훑기가 성립했는지부터 봅니다 — 표본이 없으면 아래 폭은 "0"이 아니라
+  //    **못 잰 것**이고, 둘은 화면에서 똑같이 보입니다.
+  check(
+    measured.length >= 10,
+    '🚧 창 훑기가 성립했다 (예고를 실제로 그만큼 잡았다)',
+    `${measured.length}/${winSweep.length}점`,
+  )
+  if (caught.length > 0) {
+    const lo = Math.min(...caught.map((r) => r.left))
+    const hi = Math.max(...caught.map((r) => r.left))
+    const span = hi - lo
+    console.log(
+      `  [실제 창] 남은 예고 ${lo.toFixed(2)}~${hi.toFixed(2)}초에서 막힘 — 폭 ${span.toFixed(2)}초 (광고 ${rule.window}초)`,
+    )
+    /**
+     * 광고한 창의 **70% 이상**은 실제로 써먹을 수 있어야 합니다.
+     *
+     * 0%(정확히 같아야 한다)로 두지 않는 이유: 훑는 간격이 0.02초라
+     * 양 끝에서 한 칸씩은 원리적으로 놓칩니다. 반대로 절반 밑으로 떨어지면
+     * 그건 오차가 아니라 **다른 값**입니다 — 화면에 0.18초라고 약속해 놓고
+     * 실제로는 0.09초를 주는 것이고, 플레이어는 자기가 늦은 줄 압니다.
+     */
+    check(
+      span >= rule.window * 0.7,
+      '📏 **광고한 창이 실제로 그만큼 있다** (제때 눌렀는데 놓치지 않게)',
+      `실측 ${span.toFixed(2)}초 / 광고 ${rule.window}초 (${Math.round((span / rule.window) * 100)}%)`,
+    )
+  } else {
+    check(false, '📏 **광고한 창이 실제로 그만큼 있다**', '훑는 동안 한 번도 안 막혔습니다')
+  }
+
+  /**
+   * ── 🛡 **적이 스스로 빗나간 휘두름에는 벌이 안 붙는다** ────────────────
+   *
+   * 이미 있는 면제(내가 무너뜨려 예고가 끊김)의 **두 번째 원인**입니다.
+   * 자동 플레이가 이렇게 찍었습니다 — 창을 연 것 6회 중 **헛친 것 3회**,
+   * 이유는 전부 「판정지나감」, 그중 하나는 거리가 **1.7 → 1.5m 로
+   * 가까워졌는데도** 안 맞았습니다(적이 각도로 빗나감). 읽기는 맞았고
+   * 답할 것이 안 왔을 뿐인데 0.35초 잠김 + 기력 18 을 냈습니다.
+   *
+   * ⚠️ 짝이 되는 검사가 위에 이미 있습니다 — 「아무 예고 없이 누르면 벌이
+   *    그대로다」. 그게 초록인 채로 이게 초록이어야 **면제가 공짜 가드로
+   *    번지지 않았다**는 뜻입니다. 하나만 보면 둘 다 못 가립니다.
+   */
+  const whiffed = await page.evaluate(async () => {
+    const G = window.__game
+    const gi0 = G.guardInfo()
+    // 사거리 **밖**에 섭니다 — 적이 휘둘러도 나를 못 맞히는 자리입니다.
+    const { e, idx } = await window.__t.duel('grunt', 'grunt_jab', 5)
+    G.setPaused(true)
+    /**
+     * ⚠️ **기력을 가득 채우고, 끝값이 아니라 바닥값을 봅니다.**
+     *
+     * 처음엔 100 으로 세워 두고 90프레임 뒤의 값을 읽었습니다. `기력 -(-30)`
+     * 이 나왔습니다 — 상한이 130 이라 그 1.5초 동안 **회복이 30 을 채운**
+     * 것이고, 벌이 붙었어도 같은 회복이 그걸 덮었을 것입니다. 즉 이 눈금은
+     * 어느 쪽이든 초록을 말했을 눈금입니다.
+     */
+    G.setStamina(9999)
+    const st0 = G.state().player.stamina
+    let minSt = st0
+    let sawSpared = false
+    let sawActive = false
+    const trace = []
+    G.forceAttack(e, idx, 1)
+    let left = -1
+    for (let i = 0; i < 400; i++) {
+      const inf = G.enemyInfo(e)
+      if (inf && inf.winding && inf.timer <= gi0.window * 0.6) {
+        left = inf.timer
+        break
+      }
+      G.step(1, 1 / 60)
+    }
+    /**
+     * ⚠️ **누르기 직전에 거리를 다시 못 박습니다.**
+     *
+     * 이게 없어서 같은 실험대가 판마다 다른 답을 냈습니다 — 한 번은 벌이
+     * 붙고(잠김 0.33초) 한 번은 안 붙었습니다. `duel` 의 준비 구간이
+     * 벽시계로 도는 동안 적이 **걸어서 다가오기** 때문입니다. 판정이
+     * 시작될 때 사거리 안에 들어와 있으면 애초에 "빗나간 휘두름"이 아니라
+     * 다른 상황을 재게 됩니다. 여기서부터는 고정 스텝이라, 이 한 줄이면
+     * 그 뒤가 전부 결정됩니다.
+     */
+    {
+      const es = G.enemyInfo(e)
+      G.teleportPlayer(es.x + Math.sin(es.rotY) * 6, es.z + Math.cos(es.rotY) * 6)
+    }
+    G.press(gi0.key)
+    G.release(gi0.key)
+    let opened = 0
+    let lock = 0
+    for (let i = 0; i < 90; i++) {
+      G.step(1, 1 / 60)
+      const g = G.guardInfo()
+      opened = Math.max(opened, g.windowT)
+      lock = Math.max(lock, g.lockT)
+      minSt = Math.min(minSt, G.state().player.stamina)
+      if (G.guardInfo().spared) sawSpared = true
+      const inf2 = G.enemyInfo(e)
+      if (inf2?.attacking) sawActive = true
+      trace.push(
+        `${i}:${G.guardInfo().windowT > 0 ? 'G' : '-'}${inf2?.winding ? 'w' : inf2?.attacking ? 'A' : '.'}`,
+      )
+    }
+    const out = {
+      left: Number(left.toFixed(3)),
+      opened: Number(opened.toFixed(3)),
+      lock: Number(lock.toFixed(2)),
+      spent: Number((st0 - minSt).toFixed(1)),
+      hurt: Number((100 - G.state().player.hp).toFixed(1)),
+      sawSpared,
+      sawActive,
+      trace: trace.slice(0, 16).join(' '),
+    }
+    G.setPaused(false)
+    return out
+  })
+  console.log(
+    `  [적이 빗나감] 남은 예고 ${whiffed.left}초에 누름 · 창 ${whiffed.opened}초 열림 · 잠김 ${whiffed.lock}초 · 기력 -${whiffed.spent} · 피해 ${whiffed.hurt} · 판정남 ${whiffed.sawActive} · 면제표시 ${whiffed.sawSpared}\n     자취(G=가드창 w=예고 A=판정) ${whiffed.trace}`,
+  )
+  // 🚧 창이 실제로 열렸고 실제로 안 맞았는지부터 봅니다 — 둘 중 하나라도
+  //    아니면 아래 "벌이 없다"는 면제가 아니라 **아무 일도 없었던 것**입니다.
+  check(
+    whiffed.opened > 0 && whiffed.hurt === 0 && whiffed.left > 0,
+    '🚧 창이 열렸고 그 휘두름은 나를 안 맞혔다 (면제를 잴 자리가 성립했다)',
+    `창 ${whiffed.opened}초 · 피해 ${whiffed.hurt}`,
+  )
+  check(
+    whiffed.opened > 0 && whiffed.lock === 0 && whiffed.spent === 0,
+    '🛡 **적이 스스로 빗나간 휘두름에는 벌이 안 붙는다** (읽기가 맞았으면 벌하지 않는다)',
+    `잠김 ${whiffed.lock}초 · 기력 -${whiffed.spent}`,
   )
 
   console.log('')
