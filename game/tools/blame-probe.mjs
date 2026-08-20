@@ -129,6 +129,8 @@ try {
         if (kill) G.pinStamina(0)
         const t1 = now()
         let wasWinding = false
+        /** 🎯 이미 답한 예고의 주인들 — 겹친 예고를 하나로 세지 않으려고. */
+        const seenTele = new Set()
         while (now() - t1 < 22) {
           // 죽으면 그 뒤로는 맞을 일이 없으니 체력만 채워 둡니다.
           if (G.state().player.hp < 40) G.setHp(G.playerEntity(), 100)
@@ -142,13 +144,31 @@ try {
            */
           if (how === 'eager') {
             G.setStamina(100)
-            const winding = G.telegraphs().length > 0
-            if (winding && !wasWinding) {
+            /**
+             * ⚠️ **예고 「개수」가 아니라 예고 「하나하나」에 반응해야 합니다.**
+             *
+             * 예전엔 `telegraphs().length > 0` 의 **오르는 모서리**에서만
+             * 굴렀습니다. 이 판은 적 셋이 둘러서므로 예고가 겹칩니다 —
+             * A 가 예고 중일 때 B 가 뜨면 개수는 계속 1 이상이라
+             * **B 에게는 안 굴렀습니다.** 그런데 검사는 *"뜨자마자 구른
+             * 판에는 `안누름` 이 없어야 한다"* 고 요구했으니, 게임의 장부가
+             * **정확히** `안누름` 을 적었는데도 빨간불이 났습니다.
+             *
+             * 계측기가 아니라 **봇이 틀렸던 것**입니다. 이 저장소가 여러 번
+             * 겪은 모양입니다 — 「조건이 하나만 다른 두 판」을 만들었다고
+             * 믿었는데 실제로는 두 개가 달랐던 것. 예고를 **적별로** 보고
+             * 새로 뜬 것마다 한 번씩 답합니다.
+             */
+            const nowIds = new Set(G.telegraphs().map((t) => t.entity))
+            let fresh = false
+            for (const id of nowIds) if (!seenTele.has(id)) fresh = true
+            for (const id of [...seenTele]) if (!nowIds.has(id)) seenTele.delete(id)
+            for (const id of nowIds) seenTele.add(id)
+            if (fresh) {
               G.press('Space')
               await sleep()
               G.release('Space')
             }
-            wasWinding = winding
           }
           await sleep()
         }
