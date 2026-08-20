@@ -579,6 +579,8 @@ try {
      * 문턱이 같으면 경계에서 깜빡입니다.
      */
     let fireLock = null
+    /** 🔒 지금 적과 붙어 있는가 — 교전 문턱의 히스테리시스 상태(아래 `engageRange`). */
+    let engagedFoe = false
     /** 지름길을 열러 가는 것을 잠시 멈추는 시각 / 그 왕복의 제한 시각. */
     let shortcutCooldownUntil = 0
     let shortcutTripUntil = 0
@@ -1708,7 +1710,37 @@ try {
         const step = G.pathStep(near.x, near.z)
         reachable = step && step.dist <= near.dist * 1.8 + 6 ? step : null
       }
-      if (near && reachable && near.dist < 12) {
+      /**
+       * 🔒 붙을 적이 없어졌으면 교전 상태를 풉니다.
+       * ⚠️ 이 줄을 `reachable` **선언 위**에 뒀다가 프로브가 통째로 죽었습니다
+       *    (`Cannot access 'reachable' before initialization`). 프로브의
+       *    💥 잡이가 그 자리에서 소리를 냈습니다 — 없었으면 "판이 짧네" 로
+       *    끝났을 것입니다.
+       */
+      if (!near || !reachable) engagedFoe = false
+      /**
+       * ── 🔒 **켜는 문턱과 끄는 문턱을 나눕니다** (이 병의 **세 번째** 자리) ──
+       *
+       * 교전 판정이 `near.dist < 12` 하나였습니다. 그런데 자동 플레이의
+       * 25초 막힘에서 그 적이 **11.9m** 에 서 있었습니다 — 경계 위입니다.
+       * 한 걸음 다가가면 켜지고 한 걸음 물러나면 꺼져서, 봇이
+       * 「접근」과 「보물이동」을 번갈아 골랐습니다:
+       *
+       *     순 이동 0.5m 인데 **걸은 거리 82.1m** · [보물이동×50 접근×40]
+       *     누른 키 [**SD**×46 **WA**×40] — 정확히 반대 방향
+       *
+       * 같은 병을 이 세션에서 세 번 고쳤습니다 — 적의 어그로 해제, 소비처
+       * 고르기, 그리고 여기. **문턱이 하나면 경계에서 깜빡입니다.**
+       * 소울류의 적이 어그로를 푸는 거리를 잡는 거리보다 멀게 두는 이유,
+       * 온도조절기가 히스테리시스를 갖는 이유와 같습니다.
+       *
+       * 14m 의 근거: 붙는 문턱 12m 에 **잡몹 한 걸음(약 2m)** 을 더한 값입니다.
+       * 한 걸음으로는 못 벗어나야 깜빡임이 사라집니다. 크게 잡으면 이번엔
+       * 봇이 멀어진 적을 오래 쫓느라 심부름을 못 합니다.
+       */
+      const engageRange = engagedFoe ? 14 : 12
+      if (near && reachable && near.dist < engageRange) {
+        engagedFoe = true
         G.aimAtWorld(near.x, near.z)
 
         /**
