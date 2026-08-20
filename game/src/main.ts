@@ -6144,6 +6144,8 @@ declare global {
         damageTakenScale: number
         windups: { id: string; seconds: number }[]
         chains: Record<string, string>
+        /** 🎬 전환 직후 반드시 나오는 첫 패턴(없으면 ''). */
+        firstAttack: string
       }[]
       /** 적 종류 검증용 — 표를 그대로 내보냅니다(스크립트가 수치를 베끼지 않도록). */
       enemyRoster: () => {
@@ -7086,6 +7088,8 @@ window.__game = {
        * (연계를 바꿨는데 검증만 옛 표로 통과하는 일을 막습니다.)
        */
       chains: ph.chains ?? {},
+      /** 🎬 전환 직후의 고정 패턴 — 프로브가 'boss_charge' 를 베껴 적지 않게. */
+      firstAttack: ph.firstAttack ?? '',
     })),
   damageEntity: (entity, amount) => {
     if (!isAlive(entity)) return

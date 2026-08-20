@@ -202,6 +202,8 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Enemy.phase[e] = 0
   Enemy.transitionT[e] = 0
   Enemy.chainNext[e] = NO_CHAIN
+  // 🎬 오프너 예약도 비웁니다 — 엔티티 번호는 재활용됩니다(위 주석들과 같은 이유).
+  Enemy.openerNext[e] = NO_CHAIN
   Enemy.chained[e] = 0
   Enemy.poise[e] = cfg.poiseMax
   // 🩸 bitECS 는 엔티티를 재사용합니다 — 안 비우면 앞 판의 출혈을 물려받습니다.

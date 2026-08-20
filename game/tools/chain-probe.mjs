@@ -209,6 +209,93 @@ try {
   check(tested >= 3, '연계를 최소 3개 시험했다', `${tested}개`)
 
   /**
+   * ── 🎬 **전환 직후의 고정 패턴이 실제로 나오는가** ────────────────────
+   *
+   * ── 왜 이게 필요한가 (실측) ─────────────────────────────────────
+   * 3단계 가중치는 `{ boss_charge: 5, ... }` 인데 굴림 장부에 물어보니
+   * 돌진은 **후보였던 적이 0회**였습니다 — 붙어서 싸우면 거리가 1.7m 라
+   * 최소 사거리 3m 를 못 넘습니다. 가중치를 아무리 올려도 같습니다.
+   *
+   * 그래서 전환의 **넉백이 만든 자리**를 씁니다(bossPhases.ts `firstAttack`).
+   * 연계와 다른 길이므로 여기서 따로 잽니다 — 연계는 후딜 끝에서 이어지고,
+   * 오프너는 전환 연출이 끝난 뒤 평소 규칙을 지켜 나갑니다.
+   *
+   * ⚠️ **경계 위에서 시작해 아래로 밀어 넣습니다.** 이미 그 페이즈에
+   *    있는 보스를 세워 두면 전환이 안 일어나고, 그러면 이 검사는
+   *    **아무 일도 없는 판**을 재게 됩니다.
+   */
+  for (let phaseIdx = 1; phaseIdx < tuning.length; phaseIdx++) {
+    const want = tuning[phaseIdx].firstAttack
+    if (!want) continue
+    const r = await page.evaluate(
+      ([p, want]) => {
+        const G = window.__game
+        G.reset()
+        G.clearEnemies()
+        G.setPaused(true)
+        const b = G.spawnBoss(6, 0)
+        G.step(20, 1 / 60, true)
+        G.wakeEnemy(b)
+        const roster = G.enemyRoster().find((r) => r.id === 'boss')
+        const t = G.bossTuning()
+        // 경계 **바로 위**에 세웁니다 — 한 대만 맞으면 넘어가게.
+        G.setHp(b, roster.maxHp * (t[p].enterBelow + 0.02))
+        /**
+         * ⚠️ **앞선 전환이 끝날 때까지 기다립니다.**
+         *
+         * 체력을 확 내리면 그 자리에서 이전 페이즈로의 전환이 먼저 일어나고,
+         * 그동안 보스는 **무적**입니다(전환 연출 1.25초). 그걸 안 기다리고
+         * 때렸더니 피해가 0이라 페이즈가 안 넘어갔고, 검사는 「전환 1 → 1」
+         * 로 빨개졌습니다 — 게임이 아니라 실험대가 틀린 것이었습니다.
+         * 게이트를 세워 뒀기에 그 자리에서 잡혔습니다.
+         */
+        for (let i = 0; i < 240; i++) {
+          G.step(1, 1 / 60)
+          if (G.enemyInfo(b)?.phase === p - 1) break
+        }
+        // 전환 연출(1.25초)이 지나 무적이 풀릴 때까지 넉넉히 더 굴립니다.
+        G.step(120, 1 / 60)
+        const before = G.enemyInfo(b)?.phase ?? -1
+        const hp0 = G.enemyInfo(b)?.hp ?? 0
+        G.damageEntity(b, roster.maxHp * 0.06)
+        G.step(2, 1 / 60)
+        const hp1 = G.enemyInfo(b)?.hp ?? 0
+        // 전환 연출(1.25초)이 끝나고 첫 공격이 뜰 때까지 굴립니다.
+        /**
+         * ⚠️ **`attackId` 는 상태와 무관하게 "마지막에 고른 것"을 돌려줍니다.**
+         *    그래서 그냥 읽으면 전환 전에 하던 공격이 첫 프레임에 잡히고,
+         *    이 검사는 늘 옛 패턴을 보게 됩니다. 실제로 처음엔 그래서
+         *    "boss_cleave" 가 찍혔습니다. **휘두르는 중일 때만** 셉니다.
+         */
+        let firstId = ''
+        for (let i = 0; i < 480 && !firstId; i++) {
+          G.step(1, 1 / 60)
+          const inf = G.enemyInfo(b)
+          if (inf?.attacking && inf.phase === p) firstId = inf.attackId
+        }
+        const after = G.enemyInfo(b)?.phase ?? -1
+        G.setPaused(false)
+        return { before, after, firstId, hurt: Number((hp0 - hp1).toFixed(1)) }
+      },
+      [phaseIdx, want],
+    )
+    console.log(
+      `  [${tuning[phaseIdx].name}] 전환 ${r.before} → ${r.after} · 넣은 피해 ${r.hurt} · 첫 패턴 "${r.firstId}" (예약 "${want}")`,
+    )
+    // 🚧 전환이 실제로 일어났는지부터 — 안 넘어갔으면 아무것도 잰 게 아닙니다.
+    check(
+      r.after === phaseIdx && r.before !== r.after && r.hurt > 0,
+      `🚧 [${tuning[phaseIdx].name}] 전환이 **실제로 일어났다** (비교의 게이트)`,
+      `${r.before} → ${r.after} · 넣은 피해 ${r.hurt}`,
+    )
+    check(
+      r.after === phaseIdx && r.firstId === want,
+      `🎬 [${tuning[phaseIdx].name}] **전환 직후 첫 패턴이 예약된 것으로 나온다** (거리 때문에 영영 못 나오던 패턴을 한 번은 보여 주게)`,
+      `"${r.firstId}" (예약 "${want}")`,
+    )
+  }
+
+  /**
    * ---- 3. **잡몹도** 연계한다 ----
    *
    * 지금까지 연계는 보스에만 있었습니다. 그러면 잡몹 구간에서 배우는 것이

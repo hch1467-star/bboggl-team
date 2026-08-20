@@ -997,6 +997,7 @@ export function enemyAiSystem(
       if (Enemy.chainNext[e] !== NO_CHAIN) {
         chainsDropped.death++
         Enemy.chainNext[e] = NO_CHAIN
+        Enemy.openerNext[e] = NO_CHAIN
       }
       continue
     }
@@ -1056,6 +1057,16 @@ export function enemyAiSystem(
         Enemy.transitionT[e] = PHASE_TRANSITION_TIME
         if (Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.phase++
         Enemy.chainNext[e] = NO_CHAIN
+        /**
+         * 🎬 **새 페이즈의 첫 패턴을 예약합니다**(있으면).
+         * 바로 아래 넉백이 자리를 만들고, 이 예약이 그 자리를 씁니다.
+         * 규칙과 근거는 bossPhases.ts `firstAttack` 주석에 있습니다.
+         */
+        {
+          const opener = BOSS_PHASES[want].firstAttack
+          const at = opener ? attacksFor(kind).findIndex((a) => a.id === opener) : -1
+          Enemy.openerNext[e] = at >= 0 ? at : NO_CHAIN
+        }
         Health.invulnT[e] = PHASE_TRANSITION_TIME
         Actor.state[e] = ActorState.Idle
         Actor.timer[e] = 0
@@ -1293,6 +1304,7 @@ export function enemyAiSystem(
         Actor.state[e] = ActorState.Idle
         if (Enemy.chainNext[e] !== NO_CHAIN) chainsDropped.leash++
         Enemy.chainNext[e] = NO_CHAIN
+        Enemy.openerNext[e] = NO_CHAIN
         encounterEvents.push({ entity: e, name: '', maxHp: 0, x: 0, z: 0 })
       }
 
@@ -1679,6 +1691,33 @@ export function enemyAiSystem(
           for (const a of list) only[a.id] = fresh.includes(a) ? (weights?.[a.id] ?? a.weight) : 0
           weights = only
         }
+      }
+      /**
+       * 🎬 **오프너가 예약돼 있으면 굴리지 않습니다.**
+       *
+       * 굴림(`pickAttack`)은 거리로 후보를 거릅니다. 그런데 오프너의 존재
+       * 이유가 바로 *"거리 때문에 영영 후보가 못 되는 패턴을 한 번은 낸다"*
+       * 이므로, 여기서 심사를 다시 하면 아무것도 안 바뀝니다.
+       * 나머지 규칙(쿨다운·토큰·방향)은 위에서 이미 다 지켰습니다.
+       */
+      const opener = Enemy.openerNext[e]
+      if (opener !== NO_CHAIN) {
+        Enemy.openerNext[e] = NO_CHAIN
+        idleReasons.committed++
+        /**
+         * 광역 자리는 **깎기만 하고 막지는 않습니다.**
+         * 지금 오프너인 `boss_charge` 는 60° 라 어차피 해당이 없지만,
+         * 나중에 누가 넓은 패턴을 오프너로 적어 두면 이 줄이 없을 때
+         * 자리를 **쓰고도 안 쓴 척**하게 됩니다 — 그러면 같은 프레임에
+         * 광역이 둘 나가서 "동시에 하나만"이라는 약속이 조용히 깨집니다.
+         * 막지 않는 이유는 위와 같습니다. 오프너는 심사 대상이 아닙니다.
+         */
+        if (attackAt(kind, opener).arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
+        commitGapT = ATTACK_COMMIT_GAP
+        tokens.delete(e)
+        commitAttack(e, kind, opener, ph.windupScale)
+        decayVelocity(e, dt, 12)
+        continue
       }
       const rolled = pickAttack(list, dist, combatRng.next(), weights, wantReach)
       let picked = rolled
