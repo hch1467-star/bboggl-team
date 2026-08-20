@@ -4627,6 +4627,51 @@ class Game {
    * ⚠️ 이건 걸음의 **가능성**만 잽니다(속도·조향·적 없음). 그래서 실패는
    *    확실한 병이고, 성공은 *"적어도 지도 탓은 아니다"* 까지입니다.
    */
+  /**
+   * 🧭 **게임이 안내하는 길을 칸으로 돌려줍니다.**
+   *
+   * ── 왜 필요한가 ──────────────────────────────────────────────
+   * 「주 동선」을 지금까지 **세 곳에서 따로** 그리고 있었습니다:
+   *   · 게임    — 흐름장(`nextStepToward`)
+   *   · secret  — 게임에게 물어 걷습니다 (옳음)
+   *   · map     — **자기 BFS** 로 다시 그립니다 (흉내)
+   *
+   * 흉내는 언젠가 갈라집니다. 실제로 갈라졌습니다 — 길안내에
+   * *"되돌아올 수 없는 길"* 의 값(`ONE_WAY_COST`)을 넣었더니 게임은 남쪽
+   * 낙하를 피하는데 map 의 BFS 는 그대로 그리로 갔고, 그 길로 잰
+   * *"보스 앞 복도"* 가 **20m** 로 빨갛게 떴습니다. 게임의 길로 재면
+   * **62m** 입니다. 프로브가 **없는 길의 박자**를 재고 있었던 것입니다.
+   *
+   * 그래서 그리는 자리를 한 곳으로 모읍니다. 프로브는 이 함수를 부릅니다.
+   *
+   * ⚠️ 걸음이 아니라 **칸**을 돌려줍니다. 부르는 쪽이 배치와 견주려면
+   *    칸이 필요하고, 미터가 필요하면 `pathDistance` 가 따로 있습니다.
+   */
+  debugRouteTrail(
+    fromX: number,
+    fromZ: number,
+    toX: number,
+    toZ: number,
+    maxSteps = 4000,
+  ): { x: number; z: number }[] {
+    const t = this.terrain
+    if (!t) return []
+    t.buildFlowField(toX, toZ)
+    if (t.pathDistance(fromX, fromZ) === null) return []
+    const out: { x: number; z: number }[] = [{ x: fromX, z: fromZ }]
+    let x = fromX
+    let z = fromZ
+    for (let i = 0; i < maxSteps; i++) {
+      if (t.pathDistance(x, z) === 0) break
+      const nxt = t.nextStepToward(x, z)
+      if (!nxt) break
+      x = nxt.x
+      z = nxt.z
+      out.push({ x, z })
+    }
+    return out
+  }
+
   debugPathWalk(
     toX: number,
     toZ: number,
@@ -6967,6 +7012,8 @@ declare global {
        * 🧭 지도가 말한 길을 **게임의 충돌로 실제로 걸어** 봅니다.
        * 실패한 시작점만 봐도 *"화살표가 못 가는 쪽을 가리키는 자리"* 가 나옵니다.
        */
+      /** 🧭 **게임이 안내하는 길**을 칸으로. 프로브가 동선을 다시 그리지 않게. */
+      routeTrail: (fromX: number, fromZ: number, toX: number, toZ: number) => { x: number; z: number }[]
       pathWalk: (
         toX: number,
         toZ: number,
@@ -7926,6 +7973,7 @@ window.__game = {
   pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
   walkToPlayer: (x, z) => game.debugWalkToPlayer(x, z),
   pathWalk: (toX, toZ, starts, step, maxSteps) => game.debugPathWalk(toX, toZ, starts, step, maxSteps),
+  routeTrail: (fromX, fromZ, toX, toZ) => game.debugRouteTrail(fromX, fromZ, toX, toZ),
   distancesToward: (toX, toZ, pts) => game.debugDistancesToward(toX, toZ, pts),
   terrainInfo: () => game.debugTerrainInfo(),
   /** 🗺 이 월드 좌표의 지형 단(段). 프로브가 낙차를 **찾아내는** 데 씁니다. */

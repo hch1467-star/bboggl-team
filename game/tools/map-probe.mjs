@@ -441,47 +441,130 @@ try {
    * 주 동선 위의 칸이 되돌아올 수 없는 낙차와 접해 있으면,
    * 그 자리의 걸을 수 있는 폭이 최소 6m 는 되어야 합니다.
    */
-  const routeCells = (() => {
-    // 시작 화톳불 → 보스 최단 경로를 되짚습니다.
-    const key = (x, z) => z * level.w + x
-    const from = startFire
-    const prev = new Map()
-    const dist = new Map([[key(from.cx, from.cz), 0]])
-    let queue = [from]
-    let hit = null
-    while (queue.length && !hit) {
-      const next = []
-      for (const cur of queue) {
-        if (cur.cx === boss.cx && cur.cz === boss.cz) {
-          hit = cur
-          break
-        }
-        const h = heightAt(cur.cx, cur.cz)
-        for (const [nx, nz] of [
-          [cur.cx - 1, cur.cz],
-          [cur.cx + 1, cur.cz],
-          [cur.cx, cur.cz - 1],
-          [cur.cx, cur.cz + 1],
-        ]) {
-          const nh = heightAt(nx, nz)
-          if (nh === VOID || nh - h > maxClimb) continue
-          const k = key(nx, nz)
-          if (dist.has(k)) continue
-          dist.set(k, dist.get(key(cur.cx, cur.cz)) + 1)
-          prev.set(k, cur)
-          next.push({ cx: nx, cz: nz })
-        }
+  /**
+   * ── 🧭 **동선은 게임에게 그려 달라고 합니다** ────────────────────────
+   *
+   * 여기에는 *"시작 화톳불 → 보스 최단 경로"* 를 **이 파일이 직접 BFS 로**
+   * 그리는 코드가 있었습니다. 흉내는 언젠가 갈라지고, 실제로 갈라졌습니다 —
+   * 길안내에 「되돌아올 수 없는 길」의 값(`ONE_WAY_COST`)이 생긴 뒤로
+   * 게임은 남쪽 낙하를 피하는데 이 BFS 는 그대로 그리로 갔습니다.
+   * 그 결과 *"보스 앞 복도는 비어 있다"* 가 **20m** 로 빨갛게 떴는데,
+   * 게임이 실제로 안내하는 길로 재면 **62m** 였습니다.
+   *
+   * **없는 길의 박자를 재고 있었습니다.** 이 파일의 다른 BFS 들은 그대로
+   * 둡니다 — 저건 「몇 미터인가」를 재는 자라 값이 없는 쪽이 맞습니다.
+   * 갈라지면 안 되는 것은 **어느 길로 가는가** 하나뿐입니다.
+   */
+  /**
+   * ⚠️ **재기 전에 판을 되돌립니다 — 이 줄이 없어서 한 번 크게 속았습니다.**
+   *
+   * 이 파일은 위쪽에서 **사다리를 실제로 내려 봅니다**(「위에서는 내릴 수
+   * 있다고 안내한다」). 그 상태가 그대로 남아 있으면 길찾기가 **열린
+   * 지름길로** 길을 그립니다. 실제로 그렇게 나왔습니다:
+   *
+   *     🧭 주 동선 — 66칸(132m) · **세로 6m**   ← 등뼈를 관통하는 직선
+   *
+   * 처음 플레이어가 걷는 길은 사다리가 **걷힌** 상태의 길입니다. 켠 스위치를
+   * 안 끄고 다음 절로 넘어가 판을 망친 것이 이 저장소에서만 세 번째입니다.
+   *
+   * ⚠️ **`reset()` 으로는 안 됩니다.** 내린 사다리는 **세이브에 남습니다**
+   *    (「한 번 내리면 게임을 다시 켜도 내려져 있다」는 이 파일이 검사하는
+   *    기능입니다). 그래서 진행도까지 지웁니다 — `resetProgress()`.
+   *    실제로 `reset()` 만 불렀을 때 동선이 **그대로 132m 직선**이었고,
+   *    하마터면 "사다리 탓이 아니었네" 하고 다른 데를 팔 뻔했습니다.
+   */
+  await page.evaluate(() => {
+    window.__game.resetProgress()
+    window.__game.reset()
+  })
+  await new Promise((r) => setTimeout(r, 300))
+  const routeCells = (
+    await page.evaluate(
+      ([fx, fz, bxw, bzw]) => window.__game.routeTrail(fx, fz, bxw, bzw),
+      [
+        (startFire.cx - level.w / 2 + 0.5) * CELL,
+        (startFire.cz - level.h / 2 + 0.5) * CELL,
+        (boss.cx - level.w / 2 + 0.5) * CELL,
+        (boss.cz - level.h / 2 + 0.5) * CELL,
+      ],
+    )
+  ).map((p) => ({ cx: Math.floor(p.x / CELL + level.w / 2), cz: Math.floor(p.z / CELL + level.h / 2) }))
+  {
+    // 🧭 동선 자체를 눈금으로 남깁니다 — 이 선이 틀리면 아래 배치 검사가
+    //    전부 **없는 길**을 재게 됩니다. 그때 제일 먼저 볼 줄입니다.
+    const zsr = routeCells.map((c) => (c.cz - level.h / 2 + 0.5) * CELL)
+    const xsr = routeCells.map((c) => (c.cx - level.w / 2 + 0.5) * CELL)
+    /**
+     * ⚠️ **아래 🔁 줄의 「첫 길 194m」과 이 줄의 200m 은 다른 값이 맞습니다.**
+     *    같은 화면에 6m 차이 나는 두 길이가 아무 설명 없이 찍혀 있으면
+     *    버그로 읽힙니다. 다른 이유가 **둘** 있어서 그렇습니다:
+     *
+     *      ① 출발점이 다릅니다 — 이 줄은 **부활 화톳불**에서, 🔁 줄은
+     *         **스폰**에서 잽니다. 🔁 이 묻는 것은 "막으면 다른 길이
+     *         있는가"라 판 전체를 봐야 하고, 이 줄이 묻는 것은 "죽고 나서
+     *         매번 걷는 길"이라 화톳불에서 시작하는 게 맞습니다.
+     *      ② 규칙이 다릅니다 — 이 줄은 **게임의 안내가 실제로 미는 길**
+     *         (`routeTrail`, 되돌아올 수 없는 낙차에 `ONE_WAY_COST` 벌점),
+     *         🔁 줄은 **칸 수만 세는 BFS**입니다. 그래서 이 줄이 몇 칸
+     *         **더 깁니다** — 안내가 사람을 절벽으로 안 밀기 때문입니다.
+     *         그 차이가 0 이 되면 벌점이 일을 안 하고 있다는 뜻입니다.
+     *
+     *    갈라지면 안 되는 것은 **어느 길로 가는가** 하나뿐이고, 그건 이제
+     *    전부 `routeTrail` 한 곳에서 나옵니다.
+     */
+    console.log(
+      `\n  🧭 주 동선 (화톳불→보스, 게임의 안내가 미는 길) — ` +
+        `${routeCells.length}칸 (${routeCells.length * CELL}m) · ` +
+        `가로 ${Math.max(...xsr) - Math.min(...xsr)}m · 세로 ${Math.max(...zsr) - Math.min(...zsr)}m · ` +
+        `끝 (${xsr[xsr.length - 1]},${zsr[zsr.length - 1]})`,
+    )
+    /**
+     * ── 🗺️ `MAP_ART=1 npm run map` — 판을 **글자로 그려 봅니다** ──────
+     *
+     * 왜 넣었나: 위 배치 검사들이 *"(66,32) 동선까지 22m"* 같은 숫자만
+     * 내놓습니다. 그 숫자로 **어디로 옮겨야 하는지**는 알 수 없습니다 —
+     * 22m 를 줄이려면 어느 방향으로 몇 칸인지는 동선의 **모양**을 봐야
+     * 알고, 모양은 좌표 목록으로는 안 보입니다. 실제로 이 그림이 없어서
+     * 「동선을 남쪽으로 휘게 한다」를 **세 번 시도해서 세 번 되돌렸습니다**.
+     *
+     * 기본 실행에서는 안 찍습니다 — 눈금이 아니라 **연장**이라서, 판정에
+     * 섞이면 통과/실패를 읽는 눈을 가립니다.
+     *
+     *   =  주 동선     f 화톳불   A 모루   L 사다리   T 보물
+     *   g  잡졸  c 달려드는 자  b 얽는 자  d 끄는 자  a 쏘는 자  B 보스
+     *   ·  걸을 수 있는 칸       (빈칸) 허공
+     */
+    if (process.env.MAP_ART) {
+      const GLYPH = {
+        grunt: 'g', charger: 'c', binder: 'b', dragger: 'd', archer: 'a',
+        boss: 'B', bonfire: 'f', anvil: 'A', ladder: 'L', treasure: 'T', spawn: 'S',
       }
-      queue = next
+      const art = []
+      for (let cz = 0; cz < level.h; cz++) {
+        art.push(
+          Array.from({ length: level.w }, (_, cx) =>
+            heightAt(cx, cz) === VOID ? ' ' : '·',
+          ),
+        )
+      }
+      for (const c of routeCells) if (art[c.cz]) art[c.cz][c.cx] = '='
+      // 배치물이 동선을 덮어씁니다 — 여기서 알고 싶은 것은 "무엇이 있나" 입니다.
+      for (const e of level.entities) {
+        const g = GLYPH[e.kind]
+        if (!g) continue
+        const { cx, cz } = cellOf(e)
+        if (art[cz]) art[cz][cx] = g
+      }
+      // 동선이 지나는 띠만 잘라 냅니다 — 88×72 를 다 찍으면 허공이 대부분입니다.
+      const zs = routeCells.map((c) => c.cz)
+      const lo = Math.max(0, Math.min(...zs) - 8)
+      const hi = Math.min(level.h - 1, Math.max(...zs) + 8)
+      console.log(`\n  🗺️  cz ${lo}‥${hi} (cx 0‥${level.w - 1})`)
+      for (let cz = lo; cz <= hi; cz++) {
+        console.log(`  ${String(cz).padStart(2)} ${art[cz].join('')}`)
+      }
     }
-    const out = []
-    let cur = hit
-    while (cur) {
-      out.push(cur)
-      cur = prev.get(key(cur.cx, cur.cz))
-    }
-    return out.reverse()
-  })()
+  }
 
   /** 이 칸에서 걸어갈 수 있는 이웃(같은 높이 ±오를 수 있는 단차)의 수. */
   const walkableWidth = (cx, cz) => {
@@ -710,6 +793,34 @@ try {
         Math.max(t.levelAggroRange, hurtReach + t.levelAggroLead),
         t.levelAggroMax,
       )
+      /**
+       * ── 🧗 **이 판의 천장을 같이 찍습니다** ─────────────────────
+       *
+       * 이 검사가 빨갛게 나왔을 때 제일 먼저 하는 일은 **궁수를 옮기는
+       * 것**입니다. 그래서 걸을 수 있는 칸을 전부 훑어 봤더니:
+       *
+       *     사거리 검사(8칸)를 통과하는 칸 630곳 · 그 전부가 **1.87발**
+       *
+       * **어디로 옮겨도 2발이 안 됩니다.** 이유는 기하입니다 — 동선은
+       * 한 줄이고, 반지름 19m 짜리 원이 한 줄에서 잘라 갈 수 있는 길이는
+       * 정해져 있습니다(꺾이는 자리에 세워도 54m 가 최대).
+       *
+       * 천장을 안 찍으면 이 빨간불은 *"자리를 잘못 잡았다"* 로 읽힙니다.
+       * 실제로 가리키는 것은 **궁수의 수치**(사거리 · 한 바퀴)입니다.
+       * 「못 잰 것은 통과가 아니다」의 짝입니다 — **아무도 못 넘는 문턱은
+       * 눈금이 아니라 벽입니다.** 벽이면 벽이라고 적어 둡니다.
+       */
+      let ceiling = 0
+      for (let cz = 0; cz < level.h; cz++) {
+        for (let cx = 0; cx < level.w; cx++) {
+          if (heightAt(cx, cz) === VOID) continue
+          const n = routeCells.filter(
+            (c) => Math.hypot(c.cx - cx, c.cz - cz) * CELL <= wakeRange,
+          ).length
+          if (n > ceiling) ceiling = n
+        }
+      }
+      const bestShots = ((ceiling * CELL) / walkSpeed) / archerDef.attackCycle
       for (const a of level.entities.filter((e) => e.kind === 'archer')) {
         const ac = cellOf(a)
         const inside = routeCells.filter(
@@ -722,7 +833,13 @@ try {
           shots >= 2,
           `🔴 쏘는 자(${ac.cx},${ac.cz}) — 지나가는 동안 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
           `깨는 거리 ${wakeRange}m 안의 동선 ${metres}m ÷ 이동 ${walkSpeed}m/s = ${seconds.toFixed(1)}초` +
-            ` ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초 = ${shots.toFixed(1)}발`,
+            ` ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초 = ${shots.toFixed(1)}발` +
+            (shots < 2
+              ? ` · ⛰️ **이 판의 천장 ${bestShots.toFixed(2)}발**` +
+                (bestShots < 2
+                  ? ' — 어느 칸으로 옮겨도 2발이 안 됩니다. 자리가 아니라 사거리/한 바퀴를 보세요'
+                  : '')
+              : ''),
         )
       }
     }
@@ -917,7 +1034,31 @@ try {
     }
   }
 
-  const foes = level.entities.filter((e) => FOE_KINDS.has(e.kind)).map(cellOf)
+  /**
+   * ⚠️ **보스는 빼고 셉니다** — 이 줄을 아래 검사에서만 지키고 여기서는
+   *    안 지켜서, 같은 출력 안에서 **두 자가 서로 다른 값을 말했습니다**:
+   *
+   *        ✅ 보스 직전 빈 구간 **62m**        ← 보스를 뺀 자
+   *        [빈 구간] … 최장 **46m**            ← 보스를 넣은 자
+   *
+   *    둘 다 "위협 없이 걷는 거리"를 잰다고 적혀 있었으니, 읽는 사람은
+   *    둘 중 하나가 버그라고 결론냅니다. 실제로는 **정의가 달랐을 뿐**이고
+   *    어디에도 안 적혀 있었습니다.
+   *
+   *    어느 쪽이 맞는가: **보스를 빼는 쪽.** 보스는 잡몹처럼 어그로 반경
+   *    (14m)으로 사람을 무는 것이 아니라 **전용 조우 영역**(17m)을 가지고
+   *    있고, 그 영역은 바로 위 「보스 전 화톳불이 보스 영역 밖에 있다」가
+   *    따로 지킵니다. 잡몹 자로 보스를 재면 "보스 앞은 정의상 시끄럽다"가
+   *    되어, 리듬을 보려던 자가 늘 같은 답만 냅니다.
+   *
+   *    (이 값이 62m 로 커지면서 아래 「위협 없이 30m 넘게 걷는 구간이 없다」는
+   *     **더 빨개집니다**. 자를 고치면 눈금이 나빠지는 쪽으로 움직이는 것이
+   *     정상입니다 — 46m 는 보스가 가려 준 46m 였습니다.)
+   */
+  const mobs = level.entities
+    .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
+    .map(cellOf)
+  const foes = mobs
   const quiet = []
   let runStart = null
   let runLen = 0
@@ -1025,10 +1166,11 @@ try {
    *    복도를 덮습니다). 실제로 그렇게 재서 *"빈 구간 0m"* 가 나왔고,
    *    하마터면 잡몹을 넷이나 옮길 뻔했습니다. 이 검사가 묻는 것은
    *    *"보스 말고 다른 것이 거기 있는가"* 입니다.
+   *
+   *    → `mobs` 는 이제 위 [빈 구간]·[긴장 구간]과 **같은 목록**입니다.
+   *      한동안 여기서만 보스를 빼고 위에서는 안 뺐고, 그 결과 같은 화면에
+   *      62m 와 46m 가 나란히 찍혔습니다. 규칙은 한 곳에만 둡니다.
    */
-  const mobs = level.entities
-    .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
-    .map(cellOf)
   const tailRest = (() => {
     let n = 0
     for (let i = routeCells.length - 1; i >= 0; i--) {
@@ -1094,22 +1236,56 @@ try {
     )
   }
 
-  const worst = quiet.reduce((a, b) => (a && a.metres >= b.metres ? a : b), null)
+  /**
+   * ── ⚖️ **두 검사가 같은 62m 를 두고 반대로 판정했습니다** ──────────
+   *
+   * 자를 고쳐서 보스를 뺀 뒤, 출력이 이렇게 나왔습니다:
+   *
+   *     ✅ 보스 앞 복도는 비어 있다 — 보스 직전 빈 구간 **62m** (≥23m 필요)
+   *     ❌ 위협 없이 30m 넘게 걷는 구간이 없다 — 최장 **62m**
+   *
+   * **같은 62m 입니다.** 하나는 있어야 한다고 하고 하나는 있으면 안 된다고
+   * 합니다. 이대로 두면 둘 중 하나를 맞추는 순간 다른 하나가 빨개져서,
+   * 고칠 수 없는 검사 한 쌍이 영원히 남습니다.
+   *
+   * 어디가 틀렸나: **심심함 검사가 보스 앞 복도를 몰랐습니다.** 보스 직전의
+   * 빈 길은 심심한 것이 아니라 **설계된 숨 고르기**입니다 — 소울류의 안개문
+   * 앞이 조용한 것은 실수가 아닙니다. 그래서 마지막 빈 구간에서는 **숨
+   * 고르기로 정당화되는 몫(스태미나가 차는 거리)을 빼고** 심심함을 셉니다.
+   *
+   *     62m − 23m = **39m** ← 아무 이유 없이 빈 나머지
+   *
+   * ⚠️ **면제해 주지, 문턱을 맞추지는 않습니다.** 심심함 문턱을 `breather`
+   *    로 바꾸면 두 검사가 **같은 값에서 만나** 경계에서 깜빡입니다(이 저장소가
+   *    이미 세 번 겪은 실수입니다 — 문턱이 하나면 경계에서 깜빡인다).
+   *    두 검사는 이제 서로 다른 것을 묻습니다: 하나는 *"숨 쉴 틈이 있나"*,
+   *    다른 하나는 *"숨 쉬고도 남는 빈 길이 있나"*.
+   */
+  const scored = quiet.map((q) => {
+    const isTail = q.to === routeCells[routeCells.length - 1]
+    return { ...q, isTail, judged: isTail ? Math.max(0, q.metres - breather) : q.metres }
+  })
+  const worst = scored.reduce((a, b) => (a && a.judged >= b.judged ? a : b), null)
   console.log(
     `  [빈 구간] 주 동선 ${routeCells.length * CELL}m 중 위협 없이 걷는 구간 ${quiet.length}개 — ` +
-      (quiet.length
-        ? quiet
-            .sort((a, b) => b.metres - a.metres)
+      (scored.length
+        ? scored
+            .slice()
+            .sort((a, b) => b.judged - a.judged)
             .slice(0, 4)
-            .map((q) => `${q.metres}m (${q.from.cx},${q.from.cz})→(${q.to.cx},${q.to.cz})`)
+            .map(
+              (q) =>
+                `${q.metres}m (${q.from.cx},${q.from.cz})→(${q.to.cx},${q.to.cz})` +
+                (q.isTail ? ` [보스 앞 — 숨 고르기 ${breather.toFixed(0)}m 빼면 ${q.judged.toFixed(0)}m]` : ''),
+            )
             .join(' · ')
         : '없음') +
       '\n',
   )
   check(
-    !worst || worst.metres <= 30,
-    '주 동선에 위협 없이 30m(약 6초) 넘게 걷는 구간이 없다',
-    worst ? `최장 ${worst.metres}m` : '없음',
+    !worst || worst.judged <= 30,
+    '주 동선에 위협 없이 30m(약 6초) 넘게 걷는 구간이 없다 (보스 앞 숨 고르기는 뺍니다)',
+    worst ? `최장 ${worst.judged.toFixed(0)}m` : '없음',
   )
 
   console.log('')
@@ -1283,7 +1459,7 @@ try {
     const open = bfs(spawnC, bossC, maxClimb, true, blocked)
     const say = (v) => (Number.isFinite(v) ? `${Math.round(v * CELL)}m 짜리 **두 번째 길**` : '**갈 수 없음(외길)**')
     console.log(
-      `\n  🔁 첫 길 ${Math.round(first * CELL)}m · 그 길을 막으면\n` +
+      `\n  🔁 첫 길 ${Math.round(first * CELL)}m (스폰→보스, 칸만 세는 자) · 그 길을 막으면\n` +
         `       사다리 걷은 채 — ${say(shut)}\n` +
         `       사다리 내린 뒤 — ${say(open)}`,
     )
