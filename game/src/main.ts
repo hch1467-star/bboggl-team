@@ -5853,7 +5853,12 @@ class Game {
     entity: number
     /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다(구현부 주석). */
     kind: string
-    /** 🚦 지금 이 적을 막고 있는 문 — 없음·토큰·쿨다운·바라보기·띠밖 */
+    /**
+     * 🚦 지금 이 적을 막고 있는 문.
+     * · 토큰만 — 토큰만 있었으면 **지금 쐈을** 프레임 (진짜 병목)
+     * · 토큰+  — 토큰이 있어도 못 쐈을 프레임 (쿨다운·바라보기가 겹침)
+     * 둘을 합치면 「토큰 탓」이 부풀려집니다(enemyAI 같은 자리 주석).
+     */
     idleWhy: string
     x: number
     z: number
@@ -5953,7 +5958,8 @@ class Game {
          * 토큰인지 쿨다운인지 바라보기인지 띠 밖인지에 따라 고칠 곳이
          * 전부 다릅니다.
          */
-        idleWhy: ['없음', '토큰', '쿨다운', '바라보기', '띠밖'][Enemy.idleWhy[e]] ?? '?',
+        idleWhy:
+          ['없음', '토큰만', '쿨다운', '바라보기', '띠밖', '토큰+'][Enemy.idleWhy[e]] ?? '?',
         x: Number(Transform.x[e].toFixed(2)),
         z: Number(Transform.z[e].toFixed(2)),
         dist: Number(d.toFixed(2)),
@@ -6680,7 +6686,11 @@ declare global {
         entity: number
         /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다. */
         kind: string
-        /** 🚦 지금 이 적을 막고 있는 문 — 없음·토큰·쿨다운·바라보기·띠밖 */
+        /**
+         * 🚦 지금 이 적을 막고 있는 문.
+         * 「토큰만」과 「토큰+」이 갈려 있습니다 — 앞은 고치면 바뀌는 몫,
+         * 뒤는 토큰을 늘려도 안 바뀌는 몫입니다.
+         */
         idleWhy: string
         x: number
         z: number
