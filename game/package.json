@@ -14,6 +14,7 @@
     "skills": "node tools/skill-preview.mjs",
     "weapons": "node tools/weapon-probe.mjs",
     "zone": "node tools/make-zone.mjs",
+    "route": "node tools/route-model.mjs",
     "intents": "node tools/intent-preview.mjs",
     "tripod": "node tools/tripod-preview.mjs",
     "crowd": "node tools/crowd-probe.mjs",
