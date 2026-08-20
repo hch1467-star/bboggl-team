@@ -453,6 +453,13 @@ try {
         phaseWalk: phaseWalk.map((v) => Number(v.toFixed(1))),
         taken: Math.round(taken),
         gateAt,
+        /**
+         * 🧭 **이 손이 서는 거리** — 아래 「빠짐없이 나온다」 검사가
+         * *증거*와 *손이 안 닿는 것*을 가르는 데 씁니다. 이 값을 안 실어
+         * 보내면 그 검사가 게임이 아니라 **실험대의 정책**을 잽니다.
+         */
+        stand,
+        leash,
       }
     }
   })
@@ -635,20 +642,43 @@ try {
             .map(([id]) => id),
         ),
       )
-      const missing = all.filter((a) => !fired.has(a.id))
+      /**
+       * ── 🚧 **이 손이 안 닿는 것은 증거가 아닙니다** ──────────────────
+       *
+       * 이 실험대는 **한 자리에 섭니다**(보스의 `attackRange` + 여유).
+       * 정책이 단순해야 구간 길이가 또렷해지기 때문인데(맨 위 주석),
+       * 그 대가로 **서는 거리보다 먼 데서만 나오는 패턴은 원리적으로
+       * 관측할 수 없습니다.**
+       *
+       * 이 파일은 그 함정에 **이미 한 번 빠졌습니다** — 예전엔 2.6m 에
+       * 붙어 있었고, 그래서 🟢돌진·🟣갈고리가 「세 페이즈 통틀어 0회」로
+       * 찍혔습니다. 서는 거리를 고치자 돌진은 살아났습니다(3단계 113회).
+       * 갈고리(최소 5m)는 지금 손(≈4.2m)으로도 여전히 못 닿습니다.
+       *
+       * 그러니 갈고리의 0회는 **게임의 사실이 아니라 이 손의 한계**입니다.
+       * 손이 닿는 것만 판정하고, 나머지는 [손이 안 닿음] 으로 따로 적습니다.
+       * 지난 라운드에 `blame` 이 봇의 한계를 게임 탓으로 돌릴 뻔한 것과
+       * 같은 자리입니다 — **계측기의 정책을 게임의 결론으로 만들지 않습니다.**
+       */
+      const stand = runs[0]?.stand ?? 0
+      const leash = runs[0]?.leash ?? 0
+      const inHand = all.filter((a) => a.minRange <= leash)
+      const outOfHand = all.filter((a) => a.minRange > leash)
+      const missing = inHand.filter((a) => !fired.has(a.id))
       check(
-        all.length > 0 && missing.length === 0,
-        '🕳 **적어 둔 보스 패턴이 실전에서 하나도 빠짐없이 나온다** (후보에 못 오르면 가중치는 0입니다)',
-        missing.length === 0
-          ? `${all.length}종 전부 — ${all.map((a) => a.id).join(' · ')}`
+        inHand.length > 0 && missing.length === 0,
+        '🕳 **이 손이 닿는 보스 패턴은 하나도 빠짐없이 나온다** (후보에 못 오르면 가중치는 0입니다)',
+        (missing.length === 0
+          ? `닿는 ${inHand.length}종 전부 — ${inHand.map((a) => a.id).join(' · ')}`
           : missing
-              .map(
-                (a) =>
-                  `**${a.id}**(${a.color ?? '?'} · 최소 사거리 ${a.minRange}m) 0회` ,
-              )
-              .join(' · ') +
-            ` — ${runs.length}판 내내 후보에 못 올랐습니다` +
-            ` · 그 사이 플레이어는 ${(runs[0].gateAt ?? 0).toFixed(1)}m 안쪽에 있었습니다`,
+              .map((a) => `**${a.id}**(최소 사거리 ${a.minRange}m) 0회`)
+              .join(' · ') + ` — ${runs.length}판 내내 후보에 못 올랐습니다`) +
+          (outOfHand.length
+            ? `\n     ↳ [손이 안 닿음] ${outOfHand
+                .map((a) => `${a.id} 최소 ${a.minRange}m`)
+                .join(' · ')} — 이 손은 ${stand.toFixed(1)}~${leash.toFixed(1)}m 에 섭니다.` +
+              ` **관측 못 한 것이지 없는 것이 아닙니다** — 물러나는 손이 필요합니다.`
+            : ''),
       )
     }
 
