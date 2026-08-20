@@ -65,6 +65,16 @@ function cellOf(e) {
  * (같은 규칙을 두 번 적는 것이지만, 여기서 게임 코드를 import 할 수 없고
  *  링크가 틀렸을 때 **양쪽이 같이 틀리는 것**보다 낫습니다.)
  */
+/**
+ * 🪜 이 사다리가 **여는 값**(m) — 걷힌 채로 아래 칸에서 위 칸까지 걸어야
+ *    하는 거리. 내리고 나면 그게 한 칸(2m)이 됩니다. 못 가면 Infinity 라
+ *    「길이 아예 없던 곳을 잇는다」는 뜻이고, 그건 최고로 값진 사다리입니다.
+ */
+function ladderSaving(hi, maxClimb, cellSize) {
+  const d = bfs({ cx: hi.loX, cz: hi.loZ }, { cx: hi.hiX, cz: hi.hiZ }, maxClimb, false)
+  return Number.isFinite(d) ? d * cellSize : Infinity
+}
+
 function ladderLinks() {
   const links = []
   for (const e of level.entities) {
@@ -254,16 +264,41 @@ try {
    * 입니다 — 여는 데 드는 값이 아끼는 값보다 크면 그건 수집품이지 지름길이
    * 아닙니다.
    */
-  const hi = ladderLinks()[0]
-  const detour =
-    bfs(respawnFire, { cx: hi.hiX, cz: hi.hiZ }, maxClimb, false) +
-    bfs({ cx: hi.hiX, cz: hi.hiZ }, boss, maxClimb, false) -
-    closed
-  check(
-    detour * CELL < (closed - opened) * CELL,
-    '사다리를 열러 가는 값이 아끼는 값보다 작다 (가던 길에서 잠깐 옆으로)',
-    `추가로 걷는 거리 ${detour * CELL}m vs 매 판 아끼는 거리 ${(closed - opened) * CELL}m`,
-  )
+  /**
+   * ⚠️ **이 검사는 오랫동안 사다리를 「하나만」 봤습니다** (`ladderLinks()[0]`).
+   *
+   * 그래서 두 번째 사다리가 **아끼는 값 0m** 인 채로 오래 남아 있었습니다 —
+   * 바로 옆에 걸어서 오르는 계단이 생겼는데 사다리만 그대로였던 것입니다.
+   * 자동 플레이의 장부에 눈금을 붙이고서야 드러났습니다:
+   *
+   *     사다리(56,18) — **아끼는 값 0m** · 곁에 간 적이 없다
+   *
+   * 이 저장소가 `.every(` 에 길이 게이트를 세우는 이유와 같은 병입니다 —
+   * **여럿 중 하나만 보면 나머지는 검사받지 않습니다.** 전부 봅니다.
+   */
+  for (const hi of ladderLinks()) {
+    const key = `${hi.loX},${hi.loZ}`
+    const detour =
+      bfs(respawnFire, { cx: hi.hiX, cz: hi.hiZ }, maxClimb, false) +
+      bfs({ cx: hi.hiX, cz: hi.hiZ }, boss, maxClimb, false) -
+      closed
+    /**
+     * 🪜 **아끼는 값이 0 이면 그건 지름길이 아니라 장식입니다.**
+     *    사다리마다 따로 잽니다 — 걷힌 채로 아래 칸에서 위 칸까지 걸어야
+     *    하는 거리가 곧 그 사다리가 여는 값입니다(게임이 잽니다).
+     */
+    const saves = ladderSaving(hi, maxClimb, CELL)
+    check(
+      saves > 2,
+      `사다리(${key})는 **실제로 아끼는 것이 있다** (0m 짜리는 지름길이 아니라 장식입니다)`,
+      `내리면 ${Math.round(saves)}m 가 한 칸(2m)이 됩니다`,
+    )
+    check(
+      detour * CELL < (closed - opened) * CELL,
+      `사다리(${key})를 열러 가는 값이 아끼는 값보다 작다 (가던 길에서 잠깐 옆으로)`,
+      `추가로 걷는 거리 ${detour * CELL}m vs 매 판 아끼는 거리 ${(closed - opened) * CELL}m`,
+    )
+  }
 
   // ---- 3. 걷힌 사다리는 못 오른다 ----
   const climb = await page.evaluate(async () => {

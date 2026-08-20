@@ -284,6 +284,25 @@ try {
      */
     const bodyStuck = () =>
       recentMove.length >= 12 && recentMove.reduce((a, b) => a + b, 0) < 0.5
+    /**
+     * 🧭 **「마지막 몇 미터」는 직선거리가 아니라 경로거리로 판단합니다.**
+     *
+     * 격자 길찾기는 목적지에 붙으면 두 칸 사이를 진동해서, 마지막 몇
+     * 미터만 직선으로 가게 해 두었습니다. 그런데 그 판단을 **직선거리**로
+     * 했더니, **벽 너머 4m** 도 "다 왔다"가 됐습니다:
+     *
+     *     사다리(56,36) — 가장 가까이 **4.0m** (걸어서 **56m**)
+     *                    → **곁에 갔는데 안내가 안 떴다**
+     *
+     * 봇은 사다리 **밑에 서서 위를 올려다보며** 벽으로 걸어 들어가고
+     * 있었습니다. 이 저장소가 보물 안내에서 이미 네 번 데인 자리입니다 —
+     * *"직선으로 재면 벽 너머 18m 짜리 보물을 «가깝다»고 알려 준다."*
+     * 같은 실수가 봇의 발에 남아 있었습니다.
+     *
+     * 그래서 **둘 다** 가까워야 직선으로 갑니다. 몸이 끼면 그것도 끕니다.
+     */
+    const lastFewMetres = (straight, walk, reach = 6) =>
+      straight < reach && Number.isFinite(walk) && walk < reach + 2 && !bodyStuck()
     const moveToward = (dx, dz) => {
       const p0 = G.state().player
       recentAims.push({
@@ -581,6 +600,18 @@ try {
     let fireLock = null
     /** 🔒 지금 적과 붙어 있는가 — 교전 문턱의 히스테리시스 상태(아래 `engageRange`). */
     let engagedFoe = false
+    /**
+     * 🪜 **사다리마다: 얼마나 가까이 갔고, 안내가 「내릴 수 있음」으로 뜬 적이 있는가.**
+     *
+     * 장부는 판마다 「사다리 **0 / 2개** 내림」만 말했습니다. 그런데 같은 판의
+     * 시간표에는 **「지름길이동 3%」** — 봇이 판의 3%(약 6.5초)를 사다리 열러
+     * 걸어가는 데 쓰고 아무것도 못 얻었다는 뜻입니다. 「안 갔다」와
+     * 「갔는데 못 열었다」는 처방이 완전히 다른데 0 하나로 뭉개져 있었습니다.
+     *
+     * 이 저장소가 폭발통·소비처에 붙인 것과 같은 눈금입니다 —
+     * **0 앞에 게이트를 세웁니다.**
+     */
+    const ladderChance = {}
     /** 지름길을 열러 가는 것을 잠시 멈추는 시각 / 그 왕복의 제한 시각. */
     let shortcutCooldownUntil = 0
     let shortcutTripUntil = 0
@@ -2478,6 +2509,32 @@ try {
       // ---- 사다리: 위에 서 있으면 내립니다 ----
       // 사람이라면 안내가 뜬 김에 누릅니다. 봇이 안 누르면 지름길이 열리는지
       // 아닌지를 이 실행으로는 알 수 없습니다.
+      /**
+       * 🪜 매 프레임 사다리마다 가장 가까이 간 거리를 갱신합니다. 사건이
+       *    일어나는 자리에서 기록합니다 — 나중에 되짚으면 못 봅니다.
+       */
+      {
+        const hintNow = G.shortcutHint()
+        for (const sc of G.shortcutInfo() ?? []) {
+          const rec = (ladderChance[sc.key] ??= {
+            near: Infinity,
+            nearWalk: Infinity,
+            ready: 0,
+            saving: sc.saving ?? 0,
+            opened: false,
+          })
+          rec.saving = sc.saving ?? rec.saving
+          if (sc.open) rec.opened = true
+          const d = Math.hypot(sc.hiWorldX - p.x, sc.hiWorldZ - p.z)
+          if (d < rec.near) {
+            rec.near = d
+            const st = G.pathStep(sc.hiWorldX, sc.hiWorldZ)
+            rec.nearWalk = st ? st.dist : Infinity
+          }
+          // 안내는 「지금 서 있는 자리」에 대한 것이라 가장 가까운 사다리에만 셉니다.
+          if (hintNow === 'ready' && d <= 4) rec.ready++
+        }
+      }
       if (G.shortcutHint() === 'ready') {
         markAct('사다리')
         releaseAll()
@@ -2518,8 +2575,9 @@ try {
               closedShortcut.hiWorldZ - p.z,
             )
             // 마지막 몇 미터는 직선 — 격자 길찾기는 목표에 붙으면 진동합니다.
-            const tx = straight < 6 ? closedShortcut.hiWorldX : toTop.x
-            const tz = straight < 6 ? closedShortcut.hiWorldZ : toTop.z
+            const useStraight = lastFewMetres(straight, toTop.dist)
+            const tx = useStraight ? closedShortcut.hiWorldX : toTop.x
+            const tz = useStraight ? closedShortcut.hiWorldZ : toTop.z
             moveToward(tx - p.x, tz - p.z)
             await sleep()
             continue
@@ -2992,7 +3050,7 @@ try {
            */
           markAct('강화이동')
           // 🧱 끼었으면 직선을 끕니다 — 근거는 `bodyStuck` 주석에.
-          const useStraight = straight < 6 && !bodyStuck()
+          const useStraight = lastFewMetres(straight, step.dist)
           const tx = useStraight ? fire.x : step.x
           const tz = useStraight ? fire.z : step.z
           moveToward(tx - p.x, tz - p.z)
@@ -3366,7 +3424,7 @@ try {
             // (화톳불에서 이미 한 번 데인 자리입니다).
             const straight = Math.hypot(best.goal.x - p.x, best.goal.z - p.z)
             // 🧱 끼었으면 직선을 끕니다 — 근거는 `bodyStuck` 주석에.
-            const useStraight = straight < 5 && !bodyStuck()
+            const useStraight = lastFewMetres(straight, best.step.dist, 5)
             const tx = useStraight ? best.goal.x : best.step.x
             const tz = useStraight ? best.goal.z : best.step.z
             moveToward(tx - p.x, tz - p.z)
@@ -3881,6 +3939,7 @@ try {
       focusLeft: Number(G.focusInfo().focus.toFixed(2)),
       clearedAt: Number(clearedAt.toFixed(1)),
       ladderOpen: (G.shortcutInfo() ?? []).filter((l) => l.open).length,
+      ladderChance,
       ladderTotal: (G.shortcutInfo() ?? []).length,
       bossSeen,
       bossKilled,
@@ -3994,6 +4053,26 @@ try {
     `  불티       ${log.embers} · 정련석 ${log.stones}(누적 ${log.stonesEarned}) · 성수병 강화 ${log.upgrades}회 · 무기 강화 ${log.weaponUps}회 [${log.weaponLevels.join('/')}]`,
   )
   console.log(`  지름길     사다리 ${log.ladderOpen} / ${log.ladderTotal}개 내림`)
+  /**
+   * 🪜 **0 앞에 게이트** — 「안 갔다」와 「갔는데 못 열었다」를 가릅니다.
+   *    (근거는 `ladderChance` 선언부 주석.)
+   */
+  for (const [key, r] of Object.entries(log.ladderChance ?? {})) {
+    const why = r.opened
+      ? '내렸다'
+      : r.ready > 0
+        ? `**안내는 떴는데 안 눌렸다**(${r.ready}프레임)`
+        : r.near <= 4
+          ? '**곁에 갔는데 안내가 안 떴다**'
+          : r.nearWalk > 40
+            ? '**곁에 간 적이 없다**(예산 밖)'
+            : '**곁에 간 적이 없다**'
+    console.log(
+      `             사다리(${key}) — 가장 가까이 ${r.near === Infinity ? '?' : `${r.near.toFixed(1)}m`}` +
+        ` (걸어서 ${r.nearWalk === Infinity ? '?' : `${r.nearWalk.toFixed(0)}m`})` +
+        ` · 아끼는 값 ${Math.round(r.saving)}m · ${why}`,
+    )
+  }
   /**
    * ── 곁길이 값어치가 있었는가 ────────────────────────────────────
    *
