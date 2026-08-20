@@ -66,7 +66,24 @@ try {
   announceSpeed(await simPerWall(page), 30 * 2.5)
 
   console.log('\n🎮 컨트롤의 쫀득함 — 누른 것이 언제 접수되는가\n')
+  /**
+   * ── 🖥 **이 기계의 프레임과 설계의 프레임은 다릅니다** ─────────────
+   *
+   * `core/time.ts` 의 `MAX_FRAME_DT` 는 1/20(0.05초)이고, 그건 **탭 전환
+   * 복귀용 안전 상한**입니다. GPU 가 없는 이 검증 기계는 **매 프레임 그
+   * 상한에 붙습니다.** 그래서 아래 「접수 1프레임」의 괄호 안 초는
+   * **이 기계의 프레임**이지 게임의 입력 지연이 아닙니다 — 그걸 안 적어
+   * 두면 0.050초를 보고 *"입력이 50ms 씹힌다"* 고 읽게 됩니다.
+   *
+   * 판정은 **프레임 수**로 합니다(기계와 무관). 초는 참고로만 찍습니다.
+   */
+  const budget = await page.evaluate(() => window.__game.reactionBudget())
+  const feelFrame = budget.frame
   console.log('  [기준] 접수는 **1프레임**. 2프레임 이상이면 플레이어는 "씹혔다"고 느낍니다.')
+  console.log(
+    `         ※ 판정은 **프레임 수**로 합니다 — 설계 기준 한 프레임 ${(feelFrame * 1000).toFixed(0)}ms(60fps 가정) · ` +
+      `이 기계의 상한은 ${(budget.maxFrame * 1000).toFixed(0)}ms 라, 괄호 안 초는 **기계의 프레임**입니다.`,
+  )
   console.log('         판정·되찾기는 무기의 성격이라 찍기만 합니다.\n')
 
   const t = await page.evaluate(() => window.__game.terrainInfo())
@@ -427,7 +444,9 @@ try {
      * 게임 안의 값(feelStep)을 눈금으로 쓰면 자기가 자기를 재는 셈이라
      * 무조건 통과합니다 — 그런 검사는 아무것도 증명하지 않습니다.
      */
-    const FRAME = 1 / 60
+    // 🖥 「한 프레임」은 **게임에서 읽습니다**(balance.ts `FEEL.frame`).
+    //    여기 1/60 을 적어 두면 가정을 바꾸는 날 이 프로브만 옛말을 합니다.
+    const FRAME = feelFrame
     for (let i = 1; i < rungs.length; i++) {
       const [lo, a] = rungs[i - 1]
       const [hi, b] = rungs[i]
@@ -484,7 +503,9 @@ try {
    */
   {
     const table = await page.evaluate(() => window.__game.weaponTable())
-    const FRAME = 1 / 60
+    // 🖥 「한 프레임」은 **게임에서 읽습니다**(balance.ts `FEEL.frame`).
+    //    여기 1/60 을 적어 두면 가정을 바꾸는 날 이 프로브만 옛말을 합니다.
+    const FRAME = feelFrame
     const rows = table
       .filter((w) => (w.comboSteps ?? []).length >= 2)
       .map((w) => {

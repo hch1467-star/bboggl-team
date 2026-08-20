@@ -43,7 +43,7 @@ export const time = {
   frame: 0,
 }
 
-const MAX_FRAME_DT = 1 / 20 // 탭 전환 후 복귀 시 물리가 터지지 않도록 상한
+export const MAX_FRAME_DT = 1 / 20 // 탭 전환 후 복귀 시 물리가 터지지 않도록 상한
 
 /**
  * 히트스톱 요청. 여러 타격이 겹치면 가장 긴 값이 이깁니다(더하면 끊겨 보임).

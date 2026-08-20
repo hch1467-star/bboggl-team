@@ -55,6 +55,7 @@ import {
   POISE,
   PUNISH_HEAL,
   reactionTime,
+  FEEL,
   TREASURE,
   VIAL,
   WEAPON_UPGRADE,
@@ -101,7 +102,7 @@ import { defineQuery, destroyEntity, hasComponent, isAlive, resetWorld } from '.
 import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
 import { vfxRng } from './core/rng'
-import { requestHitstop, resetTime, tick, time } from './core/time'
+import { requestHitstop, resetTime, tick, time, MAX_FRAME_DT } from './core/time'
 import { buildProps, type PropsInfo } from './render/props'
 import {
   CELL_SIZE,
@@ -6615,6 +6616,10 @@ declare global {
        * 색 가짓수는 게임이 **자기 데이터에서 세어** 넘깁니다.
        */
       reactionBudget: () => {
+        /** 🖥 손끝 차이를 셀 때의 한 프레임(초) — 60fps 가정(balance.ts FEEL). */
+        frame: number
+        /** 🖥 프레임의 안전 상한(초) — core/time.ts MAX_FRAME_DT. 목표가 아닙니다. */
+        maxFrame: number
         simple: number
         choice: number
         /** `answerIsDodge` 는 `ANSWER_IS_DODGE` 를 그대로 실어 보냅니다. */
@@ -7675,6 +7680,19 @@ window.__game = {
     }
     const colors = [...seen.values()].sort((x, y) => x.intent - y.intent)
     return {
+      /**
+       * 🖥 손끝 차이를 셀 때의 **한 프레임**(초) — balance.ts `FEEL`.
+       * 프로브가 `1/60` 을 손으로 적어 쓰고 있었습니다. 가정이므로
+       * 한 곳에 두고 **읽어 가게** 합니다(REACTION 과 같은 취급).
+       */
+      frame: FEEL.frame,
+      /**
+       * 🖥 **한 프레임의 안전 상한**(초) — `core/time.ts` 의 `MAX_FRAME_DT`.
+       * 목표 프레임이 **아닙니다**(탭 전환 복귀용). 느린 기계는 매 프레임
+       * 여기 붙어 도는데, 그때 찍히는 초를 게임의 입력 지연으로 읽으면
+       * 안 되므로 프로브가 **구분해서 말할 수 있게** 같이 보냅니다.
+       */
+      maxFrame: MAX_FRAME_DT,
       simple: Number(reactionTime(1).toFixed(3)),
       choice: Number(reactionTime(colors.length).toFixed(3)),
       colors,
