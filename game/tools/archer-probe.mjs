@@ -543,6 +543,8 @@ try {
       w.crowdAwake = 0
       w.crowdInShot = 0
       w.crowdSeen = 0
+      w.crowdBusy = 0
+      w.lastSim = null
       /**
        * ⚠️ **① 과 똑같이 걸어서 접근합니다.**
        * 처음엔 순간이동으로 세웠고, 커밋에 *"조건이 하나만 다르다"* 고
@@ -568,12 +570,35 @@ try {
          * **종류로** 집습니다.
          */
         const a = G.threats(400).find((t) => t.kind === 'archer')
+        /**
+         * ⏱ **표본이 아니라 시간을 셉니다 — 여기서 한 번 크게 속았습니다.**
+         *
+         * 처음엔 표본 수를 셌고, 「토큰만 34%」라는 값이 나왔습니다. 그런데
+         * 같은 판에서 궁수는 16.05초에 **3발** — 한 바퀴 5.35초 기준
+         * **이론상 최대치**(16.05÷5.35=3.0)를 냈습니다. 34% 를 준비된 채
+         * 기다렸다면 최대치가 나올 수 없습니다. 둘 중 하나가 거짓입니다.
+         *
+         * 거짓말한 쪽은 표본이었습니다. 이 감시기는 벽시계 6ms 마다 도는데
+         * 프레임이 무거우면 덜 찍힙니다 — **표본 비율은 시간 비율이
+         * 아닙니다.** 시뮬레이션 시계의 차이를 더합니다.
+         */
+        const nowSim = st.simElapsed
+        const dt = w.lastSim === null ? 0 : Math.max(0, nowSim - w.lastSim)
+        w.lastSim = nowSim
         if (a) {
           w.crowdSeen++
-          if (a.aggro) w.crowdAwake++
+          if (a.aggro) w.crowdAwake += dt
           if (a.dist >= w.shotMin && a.dist <= w.shotMax) {
-            w.crowdInShot++
-            if (a.aggro) w.why[a.idleWhy] = (w.why[a.idleWhy] ?? 0) + 1
+            w.crowdInShot += dt
+            /**
+             * ⚠️ **공격 중일 때는 세지 않습니다.** 공격 중인 적은 문 판정
+             *    코드에 아예 **도달하지 않고**(enemyAI 의 `continue`),
+             *    `idleWhy` 에는 **직전 값이 그대로 남습니다.** 예고+판정+후딜
+             *    약 3초가 통째로 「없음」으로 계상돼 있었습니다 — 재려던 것과
+             *    정반대입니다. 이 시간은 따로 부릅니다.
+             */
+            if (a.intent >= 0) w.crowdBusy += dt
+            else if (a.aggro) w.why[a.idleWhy] = (w.why[a.idleWhy] ?? 0) + dt
           }
         }
         await new Promise((r) => setTimeout(r, 6))
@@ -586,20 +611,22 @@ try {
         seen: w.crowdSeen,
         why: w.why,
         tele: w.tele.length,
+        busy: w.crowdBusy,
         walked: w.crowdWalked,
         others: G.threats(20).filter((t) => t.kind !== 'archer').length,
       }
     },
     [closest.x, closest.z, standSeconds, stretch],
   )
+  const secs = (v) => `${(v ?? 0).toFixed(1)}초`
   const whyText = Object.entries(crowd.why ?? {})
     .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${k} ${v}표본`)
+    .map(([k, v]) => `${k} ${secs(v)}`)
     .join(' · ')
   console.log(
     `\n  ③ 다른 적이 있을 때 — 같은 자리에 ${crowd.seconds}초 (곁의 다른 적 ${crowd.others}마리)\n` +
-      `     예고 ${crowd.tele}발 · 사거리 안 ${crowd.inShot}표본 · 그중 깨어 있던 ${crowd.awake}표본\n` +
-      `     막은 문 — ${whyText || '(깨어 있던 표본 없음)'}`,
+      `     예고 ${crowd.tele}발 · 사거리 안 ${secs(crowd.inShot)} · 그중 깨어 있던 ${secs(crowd.awake)}\n` +
+      `     그 시간의 쓰임 — 공격 중 ${secs(crowd.busy)} · ${whyText || '(막힌 시간 없음)'}`,
   )
   /**
    * 📐 **이 회차의 결론이 걸린 줄입니다.**
