@@ -56,6 +56,12 @@ const VOID = -1
  *    이 파일의 모든 답이 조용히 틀립니다.** 그래서 첫 줄에 찍어 둡니다.
  */
 const MAX_CLIMB = 1
+/**
+ * 🪜 되돌아올 수 없는 걸음에 얹는 값(칸). 게임과 **같아야** 합니다 —
+ *    `src/level/format.ts` `ONE_WAY_COST`. 갈라지면 이 스케치가 게임과
+ *    다른 길을 그립니다.
+ */
+const ONE_WAY_COST = 11
 const CELL = 2
 
 const wx = (cx) => (cx - W / 2 + 0.5) * CELL
@@ -94,14 +100,17 @@ function heights() {
  */
 function flood(h, sx, sz) {
   const at = (cx, cz) => (cx < 0 || cz < 0 || cx >= W || cz >= H ? VOID : h[cz * W + cx])
-  const dist = new Int32Array(W * H).fill(-1)
-  if (at(sx, sz) === VOID) return dist
-  dist[sz * W + sx] = 0
-  let frontier = [[sx, sz]]
-  while (frontier.length) {
-    const next = []
-    for (const [cx, cz] of frontier) {
-      const d = dist[cz * W + cx]
+  const cost = new Int32Array(W * H).fill(-1)
+  const steps = new Int32Array(W * H).fill(-1)
+  if (at(sx, sz) === VOID) return { cost, steps }
+  cost[sz * W + sx] = 0
+  steps[sz * W + sx] = 0
+  const buckets = [[[sx, sz]]]
+  for (let d = 0; d < buckets.length; d++) {
+    const bucket = buckets[d]
+    if (!bucket) continue
+    for (const [cx, cz] of bucket) {
+      if (cost[cz * W + cx] !== d) continue
       const from = at(cx, cz)
       for (const [nx, nz] of [
         [cx - 1, cz],
@@ -110,16 +119,20 @@ function flood(h, sx, sz) {
         [cx, cz + 1],
       ]) {
         if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue
-        if (dist[nz * W + nx] !== -1) continue
         const to = at(nx, nz)
         if (to === VOID || to - from > MAX_CLIMB) continue
-        dist[nz * W + nx] = d + 1
-        next.push([nx, nz])
+        // 🪜 되돌아 못 오면 값을 얹습니다 — 게임의 floodFrom 과 같은 규칙.
+        const nd = d + 1 + (from - to > MAX_CLIMB ? ONE_WAY_COST : 0)
+        const cur = cost[nz * W + nx]
+        if (cur !== -1 && cur <= nd) continue
+        cost[nz * W + nx] = nd
+        steps[nz * W + nx] = steps[cz * W + cx] + 1
+        ;(buckets[nd] ??= []).push([nx, nz])
       }
     }
-    frontier = next
+    buckets[d] = []
   }
-  return dist
+  return { cost, steps }
 }
 
 const { h, edits } = heights()
@@ -136,10 +149,11 @@ const fromSpawn = flood(h, sx, sz)
  *    느리지만(보물 다섯 × 6336칸) 여전히 0.2초 안쪽이고, 방향을 틀리면
  *    답이 통째로 뒤집힙니다.
  */
-const sb = fromSpawn[bz * W + bx]
+const sb = fromSpawn.steps[bz * W + bx]
+const sbCost = fromSpawn.cost[bz * W + bx]
 console.log(`\n🧭 동선 스케치 — ${level.name ?? 'level'} (${W}×${H}칸 · MAX_CLIMB ${MAX_CLIMB})`)
 if (edits > 0) console.log(`  ✂️ 가상 손질 ${edits}칸 적용 — ROUTE_EDIT`)
-if (sb < 0) {
+if (sb < 0 || sbCost < 0) {
   console.log('  ❌ 시작 지점에서 보스까지 **길이 없습니다.**')
   process.exit(1)
 }
@@ -154,9 +168,10 @@ const toBoss = flood(h, bx, bz) // 근사: 대칭 구간에서만 맞습니다(�
 const route = []
 for (let cz = 0; cz < H; cz++) {
   for (let cx = 0; cx < W; cx++) {
-    const a = fromSpawn[cz * W + cx]
-    const b = toBoss[cz * W + cx]
-    if (a >= 0 && b >= 0 && a + b === sb) route.push([cx, cz])
+    // 동선은 **값(cost)** 으로 고릅니다 — 게임의 화살표와 같은 기준입니다.
+    const a = fromSpawn.cost[cz * W + cx]
+    const b = toBoss.cost[cz * W + cx]
+    if (a >= 0 && b >= 0 && a + b === sbCost) route.push([cx, cz])
   }
 }
 const zs = route.map(([, cz]) => wz(cz))
@@ -181,8 +196,8 @@ let overEye = 0
 console.log('')
 for (const t of ent('treasure')) {
   const [tx, tz] = cellOf(t.x, t.z)
-  const st = fromSpawn[tz * W + tx]
-  const tb = flood(h, tx, tz)[bz * W + bx]
+  const st = fromSpawn.steps[tz * W + tx]
+  const tb = flood(h, tx, tz).steps[bz * W + bx]
   const eye = Math.min(...route.map(([cx, cz]) => Math.hypot(wx(cx) - t.x, wz(cz) - t.z)))
   const det = st >= 0 && tb >= 0 ? (st + tb - sb) * CELL : null
   if (det === null || det > BUDGET) overBudget++

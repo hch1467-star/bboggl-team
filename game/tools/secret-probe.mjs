@@ -341,7 +341,20 @@ try {
       // 이 자취가 곧 "이 게임이 실제로 걷게 하는 길"이기 때문입니다.
       [tx, tz, { x: trail[0].x, z: trail[0].z }, trail[trail.length - 1].x, trail[trail.length - 1].z],
     )
-    if (!r || ![r.sb, r.tb, r.st].every((v) => Number.isFinite(v) && v >= 0)) return -1
+    /**
+     * ⚠️ **못 가는 것은 `null` 로 답합니다 — 예전엔 −1 이었습니다.**
+     *
+     * 길안내에 「되돌아올 수 없는 길」의 값이 생기면서(format.ts
+     * `ONE_WAY_COST`) **음수 우회가 가능해졌습니다.** 안내는 *값*으로
+     * 고르고 거리는 *걸음*으로 재니, *"안내받은 길보다 돌아가는 쪽이
+     * 실제로는 더 짧다"* 가 성립합니다 — 구덩이로 뛰어내리면 미터는
+     * 줄지만 되돌아올 수 없으니 안내가 안 권하는 경우입니다.
+     *
+     * 그래서 −1 을 「못 감」의 표시로 쓸 수 없게 됐습니다. 실제로 폭발통
+     * (45,−9) 가 **−8m** 로 나와 「예산 밖」으로 잘못 찍혔습니다.
+     * 못 가는 것과 음수는 **다른 사실**이므로 다른 값으로 답합니다.
+     */
+    if (!r || ![r.sb, r.tb, r.st].every((v) => Number.isFinite(v) && v >= 0)) return null
     return r.st + r.tb - r.sb
   }
 
@@ -392,10 +405,10 @@ try {
       for (const b of barrels) {
         const d = nearest(b.x, b.z)
         const ex = await detour(b.x, b.z)
-        if (ex < 0 || ex > DETOUR_BUDGET) barrelFar.push(`(${Math.round(b.x)},${Math.round(b.z)}) ${ex}m`)
+        if (ex === null || ex > DETOUR_BUDGET) barrelFar.push(`(${Math.round(b.x)},${Math.round(b.z)}) ${ex === null ? '못 감' : `${ex}m`}`)
         console.log(
           `    ${d <= t.cameraViewSize ? '·' : '⚠️'} (${Math.round(b.x)}, ${Math.round(b.z)})` +
-            `  눈으로 ${d.toFixed(1)}m · **더 걷는 ${ex < 0 ? '?' : `${ex.toFixed(0)}m`}**` +
+            `  눈으로 ${d.toFixed(1)}m · **더 걷는 ${ex === null ? '못 감' : `${ex.toFixed(0)}m`}**` +
             `${d <= t.cameraViewSize ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
         )
       }
@@ -414,7 +427,7 @@ try {
     console.log(
       `    ${ok ? '·' : '⚠️'} (${Math.round(v.x)}, ${Math.round(v.z)})` +
         `  눈으로 ${v.d.toFixed(1)}m · 발로 ${v.walk < 0 ? '?' : `${v.walk.toFixed(0)}m`}` +
-        ` · **더 걷는 ${v.extra < 0 ? '?' : `${v.extra.toFixed(0)}m`}**` +
+        ` · **더 걷는 ${v.extra === null ? '못 감' : `${v.extra.toFixed(0)}m`}**` +
         `${ok ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
     )
   }
@@ -431,7 +444,7 @@ try {
    * ⚠️ 예산은 봇에서 **읽어 옵니다.** 여기 40을 적으면 예산을 바꾸는 날
    *    이 검사만 옛 값으로 통과합니다.
    */
-  const far = seen.filter((v) => v.extra < 0 || v.extra > DETOUR_BUDGET)
+  const far = seen.filter((v) => v.extra === null || v.extra > DETOUR_BUDGET)
   check(
     seen.length > 0 && far.length === 0,
     `모든 보물이 곁길 예산 안에 있다 — **원래 길보다 더 걷는 거리**로 (${DETOUR_BUDGET}m)`,
@@ -607,7 +620,7 @@ try {
    * 그런 보물이 안 알려지는 것은 **실패가 아니라 규칙이 지켜진 것**입니다.
    * 예산 밖까지 세면 이 검사는 게임에게 규칙을 어기라고 요구하게 됩니다.
    */
-  const inBudget = seen.filter((v) => v.extra >= 0 && v.extra <= DETOUR_BUDGET)
+  const inBudget = seen.filter((v) => v.extra !== null && v.extra <= DETOUR_BUDGET)
   const budgetKeys = new Set(inBudget.map((v) => `${Math.round(v.x)},${Math.round(v.z)}`))
   const toldInBudget = along.told.filter((k) => budgetKeys.has(k))
   check(

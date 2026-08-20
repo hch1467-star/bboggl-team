@@ -559,6 +559,26 @@ try {
     let lastSkipKey = ''
     /** 화톳불로 향하기 시작한 뒤의 제한 시각. 왕복이 길어지면 포기합니다. */
     let fireTripUntil = 0
+    /**
+     * 🔒 **가기로 한 소비처를 붙잡아 둡니다** (히스테리시스).
+     *
+     * 고르는 규칙은 *"내 앞에 있는 것 중 가장 멀리 있는 것"* 입니다. 그런데
+     * *"내 앞"* 의 경계는 내가 걸을수록 움직여서, 두 소비처가 그 경계를
+     * 사이에 두고 있으면 **매 프레임 답이 바뀝니다.** 자동 플레이의 25초
+     * 막힘이 정확히 그 모양이었습니다:
+     *
+     *     순 이동 0.3m 인데 **걸은 거리 70.8m** · [강화이동×90]
+     *     조준점 2곳 [(26,4)×55 (24,4)×35] · 누른 키 [**SD**×55 **WA**×35]
+     *
+     * 누른 키가 정확히 반대입니다 — 두 목표 사이에서 제자리걸음을 한 것입니다.
+     * (지난 회차의 라벨은 이걸 「걸음이 진동」으로 잘못 읽었습니다. 조준점이
+     *  둘이어도 **목표가 둘**일 수 있습니다 — 그 라벨도 같이 고칩니다.)
+     *
+     * 사람은 가기로 정하면 갑니다. 그래서 **여정이 끝날 때까지 안 바꿉니다.**
+     * 이 저장소가 어그로 해제에 쓴 것과 같은 원리입니다 — 켜는 문턱과 끄는
+     * 문턱이 같으면 경계에서 깜빡입니다.
+     */
+    let fireLock = null
     /** 지름길을 열러 가는 것을 잠시 멈추는 시각 / 그 왕복의 제한 시각. */
     let shortcutCooldownUntil = 0
     let shortcutTripUntil = 0
@@ -910,12 +930,19 @@ try {
                  *    답이 있는데 아래 줄이 다른 말을 하면, 다음 사람은
                  *    **더 자세한 쪽**을 믿습니다. 순서를 못 박습니다.
                  */
+                /**
+                 * ⚠️ **조준점 수로는 「목표가 둘」과 「걸음이 둘」을 못 가릅니다.**
+                 *    실측: 조준점 2곳인데 누른 키가 [SD×55 WA×35] — 정확히
+                 *    반대 방향이었고, 원인은 **소비처 두 곳 사이의 진동**
+                 *    이었습니다. 라벨은 「걸음이 진동」이라고 잘못 말했습니다.
+                 *    방향이 실제로 뒤집혔는지를 봐야 합니다.
+                 */
                 const verdict =
                   walkedSince < 3
                     ? '**끼임 — 몸이 안 나간다**'
-                    : cells.size <= 2
-                      ? '**걸음이 진동**'
-                      : '**목표가 진동**'
+                    : flips >= 2
+                      ? '**진동 — 반대 방향을 번갈아 누름**'
+                      : '**한 방향으로 계속 걷는데 제자리**'
                 const keyCount = recentAims.reduce((m, a) => {
                   const k = a.keys ?? '?'
                   return m.set(k, (m.get(k) ?? 0) + 1)
@@ -2536,7 +2563,24 @@ try {
          * 못 들렀습니다.
          */
         const d = obj ? G.distancesToward?.(obj.x, obj.z, pts) : null
-        if (d && pts.length) {
+        /**
+         * 🔒 이미 가는 중이면 그 곳을 그대로 씁니다 — 목록에 남아 있고
+         *    아직 못 갔을 때만. (근거는 `fireLock` 선언부 주석.)
+         */
+        if (fireLock && fireTripUntil > 0) {
+          const held = pts.find((q) => q.x === fireLock.x && q.z === fireLock.z)
+          if (held) {
+            fire = held
+            const toHeld = G.pathStep(held.x, held.z)
+            const leftHeld = d ? d.points[pts.indexOf(held)] : NaN
+            if (toHeld && Number.isFinite(leftHeld) && d) {
+              fireDetour = toHeld.dist + leftHeld - d.player
+            }
+          } else {
+            fireLock = null
+          }
+        }
+        if (!fire && d && pts.length) {
           let bestLeft = -Infinity
           let bestIdx = -1
           for (let i = 0; i < pts.length; i++) {
@@ -2820,12 +2864,17 @@ try {
          */
         // 98m 는 걷기만 해도 20초, 도중에 싸우면 더 걸립니다. 25초로는
         // 도착 직전에 포기하게 됩니다 — 예산과 제한 시간은 같이 움직여야 합니다.
-        if (fireTripUntil === 0) fireTripUntil = now() + 25
+        if (fireTripUntil === 0) {
+          fireTripUntil = now() + 25
+          fireLock = fire ? { x: fire.x, z: fire.z } : null // 🔒 여기서 잠급니다
+        }
         if (now() > fireTripUntil) {
           // 25초 안에 못 닿았으면 포기하고, **지갑도 그때 값으로 적어 둡니다.**
           // 안 그러면 다음 프레임에 "지갑이 늘었다"가 계속 참이라 영원히 재시도합니다.
           fireCooldownUntil = now() + 30
           fireTripUntil = 0
+        fireLock = null
+          fireLock = null
           lastFireWallet = { embers: em.embers, stones: wu.stones }
         /**
          * 왕복 예산 — 무기 강화는 **멀어도 갑니다.**
@@ -2984,6 +3033,8 @@ try {
           }
           fireCooldownUntil = now() + 30
           fireTripUntil = 0
+        fireLock = null
+          fireLock = null
           lastFireWallet = { embers: em.embers, stones: wu.stones }
         }
       }
@@ -3185,6 +3236,8 @@ try {
           // (실제로 그렇게 막혀서 139초에 실행이 끝났습니다).
           fireCooldownUntil = now() + 15
           fireTripUntil = 0
+        fireLock = null
+          fireLock = null
           const until = now() + 2.5
           while (now() < until) await sleep()
           lastVials = G.vialInfo().vials

@@ -3,6 +3,7 @@ import {
   CELL_SIZE,
   HEIGHT_STEP,
   MAX_CLIMB,
+  ONE_WAY_COST,
   VOID,
   cellToWorld,
   type LevelData,
@@ -344,7 +345,10 @@ export class Terrain {
    * 방향이 중요합니다: 오르막은 한쪽으로만 통하므로(내려가기는 자유, 오르기는
    * 제한) **목표에서 거꾸로** 퍼뜨리되 판정은 "이웃 → 지금 칸"으로 겁니다.
    */
+  /** 🧭 방향을 정하는 장 — 일방통행에 값이 얹혀 있습니다. 거리로 쓰면 안 됩니다. */
   private field: Int32Array | null = null
+  /** 📏 거리를 답하는 장 — 실제로 걷는 칸 수. `field` 와 짝입니다. */
+  private fieldSteps: Int32Array | null = null
   private fieldKey = ''
 
   private canStepCell(fromX: number, fromZ: number, toX: number, toZ: number): boolean {
@@ -381,6 +385,7 @@ export class Terrain {
    * BFS는 플레이어가 **칸을 옮길 때만** 다시 돕니다(격자 2m).
    */
   private playerField: Int32Array | null = null
+  private playerSteps: Int32Array | null = null
   private playerFieldKey = ''
 
   buildPlayerField(x: number, z: number): void {
@@ -389,7 +394,9 @@ export class Terrain {
     const key = `${t.cx},${t.cz}|${this.shortcuts.map((s) => (s.open ? 1 : 0)).join('')}`
     if (key === this.playerFieldKey && this.playerField) return
     this.playerFieldKey = key
-    this.playerField = this.floodFrom(t.cx, t.cz)
+    const f = this.floodFrom(t.cx, t.cz)
+    this.playerField = f.cost
+    this.playerSteps = f.steps
   }
 
   /**
@@ -397,25 +404,52 @@ export class Terrain {
    * `buildPlayerField` 를 먼저 부른 프레임에서만 유효합니다.
    */
   distanceToPlayer(x: number, z: number): number | null {
-    if (!this.playerField) return null
+    // 📏 **거리는 걸음 수로 답합니다** — 값이 얹힌 `playerField` 로 답하면
+    //    적이 "22m 더 멀리 있다"고 거짓말을 하게 됩니다(floodFrom 설계 노트).
+    if (!this.playerSteps) return null
     const { w, h } = this.level
     const { cx, cz } = worldToCell(x, z, w, h)
     if (cx < 0 || cz < 0 || cx >= w || cz >= h) return null
-    const d = this.playerField[cz * w + cx]
+    const d = this.playerSteps[cz * w + cx]
     return d < 0 ? null : d * CELL_SIZE
   }
 
-  /** 한 칸에서 퍼져 나가는 BFS. 거리장 두 개가 같은 규칙을 쓰도록 함수로 뺐습니다. */
-  private floodFrom(tx: number, tz: number): Int32Array {
+  /**
+   * ── 한 칸에서 퍼져 나가는 거리장 ────────────────────────────────
+   *
+   * 거리장 **둘**(목표용·플레이어용)이 같은 규칙을 쓰도록 함수로 뺐습니다.
+   * ⚠️ 예전에는 `buildFlowField` 가 **같은 반복문을 한 벌 더** 갖고
+   *    있었습니다. 규칙이 두 곳에 살면 언젠가 한쪽만 고쳐집니다 —
+   *    실제로 되돌아올 수 없는 길의 값을 넣으면서 그 자리를 합쳤습니다.
+   *
+   * ── 값이 둘인 이유 ─────────────────────────────────────────────
+   *   · `cost`  — **어느 쪽으로 갈지**를 정합니다. 일방통행에 `ONE_WAY_COST`
+   *               가 얹힙니다(format.ts 설계 노트).
+   *   · `steps` — **몇 미터인지**를 답합니다. 실제로 걷는 칸 수 그대로입니다.
+   *
+   * 하나로 합치면 안 됩니다. 값을 얹은 장으로 거리를 답하면 HUD 의
+   * *"보스까지 100m"* 와 프로브의 *"더 걷는 거리"* 가 **걷지도 않은 22m 를
+   * 더해서** 말하게 됩니다. 방향을 정하는 자와 거리를 재는 자는 다릅니다.
+   */
+  private floodFrom(tx: number, tz: number): { cost: Int32Array; steps: Int32Array } {
     const { w, h } = this.level
-    const field = new Int32Array(w * h).fill(-1)
-    if (this.levelAtCell(tx, tz) === VOID) return field
-    field[tz * w + tx] = 0
-    let frontier: [number, number][] = [[tx, tz]]
-    while (frontier.length) {
-      const next: [number, number][] = []
-      for (const [cx, cz] of frontier) {
-        const d = field[cz * w + cx]
+    const cost = new Int32Array(w * h).fill(-1)
+    const steps = new Int32Array(w * h).fill(-1)
+    if (this.levelAtCell(tx, tz) === VOID) return { cost, steps }
+    cost[tz * w + tx] = 0
+    steps[tz * w + tx] = 0
+    /**
+     * 값이 1 또는 1+ONE_WAY_COST 두 가지뿐이라 **버킷 큐**면 충분합니다.
+     * (우선순위 큐를 쓰면 정렬 비용이 붙는데, 이 지도는 6336칸이라
+     *  버킷 배열이 더 싸고 코드도 짧습니다.)
+     */
+    const buckets: [number, number][][] = [[[tx, tz]]]
+    for (let d = 0; d < buckets.length; d++) {
+      const bucket = buckets[d]
+      if (!bucket) continue
+      for (const [cx, cz] of bucket) {
+        // 더 싼 값으로 이미 확정된 칸이면 이 항목은 낡은 것입니다.
+        if (cost[cz * w + cx] !== d) continue
         for (const [nx, nz] of [
           [cx - 1, cz],
           [cx + 1, cz],
@@ -423,16 +457,24 @@ export class Terrain {
           [cx, cz + 1],
         ] as [number, number][]) {
           if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
-          if (field[nz * w + nx] !== -1) continue
           // **이웃에서 지금 칸으로** 올 수 있어야 합니다(오르막 방향 주의).
           if (!this.canStepCell(nx, nz, cx, cz)) continue
-          field[nz * w + nx] = d + 1
-          next.push([nx, nz])
+          /**
+           * 🪜 그 걸음이 **되돌아올 수 없는** 것인가 — 지금 칸에서 이웃으로
+           *    다시 갈 수 없으면 일방통행입니다. 값을 얹는 것은 여기 한 곳뿐.
+           */
+          const oneWay = !this.canStepCell(cx, cz, nx, nz)
+          const nd = d + 1 + (oneWay ? ONE_WAY_COST : 0)
+          const cur = cost[nz * w + nx]
+          if (cur !== -1 && cur <= nd) continue
+          cost[nz * w + nx] = nd
+          steps[nz * w + nx] = steps[cz * w + cx] + 1
+          ;(buckets[nd] ??= []).push([nx, nz])
         }
       }
-      frontier = next
+      buckets[d] = []
     }
-    return field
+    return { cost, steps }
   }
 
   /** 목표 지점으로 향하는 거리장을 준비합니다. 같은 조건이면 다시 만들지 않습니다. */
@@ -443,34 +485,14 @@ export class Terrain {
     if (key === this.fieldKey && this.field) return
     this.fieldKey = key
 
-    const field = new Int32Array(w * h).fill(-1)
-    if (this.levelAtCell(t.cx, t.cz) === VOID) {
-      this.field = field
-      return
-    }
-    field[t.cz * w + t.cx] = 0
-    let frontier = [[t.cx, t.cz] as [number, number]]
-    while (frontier.length) {
-      const next: [number, number][] = []
-      for (const [cx, cz] of frontier) {
-        const d = field[cz * w + cx]
-        for (const [nx, nz] of [
-          [cx - 1, cz],
-          [cx + 1, cz],
-          [cx, cz - 1],
-          [cx, cz + 1],
-        ] as [number, number][]) {
-          if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
-          if (field[nz * w + nx] !== -1) continue
-          // **이웃에서 지금 칸으로** 올 수 있어야 합니다(오르막 방향 주의).
-          if (!this.canStepCell(nx, nz, cx, cz)) continue
-          field[nz * w + nx] = d + 1
-          next.push([nx, nz])
-        }
-      }
-      frontier = next
-    }
-    this.field = field
+    /**
+     * ⚠️ 여기에는 `floodFrom` 과 **똑같은 반복문이 한 벌 더** 있었습니다.
+     *    일방통행 값을 넣으면서 한쪽만 고치면 *"화살표는 구덩이를 피하는데
+     *    적은 안 피한다"* 가 되므로, 그 자리에서 합쳤습니다.
+     */
+    const f = this.floodFrom(t.cx, t.cz)
+    this.field = f.cost
+    this.fieldSteps = f.steps
   }
 
   /**
@@ -508,11 +530,12 @@ export class Terrain {
 
   /** 목표까지 실제로 걸어야 하는 거리(m). 길이 없으면 null. */
   pathDistance(x: number, z: number): number | null {
-    if (!this.field) return null
+    // 📏 위 `distanceToPlayer` 와 같은 이유로 **걸음 수**로 답합니다.
+    if (!this.fieldSteps) return null
     const { w, h } = this.level
     const { cx, cz } = worldToCell(x, z, w, h)
     if (cx < 0 || cz < 0 || cx >= w || cz >= h) return null
-    const d = this.field[cz * w + cx]
+    const d = this.fieldSteps[cz * w + cx]
     return d < 0 ? null : d * CELL_SIZE
   }
 
