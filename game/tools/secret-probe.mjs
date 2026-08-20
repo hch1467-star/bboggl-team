@@ -178,6 +178,73 @@ try {
   )
 
   /**
+   * ── 🧭 **두 「주 동선」이 같은 선인가** ─────────────────────────────
+   *
+   * 이 저장소에는 「주 동선」이 **두 가지 뜻**으로 쓰입니다:
+   *
+   *   · `npm run map`  — `routeTrail(화톳불→보스)`. 흐름장이 미는 **한 줄**.
+   *                       곁길 비용·적 배치·빈 구간을 전부 이 선에서 잽니다.
+   *   · `npm run secret` — **목표를 따라 실제로 걸은 자취**. 보물·화톳불 같은
+   *                       중간 목표를 거치므로 길이 달라질 수 있습니다.
+   *
+   * 두 선이 갈라져 있으면, 배치 검사는 **플레이어가 걷지 않는 선** 위에서
+   * 판정하는 셈입니다. 지난 회차에 동선 사본 셋을 하나로 모았는데, 이건
+   * 한 단계 위에서 같은 병일 수 있습니다.
+   *
+   * 실제로 한 자리에서 두 값이 크게 어긋났습니다 —
+   *     `map`    함몰지 가장자리 곁길 **왕복 12m** (최단 경로에서 6m)
+   *     `secret` 같은 자리 보물 **편도 60m** (걸은 자취에서)
+   *
+   * 그래서 **재 봅니다.** 갈라졌다면 어느 쪽이 「플레이어가 걷는 길」인지
+   * 정하고 검사들을 그쪽으로 모아야 하고, 안 갈라졌다면 위 어긋남은
+   * 다른 이유입니다 — 어느 쪽이든 **재기 전에는 못 고칩니다.**
+   */
+  {
+    const cmp = await page.evaluate(
+      ([sx, sz, ex, ez, pts]) => {
+        const G = window.__game
+        const line = G.routeTrail(sx, sz, ex, ez)
+        if (!line || !line.length) return null
+        // 자취의 각 걸음이 그 「한 줄」에서 얼마나 벗어나 있는가.
+        const off = pts.map((p) => {
+          let best = Infinity
+          for (const q of line) best = Math.min(best, Math.hypot(q.x - p.x, q.z - p.z))
+          return best
+        })
+        return { lineLen: line.length, off }
+      },
+      [
+        trail[0].x,
+        trail[0].z,
+        trail[trail.length - 1].x,
+        trail[trail.length - 1].z,
+        trail.map((p) => ({ x: p.x, z: p.z })),
+      ],
+    )
+    if (cmp) {
+      const worst = Math.max(...cmp.off)
+      const far = cmp.off.filter((d) => d > 22).length
+      console.log(
+        `  🧭 두 동선 대조 — 흐름장이 미는 줄 ${cmp.lineLen}칸 vs 목표 따라 걸은 자취 ${trail.length}걸음\n` +
+          `       자취가 그 줄에서 벗어난 거리 — 평균 ${(cmp.off.reduce((a, b) => a + b, 0) / cmp.off.length).toFixed(1)}m · ` +
+          `최대 **${worst.toFixed(1)}m** · 화면(22m) 밖으로 벗어난 걸음 ${far}/${trail.length}`,
+      )
+      /**
+       * 🚧 두 선이 화면 한 장 넘게 갈라지면, `map` 의 배치 검사와
+       *    이 파일의 시야·안내 검사는 **다른 판을 재고 있는 것**입니다.
+       *    숫자를 나란히 놓고 비교하기 전에 이것부터 서야 합니다.
+       */
+      check(
+        far === 0,
+        '🧭 **두 「주 동선」이 같은 길이다** (배치 검사와 시야 검사가 같은 판을 재도록)',
+        far === 0
+          ? `가장 많이 벗어난 걸음도 ${worst.toFixed(1)}m (화면 22m 안)`
+          : `${far}걸음이 화면 밖 · 최대 ${worst.toFixed(1)}m — map 의 곁길·배치 판정과 이 파일의 시야·안내 판정이 **다른 선**을 씁니다`,
+      )
+    }
+  }
+
+  /**
    * ── 📐 **동선이 실제로 얼마나 휘는가** ────────────────────────────
    *
    * 아래 검사들은 *"보물이 동선에서 멀다"* 고 말합니다. 그런데 그건 결과일
