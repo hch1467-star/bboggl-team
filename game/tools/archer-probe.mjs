@@ -131,6 +131,8 @@ try {
    *    이 실험 전체가 무의미하므로, 먼저 그것부터 확인합니다.
    */
   const maxShotRange = Math.max(...A.attacks.map((a) => a.maxRange))
+  const minShotRange = Math.min(...A.attacks.map((a) => a.minRange))
+  const [WAKE, SMIN, SMAX] = [A.wakeRange, minShotRange, maxShotRange]
   check(
     A.wakeRange > maxShotRange,
     '🚧 깨는 거리가 사거리보다 **멀다** (사거리 안에서야 깨면 쏠 틈이 없습니다)',
@@ -197,7 +199,7 @@ try {
    *
    * 지도가 계산한 그 상황입니다. 실제로 걸어서 몇 발이 오는지 셉니다.
    */
-  await page.evaluate(() => {
+  await page.evaluate(([WAKE, SMIN, SMAX]) => {
     const G = window.__game
     /** 시뮬레이션 시계로 기다립니다 — 벽시계로 재면 이 컨테이너에서는
      *  한 프레임이 0.2초라 「1.2초」가 여섯 프레임이 됩니다(두 번 데었습니다). */
@@ -212,7 +214,22 @@ try {
      * 🔭 **예고 감시기.** 예고가 시작되는 순간을 세려면 프레임 사이를
      * 촘촘히 봐야 합니다. Node 에서 매번 물어보면 왕복이 느려 놓칩니다.
      */
-    const w = { tele: [], woke: null, minDist: Infinity, samples: 0 }
+    const w = {
+      tele: [],
+      woke: null,
+      minDist: Infinity,
+      /** 🚶 깨는 판정이 쓰는 값의 최솟값 — 직선과 나란히 놓고 봅니다. */
+      minWalk: Infinity,
+      /** 직선으로는 사거리 안인데 **걸어서는 깨는 거리 밖**이었던 프레임. */
+      asleepFar: 0,
+      awake: 0,
+      inShot: 0,
+      samplesInShot: [],
+      samples: 0,
+      wake: WAKE,
+      shotMin: SMIN,
+      shotMax: SMAX,
+    }
     window.__arch = w
     let prevId = ''
     w.timer = setInterval(() => {
@@ -223,7 +240,38 @@ try {
       const t0 = th.length ? th.reduce((b, x) => (x.dist < b.dist ? x : b), th[0]) : null
       if (t0) {
         w.minDist = Math.min(w.minDist, t0.dist)
-        if (t0.aggro && w.woke === null) w.woke = { at: st.simElapsed, dist: Number(t0.dist.toFixed(2)) }
+        /**
+         * 🚶 **깨는 판정이 실제로 쓰는 값**을 그대로 받아 적습니다.
+         *
+         * 이 게임은 적을 **직선거리가 아니라 걸어야 하는 거리**로 깨웁니다
+         * (벽 건너 적이 직선 12.4m 라고 깨어나 영원히 벽을 향해 걷던 사고
+         * 때문입니다 — 실제 경로는 98m 였습니다). 그래서 직선만 보면
+         * *"코앞인데 왜 안 깨지?"* 가 영원히 안 풀립니다.
+         *
+         * `enemyInfo().walk` 는 AI 가 쓰는 그 값입니다. 프로브가 지형에서
+         * 다시 계산하면 **다른 함수**를 검사하게 됩니다.
+         */
+        const inf = G2.enemyInfo(t0.entity)
+        const walk = inf ? inf.walk : null
+        if (walk !== null && walk < w.minWalk) w.minWalk = walk
+        // 직선은 가까운데 걸어서는 먼 자리 — 원거리 적이 잠드는 자리입니다.
+        if (t0.dist <= w.shotMax && (walk === null || walk > w.wake)) w.asleepFar++
+        if (t0.aggro) w.awake++
+        if (t0.dist >= w.shotMin && t0.dist <= w.shotMax) {
+          w.inShot++
+          w.samplesInShot.push({
+            straight: Number(t0.dist.toFixed(1)),
+            walk: walk === null ? null : Number(walk.toFixed(1)),
+            aggro: t0.aggro,
+            why: t0.idleWhy,
+          })
+        }
+        if (t0.aggro && w.woke === null)
+          w.woke = {
+            at: st.simElapsed,
+            dist: Number(t0.dist.toFixed(2)),
+            walk: walk === null ? null : Number(walk.toFixed(2)),
+          }
       }
       const mine = G2.telegraphs()
       const id = mine.length ? mine[0].attackId : ''
@@ -233,7 +281,7 @@ try {
       }
       prevId = id
     }, 6)
-  })
+  }, [WAKE, SMIN, SMAX])
 
   const walkResult = await page.evaluate(
     async ([cells, speed]) => {
@@ -308,8 +356,11 @@ try {
     `\n  ① 지나가기 — 동선 ${stretch.length}칸(${stretch.length * CELL}m) 을 걸었습니다\n` +
       `     실제로 걸은 거리 ${walkResult.walked}m · 걸린 시간 ${walkResult.seconds}초 ` +
       `(걸음 ${rules.walkSpeed}m/s 로 계산하면 ${((stretch.length * CELL) / rules.walkSpeed).toFixed(1)}초)\n` +
-      `     가장 가까이 붙은 거리 ${walkWatch.minDist === null ? '—' : walkWatch.minDist.toFixed(1)}m · ` +
-      `깬 순간 ${walkWatch.woke ? `${walkWatch.woke.dist}m` : '**안 깼습니다**'}\n` +
+      `     가장 가까이 붙은 거리 ${walkWatch.minDist === null ? '—' : walkWatch.minDist.toFixed(1)}m ` +
+      `(걸어서 ${Number.isFinite(walkWatch.minWalk) ? walkWatch.minWalk.toFixed(1) : '길없음'}m)\n` +
+      `     깬 순간 ${walkWatch.woke ? `직선 ${walkWatch.woke.dist}m · 걸어서 ${walkWatch.woke.walk ?? '?'}m` : '**안 깼습니다**'}\n` +
+      `     사거리 안 ${walkWatch.inShot}프레임 · 그중 깨어 있던 ${walkWatch.awake}프레임 · ` +
+      `직선은 사거리 안인데 **걸어서는 깨는 거리 밖**이던 ${walkWatch.asleepFar}프레임\n` +
       `     📐 같은 식으로 계산하면 **${predicted.toFixed(1)}발**  vs  🏹 실측 **${walkWatch.tele.length}발**` +
       (walkWatch.tele.length
         ? ` (${walkWatch.tele.map((t) => `${t.id}@${t.dist}m`).join(' · ')})`
@@ -325,6 +376,37 @@ try {
     '🚧 실험대가 **실제로 걸었다** (안 걷고 0발이면 그건 실험대 고장입니다)',
     `${walkResult.walked}m / 동선 ${stretch.length * CELL}m`,
   )
+  /**
+   * ── 🚶 **직선은 코앞인데 걸어서는 먼 자리** ────────────────────────
+   *
+   * 이 게임은 적을 **걸어야 하는 거리**로 깨웁니다. 근접 적에게는 옳은
+   * 규칙입니다 — 벽 건너 적이 직선 12.4m 라고 깨어나 영원히 벽을 향해
+   * 걷던 사고(실제 경로 98m)를 고치려고 넣은 것이니까요.
+   *
+   * 그런데 **원거리 적에게 「돌아가야 하는 자리」는 바로 쏘라고 세워 둔
+   * 자리입니다.** 아노르 론도의 은기사 궁수가 건너편 들보에 있는 것이
+   * 설계의 전부인 것처럼요. 근접을 고친 규칙이 원거리를 끌 수 있습니다.
+   *
+   * 자동 플레이가 그 모양을 찍었습니다 — 사거리 안 297프레임 중 깨어
+   * 있던 것이 **8프레임**. 다만 봇의 길은 판마다 흔들려서(주 동선 밟은
+   * 비율 56~100%) 봇으로는 결론을 못 냅니다. 여기서는 **같은 길을 늘
+   * 같게** 걸으므로 결론이 납니다.
+   */
+  const farFrames = walkWatch.asleepFar
+  check(
+    farFrames === 0,
+    '🚶 **직선으로 사거리 안이면 걸어서도 깨는 거리 안**이다 (원거리 적이 코앞에서 자지 않게)',
+    farFrames === 0
+      ? `그런 프레임 0개 · 가장 가까이 직선 ${walkWatch.minDist.toFixed(1)}m / 걸어서 ${Number.isFinite(walkWatch.minWalk) ? walkWatch.minWalk.toFixed(1) : '길없음'}m`
+      : `${farFrames}프레임 — 예: ` +
+        (walkWatch.samplesInShot ?? [])
+          .filter((s) => s.walk === null || s.walk > A.wakeRange)
+          .slice(0, 3)
+          .map((s) => `직선 ${s.straight}m/걸어서 ${s.walk ?? '길없음'}m`)
+          .join(' · ') +
+        ` (깨는 거리 ${A.wakeRange}m)`,
+  )
+
   check(
     walkWatch.woke !== null,
     '🚧 지나가는 동안 쏘는 자가 **깨어났다**',
