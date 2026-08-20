@@ -278,6 +278,49 @@ try {
     `판정부터 ${fromActive.toFixed(1)} vs 후딜부터 ${fromRecovery.toFixed(1)}`,
   )
 
+  /**
+   * ── 🧍 **사람을 계산에 넣습니다** ──────────────────────────────────
+   *
+   * 위 검사는 *"등 뒤에 닿을 수 있는가"* 를 묻고 초록입니다 — 붙어 싸우는
+   * 적 전부가 통과합니다. 그런데 그 계산에는 **사람이 없습니다.** 이 실험대는
+   * 커밋이 시작되는 **바로 그 프레임**에 움직이기 시작합니다.
+   *
+   * 사람은 보고 나서 움직입니다. 이 저장소는 그 예산을 이미 갖고 있고
+   * (`balance.ts` `reactionTime` — Hick의 법칙), 답이 하나뿐인 경우가
+   * `simple` 입니다. 등 뒤로 도는 데는 고를 것이 없으니 그 값이 맞습니다.
+   *
+   * ⚠️ 값을 여기 적지 않고 **게임에서 받습니다**(`reactionBudget()`).
+   *    `npm run react` 가 색 목록을 손으로 적어 두었다가 🔵 을 통째로
+   *    빠뜨린 적이 있습니다 — 같은 실수를 반복하지 않습니다.
+   *
+   * 이건 `npm run react` 가 4색에 한 일과 **같은 일**입니다. 거기 머리말이
+   * 이렇게 적혀 있습니다 — *"그 계산을 다시 읽어 보니 **사람이 들어 있지
+   * 않았습니다**."* 기둥 3 의 계산에도 안 들어 있었습니다.
+   */
+  const react = await page.evaluate(() => window.__game.reactionBudget())
+  {
+    const rows = results
+      .filter((r) => r.runs.some((x) => x.behindAt >= 0))
+      .map((r) => {
+        const b = med(r.runs.map((x) => x.behindAt))
+        const w = med(r.runs.map((x) => x.window))
+        return { name: r.name, slack: w - b, left: w - b - react.simple }
+      })
+    const dead = rows.filter((r) => r.left < 0)
+    check(
+      rows.length > 0 && dead.length === 0,
+      '🧍 **사람이 보고 움직여도 등 뒤 창이 남는다** (여유에서 반응 시간을 뺀 값)',
+      `반응 ${react.simple}초(답이 하나뿐일 때) · ` +
+        rows
+          .sort((a, b) => a.left - b.left)
+          .map((r) => `${r.name} ${r.left >= 0 ? '+' : ''}${r.left.toFixed(2)}초`)
+          .join(' · ') +
+        (dead.length
+          ? ` — **${dead.map((d) => d.name).join('·')}** 는 사람이 움직이기 시작하기도 전에 닫힙니다`
+          : ''),
+    )
+  }
+
   console.log('\n  [적별] 등 뒤에 닿기까지 / 커밋이 풀릴 때까지 (여유)')
   for (const r of results) {
     const b = r.runs.length ? med(r.runs.map((x) => x.behindAt)) : -1
