@@ -500,26 +500,54 @@ try {
     const start = a.keepDistance ?? a.minRange ?? 0
     const free = Math.max(0, a.windup - budget.choice)
     const walk = Math.max(0, free - slowDodge.duration)
+    /**
+     * ⚠️ **못 하는 동작의 거리를 더하면 안 됩니다.**
+     *
+     * 이 식은 *"반응 → 구르기 → 걷기"* 를 가정하는데, 남은 예고가 구르기
+     * 길이보다 짧으면 **구르기가 끝나지 않습니다.** 그런데 `have` 에는
+     * 구르기 거리가 그대로 들어가 있었고, `canDodge` 는 ❗ 표시만 하고
+     * **판정은 그 거리로 통과**시켰습니다.
+     *
+     * 이 저장소가 여러 번 데인 모양입니다 — 경고를 찍되 문을 안 세우면
+     * 초록에 묻힙니다. 못 구르면 **걸어서만** 갑니다.
+     */
+    const canDodge = free >= slowDodge.duration
     return {
       from: a.from,
       need: a.reach,
-      have: start + t.dodgeDistance + t.playerMoveSpeed * walk,
+      have: start + (canDodge ? t.dodgeDistance : 0) + t.playerMoveSpeed * walk,
       start,
-      canDodge: free >= slowDodge.duration,
+      canDodge,
+      /**
+       * 🚧 **시작부터 사거리 밖이면 증거가 아닙니다.**
+       * 「8m 에서 시작해 6m 밖으로」는 물러날 것도 없이 이미 밖입니다.
+       * 그런 줄이 섞이면 *"물러날 시간이 남는다"* 가 **빈 표본으로**
+       * 통과할 수 있습니다 — 이 파일이 다른 자리마다 세워 둔 게이트와
+       * 같은 이유로 갈라 둡니다.
+       */
+      trivial: start >= a.reach,
     }
   })
-  const pullBad = pulls.filter((p) => p.have <= p.need)
+  const real = pulls.filter((p) => !p.trivial)
+  const pullBad = real.filter((p) => p.have <= p.need)
   mark(PULL)
   check(
-    pulls.length > 0 && pullBad.length === 0,
+    real.length > 0 && pullBad.length === 0,
     '🟣 은 반응하고도 **사거리 밖으로 물러날 시간이 남는다**',
-    pulls
+    real
       .map(
         (p) =>
           `${p.from} ${p.start}m 에서 시작해 ${p.need}m 밖으로 / 반응 빼고 ${p.have.toFixed(1)}m` +
-          (p.canDodge ? '' : ' ❗구르기조차 못 넣음'),
+          (p.canDodge ? '' : ' ❗구르기는 못 넣어 **걸어서만** 잰 값'),
       )
-      .join(' · '),
+      .join(' · ') +
+      (pulls.length > real.length
+        ? ` · [증거 아님] 시작부터 사거리 밖 ${pulls.length - real.length}개 — ` +
+          pulls
+            .filter((p) => p.trivial)
+            .map((p) => `${p.from} ${p.start}m≥${p.need}m`)
+            .join(' · ')
+        : ''),
   )
 
   /**
