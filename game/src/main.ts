@@ -177,6 +177,7 @@ import {
   readChainsLost,
   readIdleReasons,
   setAggroRangeOverride,
+  wakeRangeOf,
   spotEvents,
   deaggroEvents,
   reachDistanceOf,
@@ -5850,6 +5851,8 @@ class Game {
 
   debugThreats(range = 14): {
     entity: number
+    /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다(구현부 주석). */
+    kind: string
     x: number
     z: number
     dist: number
@@ -5925,6 +5928,23 @@ class Game {
       const attacking = Actor.state[e] === ActorState.Attack
       out.push({
         entity: e,
+        /**
+         * 🏷 **이 적의 종류**(`grunt`·`archer`…).
+         *
+         * ── 봇에게 숨은 정보를 주는 것이 아닙니다 ──────────────────
+         * 적마다 **색과 실루엣이 다릅니다.** 쏘는 자는 일부러 밝고 차가운
+         * 색(0x8fb3c9)을 줬는데, 그 근거가 `enemies.ts` 에 이렇게 적혀
+         * 있습니다 — *"멀리 있는 실루엣이 배경에 묻히면 「저기서 쏘고
+         * 있다」를 못 읽습니다."* 즉 사람도 화면에서 종류를 읽습니다.
+         *
+         * ── 왜 필요했나 ────────────────────────────────────────────
+         * 자동 플레이 기록에 쏘는 자가 **한 줄도 없었습니다**(예고 0회).
+         * 그런데 `npm run archer` 로 같은 자리를 실제로 걸어 보니
+         * **두 발**이 정확히 날아왔습니다. 모델도 배치도 맞는데 판에서만
+         * 0 이라면 남은 갈림길은 *"봇이 거기를 안 걷는다"* 인데,
+         * 종류가 없으면 그 장부를 **적을 수가 없습니다.**
+         */
+        kind: enemyDef(Enemy.kind[e]).id,
         x: Number(Transform.x[e].toFixed(2)),
         z: Number(Transform.z[e].toFixed(2)),
         dist: Number(d.toFixed(2)),
@@ -6370,6 +6390,8 @@ declare global {
         attackCycle: number
         /** 강인도 최대치 — "무너뜨리려면 얼마나 깎아야 하는가"의 기준입니다. */
         poiseMax: number
+        /** 🔔 지금 모드에서 이 종류가 **실제로 깨어나는 거리**(m). */
+        wakeRange: number
         attacks: {
           id: string
           intent: number
@@ -6647,6 +6669,8 @@ declare global {
       heartbeatInfo: () => { beats: number; intensity: number; warn: number }
       threats: (range?: number) => {
         entity: number
+        /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다. */
+        kind: string
         x: number
         z: number
         dist: number
@@ -7285,6 +7309,18 @@ window.__game = {
           return d.attackCooldown + avg
         })(),
         poiseMax: d.poiseMax,
+        /**
+         * 🔔 **이 종류가 실제로 깨어나는 거리**(m) — AI 가 쓰는 바로 그 값.
+         *
+         * `npm run map` 이 이 식을 손으로 베껴 두고 있었습니다. 지난 회차에
+         * 「주 동선」이 세 곳에서 따로 그려지다 어긋난 것과 같은 병이라,
+         * 같은 처방을 씁니다 — 식은 `enemyAI.wakeRangeOf` 한 곳에만 둡니다.
+         *
+         * ⚠️ **모드에 따라 값이 다릅니다.** 레벨 모드에서는 방 단위로 좁혀
+         *    쏘는 자 19m 이고, 아레나에서는 종류별 기본값(55m)입니다.
+         *    실험대를 아레나에 세우면 **게임과 다른 규칙**을 재게 됩니다.
+         */
+        wakeRange: wakeRangeOf(k),
         attacks: attacksFor(k).map((a) => ({
           id: a.id,
           intent: a.intent as number,

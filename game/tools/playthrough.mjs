@@ -700,6 +700,15 @@ try {
     let bossWasEngaged = false
     let lastBossSample = 0
     const bossAttackRange = G.enemyRoster().find((r) => r.id === 'boss')?.attackRange ?? 3.4
+    /**
+     * 🏹 쏘는 자의 **깨는 거리 · 사거리 구간**을 게임에서 읽습니다.
+     * 여기 19/3/12 를 베껴 적으면 밸런스를 손보는 날 장부만 옛말을 합니다.
+     * (`wakeRange` 는 AI 가 쓰는 바로 그 값 — `enemyAI.wakeRangeOf`)
+     */
+    const archerDef = G.enemyRoster().find((r) => r.id === 'archer')
+    const archerWake = archerDef?.wakeRange ?? 0
+    const archerMin = Math.min(...(archerDef?.attacks ?? [{ minRange: 0 }]).map((a) => a.minRange))
+    const archerMax = Math.max(...(archerDef?.attacks ?? [{ maxRange: 0 }]).map((a) => a.maxRange))
     let bossKilled = false
     let clearedAt = 0
     const notes = []
@@ -809,6 +818,27 @@ try {
     let act = '시작'
     /** 💥 통마다: 가장 가까이 간 거리 · 사거리 안이었던 프레임 · 조건까지 맞은 프레임. */
     const barrelChance = {}
+    /**
+     * 🏹 **쏘는 자마다의 장부** — 통·사다리·소비처에 붙인 것과 같은 눈금입니다.
+     *
+     * ── 왜 생겼나 (숫자) ───────────────────────────────────────────
+     * 판을 끝낸 기록에 쏘는 자가 **한 줄도 없었습니다** — 예고 0회 · 피해 0 ·
+     * 그 구역(오르는 계단)에서 적의 휘두름 0회. 그런데 `npm run map` 은
+     * 같은 자리를 *"지나가면 1.7발"* 로 계산했고, `npm run archer` 로 그
+     * 구간을 실제로 걸어 보니 **정확히 두 발**이 날아왔습니다
+     * (archer_shot@11.5m · archer_draw@11.0m). 사거리 안에 16초 서 있으면
+     * 3발 · 체력 87→34 였습니다.
+     *
+     * 즉 **모델도 맞고 배치도 맞는데 판에서만 0** 입니다. 남은 갈림길은
+     * 셋인데 처방이 전부 다릅니다:
+     *   · 봇이 **그 구간을 안 걷는다**      → 고칠 곳은 길안내/봇
+     *   · 봇이 **깨기 전에 죽인다**         → 고칠 곳은 적 체력/자리
+     *   · 봇이 **깨웠는데 쏘기 전에 죽인다** → 고칠 곳은 예고/물러나기
+     * 장부가 없으면 이 셋이 전부 「0회」로 똑같이 보입니다.
+     *
+     * 「사건은 사건이 일어난 자리에서 기록한다」 — 매 프레임 적습니다.
+     */
+    const archerChance = {}
     /** 최근 90 프레임의 가지 — 막혔을 때 되감아 봅니다. */
     const recentActs = []
     const actTotals = new Map()
@@ -886,6 +916,53 @@ try {
             ).length
             if (caught >= 2) rec.ready++
           }
+        }
+      }
+
+      /**
+       * ── 🏹 **쏘는 자를 매 프레임 지켜봅니다** ──────────────────────
+       *
+       * 재는 값과 그 값이 가리키는 처방(위 `archerChance` 주석의 갈림길):
+       *   · `near`     가장 가까이 간 직선거리 → **동선 문제**인지
+       *   · `inWake`   깨는 거리 안이었던 프레임 → 깰 **기회**가 있었는지
+       *   · `inShot`   사거리 안이었던 프레임   → 쏠 **기회**가 있었는지
+       *   · `woke`     실제로 깨어난 적이 있는지
+       *   · `winding`  예고를 실제로 띄운 프레임
+       *   · `died`     죽었는지 · 그때까지 몇 초였는지
+       *
+       * ⚠️ 죽으면 목록에서 사라지므로 **키는 처음 본 자리**로 잡습니다
+       *    (통과 같은 이유입니다). 쏘는 자는 물러나기(7m) 때문에 움직이니,
+       *    좌표를 매 프레임 키로 쓰면 한 마리가 여러 마리로 세어집니다.
+       */
+      {
+        // 판 전체를 덮는 반지름 — 잠든 적도 돌려주므로 「한 번도 안 깼다」가 잡힙니다.
+        for (const t of G.threats(400)) {
+          if (t.kind !== 'archer') continue
+          const rec = (archerChance[t.entity] ??= {
+            at: `${Math.round(t.x)},${Math.round(t.z)}`,
+            near: Infinity,
+            inWake: 0,
+            inShot: 0,
+            winding: 0,
+            woke: false,
+            seen: 0,
+            died: null,
+          })
+          rec.seen++
+          if (t.dist < rec.near) rec.near = t.dist
+          if (t.dist <= archerWake) rec.inWake++
+          if (t.dist >= archerMin && t.dist <= archerMax) rec.inShot++
+          if (t.aggro) rec.woke = true
+          if (t.winding) rec.winding++
+        }
+        // 이번 프레임에 목록에서 사라진 것 = 죽은 것. **사라진 자리에서** 적습니다.
+        const aliveNow = new Set(
+          G.threats(400)
+            .filter((t) => t.kind === 'archer')
+            .map((t) => String(t.entity)),
+        )
+        for (const [id, rec] of Object.entries(archerChance)) {
+          if (rec.died === null && !aliveNow.has(id)) rec.died = Number((now() - t0).toFixed(1))
         }
       }
 
@@ -3516,6 +3593,8 @@ try {
       barrelLitByBot: actTotals.get('통점화') ?? 0,
       barrelLeft: G.barrelInfo().barrels.length,
       barrelChance: Object.entries(barrelChance).map(([k, v]) => ({ at: k, ...v })),
+      archerChance: Object.values(archerChance),
+      archerRule: { wake: archerWake, min: archerMin, max: archerMax },
       runAttacks: G.runStats().runAttacks ?? 0,
       rollAttacks: G.runStats().rollAttacks ?? 0,
       plungeAttacks: G.runStats().plungeAttacks ?? 0,
@@ -4420,6 +4499,33 @@ try {
       `                통(${c.at}) — 가장 가까이 ${Number.isFinite(c.near) ? c.near.toFixed(1) : '?'}m` +
         ` · 사거리 안 ${c.inReach}프레임(그중 조건 ${c.ready}) — ${why}`,
     )
+  }
+  /**
+   * 🏹 **쏘는 자의 사연.** 「예고 0회」가 어디서 끊겼는지를 한 줄로 봅니다.
+   * 갈림길마다 고칠 곳이 다릅니다 — 판정하지 않고 **사실만** 적습니다
+   * (판정은 `npm run map` 과 `npm run archer` 의 몫입니다).
+   */
+  if ((log.archerChance ?? []).length) {
+    const r = log.archerRule ?? {}
+    console.log(
+      `             🏹 쏘는 자 (깨는 ${r.wake}m · 사거리 ${r.min}~${r.max}m)`,
+    )
+    for (const a of log.archerChance) {
+      const why = !Number.isFinite(a.near)
+        ? '**한 번도 못 봤다**'
+        : a.winding > 0
+          ? '예고를 띄웠다'
+          : a.woke
+            ? '깼는데 **예고까지 못 갔다**'
+            : a.inWake > 0
+              ? '깨는 거리 안에 들어갔는데 **안 깼다**'
+              : '**깨는 거리 안에 든 적이 없다**'
+      console.log(
+        `                (${a.at}) — 가장 가까이 ${Number.isFinite(a.near) ? a.near.toFixed(1) : '?'}m` +
+          ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임 · 예고 ${a.winding}프레임` +
+          `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}`,
+      )
+    }
   }
   const distTotal =
     log.boss.fought && log.boss.dist

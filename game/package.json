@@ -76,7 +76,8 @@
     "repro": "node tools/repro-probe.mjs",
     "landmark": "node tools/landmark-probe.mjs",
     "track": "node tools/track-probe.mjs",
-    "rhythm": "node tools/rhythm-probe.mjs"
+    "rhythm": "node tools/rhythm-probe.mjs",
+    "archer": "node tools/archer-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

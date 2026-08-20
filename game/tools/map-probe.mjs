@@ -665,6 +665,37 @@ try {
    * ⚠️ 어그로 거리는 게임에서 읽습니다(terrainInfo().levelAggroRange).
    */
   const aggro = await page.evaluate(() => window.__game.terrainInfo().levelAggroRange)
+  const roster = await page.evaluate(() => window.__game.enemyRoster())
+
+  /**
+   * ── 🚧 **14m 를 근접 적 전부에게 쓰는 것이 아직 맞는가** ────────────
+   *
+   * 아래 검사들은 *"이 칸에서 깨울 수 있는 적"* 을 **한 개의 반지름**
+   * (`levelAggroRange` = 14m)으로 셉니다. 오늘은 맞습니다 — 근접 적은
+   * 전부 `reach + 여유` 가 14 미만이라 깨는 거리가 14m 로 눌립니다
+   * (balance.ts `LEVEL_AGGRO_LEAD` 설계 노트의 표).
+   *
+   * 하지만 그건 **지금 수치에서만** 참인 우연입니다. 누군가 근접 적의
+   * 사거리를 늘리면 그 적의 깨는 거리는 조용히 넓어지는데, 이 파일은
+   * 계속 14m 로 세면서 **초록을 유지합니다.** 「한 칸 차이의 초록은
+   * 운이다」의 전형입니다.
+   *
+   * 그래서 우연이 깨지는 순간 **말을 하게** 둡니다. 원거리 적(쏘는 자)은
+   * 애초에 다른 반지름으로 재므로 여기서 뺍니다.
+   */
+  {
+    const MELEE = ['grunt', 'charger', 'binder', 'dragger']
+    const off = roster
+      .filter((r) => MELEE.includes(r.id))
+      .filter((r) => r.wakeRange !== aggro)
+    check(
+      off.length === 0,
+      '🚧 근접 적의 **깨는 거리가 아직 전부 같다** (아래 검사들이 반지름 하나로 세도 되는 근거)',
+      off.length
+        ? `${off.map((r) => `${r.id} ${r.wakeRange}m`).join(' · ')} ≠ ${aggro}m — 이 파일의 "어그로 ${aggro}m" 계산을 종류별로 갈라야 합니다`
+        : `${MELEE.length}종 전부 ${aggro}m`,
+    )
+  }
 
   /**
    * ---- 8.5 **색을 가르치는 적이 주 동선에서 깨어나는가** ----
@@ -776,23 +807,26 @@ try {
      * **2발**을 최소로 둡니다. 한 발은 사고이고, 두 발이어야
      * *"피하고 붙는다"* 라는 대응이 성립합니다.
      */
-    const roster = await page.evaluate(() => window.__game.enemyRoster())
+    // 로스터는 위(어그로 게이트)에서 이미 한 번 읽었습니다 — 그대로 씁니다.
     const t = await page.evaluate(() => window.__game.terrainInfo())
     const walkSpeed = t.playerMoveSpeed
     const archerDef = roster.find((r) => r.id === 'archer')
     if (archerDef) {
-      // 게임(enemyAI.ts)과 **같은 식**으로 이 종류의 실제 어그로를 냅니다.
       /**
-       * 게임(enemyAI.ts)과 **같은 식**으로 깨는 거리를 냅니다.
-       * ⚠️ 기준은 `attackRange`(달려들기 시작하는 거리)가 아니라 패턴의
-       * **reach**(실제로 때리는 거리)입니다 — 끄는 자가 attackRange 12 ·
-       * reach 6.5 라, 이 둘을 헷갈리면 근접 적 어그로까지 조용히 넓어집니다.
+       * ── 🔔 깨는 거리는 **게임에게 묻습니다** ──────────────────────
+       *
+       * 여기에는 원래 `min(max(levelAggroRange, reach + lead), max)` 라는
+       * 식이 **손으로 베껴** 적혀 있었습니다. 게임 쪽 원본은
+       * `enemyAI.ts` 의 루프 안에 인라인으로 있었고요 — 즉 같은 규칙이
+       * 두 곳에 있었습니다.
+       *
+       * 지난 회차에 「주 동선」이 세 곳에서 따로 그려지다 서로 어긋난
+       * 것과 **똑같은 병**입니다. 그때 배운 처방을 그대로 씁니다:
+       * 식은 `enemyAI.wakeRangeOf` 한 곳에만 두고, 여기서는 그 결과를
+       * 로스터로 받아 읽기만 합니다. 밸런스를 손보는 날 검사가 저절로
+       * 따라옵니다.
        */
-      const hurtReach = Math.max(...archerDef.attacks.map((a) => a.reach))
-      const wakeRange = Math.min(
-        Math.max(t.levelAggroRange, hurtReach + t.levelAggroLead),
-        t.levelAggroMax,
-      )
+      const wakeRange = archerDef.wakeRange
       /**
        * ── 🧗 **이 판의 천장을 같이 찍습니다** ─────────────────────
        *

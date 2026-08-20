@@ -124,6 +124,36 @@ export function setAggroRangeOverride(range: number): void {
   aggroRangeOverride = range
 }
 
+/**
+ * 🔔 **이 종류가 실제로 깨어나는 거리**(m) — 판단하는 쪽이 쓰는 바로 그 값.
+ *
+ * ── 왜 함수로 빼는가 ────────────────────────────────────────────────
+ * 이 식은 아래 루프에 인라인으로 있었고, `npm run map` 이 **같은 식을 손으로
+ * 베껴** 쓰고 있었습니다. 지난 회차에 「주 동선」이 세 곳에서 따로 그려지다
+ * 서로 어긋난 것과 **똑같은 병**입니다. 그때 배운 것을 여기에도 적용합니다:
+ * 베낀 식은 언젠가 갈라지고, 갈라진 뒤에는 **프로브가 없는 게임을 검사합니다.**
+ *
+ * ── 무엇을 계산하는가 ──────────────────────────────────────────────
+ * · 레벨 모드(`aggroRangeOverride > 0`)에서는 방 단위로 좁히되,
+ *   원거리 적에게는 **자기 사거리 + 여유**만큼은 확보해 줍니다.
+ *   (근거는 balance.ts 의 `LEVEL_AGGRO_RANGE` · `LEVEL_AGGRO_LEAD` 설계 노트)
+ * · 아레나 모드에서는 종류별 기본값 그대로입니다.
+ *
+ * ⚠️ 기준은 `attackRange`(달려들기 시작하는 거리)가 **아니라** 패턴의
+ *    `reach`(실제로 때리는 거리)입니다. 끄는 자가 attackRange 12 · reach 6.5
+ *    라, 이 둘을 헷갈리면 근접 적 어그로까지 조용히 넓어집니다 —
+ *    실제로 한 번 그렇게 틀렸고 `npm run encounter` 가 잡았습니다.
+ */
+export function wakeRangeOf(kind: EnemyKind): number {
+  const cfg = enemyDef(kind)
+  const hurtReach = attacksFor(kind).reduce((m, a) => Math.max(m, a.reach), 0)
+  const wakeCap = Math.min(
+    LEVEL_AGGRO_MAX,
+    Math.max(aggroRangeOverride, hurtReach + LEVEL_AGGRO_LEAD),
+  )
+  return aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, wakeCap) : cfg.aggroRange
+}
+
 /** 🚧 AI 가 지금 도는가 — 프로브가 **멈춘 게임**을 재고 규칙 탓을 하지 않게. */
 export function enemyAiRunning(): boolean {
   return aiEnabled
@@ -1399,12 +1429,8 @@ export function enemyAiSystem(
      * 끝납니다(balance.ts LEVEL_AGGRO_LEAD 설계 노트). 근접 적은
      * 사거리가 작아 이 식이 14m 를 넘지 않으므로 **아무것도 안 바뀝니다.**
      */
-    const hurtReach = attacksFor(kind).reduce((m, a) => Math.max(m, a.reach), 0)
-    const wakeCap = Math.min(
-      LEVEL_AGGRO_MAX,
-      Math.max(aggroRangeOverride, hurtReach + LEVEL_AGGRO_LEAD),
-    )
-    const range = aggroRangeOverride > 0 ? Math.min(cfg.aggroRange, wakeCap) : cfg.aggroRange
+    // 식 자체는 `wakeRangeOf` 하나뿐입니다 — 프로브도 **같은 함수**를 읽습니다.
+    const range = wakeRangeOf(kind)
     /**
      * ⚠️ **직선거리가 아니라 걸어야 하는 거리로 깨웁니다.**
      *
