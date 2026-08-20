@@ -456,12 +456,36 @@ try {
   )
 
   console.log('')
-  check(
-    hidden.length === 0,
-    '모든 보물이 주 동선에서 한 번은 화면에 뜬다 (빛기둥이 발을 돌릴 수 있다)',
-    hidden.length === 0
-      ? `가장 먼 것이 ${Math.max(...seen.map((v) => v.d)).toFixed(1)}m`
-      : `${hidden.length}개가 동선에서 시야 밖 — 최대 ${Math.max(...hidden.map((v) => v.d)).toFixed(1)}m`,
+  /**
+   * ── 📻 **빛기둥은 「알 방법」의 하나이지 전부가 아닙니다** ──────────
+   *
+   * 이 줄은 오랫동안 **판정**이었습니다: *"모든 보물이 한 번은 화면에
+   * 뜬다."* 그런데 그 뒤에 **곁길 알림**(안내 줄)이 생겼고, 그건 정확히
+   * *"안 보이는 보물을 알려 주기 위한"* 통로입니다. 그래서 지금 둘을 다
+   * 판정으로 두면 **모든 보물에 두 통로를 다 요구**하게 됩니다.
+   *
+   * 이 파일 맨 위가 묻고 싶은 것은 하나입니다 —
+   * *"갈까 말까가 선택이 되려면 **갈 곳이 있다는 걸 알아야** 한다."*
+   * 빛기둥이든 안내든, 알면 선택이 성립합니다. 참조한 게임들도 통로를
+   * 하나로 강요하지 않습니다:
+   *   · **오공** — 주 동선에서 뭔가 **보이게** 두어 발을 돌리게 합니다
+   *   · **엘든 링** — 안내가 없고 **빛/실루엣**만으로 알립니다
+   *   · **젤다 BotW** — 눈에 안 띄는 것은 **센서가 소리로** 알립니다
+   *   · **호라이즌** — 포커스가 범위 안을 **한꺼번에** 띄웁니다
+   * 공통점은 「채널이 여럿이고, 하나면 족하다」입니다.
+   *
+   * 그래서 채널별 숫자는 **눈금으로** 남기고, 판정은 아래 「알 방법이
+   * 하나는 있다」 하나로 모읍니다. 눈금을 지우지는 않습니다 — 어느
+   * 통로가 약한지는 고칠 때 알아야 하고, 실제로 이 두 숫자가 **서로 다른
+   * 보물**을 가리키고 있었습니다(빛기둥 없는 것 2개, 안내 없는 것 2개,
+   * 그런데 겹치는 것은 **1개**).
+   */
+  console.log(
+    `  [빛기둥] 동선에서 시야(${t.cameraViewSize}m) 안 ${seen.length - hidden.length}/${seen.length}개` +
+      (hidden.length
+        ? ` · 밖 ${hidden.map((v) => `(${Math.round(v.x)},${Math.round(v.z)}) ${v.d.toFixed(1)}m`).join(' · ')}`
+        : '') +
+      '  ※ 재되 걸지 않습니다(위 주석)',
   )
 
   /**
@@ -623,11 +647,56 @@ try {
   const inBudget = seen.filter((v) => v.extra !== null && v.extra <= DETOUR_BUDGET)
   const budgetKeys = new Set(inBudget.map((v) => `${Math.round(v.x)},${Math.round(v.z)}`))
   const toldInBudget = along.told.filter((k) => budgetKeys.has(k))
+  console.log(
+    `  [안내] 예산 안의 보물 중 걷는 동안 알려진 것 ${toldInBudget.length}/${inBudget.length}개` +
+      ` — ${toldInBudget.join(' · ') || '없음'}` +
+      ` · 예산 밖이라 안 알려 준 것 ${seen.length - inBudget.length}개  ※ 재되 걸지 않습니다`,
+  )
+  /**
+   * ── 🔦 **알 방법이 하나는 있는가 — 이 파일의 판정** ─────────────────
+   *
+   * 위 두 눈금(빛기둥·안내)을 **또는**으로 묶습니다. 근거는 바로 위
+   * 주석과 이 파일 맨 위의 설계 의도입니다.
+   *
+   * ⚠️ **문턱을 낮춘 것이 아니라 질문을 고친 것입니다.** 확인하는 방법:
+   *    묶고 나서도 이 판정은 **빨갛습니다.** 두 눈금이 서로 다른 보물을
+   *    가리키고 있었고, 통로가 **하나도 없는** 보물이 정확히 하나
+   *    있기 때문입니다. 묶어서 초록이 됐다면 그건 문턱을 낮춘 것입니다.
+   *
+   * ⚠️ 예산 밖 보물은 뺍니다 — 게임이 **일부러 안 알려 주는** 것이라
+   *    (바로 위 주석) 여기서 세면 규칙을 어기라고 요구하게 됩니다.
+   */
+  const toldSet = new Set(along.told)
+  const dark = inBudget.filter(
+    (v) => v.d > t.cameraViewSize && !toldSet.has(`${Math.round(v.x)},${Math.round(v.z)}`),
+  )
   check(
-    inBudget.length > 0 && toldInBudget.length === inBudget.length,
-    '🧭 **예산 안의 보물은 동선을 걷는 동안 한 번은 알려진다** (규칙이 아니라 도달한 것)',
-    `${toldInBudget.length}/${inBudget.length}개 — 알려진 자리 ${toldInBudget.join(' · ') || '없음'}` +
-      ` · 예산 밖이라 안 알려 준 것 ${seen.length - inBudget.length}개`,
+    inBudget.length > 0 && dark.length === 0,
+    '🔦 **보물마다 알 방법이 하나는 있다** (빛기둥이 보이거나 · 안내가 가리키거나)',
+    dark.length === 0
+      ? `예산 안 ${inBudget.length}개 전부 — 빛기둥 ${inBudget.filter((v) => v.d <= t.cameraViewSize).length}개 · 안내 ${toldInBudget.length}개`
+      : dark
+          .map((v) => {
+            /**
+             * 🔎 **어느 문에서 막혔는지까지 댑니다.** 빨간불을 보고 다음에
+             *    할 일이 *"보물을 옮긴다"* 인지 *"안내 규칙을 본다"* 인지가
+             *    여기서 갈립니다. 이 저장소가 계속 배운 것 —
+             *    숫자가 처방이 되려면 **분기 그대로** 갈라 놔야 합니다.
+             */
+            const why = []
+            if (v.d > t.cameraViewSize) why.push(`빛기둥 — 눈으로 ${v.d.toFixed(1)}m > 시야 ${t.cameraViewSize}m`)
+            const walkFar = v.walk === null || v.walk > hint.rule.range
+            const extraFar = v.extra === null || v.extra > hint.rule.range
+            if (walkFar)
+              why.push(
+                `안내 — **편도 ${v.walk === null ? '못 감' : `${v.walk.toFixed(0)}m`} > ${hint.rule.range}m**` +
+                  (extraFar ? '' : ` (더 걷는 ${v.extra.toFixed(0)}m 는 예산 안인데도)`),
+              )
+            else if (extraFar) why.push(`안내 — 더 걷는 ${v.extra.toFixed(0)}m > ${hint.rule.range}m`)
+            else why.push('안내 — 문턱은 통과하는데 다른 보물에 밀림')
+            return `(${Math.round(v.x)},${Math.round(v.z)}) ${why.join(' · ')}`
+          })
+          .join('\n       ') + '\n       → **둘 다 없습니다**',
   )
 
   check(
