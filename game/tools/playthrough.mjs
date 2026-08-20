@@ -965,6 +965,8 @@ try {
           const rec = (archerChance[t.entity] ??= {
             at: `${Math.round(t.x)},${Math.round(t.z)}`,
             near: Infinity,
+            nearWalk: Infinity,
+            awake: 0,
             inWake: 0,
             inShot: 0,
             winding: 0,
@@ -975,7 +977,23 @@ try {
             why: {},
           })
           rec.seen++
-          if (t.dist < rec.near) rec.near = t.dist
+          if (t.aggro) rec.awake++
+          if (t.dist < rec.near) {
+            rec.near = t.dist
+            /**
+             * 🚶 **걸어야 하는 거리도 같이 남깁니다 — 깨는 판정이 쓰는 값입니다.**
+             *
+             * `enemyAI` 는 직선이 아니라 **걸어야 하는 거리**로 깨웁니다
+             * (벽 건너 적이 깨어나 영원히 벽을 향해 걷던 사고 때문입니다).
+             * 그래서 직선 4.4m 라도 **돌아가야 하면** 안 깰 수 있습니다.
+             *
+             * 이 줄이 없어서 한 번 못 가렸습니다: 사거리 안 297프레임 중
+             * 깨어 있던 프레임이 8개뿐이었는데, 원인이 「안 깨는 것」인지
+             * 「깼다 풀리는 것」인지 알 수가 없었습니다.
+             */
+            const st = G.pathStep(t.x, t.z)
+            rec.nearWalk = st ? st.dist : Infinity
+          }
           if (t.dist <= archerWake) rec.inWake++
           if (t.dist >= archerMin && t.dist <= archerMax) {
             rec.inShot++
@@ -4635,7 +4653,9 @@ try {
               : '**깨는 거리 안에 든 적이 없다**'
       console.log(
         `                (${a.at}) — 가장 가까이 ${Number.isFinite(a.near) ? a.near.toFixed(1) : '?'}m` +
-          ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임 · 예고 ${a.winding}프레임` +
+          `(걸어서 ${Number.isFinite(a.nearWalk) ? a.nearWalk.toFixed(1) : '길없음'}m)` +
+          ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임` +
+          ` · 깨어 있던 ${a.awake ?? 0}프레임 · 예고 ${a.winding}프레임` +
           `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}` +
           // 🚦 「깼는데 예고까지 못 갔다」의 범인을 이름으로 부릅니다.
           (Object.keys(a.why ?? {}).length
