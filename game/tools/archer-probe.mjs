@@ -294,9 +294,25 @@ try {
     }, 6)
   }, [WAKE, SMIN, SMAX])
 
-  const walkResult = await page.evaluate(
-    async ([cells, speed]) => {
-      const G = window.__game
+  /**
+   * 🚶 **걷기를 함수로 둡니다 — 실험 ①과 ③이 똑같이 걸어야 합니다.**
+   *
+   * ── 왜 이렇게 바꿨는가 (사고 기록) ────────────────────────────────
+   * ③ 을 처음엔 `reset()` 뒤 **순간이동**으로 세웠습니다. 커밋에는
+   * *"조건이 하나만 다르다"* 고 적었는데 **둘이 달랐습니다**:
+   *   · 다른 적이 있다        ← 재려던 것
+   *   · 걸어오지 않고 나타났다 ← 몰래 끼어든 것
+   *
+   * 이 게임은 **소리와 시야**로 깨웁니다(`awareInfo().hearNow` 는 속도에
+   * 따라 변합니다). 순간이동한 플레이어는 속도가 0 이라 발소리가 없습니다.
+   * 그러면 ③ 의 「0발」이 *다른 적 탓* 인지 *안 걸어온 탓* 인지 못 가릅니다 —
+   * 원인이 둘인데 처방이 정반대인, 이 저장소가 계속 피해 온 그 상황입니다.
+   *
+   * 그래서 ③ 도 ① 과 **같은 칸을 같은 방식으로 걸어** 접근합니다.
+   */
+  await page.evaluate(() => {
+    const G = window.__game
+    window.__walk = async (cells) => {
       const held = new Set()
       const hold = (c) => {
         if (!held.has(c)) {
@@ -346,10 +362,12 @@ try {
         seconds: Number((G.state().simElapsed - t0).toFixed(2)),
         walked: Number(walked.toFixed(1)),
         hp: G.state().player.hp,
-        speed,
       }
-    },
-    [stretch, rules.walkSpeed],
+    }
+  })
+  const walkResult = await page.evaluate(
+    async ([cells]) => window.__walk(cells),
+    [stretch],
   )
   const walkWatch = await page.evaluate(() => ({ ...window.__arch, timer: undefined }))
 
@@ -513,7 +531,7 @@ try {
    *    가설이 아니라 **답**입니다. 실험대는 같은 길을 늘 같게 걷습니다.
    */
   const crowd = await page.evaluate(
-    async ([x, z, secs]) => {
+    async ([x, z, secs, cells]) => {
       const G = window.__game
       const w = window.__arch
       // 판을 통째로 되돌립니다 — 치웠던 적 30마리가 원래 자리로 돌아옵니다.
@@ -525,6 +543,18 @@ try {
       w.crowdAwake = 0
       w.crowdInShot = 0
       w.crowdSeen = 0
+      /**
+       * ⚠️ **① 과 똑같이 걸어서 접근합니다.**
+       * 처음엔 순간이동으로 세웠고, 커밋에 *"조건이 하나만 다르다"* 고
+       * 적었는데 **둘이 달랐습니다** — 다른 적이 있다(재려던 것)와
+       * 걸어오지 않고 나타났다(몰래 끼어든 것). 이 게임은 소리와 시야로
+       * 깨우고 `hearNow` 는 속도에 따라 변하는데, 순간이동한 플레이어는
+       * 속도가 0 이라 발소리가 없습니다. 그러면 「0발」이 다른 적 탓인지
+       * 안 걸어온 탓인지 못 가립니다.
+       */
+      const approach = await window.__walk(cells)
+      w.crowdWalked = approach.walked
+      // 걸어 도착한 뒤, ② 와 같은 자리에 같은 시간 서 있습니다.
       G.teleportPlayer(x, z)
       const t0 = G.state().simElapsed
       const dl = Date.now() + 240000
@@ -556,10 +586,11 @@ try {
         seen: w.crowdSeen,
         why: w.why,
         tele: w.tele.length,
+        walked: w.crowdWalked,
         others: G.threats(20).filter((t) => t.kind !== 'archer').length,
       }
     },
-    [closest.x, closest.z, standSeconds],
+    [closest.x, closest.z, standSeconds, stretch],
   )
   const whyText = Object.entries(crowd.why ?? {})
     .sort((a, b) => b[1] - a[1])
