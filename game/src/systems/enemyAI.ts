@@ -1762,6 +1762,27 @@ export function enemyAiSystem(
     else if (Actor.cooldownT[e] > 0) idleReasons.cooldown++
     else if (facingError > ATTACK_FACING_TOLERANCE) idleReasons.facing++
 
+    /**
+     * 🚦 **같은 판정을 적마다도 남깁니다**(components.ts `idleWhy` 설계 노트).
+     * 합계만으로는 *"저 한 마리가 왜 못 쐈는가"* 에 답할 수 없습니다.
+     *
+     * ⚠️ 순서가 곧 뜻입니다 — **먼저 막는 문이 범인**입니다. 위 합계와
+     *    같은 순서를 씁니다. 두 곳이 다른 순서를 쓰면 두 숫자가 어긋나고,
+     *    그때 어느 쪽을 믿을지 알 수 없게 됩니다.
+     * ⚠️ 토큰 줄에 **아예 못 선** 경우(자기 띠 밖이라 `hasAttackInBand` 가
+     *    걸렀을 때)도 `!tokens.has(e)` 로 보입니다. 그 둘은 고칠 곳이
+     *    다르므로(토큰 수 vs 자리·사거리) 여기서 갈라 둡니다.
+     */
+    Enemy.idleWhy[e] = !tokens.has(e)
+      ? hasAttackInBand(attacksFor(kind), dist)
+        ? 1
+        : 4
+      : Actor.cooldownT[e] > 0
+        ? 2
+        : facingError > ATTACK_FACING_TOLERANCE
+          ? 3
+          : 0
+
     if (tokens.has(e) && Actor.cooldownT[e] <= 0 && facingError <= ATTACK_FACING_TOLERANCE) {
       const list = attacksFor(kind)
       /**

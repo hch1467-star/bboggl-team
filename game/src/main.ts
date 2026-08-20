@@ -5853,6 +5853,8 @@ class Game {
     entity: number
     /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다(구현부 주석). */
     kind: string
+    /** 🚦 지금 이 적을 막고 있는 문 — 없음·토큰·쿨다운·바라보기·띠밖 */
+    idleWhy: string
     x: number
     z: number
     dist: number
@@ -5945,6 +5947,13 @@ class Game {
          * 종류가 없으면 그 장부를 **적을 수가 없습니다.**
          */
         kind: enemyDef(Enemy.kind[e]).id,
+        /**
+         * 🚦 **이 적이 지금 못 때리는 이유** (components.ts `idleWhy`).
+         * 「사거리 안에 있었는데 예고 0회」의 범인을 이름으로 부릅니다 —
+         * 토큰인지 쿨다운인지 바라보기인지 띠 밖인지에 따라 고칠 곳이
+         * 전부 다릅니다.
+         */
+        idleWhy: ['없음', '토큰', '쿨다운', '바라보기', '띠밖'][Enemy.idleWhy[e]] ?? '?',
         x: Number(Transform.x[e].toFixed(2)),
         z: Number(Transform.z[e].toFixed(2)),
         dist: Number(d.toFixed(2)),
@@ -6671,6 +6680,8 @@ declare global {
         entity: number
         /** 🏷 적의 종류 id — 화면의 색·실루엣과 같은 정보입니다. */
         kind: string
+        /** 🚦 지금 이 적을 막고 있는 문 — 없음·토큰·쿨다운·바라보기·띠밖 */
+        idleWhy: string
         x: number
         z: number
         dist: number

@@ -971,11 +971,17 @@ try {
             woke: false,
             seen: 0,
             died: null,
+            /** 🚦 사거리 안에 있었는데 못 쏜 프레임을 **문별로** 나눕니다. */
+            why: {},
           })
           rec.seen++
           if (t.dist < rec.near) rec.near = t.dist
           if (t.dist <= archerWake) rec.inWake++
-          if (t.dist >= archerMin && t.dist <= archerMax) rec.inShot++
+          if (t.dist >= archerMin && t.dist <= archerMax) {
+            rec.inShot++
+            // 「쏠 수 있었던 자리」에서만 셉니다 — 띠 밖의 이유는 여기 답이 아닙니다.
+            if (t.aggro) rec.why[t.idleWhy] = (rec.why[t.idleWhy] ?? 0) + 1
+          }
           if (t.aggro) rec.woke = true
           if (t.winding) rec.winding++
         }
@@ -4630,7 +4636,15 @@ try {
       console.log(
         `                (${a.at}) — 가장 가까이 ${Number.isFinite(a.near) ? a.near.toFixed(1) : '?'}m` +
           ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임 · 예고 ${a.winding}프레임` +
-          `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}`,
+          `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}` +
+          // 🚦 「깼는데 예고까지 못 갔다」의 범인을 이름으로 부릅니다.
+          (Object.keys(a.why ?? {}).length
+            ? `\n                    쏠 수 있던 자리에서 막은 문 — ` +
+              Object.entries(a.why)
+                .sort((x, y) => y[1] - x[1])
+                .map(([k, v]) => `${k} ${v}프레임`)
+                .join(' · ')
+            : ''),
       )
     }
   }
