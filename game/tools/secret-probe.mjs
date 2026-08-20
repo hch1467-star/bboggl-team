@@ -354,6 +354,59 @@ try {
       extra: await detour(v.x, v.z),
     })
   }
+  /**
+   * ── 💥 **놓아 둔 것을 아무도 안 만나면 없는 것과 같습니다** ────────────
+   *
+   * 자동 플레이가 판마다 같은 말을 합니다:
+   *
+   *     통(17,-9) — 가장 가까이 24.2m · 사거리 안 0프레임 — **곁에 간 적이 없다**
+   *     통(45,-9) — 가장 가까이 20.7m · 사거리 안 0프레임 — **곁에 간 적이 없다**
+   *
+   * 셋 중 둘입니다. 그런데 통 (45,-9) 는 **적 넷 한가운데**에 잘 놓여
+   * 있습니다 — 자리가 나쁜 게 아니라 동선이 거기 안 갑니다. 보물에 쓰던
+   * 자를 그대로 대 보면 그 둘이 갈립니다.
+   *
+   * ── 재고 나서 **가설이 뒤집혔습니다** ─────────────────────────
+   *
+   *     (-31, 1)  눈으로 0.0m · 더 걷는 0m
+   *     (17, -9)  눈으로 4.0m · 더 걷는 0m
+   *     (45, -9)  눈으로 0.0m · 더 걷는 0m
+   *
+   * **셋 다 동선 위입니다.** (45,-9) 는 동선이 그대로 지나가고 (17,-9) 는
+   * 4m 옆입니다. 즉 「곁에 간 적이 없다」는 **자리의 이야기가 아니라
+   * 봇의 이야기**입니다 — 옆을 지나면서 안 씁니다. 재기 전에 옮겼으면
+   * 멀쩡한 배치를 망가뜨리고 "고쳤다"고 적었을 자리입니다.
+   *
+   * 그래서 이것을 **검사로 올립니다.** 지금 초록인 성질이고, 다음에 지도를
+   * 손볼 때 통이 동선에서 떨어져 나가면 그때 빨개져야 합니다. 예산은
+   * 게임이 내보내는 값을 그대로 씁니다(프로브가 문턱을 안 짓습니다).
+   *
+   * ⚠️ **통을 「쓰는가」는 여기서 안 묻습니다.** 그건 봇 정책이고
+   *    `playthrough` 의 통 장부가 이미 프레임 단위로 셉니다.
+   */
+  {
+    const barrels = await page.evaluate(() => window.__game.barrelInfo().barrels ?? [])
+    if (barrels.length > 0) {
+      console.log('\n  💥 폭발통 — 동선에서 얼마나 떨어져 있는가')
+      const barrelFar = []
+      for (const b of barrels) {
+        const d = nearest(b.x, b.z)
+        const ex = await detour(b.x, b.z)
+        if (ex < 0 || ex > DETOUR_BUDGET) barrelFar.push(`(${Math.round(b.x)},${Math.round(b.z)}) ${ex}m`)
+        console.log(
+          `    ${d <= t.cameraViewSize ? '·' : '⚠️'} (${Math.round(b.x)}, ${Math.round(b.z)})` +
+            `  눈으로 ${d.toFixed(1)}m · **더 걷는 ${ex < 0 ? '?' : `${ex.toFixed(0)}m`}**` +
+            `${d <= t.cameraViewSize ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
+        )
+      }
+      check(
+        barrelFar.length === 0,
+        `💥 **폭발통이 전부 곁길 예산(${DETOUR_BUDGET}m) 안에 있다** (놓아 두고 아무도 안 만나면 없는 것과 같습니다)`,
+        barrelFar.length ? `예산 밖 ${barrelFar.join(' · ')}` : `${barrels.length}개 전부`,
+      )
+    }
+  }
+
   const hidden = seen.filter((v) => v.d > t.cameraViewSize)
   console.log('')
   for (const v of seen) {
