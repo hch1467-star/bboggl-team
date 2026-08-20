@@ -683,19 +683,37 @@ try {
    * 그래서 우연이 깨지는 순간 **말을 하게** 둡니다. 원거리 적(쏘는 자)은
    * 애초에 다른 반지름으로 재므로 여기서 뺍니다.
    */
-  {
-    const MELEE = ['grunt', 'charger', 'binder', 'dragger']
-    const off = roster
-      .filter((r) => MELEE.includes(r.id))
-      .filter((r) => r.wakeRange !== aggro)
-    check(
-      off.length === 0,
-      '🚧 근접 적의 **깨는 거리가 아직 전부 같다** (아래 검사들이 반지름 하나로 세도 되는 근거)',
-      off.length
-        ? `${off.map((r) => `${r.id} ${r.wakeRange}m`).join(' · ')} ≠ ${aggro}m — 이 파일의 "어그로 ${aggro}m" 계산을 종류별로 갈라야 합니다`
-        : `${MELEE.length}종 전부 ${aggro}m`,
-    )
-  }
+  /**
+   * ── 🔔 **깨는 거리는 종류마다 다릅니다** ────────────────────────────
+   *
+   * 이 파일은 오랫동안 *"적을 깨울 수 있는가"* 를 **반지름 하나**
+   * (`levelAggroRange` = 14m)로 셌습니다. 근거는 balance.ts 의 표였습니다 —
+   * *"근접 적은 전부 `reach + 여유` 가 14 미만이라 그대로다"*.
+   *
+   * 그 표가 **낡았습니다.** 게임에게 직접 물어보니:
+   *
+   *     잡졸 14m · 달려드는 자 14m · **얽는 자 15m · 끄는 자 19m**
+   *
+   * 끄는 자는 쏘는 자와 **같은 19m** 입니다. `dragger_hook` 의 사거리가
+   * 12m 로 늘어난 뒤 아무도 그 표를 안 고쳤고, 이 파일은 계속 14m 로
+   * 세면서 **초록을 유지했습니다.** 「한 칸 차이의 초록은 운이다」의
+   * 전형이라, 우연이 깨지는 순간 말하도록 게이트를 세워 뒀더니 바로
+   * 이렇게 잡혔습니다.
+   *
+   * 그래서 반지름을 **종류별로** 씁니다. 게이트는 이제 할 일이 없으므로
+   * 눈금으로 바꿉니다 — 값 자체는 계속 보여야 다음 사람이 압니다.
+   */
+  const wakeByKind = Object.fromEntries(roster.map((r) => [r.id, r.wakeRange]))
+  /** 이 적을 깨울 수 있는 거리(m). 모르는 종류면 판 기본값. */
+  const wakeOf = (kindId) => wakeByKind[kindId] ?? aggro
+  console.log(
+    `\n  🔔 깨는 거리 — ` +
+      ['grunt', 'charger', 'binder', 'dragger', 'archer']
+        .filter((k) => wakeByKind[k] !== undefined)
+        .map((k) => `${k} ${wakeByKind[k]}m`)
+        .join(' · ') +
+      `   (판 기본 ${aggro}m)`,
+  )
 
   /**
    * ---- 8.5 **색을 가르치는 적이 주 동선에서 깨어나는가** ----
@@ -775,7 +793,9 @@ try {
         const c = cellOf(e)
         return { c, d: distToRoute.get(key(c.cx, c.cz)) ?? Infinity }
       })
-      const onRoute = dists.filter((x) => x.d <= aggro)
+      // 색마다 깨는 거리가 다릅니다(위 🔔 표) — 그 색의 값으로 셉니다.
+      const wake = wakeOf(kind)
+      const onRoute = dists.filter((x) => x.d <= wake)
       check(
         onRoute.length >= 2,
         `${label} — 주 동선에서 깨울 수 있는 개체가 2마리 이상 (배치만 하고 안 만나지 않게)`,
@@ -784,7 +804,7 @@ try {
             .sort((a, b) => a.d - b.d)
             .map((x) => `(${x.c.cx},${x.c.cz}) ${Number.isFinite(x.d) ? `${x.d}m` : '길없음'}`)
             .join(' · ') +
-          ` · 어그로 ${aggro}m`,
+          ` · 어그로 ${wake}m`,
       )
     }
 
@@ -931,7 +951,7 @@ try {
         .map((e) => {
           const pr = progressOf(cellOf(e))
           const embers = foesOnRoute
-            .filter((f) => f.at < pr.at && f.off <= aggro)
+            .filter((f) => f.at < pr.at && f.off <= wakeOf(f.kind))
             .reduce((a, f) => a + (emberOf.get(f.kind) ?? 0), 0)
           const stones = treasuresOnRoute.filter(
             (t) => t.at < pr.at && t.off <= DETOUR_BUDGET,
@@ -1091,14 +1111,15 @@ try {
    */
   const mobs = level.entities
     .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
-    .map(cellOf)
+    // ⚠️ 종류를 들고 다녀야 **종류별 깨는 거리**를 쓸 수 있습니다.
+    .map((e) => ({ ...cellOf(e), kind: e.kind }))
   const foes = mobs
   const quiet = []
   let runStart = null
   let runLen = 0
   for (const c of routeCells) {
     const near = foes.some(
-      (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+      (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
     )
     if (near) {
       if (runStart && runLen * CELL >= 16) {
@@ -1146,7 +1167,7 @@ try {
     let gap = 0
     for (const c of routeCells) {
       const near = foes.some(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
       )
       if (near) {
         if (start === null) {
@@ -1210,7 +1231,7 @@ try {
     for (let i = routeCells.length - 1; i >= 0; i--) {
       const c = routeCells[i]
       const near = mobs.some(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
       )
       if (near) break
       n++
@@ -1254,7 +1275,7 @@ try {
     let sample = null
     for (const c of routeCells) {
       const near = ccFoes.filter(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= aggro,
+        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
       )
       if (near.length >= 2) {
         overlap++
