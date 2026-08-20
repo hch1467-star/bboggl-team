@@ -294,10 +294,22 @@ try {
         dz,
       })
       if (recentAims.length > 90) recentAims.shift()
+      const px0 = p0.x
+      const pz0 = p0.z
+      recentAims[recentAims.length - 1].px = px0
+      recentAims[recentAims.length - 1].pz = pz0
       const cam = G.cameraAxes()
       const fwd = dx * cam.forwardX + dz * cam.forwardZ
       const right = dx * cam.rightX + dz * cam.rightZ
       const dead = 0.25
+      /**
+       * 🎹 **실제로 누른 키를 남깁니다.** 「끼임」에는 아직 갈림길이 하나
+       * 남아 있습니다 — *봇이 안 누른 것*인가, *눌렀는데 몸이 안 나간 것*
+       * 인가. 조준점만으로는 이 둘이 똑같이 보입니다.
+       */
+      const keys =
+        (fwd > dead ? 'W' : fwd < -dead ? 'S' : '') + (right > dead ? 'D' : right < -dead ? 'A' : '')
+      recentAims[recentAims.length - 1].keys = keys || '없음'
       if (fwd > dead) hold('KeyW')
       else release('KeyW')
       if (fwd < -dead) hold('KeyS')
@@ -904,8 +916,18 @@ try {
                     : cells.size <= 2
                       ? '**걸음이 진동**'
                       : '**목표가 진동**'
+                const keyCount = recentAims.reduce((m, a) => {
+                  const k = a.keys ?? '?'
+                  return m.set(k, (m.get(k) ?? 0) + 1)
+                }, new Map())
+                const keyStr = [...keyCount.entries()]
+                  .sort((x, y) => y[1] - x[1])
+                  .slice(0, 3)
+                  .map(([k, v]) => `${k}×${v}`)
+                  .join(' ')
                 return (
-                  ` · 조준점 ${cells.size}곳 [${top}] · 방향 뒤집힘 ${flips}회 → ${verdict}`
+                  ` · 조준점 ${cells.size}곳 [${top}] · 방향 뒤집힘 ${flips}회` +
+                  ` · 누른 키 [${keyStr}] → ${verdict}`
                 )
               })() +
               (obj2
@@ -3593,6 +3615,23 @@ try {
       weaponUps: G.weaponUpgradeInfo().levels.reduce((a, v, i) => a + (v - startWeaponLevels[i]), 0),
       weaponId: G.state().loadout.weapon,
       /**
+       * 🩸 이 무기가 **문턱까지 몇 대**인가. 위 장부 줄이 「0회」를 어떻게
+       * 읽어야 하는지 스스로 말하게 하려는 것입니다. 식은 게임이 갖고 있습니다.
+       */
+      bleedHitsToPop: (() => {
+        const bi = G.bleedInfo?.()
+        if (!bi) return 0
+        const w = bi.weapons.find((x) => x.id === G.state().loadout.weapon)
+        const grunt = bi.maxByKind.find((m) => m.id === 'boss') ?? bi.maxByKind[0]
+        if (!w || !grunt) return 0
+        return Math.ceil(grunt.max / (bi.perHit * w.bleedScale))
+      })(),
+      bleedComboHits: (() => {
+        const bi = G.bleedInfo?.()
+        const w = bi?.weapons.find((x) => x.id === G.state().loadout.weapon)
+        return w?.hitsPerCombo ?? 0
+      })(),
+      /**
        * 🩸 **손익분기 간격** — 이보다 느리게 때리면 출혈은 영영 안 찹니다.
        * 식을 프로브가 들고 있지 않습니다(main.ts `bleedInfo().breakEvenGap`).
        */
@@ -3838,6 +3877,25 @@ try {
   // 요약은 **맨 마지막**에 찍습니다. 앞에 두면 tail 로 볼 때 잘립니다
   // (실제로 첫 실행에서 요약이 통째로 안 보였습니다).
   console.log('  ── 요약 ──────────────────────────────')
+  /**
+   * ⚠️ **끝내지 못한 판은 큰 소리로 말합니다.**
+   *
+   * ── 이게 없어서 세 라운드를 잃었습니다 ──────────────────────────
+   * 봇이 예산 420초 중 **67~120초에 막혀** 끝나던 시절, 그 반쪽짜리 판의
+   * 「🩸 출혈 터짐 0회」·「보스 조우 X」를 보고 **설계를 진단했습니다.**
+   * 봇을 고쳐 존을 끝까지 돌게 하니 같은 축이 판당 1~2회 터졌습니다.
+   *
+   * 못 끝낸 판의 장부는 틀린 게 아니라 **반쪽**입니다. 그런데 반쪽인 줄
+   * 모르면 틀린 것보다 나쁩니다 — 사람은 그 숫자로 멀쩡한 것을 고칩니다.
+   * 그래서 요약 맨 앞에 못을 박습니다. `★` 하나로는 부족했습니다.
+   */
+  if (log.clearedAt <= 0) {
+    console.log(
+      `  ⚠️ **이 판은 존을 못 끝냈습니다** (${log.elapsed}초 / 예산 ${TIME_LIMIT}초` +
+        `${log.bossSeen ? '' : ' · 보스 조우 X'}). **아래 장부는 전부 반쪽입니다** —\n` +
+        `     특히 「0회」로 찍히는 것들(출혈·처형·페이즈)은 **설계가 아니라 판이 짧아서**일 수 있습니다.`,
+    )
+  }
   console.log(
     log.clearedAt > 0
       ? `  진행       ★ ${log.clearedAt}초에 존 클리어`
@@ -4291,7 +4349,23 @@ try {
           .join('\n')
       )
     })(),
-    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0})\n` +
+    /**
+     * 🩸 ⚠️ **「0회」 옆에 무기를 적습니다. 이게 없어서 세 라운드를 잃었습니다.**
+     *
+     * 이 축의 설계는 *"대검은 무너뜨리고 단검은 터뜨린다"* 입니다(balance.ts
+     * `BLEED`). 즉 **어떤 무기에게는 0회가 정답**입니다. 그런데 장부가
+     * 무기를 안 적어서, 대검·롱소드로 잰 「0회」가 *"이 축은 죽어 있다"* 로
+     * 읽혔고 그 위에서 세 라운드를 고치려 들었습니다.
+     *
+     * 문턱까지 몇 대인지는 **게임에게 묻습니다**(`bleedInfo`) — 여기에
+     * 배율을 베껴 적으면 그 순간 이 줄이 또 하나의 진실이 됩니다.
+     */
+    `  두 축       붕괴 ${log.poiseBreaks}회 · 처형 ${log.finishers}회 · 🩸 출혈 터짐 ${log.bleedPops ?? 0}회 (한 적 최고 ${log.bleedPeak ?? 0})` +
+      `  ← ${log.weaponId ?? '?'} 로 잰 판${
+        log.bleedHitsToPop
+          ? ` (이 무기는 문턱까지 ${log.bleedHitsToPop}대 · 한 바퀴 ${log.bleedComboHits}타)`
+          : ''
+      }\n` +
     /**
      * 🩸 **못 터진 것들.** 「죽어서」인가 「식어서」인가 — 처방이 정반대입니다.
      *
