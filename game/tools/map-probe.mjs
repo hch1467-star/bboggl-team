@@ -1089,6 +1089,71 @@ try {
   }
 
   /**
+   * ── 🔥 **쉼터는 맞는 자리가 아니다** ───────────────────────────────
+   *
+   * ── 다른 게임이 예외 없이 지키는 것 ────────────────────────────────
+   * 소울류의 화톳불, 할로우 나이트의 벤치, 오공의 토지묘, 로스트아크의
+   * 관문 앞 — 전부 **주머니 안**에 있습니다. 취향이 아니라 규칙입니다.
+   * 부활 지점이 안전하지 않으면 **죽음의 대가가 두 번 청구됩니다** —
+   * 한 번은 불티로, 한 번은 일어서자마자 다시 맞는 것으로.
+   *
+   * ── 무엇을 걸고 무엇을 안 거는가 ──────────────────────────────────
+   * 「깨울 수 있는 적이 하나도 없다」로 걸고 싶었지만 **안 겁니다.**
+   * 이 레벨은 와이드 리니어 존이라 동선이 대체로 위협 안에 있는 것이
+   * 성격이고(바로 위 [긴장 구간] 주석), 화톳불 둘레에 19m 짜리 빈
+   * 주머니를 요구하면 존의 알맹이를 들어내야 합니다. 실제로 훑어 보니
+   * 가장 가까운 조용한 칸이 **15.6m** 밖이었습니다 — 화톳불을 거기로
+   * 옮기면 주 동선에서 내려가고, 예전에 그렇게 옮겼다가 **봇이 두 판
+   * 연속 408초 동안 존을 못 끝냈습니다**(playthrough.mjs 기록).
+   *
+   * 그래서 **깨는 거리가 아니라 사거리**로 겁니다. 깨는 것은 견딜 만합니다 —
+   * 보고 걸어 나갈 수 있으니까요. 불공정한 것은 **서 있는 그 자리가 이미
+   * 맞는 자리인 것**입니다. 문턱을 좁히면 존을 안 헐고도 그 불공정만
+   * 잡을 수 있습니다. 깨는 쪽은 아래에 **눈금으로** 남깁니다.
+   *
+   * ⚠️ 사거리는 **패턴의 reach** 입니다(`attackRange` 아님). 이 저장소가
+   *    그 둘을 헷갈려 어그로가 조용히 넓어진 적이 있습니다 — 끄는 자가
+   *    attackRange 12 · reach 6.5 였고, 지금은 갈고리가 12m 입니다.
+   */
+  {
+    const reachOf = (kindId) => {
+      const r = roster.find((x) => x.id === kindId)
+      return r ? Math.max(...r.attacks.map((a) => a.reach)) : 0
+    }
+    const restKinds = ['bonfire', 'anvil']
+    const rests = level.entities
+      .filter((e) => restKinds.includes(e.kind))
+      .map((e) => ({ kind: e.kind, c: cellOf(e) }))
+    const mobsNear = level.entities
+      .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
+      .map((e) => ({ kind: e.kind, c: cellOf(e) }))
+    const hit = []
+    const wakeLedger = []
+    for (const r of rests) {
+      const d = (m) => Math.hypot(m.c.cx - r.c.cx, m.c.cz - r.c.cz) * CELL
+      const covering = mobsNear.filter((m) => d(m) <= reachOf(m.kind))
+      const waking = mobsNear.filter((m) => d(m) <= wakeOf(m.kind))
+      if (covering.length) {
+        hit.push(
+          `${r.kind === 'bonfire' ? '화톳불' : '모루'}(${r.c.cx},${r.c.cz}) ← ` +
+            covering
+              .map((m) => `${m.kind}(${m.c.cx},${m.c.cz}) ${d(m).toFixed(1)}m/사거리 ${reachOf(m.kind)}m`)
+              .join(' · '),
+        )
+      }
+      wakeLedger.push(
+        `${r.kind === 'bonfire' ? '🔥' : '🔨'}(${r.c.cx},${r.c.cz}) ${waking.length}마리`,
+      )
+    }
+    console.log(`  [쉼터] 그 자리에서 깨울 수 있는 적 — ${wakeLedger.join(' · ')}  ※ 재되 걸지 않습니다(위 주석)`)
+    check(
+      hit.length === 0,
+      '🔥 **쉼터가 맞는 자리는 아니다** (부활하자마자 맞지 않게 — 소울류의 화톳불이 늘 주머니에 있는 이유)',
+      hit.length ? hit.join(' | ') : `쉼터 ${rests.length}곳 전부`,
+    )
+  }
+
+  /**
    * ⚠️ **보스는 빼고 셉니다** — 이 줄을 아래 검사에서만 지키고 여기서는
    *    안 지켜서, 같은 출력 안에서 **두 자가 서로 다른 값을 말했습니다**:
    *

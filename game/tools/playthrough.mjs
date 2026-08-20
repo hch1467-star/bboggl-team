@@ -839,6 +839,8 @@ try {
      * 「사건은 사건이 일어난 자리에서 기록한다」 — 매 프레임 적습니다.
      */
     const archerChance = {}
+    /** 🪦 직전 프레임의 사망 수 — 「죽인 것」과 「부활로 되돌려진 것」을 가릅니다. */
+    let lastDeaths = 0
     /**
      * 👣 **봇이 실제로 밟은 칸**(2m 격자로 접어 둡니다).
      *
@@ -972,7 +974,8 @@ try {
             winding: 0,
             woke: false,
             seen: 0,
-            died: null,
+            gone: null,
+            goneWhy: '',
             /** 🚦 사거리 안에 있었는데 못 쏜 프레임을 **문별로** 나눕니다. */
             why: {},
           })
@@ -1009,9 +1012,25 @@ try {
             .filter((t) => t.kind === 'archer')
             .map((t) => String(t.entity)),
         )
+        /**
+         * ⚠️ **사라진 것이 곧 죽은 것은 아닙니다.**
+         *
+         * 플레이어가 죽으면 판이 되돌려지고 적이 **새 엔티티로 다시**
+         * 태어납니다. 그러면 옛 엔티티가 목록에서 사라지는데, 그걸 그대로
+         * 「죽음」이라 적었더니 한 판에 쏘는 자가 **두 마리로** 찍혔고
+         * 둘 다 *"…초에 죽음"* 이었습니다 — 판에는 한 마리뿐입니다.
+         *
+         * 죽인 것과 되돌려진 것은 뜻이 정반대입니다(전자는 봇이 이긴 것,
+         * 후자는 진 것). 그래서 **그 순간 사망 수가 늘었는지**로 가릅니다.
+         */
+        const deathsNow = G.runStats().deaths ?? 0
         for (const [id, rec] of Object.entries(archerChance)) {
-          if (rec.died === null && !aliveNow.has(id)) rec.died = Number((now() - t0).toFixed(1))
+          if (rec.gone === null && !aliveNow.has(id)) {
+            rec.gone = Number((now() - t0).toFixed(1))
+            rec.goneWhy = deathsNow > lastDeaths ? '부활로 되돌려짐' : '죽음'
+          }
         }
+        lastDeaths = deathsNow
       }
 
       /**
@@ -4656,7 +4675,7 @@ try {
           `(걸어서 ${Number.isFinite(a.nearWalk) ? a.nearWalk.toFixed(1) : '길없음'}m)` +
           ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임` +
           ` · 깨어 있던 ${a.awake ?? 0}프레임 · 예고 ${a.winding}프레임` +
-          `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}` +
+          `${a.gone !== null ? ` · ${a.gone}초에 ${a.goneWhy}` : ' · 살아남음'} — ${why}` +
           // 🚦 「깼는데 예고까지 못 갔다」의 범인을 이름으로 부릅니다.
           (Object.keys(a.why ?? {}).length
             ? `\n                    쏠 수 있던 자리에서 막은 문 — ` +
