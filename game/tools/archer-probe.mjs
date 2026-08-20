@@ -408,8 +408,8 @@ try {
     farFrames === 0,
     '🚶 **직선으로 사거리 안이면 걸어서도 깨는 거리 안**이다 (원거리 적이 코앞에서 자지 않게)',
     farFrames === 0
-      ? `그런 프레임 0개 · 가장 가까이 직선 ${walkWatch.minDist.toFixed(1)}m / 걸어서 ${Number.isFinite(walkWatch.minWalk) ? walkWatch.minWalk.toFixed(1) : '길없음'}m`
-      : `${farFrames}프레임 — 예: ` +
+      ? `그런 표본 0개 · 가장 가까이 직선 ${walkWatch.minDist.toFixed(1)}m / 걸어서 ${Number.isFinite(walkWatch.minWalk) ? walkWatch.minWalk.toFixed(1) : '길없음'}m`
+      : `${farFrames}표본 — 예: ` +
         (walkWatch.samplesInShot ?? [])
           .filter((s) => s.walk === null || s.walk > A.wakeRange)
           .slice(0, 3)
