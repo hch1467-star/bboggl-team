@@ -359,8 +359,8 @@ try {
       `     가장 가까이 붙은 거리 ${walkWatch.minDist === null ? '—' : walkWatch.minDist.toFixed(1)}m ` +
       `(걸어서 ${Number.isFinite(walkWatch.minWalk) ? walkWatch.minWalk.toFixed(1) : '길없음'}m)\n` +
       `     깬 순간 ${walkWatch.woke ? `직선 ${walkWatch.woke.dist}m · 걸어서 ${walkWatch.woke.walk ?? '?'}m` : '**안 깼습니다**'}\n` +
-      `     사거리 안 ${walkWatch.inShot}프레임 · 그중 깨어 있던 ${walkWatch.awake}프레임 · ` +
-      `직선은 사거리 안인데 **걸어서는 깨는 거리 밖**이던 ${walkWatch.asleepFar}프레임\n` +
+      `     사거리 안 ${walkWatch.inShot}표본 · 깨어 있던 ${walkWatch.awake}표본(사거리 밖 포함) · ` +
+      `직선은 사거리 안인데 **걸어서는 깨는 거리 밖**이던 ${walkWatch.asleepFar}표본\n` +
       `     📐 같은 식으로 계산하면 **${predicted.toFixed(1)}발**  vs  🏹 실측 **${walkWatch.tele.length}발**` +
       (walkWatch.tele.length
         ? ` (${walkWatch.tele.map((t) => `${t.id}@${t.dist}m`).join(' · ')})`
@@ -476,6 +476,90 @@ try {
     second === null
       ? `${stand.seconds}초 동안 두 발째가 안 왔습니다 (한 바퀴 ${A.attackCycle.toFixed(2)}초)`
       : `${second}초 · 한 바퀴 ${A.attackCycle.toFixed(2)}초`,
+  )
+
+  /**
+   * ---- 6. 실험 ③ — **다른 적이 있을 때** (A/B) ----
+   *
+   * ── 왜 이 실험이 남았는가 ──────────────────────────────────────────
+   * 여기까지 가설이 **다섯 번 틀렸습니다.** 궁수 수치 → 지도의 식 →
+   * 봇의 동선 → 공격 토큰 → 걸어야 하는 거리. 다섯 번 다 계측기가
+   * 먼저 말했고, 위 ①②가 그중 넷을 지웠습니다:
+   *
+   *     실험대에서는 **전부 정상**입니다 — 지나가면 2발, 서 있으면 3발.
+   *     그런데 진짜 판에서는 사거리 안 297프레임 중 깨어 있던 것이
+   *     **8프레임**이고, 그 8프레임에는 막은 문이 **없습니다**.
+   *
+   * 이제 실험대와 진짜 판 사이에 남은 **측정된 차이는 하나**입니다 —
+   * 위 2번에서 `clearEnemies()` 로 치운 **다른 적 30마리**.
+   *
+   * 그래서 ②를 그대로 한 번 더 하되, **적을 안 치우고** 합니다.
+   * 조건이 하나만 다른 두 판이라 결과 차이의 원인이 하나로 좁혀집니다.
+   * (이 저장소가 출혈 실험대에서 쓴 것과 같은 방법입니다 — 죽지 않는
+   *  허수아비를 세우고 변수를 하나만 남겼습니다.)
+   *
+   * ⚠️ 여기서 「없음」이 아니라 다른 문이 나오면, 그것이 여섯 번째
+   *    가설이 아니라 **답**입니다. 실험대는 같은 길을 늘 같게 걷습니다.
+   */
+  const crowd = await page.evaluate(
+    async ([x, z, secs]) => {
+      const G = window.__game
+      const w = window.__arch
+      // 판을 통째로 되돌립니다 — 치웠던 적 30마리가 원래 자리로 돌아옵니다.
+      G.resetProgress()
+      G.reset()
+      await window.__t.runFor(0.5)
+      w.tele.length = 0
+      w.why = {}
+      w.crowdAwake = 0
+      w.crowdInShot = 0
+      G.teleportPlayer(x, z)
+      const t0 = G.state().simElapsed
+      const dl = Date.now() + 240000
+      /** 이 실험 동안만 궁수를 따로 지켜봅니다 — 가장 가까운 적은 잡몹일 수 있습니다. */
+      while (G.state().simElapsed < t0 + secs && Date.now() < dl) {
+        const a = G.threats(400).find(
+          (t) => t.kind === 'archer' && Math.hypot(t.x - x, t.z - z) < 6,
+        )
+        if (a) {
+          if (a.aggro) w.crowdAwake++
+          if (a.dist >= w.shotMin && a.dist <= w.shotMax) {
+            w.crowdInShot++
+            if (a.aggro) w.why[a.idleWhy] = (w.why[a.idleWhy] ?? 0) + 1
+          }
+        }
+        await new Promise((r) => setTimeout(r, 6))
+      }
+      return {
+        seconds: Number((G.state().simElapsed - t0).toFixed(2)),
+        hp: G.state().player.hp,
+        awake: w.crowdAwake,
+        inShot: w.crowdInShot,
+        why: w.why,
+        tele: w.tele.length,
+        others: G.threats(20).filter((t) => t.kind !== 'archer').length,
+      }
+    },
+    [closest.x, closest.z, standSeconds],
+  )
+  const whyText = Object.entries(crowd.why ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k} ${v}표본`)
+    .join(' · ')
+  console.log(
+    `\n  ③ 다른 적이 있을 때 — 같은 자리에 ${crowd.seconds}초 (곁의 다른 적 ${crowd.others}마리)\n` +
+      `     예고 ${crowd.tele}발 · 사거리 안 ${crowd.inShot}표본 · 그중 깨어 있던 ${crowd.awake}표본\n` +
+      `     막은 문 — ${whyText || '(깨어 있던 표본 없음)'}`,
+  )
+  /**
+   * 📐 **이 회차의 결론이 걸린 줄입니다.**
+   * ②(혼자)와 ③(다른 적과 함께)의 차이가 곧 원인입니다.
+   */
+  check(
+    crowd.tele >= 1,
+    '🏹 **다른 적이 곁에 있어도 쏜다** (「붙어 있는 잡몹을 상대하는 동안 계속 날아온다」는 설계 그대로)',
+    `혼자 ${standWatch.tele.length}발 vs 다른 적과 함께 ${crowd.tele}발` +
+      (crowd.tele === 0 && crowd.awake === 0 ? ' — **깨지도 않았습니다**' : ''),
   )
 
   await page.evaluate(() => clearInterval(window.__arch.timer))
