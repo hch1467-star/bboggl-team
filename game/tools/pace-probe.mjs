@@ -677,9 +677,76 @@ try {
             ? `\n     ↳ [손이 안 닿음] ${outOfHand
                 .map((a) => `${a.id} 최소 ${a.minRange}m`)
                 .join(' · ')} — 이 손은 ${stand.toFixed(1)}~${leash.toFixed(1)}m 에 섭니다.` +
-              ` **관측 못 한 것이지 없는 것이 아닙니다** — 물러나는 손이 필요합니다.`
+              ` **관측 못 한 것이지 없는 것이 아닙니다** — 아래에서 물러난 손으로 따로 봅니다.`
             : ''),
       )
+
+      /**
+       * ── 🔭 **물러난 손** — 손이 안 닿던 것을 따로 봅니다 ────────────────
+       *
+       * 위 판정은 *"이 손이 닿는 것"* 까지만 말합니다. 그러면 남는 질문이
+       * 그대로입니다 — **멀리 서면 그 패턴이 후보에 오르는가.**
+       *
+       * 본 측정(15판 × 3단계)은 건드리지 않습니다. 정책이 단순해야 구간
+       * 길이가 또렷하다는 것이 이 실험대의 전제니까요. 대신 **짧은 관측**을
+       * 하나 더 답니다: 물러난 자리에 서서 보스가 무엇을 내는지 셉니다.
+       *
+       * ⚠️ **판정이 아니라 관측입니다.** 거리를 유지하려고 매 프레임
+       *    순간이동합니다 — 사람이 그렇게 싸울 수 있다는 뜻이 아닙니다.
+       *    묻는 것은 밸런스가 아니라 **규칙**입니다: *"그 거리에서 이 패턴이
+       *    굴림에 들어가기는 하는가."* (봇은 밸런스를 재고 실험대는 규칙을
+       *    잽니다 — 이 저장소의 구분 그대로입니다.)
+       *
+       * ⚠️ 그래서 **여기서 "잘 나온다"가 나와도 실전에서 나온다는 뜻이
+       *    아닙니다.** 그건 플레이어가 물러날 이유가 있느냐의 문제이고,
+       *    이 관측은 거기에 답하지 않습니다.
+       */
+      if (outOfHand.length) {
+        const farAt = Math.max(...outOfHand.map((a) => a.minRange)) + 1.5
+        const seen = await page.evaluate(
+          async ([dist, secs]) => {
+            const G = window.__game
+            const sleep = () => new Promise((r) => setTimeout(r, 6))
+            G.reset()
+            await sleep()
+            G.clearEnemies()
+            const b = G.spawnBoss(0, 0)
+            G.setHp(G.playerEntity(), 100)
+            const log = {}
+            let prev = ''
+            const t0 = G.state().simElapsed
+            const dl = Date.now() + 240000
+            while (G.state().simElapsed - t0 < secs && Date.now() < dl) {
+              const bi = G.enemyInfo(b)
+              if (!bi) break
+              // 보스에게서 정확히 `dist` 만큼 떨어진 자리를 유지합니다.
+              G.teleportPlayer(bi.x + dist, bi.z)
+              G.setHp(G.playerEntity(), 100)
+              const t = G.telegraphs().find((g) => g.entity === b)
+              const id = t ? t.attackId : ''
+              if (id && id !== prev) log[id] = (log[id] ?? 0) + 1
+              prev = id
+              await sleep()
+            }
+            return log
+          },
+          [farAt, 40],
+        )
+        const got = Object.entries(seen).sort((a2, b2) => b2[1] - a2[1])
+        console.log(
+          `     ↳ [물러난 손] ${farAt.toFixed(1)}m 에서 40초 — ` +
+            (got.length ? got.map(([id, n]) => `${id} ${n}`).join(' · ') : '**아무것도 안 냈습니다**'),
+        )
+        const stillMissing = outOfHand.filter((a) => !seen[a.id])
+        check(
+          stillMissing.length === 0,
+          '🔭 **물러나면 그 패턴이 후보에 오른다** (규칙상 낼 수 있는 것인지 · 실전 빈도는 별개)',
+          stillMissing.length === 0
+            ? `${outOfHand.map((a) => a.id).join(' · ')} — ${farAt.toFixed(1)}m 에서 실제로 나왔습니다`
+            : `**${stillMissing.map((a) => a.id).join(' · ')}** 는 ${farAt.toFixed(1)}m 에서도 안 나왔습니다` +
+              ` — 사거리 말고 다른 것이 막고 있습니다(가중치·연계·쿨다운)`,
+        )
+      }
     }
 
     /**
