@@ -299,8 +299,28 @@ try {
    */
   const react = await page.evaluate(() => window.__game.reactionBudget())
   {
+    /**
+     * ── 👑 **보스는 등 뒤를 주는 적이 아닙니다 — 다만 조건부로 뺍니다** ──
+     *
+     * 재 보니 수문장만 음수였습니다(여유 0.10초 − 반응 0.26초). 그런데
+     * 참조 게임 어디도 보스에게 백스탭을 주지 않습니다:
+     *   · 다크 소울·엘든 링 — 보스는 백스탭 면역. 대신 **자세를 깨면 리포스트**
+     *   · 세키로            — 보스는 백스탭이 아니라 **간파/처형**
+     *   · 몬헌              — 애초에 백스탭이 없고 **약점**이 그 자리
+     * 공통점은 *"보스에게는 위치의 보상을 **다른 동사**로 준다"* 입니다.
+     * 몸집도 다릅니다 — 수문장은 도는 데만 1.12초입니다.
+     *
+     * ⚠️ **무조건 빼면 보스가 망가진 날 이 검사가 숨겨 줍니다.** 그래서
+     *    **대체 경로가 실제로 있을 때만** 뺍니다: 강인도가 있어서 무너뜨릴
+     *    수 있는가. (자동 플레이 실측 — 보스는 판당 **4번 무너지고 처형
+     *    4회**를 받습니다.) 강인도가 0이 되는 날 이 면제는 저절로 풀리고
+     *    수문장이 다시 표에 올라옵니다.
+     */
+    const bossRow = roster.find((x) => x.id === 'boss')
+    const bossHasBreak = (bossRow?.poiseMax ?? 0) > 0
     const rows = results
       .filter((r) => r.runs.some((x) => x.behindAt >= 0))
+      .filter((r) => !(bossHasBreak && r.name === bossRow?.name))
       .map((r) => {
         const b = med(r.runs.map((x) => x.behindAt))
         const w = med(r.runs.map((x) => x.window))
@@ -319,6 +339,15 @@ try {
           ? ` — **${dead.map((d) => d.name).join('·')}** 는 사람이 움직이기 시작하기도 전에 닫힙니다`
           : ''),
     )
+    if (bossHasBreak && bossRow) {
+      const b = results.find((r) => r.name === bossRow.name)
+      const slack = b && b.runs.length ? med(b.runs.map((x) => x.window)) - med(b.runs.map((x) => x.behindAt)) : -1
+      console.log(
+        `     ↳ [면제] ${bossRow.name} — 여유 ${slack.toFixed(2)}초로 반응(${react.simple}초)을 못 당합니다.` +
+          ` 보스에게 위치의 보상은 **등 뒤가 아니라 무너뜨림**입니다(강인도 ${bossRow.poiseMax} · 실측 판당 4회 붕괴/처형).` +
+          ` 강인도가 없어지면 이 면제도 풀립니다.`,
+      )
+    }
   }
 
   console.log('\n  [적별] 등 뒤에 닿기까지 / 커밋이 풀릴 때까지 (여유)')
