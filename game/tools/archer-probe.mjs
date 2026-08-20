@@ -582,7 +582,10 @@ try {
          * 프레임이 무거우면 덜 찍힙니다 — **표본 비율은 시간 비율이
          * 아닙니다.** 시뮬레이션 시계의 차이를 더합니다.
          */
-        const nowSim = st.simElapsed
+        // ⚠️ `st` 는 감시기(setInterval) 쪽 변수입니다 — 이 루프에는 없습니다.
+        //    처음에 그걸 그대로 써서 `ReferenceError` 로 실험 ③ 이 통째로
+        //    날아갔습니다. 여기서는 게임에게 직접 묻습니다.
+        const nowSim = G.state().simElapsed
         const dt = w.lastSim === null ? 0 : Math.max(0, nowSim - w.lastSim)
         w.lastSim = nowSim
         if (a) {
