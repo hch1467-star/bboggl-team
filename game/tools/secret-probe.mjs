@@ -565,6 +565,99 @@ try {
     '곁길 알림의 규칙값을 게임에서 읽었다 (프로브가 문턱을 안 베낍니다)',
     `예산 ${hint.rule.range}m · 눈앞 ${hint.rule.near}m`,
   )
+  /**
+   * ── 📻 **안내가 말할 수 있는 「띠」의 폭** ──────────────────────────
+   *
+   * 안내는 세 문을 통과해야 뜹니다(main.ts `findSideHint`):
+   *   ① 편도 ≤ 예산      — *"지금 이 근처인가"* (놀리지 않기)
+   *   ② 더 걷는 ≤ 예산   — *"값이 싼가"*       (헛걸음 시키지 않기)
+   *   ③ 편도 ≥ 눈앞      — *"이미 보이지 않는가"* (빛기둥이 대신함)
+   *
+   * ①과 ③이 함께 걸리면 안내가 말하는 구간은 **편도 20~40m 라는 20m 폭의
+   * 띠**입니다. 그런데 두 문턱이 **같은 상수 하나**(`sideHintRange`)를
+   * 쓰면서 서로 다른 질문에 답하고 있습니다.
+   *
+   * 그래서 이 띠에 **한 번도 안 들어오는** 보물이 생깁니다 — 실측 최소
+   * 편도가 46m · 60m 인 것이 그렇습니다. 안내가 원래 맡기로 한 일이
+   * *"빛기둥이 못 닿는 보물을 알리는 것"* 인데, 정작 그런 보물을 거릅니다.
+   *
+   * 띠를 넓히려면 **시작 지점에서 무엇이 뜨는지**를 알아야 합니다
+   * (바로 위 「멀면 안 알려 준다」가 그걸 지킵니다). 추측하지 않고 찍습니다.
+   */
+  {
+    const atSpawn = await page.evaluate(
+      async ([sx, sz]) => {
+        const G = window.__game
+        G.reset()
+        await new Promise((r) => setTimeout(r, 200))
+        G.teleportPlayer(sx, sz)
+        await new Promise((r) => setTimeout(r, 200))
+        const goal = G.objective()
+        const me = goal ? G.distancesToward(goal.x, goal.z, [{ x: sx, z: sz }]) : null
+        const meToGoal = me ? me.points[0] : 0
+        const out = []
+        for (const t of G.treasurePositions().filter((v) => !v.taken)) {
+          const w = G.distancesToward(t.x, t.z, [{ x: sx, z: sz }])
+          const walk = w ? w.points[0] : null
+          const g = goal ? G.distancesToward(goal.x, goal.z, [{ x: t.x, z: t.z }]) : null
+          const toGoal = g ? g.points[0] : null
+          out.push({
+            x: Math.round(t.x),
+            z: Math.round(t.z),
+            walk,
+            extra: walk !== null && toGoal !== null ? walk + toGoal - meToGoal : null,
+          })
+        }
+        return out.sort((a, b) => (a.walk ?? 1e9) - (b.walk ?? 1e9))
+      },
+      [trail[0].x, trail[0].z],
+    )
+    console.log(
+      `  [띠] 안내가 말하는 구간 — 편도 ${hint.rule.near}~${hint.rule.range}m (폭 ${hint.rule.range - hint.rule.near}m)\n` +
+        `       동선 위 최소 편도 — ${seen
+          .map((v) => `(${Math.round(v.x)},${Math.round(v.z)}) ${v.walk === null ? '?' : v.walk.toFixed(0)}m`)
+          .join(' · ')}\n` +
+        `       시작 지점에서 — ${atSpawn
+          .map(
+            (v) =>
+              `(${v.x},${v.z}) 편도 ${v.walk === null ? '?' : v.walk.toFixed(0)}m/더 걷는 ${v.extra === null ? '?' : v.extra.toFixed(0)}m`,
+          )
+          .join(' · ')}`,
+    )
+    /**
+     * ── ⛰️ **단일 문턱으로는 불가능합니다 — 벽이면 벽이라고 적습니다** ──
+     *
+     * 위 두 줄을 나란히 놓으면 답이 나옵니다:
+     *
+     *   · (35,35) 를 띠에 넣으려면 편도 문턱이 **≥ 60m** 여야 합니다
+     *   · 시작 지점에서 조용하려면 **< 52m** 여야 합니다((-27,19) 가 52m)
+     *
+     * **52 < 60.** 어떤 값을 넣어도 둘 다 만족할 수 없습니다. 궁수의
+     * 「천장 1.87발」과 같은 종류의 벽입니다 — *아무도 못 넘는 문턱은
+     * 눈금이 아니라 벽이고, 벽이면 벽이라고 적어 둡니다.*
+     *
+     * 그래서 처방이 바뀝니다: **문턱을 올려라 → 규칙의 모양을 바꿔라.**
+     * 두 경우를 가르는 축은 위 표에 이미 있습니다 —
+     *
+     *     시작 지점의 (-27,19) — 더 걷는 **36m**  (진짜 곁길)
+     *     문제의 (35,35)/(13,47) — 더 걷는 **4m·12m** (사실상 가는 길)
+     *
+     * 즉 *"멀다"* 가 아니라 *"멀고 **비싸다**"* 를 걸러야 합니다.
+     * 다만 시작 지점에서는 저 넷이 전부 더 걷는 ≤ 22m 라, 「싸면 멀어도
+     * 알린다」만으로는 **146m 짜리를 알리게 됩니다.** 두 번째 경계가
+     * 더 필요하고, 그 값을 이 판에 맞춰 고르면 그건 문턱 맞추기입니다.
+     *
+     * ⚠️ 그래서 이번 회차는 **규칙을 안 바꿉니다.** 벽이라는 사실과
+     *    가르는 축을 숫자로 남기는 것까지가 이번 몫입니다.
+     */
+    const minWalkMax = Math.max(...seen.map((v) => (v.walk === null ? 0 : v.walk)))
+    const spawnMin = Math.min(...atSpawn.map((v) => (v.walk === null ? 1e9 : v.walk)))
+    console.log(
+      `       ⛰️ 벽 — 다 담으려면 편도 문턱 **≥ ${minWalkMax.toFixed(0)}m**, ` +
+        `시작에서 조용하려면 **< ${spawnMin.toFixed(0)}m**` +
+        `${spawnMin <= minWalkMax ? ' → **단일 문턱으로는 불가능**' : ''}`,
+    )
+  }
   check(
     hint.far === '',
     '멀면 **안 알려 준다** (갈 수 없는 것을 알려 주는 것은 놀리는 것입니다)',
