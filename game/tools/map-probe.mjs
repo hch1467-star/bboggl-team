@@ -1427,7 +1427,83 @@ try {
   )
 
   console.log('')
-  check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
+  /**
+   * ── 🧭 **지도가 말한 길을 몸이 실제로 걸을 수 있는가** ────────────────
+   *
+   * 이 게임에는 길에 대한 진실이 **두 벌** 있습니다. 흐름장이 말하는
+   * *"다음 한 걸음"* 과, 충돌이 허락하는 *"실제로 갈 수 있는 자리"*.
+   * 둘이 어긋나도 **아무 오류도 안 납니다.** 그냥 지면 화살표가 못 가는
+   * 쪽을 가리키고(기둥 4 — *"걸어갈 수 있는 방향을 가리킨다"*), 자동
+   * 플레이는 그 자리에서 왔다 갔다 합니다. 실제로 판마다 찍혔습니다:
+   *
+   *     막힘 @무너진 회랑 — 순 이동 0.6m 인데 **걸은 거리 68.0m**
+   *
+   * 그래서 **게임의 두 함수를 그대로 이어 붙여** 걸어 봅니다(`pathWalk`).
+   * 프로브가 지형 규칙을 흉내 내면 흉내를 검사하게 되므로, 게임에서 합니다.
+   *
+   * ⚠️ 「길이 없다」고 한 짝은 세지 않습니다 — 이 검사가 묻는 것은
+   *    *"있다고 해 놓고 못 가는가"* 이지 *"없는 길이 있는가"* 가 아닙니다.
+   */
+  // 칸→월드 변환은 이 파일 위쪽 `CELL` 과 같은 규약입니다(1198행 근처와 동일).
+  const world = (cx, cz) => ({ x: (cx - level.w / 2 + 0.5) * CELL, z: (cz - level.h / 2 + 0.5) * CELL })
+  // 서 있을 수 있는 칸만 씁니다. 성글게(6칸=12m) 훑어 판이 몇 분 안에 끝나게.
+  const spots = []
+  for (let cz = 1; cz < level.h - 1; cz += 6) {
+    for (let cx = 1; cx < level.w - 1; cx += 6) {
+      if (heightAt(cx, cz) === VOID) continue
+      spots.push(world(cx, cz))
+    }
+  }
+  const walkRes = await page.evaluate(
+    async ([spots]) => {
+      const G = window.__game
+      const bad = []
+      let tried = 0
+      let arrived = 0
+      // 목표는 같은 표에서 성글게 고릅니다 — 특정 지점 목록에 기대지 않게.
+      for (let i = 0; i < spots.length; i += 3) {
+        const goal = spots[i]
+        const rows = G.pathWalk(goal.x, goal.z, spots)
+        for (const r of rows) {
+          tried++
+          if (r.arrived) {
+            arrived++
+            continue
+          }
+          bad.push({
+            from: `${r.x.toFixed(0)},${r.z.toFixed(0)}`,
+            to: `${goal.x.toFixed(0)},${goal.z.toFixed(0)}`,
+            why: r.why,
+            walked: r.walked,
+            net: r.net,
+            end: `${r.endX},${r.endZ}`,
+          })
+        }
+      }
+      return { tried, arrived, bad: bad.slice(0, 6), badCount: bad.length }
+    },
+    [spots],
+  )
+  console.log(
+    `\n  [지도가 말한 길을 걸어 보기] 길이 있다고 한 짝 ${walkRes.tried}개 · 도착 ${walkRes.arrived}개 · ` +
+      `**못 간 것 ${walkRes.badCount}개**`,
+  )
+  for (const b of walkRes.bad) {
+    console.log(`     (${b.from}) → (${b.to})  ${b.why} @(${b.end}) · 걸은 ${b.walked}m · 순 이동 ${b.net}m`)
+  }
+  check(
+    walkRes.tried >= 200,
+    '🚧 걸어 볼 짝을 **충분히 잡았다** (몇 개만 재고 「지도가 멀쩡하다」고 하지 않게)',
+    `${walkRes.tried}개`,
+  )
+  check(
+    walkRes.badCount === 0,
+    '🧭 **길이 있다고 한 곳은 걸어서 도착한다** (화살표가 못 가는 쪽을 가리키지 않는다)',
+    `못 간 것 ${walkRes.badCount}/${walkRes.tried}`,
+  )
+
+  console.log('')
+    check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
   /**
    * 💥 **도중에 죽으면 반드시 소리를 냅니다.**

@@ -4609,6 +4609,116 @@ class Game {
    * 🚪 그 자리에서 **나에게 오는** 걸어야 하는 거리(m). 어그로 규칙이 쓰는
    * 바로 그 값입니다 — 프로브가 다른 방향으로 재다가 한 번 속았습니다.
    */
+  /**
+   * 🧭 **지도가 「길이 있다」고 한 곳을 몸으로 걸어가 봅니다.**
+   *
+   * ── 왜 필요한가 ──────────────────────────────────────────────
+   * 이 게임에는 길에 대한 진실이 **두 벌** 있습니다:
+   *   · `nextStepToward` — 흐름장이 말하는 *"다음 한 걸음"*
+   *   · `resolveMove`    — 몸이 실제로 갈 수 있는 자리(충돌·단차·미끄러짐)
+   *
+   * 둘이 어긋나면 아무 오류도 안 납니다. 그냥 **지면 화살표가 못 가는 쪽을
+   * 가리키고**(기둥 4), 자동 플레이는 그 자리에서 왔다 갔다 합니다 —
+   * 실제로 판마다 *"순 이동 0.6m 인데 걸은 거리 68m"* 가 찍혔습니다.
+   *
+   * 그래서 **게임의 두 함수를 그대로 이어 붙여** 걸어 봅니다. 프로브가
+   * 지형 규칙을 흉내 내면 흉내를 검사하게 되므로, 여기서 합니다.
+   *
+   * ⚠️ 이건 걸음의 **가능성**만 잽니다(속도·조향·적 없음). 그래서 실패는
+   *    확실한 병이고, 성공은 *"적어도 지도 탓은 아니다"* 까지입니다.
+   */
+  debugPathWalk(
+    toX: number,
+    toZ: number,
+    starts: readonly { x: number; z: number }[],
+    step = 0.35,
+    maxSteps = 3000,
+  ): {
+    x: number
+    z: number
+    arrived: boolean
+    walked: number
+    net: number
+    endX: number
+    endZ: number
+    why: string
+  }[] {
+    const out: {
+      x: number
+      z: number
+      arrived: boolean
+      walked: number
+      net: number
+      endX: number
+      endZ: number
+      why: string
+    }[] = []
+    const t = this.terrain
+    if (!t) return out
+    t.buildFlowField(toX, toZ)
+    for (const s0 of starts) {
+      // 지도가 "길이 없다"고 한 짝은 이 검사의 대상이 아닙니다.
+      if (t.pathDistance(s0.x, s0.z) === null) continue
+      let x = s0.x
+      let z = s0.z
+      let walked = 0
+      let why = '걸음 수를 다 씀'
+      let arrived = false
+      for (let i = 0; i < maxSteps; i++) {
+        /**
+         * ⚠️ **「도착」을 1m 라는 리터럴로 정했다가 26건이 빨갛게 떴습니다.**
+         *    죽은 자리가 26건 **전부 같은 칸**이었습니다 — 목표 칸 안에
+         *    들어와 있는데 목표 *점*까지는 1m 남은 상태. 칸이 2m 니까
+         *    당연한 일이고, 지도는 아무 잘못이 없었습니다.
+         *    도착했는지는 **게임에게 묻습니다** — 흐름장 값이 0 인 칸이
+         *    곧 목표 칸입니다.
+         */
+        if (t.pathDistance(x, z) === 0) {
+          arrived = true
+          why = ''
+          break
+        }
+        const nxt = t.nextStepToward(x, z)
+        if (!nxt) {
+          /**
+           * 여기서 **두 가지 병을 갈라야 합니다.**
+           *   · 흐름장 **밖**으로 미끄러졌다 — 몸이 지도가 안 덮는 칸에 있음
+           *     (한쪽으로만 내려가는 턱에서 잘 납니다. 지도는 목표로 *올 수
+           *     있는* 칸만 덮으므로, 떨어지면 그 칸엔 값이 없습니다)
+           *   · 흐름장이 그 칸에서 **끝났다** — 값은 있는데 더 낮은 이웃이 없음
+           * 처방이 정반대라 한 칸에 담으면 안 됩니다.
+           */
+          why = t.pathDistance(x, z) === null ? '흐름장 밖으로 미끄러졌다' : '흐름장이 그 칸에서 끝났다'
+          break
+        }
+        const dx = nxt.x - x
+        const dz = nxt.z - z
+        const l = Math.hypot(dx, dz) || 1
+        const r = t.resolveMove(x, z, x + (dx / l) * step, z + (dz / l) * step)
+        const moved = Math.hypot(r.x - x, r.z - z)
+        x = r.x
+        z = r.z
+        walked += moved
+        if (moved < step * 0.05) {
+          // 지도는 가라는데 **몸이 안 나갑니다.** 이게 두 진실이 어긋난 자리입니다.
+          why = '지도는 가라는데 몸이 안 나간다'
+          break
+        }
+      }
+      out.push({
+        x: s0.x,
+        z: s0.z,
+        arrived,
+        walked: Number(walked.toFixed(1)),
+        net: Number(Math.hypot(x - s0.x, z - s0.z).toFixed(1)),
+        endX: Number(x.toFixed(0)),
+        endZ: Number(z.toFixed(0)),
+        why,
+      })
+    }
+    return out
+  }
+
   debugWalkToPlayer(x: number, z: number): number | null {
     const p = this.playerEntity
     this.terrain?.buildPlayerField(Transform.x[p], Transform.z[p])
@@ -6853,6 +6963,26 @@ declare global {
        *    어그로 규칙이 쓰는 것은 **이 방향**입니다.
        */
       walkToPlayer: (x: number, z: number) => number | null
+      /**
+       * 🧭 지도가 말한 길을 **게임의 충돌로 실제로 걸어** 봅니다.
+       * 실패한 시작점만 봐도 *"화살표가 못 가는 쪽을 가리키는 자리"* 가 나옵니다.
+       */
+      pathWalk: (
+        toX: number,
+        toZ: number,
+        starts: readonly { x: number; z: number }[],
+        step?: number,
+        maxSteps?: number,
+      ) => {
+        x: number
+        z: number
+        arrived: boolean
+        walked: number
+        net: number
+        endX: number
+        endZ: number
+        why: string
+      }[]
       distancesToward: (
         toX: number,
         toZ: number,
@@ -7795,6 +7925,7 @@ window.__game = {
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
   pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
   walkToPlayer: (x, z) => game.debugWalkToPlayer(x, z),
+  pathWalk: (toX, toZ, starts, step, maxSteps) => game.debugPathWalk(toX, toZ, starts, step, maxSteps),
   distancesToward: (toX, toZ, pts) => game.debugDistancesToward(toX, toZ, pts),
   terrainInfo: () => game.debugTerrainInfo(),
   /** 🗺 이 월드 좌표의 지형 단(段). 프로브가 낙차를 **찾아내는** 데 씁니다. */

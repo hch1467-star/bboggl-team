@@ -256,7 +256,44 @@ try {
      * 월드 +X로 가려면 화면상 오른쪽 아래로 가야 합니다.
      * 카메라의 전방/우측 벡터에 투영해서 눌러야 할 키를 고릅니다.
      */
+    /**
+     * 🧭 **최근 90프레임의 「어디를 향해 눌렀나」.**
+     *
+     * 막힘 기록이 *"순 이동 0.6m 인데 걸은 거리 68m"* — 즉 **왕복**이라는
+     * 것까지는 말해 주는데, 왕복에도 병이 둘입니다:
+     *   · **목표가 진동한다** — 두 곳을 번갈아 고른다 (고르는 규칙의 이야기)
+     *   · **걸음이 진동한다** — 목표는 하나인데 한 걸음마다 되돌아간다
+     * 처방이 정반대라 한 줄에 담으면 다음 사람이 또 못 고릅니다.
+     *
+     * 그래서 **누르는 자리에서** 조준점을 남깁니다. 사건은 사건이 일어난
+     * 자리에서 기록합니다 — 여기를 지나지 않는 이동은 없습니다.
+     */
+    const recentAims = []
+    /**
+     * 🧱 **몸이 끼었는가** — 최근 12프레임을 다 눌렀는데 총 0.5m 도 못 갔다.
+     *
+     * 아래 두 곳(보물이동·소비처이동)의 *"마지막 몇 미터는 직선"* 이 이걸
+     * 봅니다. 그 지름길은 격자 진동을 없애려고 넣은 것인데, **길찾기를 끄는**
+     * 지름길이라 목적지가 턱 뒤에 있으면 몸이 그대로 낍니다. 실측:
+     *
+     *     막힘 @(17,-2) — 순 이동 0.9m · **걸은 거리 0.9m** · 방향 뒤집힘 0회
+     *     조준점 (18,0)×60 — 2.2m 앞을 60프레임 눌렀는데 안 나감
+     *
+     * 끼면 직선을 끄고 **길에게 다시 묻습니다.** 진동을 없애려다 끼임을
+     * 만들었으니, 둘 중 그때그때 맞는 쪽을 씁니다.
+     */
+    const bodyStuck = () =>
+      recentMove.length >= 12 && recentMove.reduce((a, b) => a + b, 0) < 0.5
     const moveToward = (dx, dz) => {
+      const p0 = G.state().player
+      recentAims.push({
+        // 칸(2m)으로 접어 둡니다 — 0.1m 흔들림을 "다른 목표"로 세지 않게.
+        ax: Math.round((p0.x + dx) / 2),
+        az: Math.round((p0.z + dz) / 2),
+        dx,
+        dz,
+      })
+      if (recentAims.length > 90) recentAims.shift()
       const cam = G.cameraAxes()
       const fwd = dx * cam.forwardX + dz * cam.forwardZ
       const right = dx * cam.rightX + dz * cam.rightZ
@@ -293,6 +330,8 @@ try {
      * 걸은 거리도 0에 가까우면 끼인 것이고, 걸은 거리만 크면 왕복입니다.
      */
     let walkedSince = 0
+    /** 🧱 최근 12프레임의 실제 이동 — 「끼임」을 그 자리에서 알아채기 위한 것. */
+    const recentMove = []
     let prevPos = G.state().player
     const regionLog = []
     /** 구역별 받은 피해와 머문 시간 — 난이도 곡선을 보기 위해 */
@@ -797,7 +836,14 @@ try {
        * **"움직이지도, 아무것도 죽이지도 못한 시간"** 을 봅니다.
        */
       {
-        walkedSince += Math.hypot(p.x - prevPos.x, p.z - prevPos.z)
+        const stepLen = Math.hypot(p.x - prevPos.x, p.z - prevPos.z)
+        walkedSince += stepLen
+        /**
+         * 🧱 **최근 몇 프레임 동안 몸이 실제로 나갔는가.**
+         * 아래 「마지막 몇 미터는 직선」이 이 값을 봅니다 — 근거는 그 자리에.
+         */
+        recentMove.push(stepLen)
+        if (recentMove.length > 12) recentMove.shift()
         prevPos = p
         const moved = Math.hypot(p.x - lastPos.x, p.z - lastPos.z)
         const kills = G.runStats().kills
@@ -825,6 +871,43 @@ try {
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, v]) => `${k}×${v}`)
                 .join(' ')}]` +
+              (() => {
+                // 🧭 **왕복의 두 병을 가릅니다** (위 `recentAims` 주석).
+                if (recentAims.length < 4) return ''
+                const cells = new Set(recentAims.map((a) => `${a.ax},${a.az}`))
+                let flips = 0
+                for (let i = 1; i < recentAims.length; i++) {
+                  const a1 = recentAims[i - 1]
+                  const a2 = recentAims[i]
+                  if (a1.dx * a2.dx + a1.dz * a2.dz < 0) flips++
+                }
+                const top = [...recentAims.reduce((m, a) => {
+                  const k = `${a.ax},${a.az}`
+                  return m.set(k, (m.get(k) ?? 0) + 1)
+                }, new Map())]
+                  .sort((x, y) => y[1] - x[1])
+                  .slice(0, 3)
+                  .map(([k, v]) => `(${k.split(',').map((n) => n * 2).join(',')})×${v}`)
+                  .join(' ')
+                /**
+                 * ⚠️ **판정 순서가 중요합니다 — 처음에 틀렸습니다.**
+                 *    조준점 수만 보고 「목표가 진동」이라고 적었는데, 그 판은
+                 *    **걸은 거리가 0.9m** 였습니다. 즉 왕복이 아니라 끼임이고,
+                 *    조준점이 셋인 것은 몸이 안 나가는 동안 봇이 목표를
+                 *    몇 번 바꿔 본 흔적일 뿐이었습니다. 바로 위 줄에 이미
+                 *    답이 있는데 아래 줄이 다른 말을 하면, 다음 사람은
+                 *    **더 자세한 쪽**을 믿습니다. 순서를 못 박습니다.
+                 */
+                const verdict =
+                  walkedSince < 3
+                    ? '**끼임 — 몸이 안 나간다**'
+                    : cells.size <= 2
+                      ? '**걸음이 진동**'
+                      : '**목표가 진동**'
+                return (
+                  ` · 조준점 ${cells.size}곳 [${top}] · 방향 뒤집힘 ${flips}회 → ${verdict}`
+                )
+              })() +
               (obj2
                 ? ` · 목표 ${obj2.label} 걷는거리 ${obj2.walkDist.toFixed(0)}m`
                 : ' · 목표 없음') +
@@ -2805,7 +2888,8 @@ try {
            * 아닙니다.
            */
           markAct('강화이동')
-          const useStraight = straight < 6
+          // 🧱 끼었으면 직선을 끕니다 — 근거는 `bodyStuck` 주석에.
+          const useStraight = straight < 6 && !bodyStuck()
           const tx = useStraight ? fire.x : step.x
           const tz = useStraight ? fire.z : step.z
           moveToward(tx - p.x, tz - p.z)
@@ -3174,8 +3258,10 @@ try {
             // 마지막 몇 미터는 직선 — 격자 길찾기는 목적지에 붙으면 진동합니다
             // (화톳불에서 이미 한 번 데인 자리입니다).
             const straight = Math.hypot(best.goal.x - p.x, best.goal.z - p.z)
-            const tx = straight < 5 ? best.goal.x : best.step.x
-            const tz = straight < 5 ? best.goal.z : best.step.z
+            // 🧱 끼었으면 직선을 끕니다 — 근거는 `bodyStuck` 주석에.
+            const useStraight = straight < 5 && !bodyStuck()
+            const tx = useStraight ? best.goal.x : best.step.x
+            const tz = useStraight ? best.goal.z : best.step.z
             moveToward(tx - p.x, tz - p.z)
             await sleep()
             continue
