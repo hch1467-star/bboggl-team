@@ -31,6 +31,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { simPerWall, announceSpeed } from './machine.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5225
@@ -57,6 +58,12 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  /**
+   * ⏱ 6동작 × 5회 = 30판이고 한 판이 2~3 시뮬레이션초입니다.
+   *    실측으로 이 컨테이너에서 **11분 41초** 걸렸습니다(22개 전부 통과).
+   *    그 11분을 「멈췄다」로 읽어서 이 프로브가 오래 죽어 있었습니다.
+   */
+  announceSpeed(await simPerWall(page), 30 * 2.5)
 
   console.log('\n🎮 컨트롤의 쫀득함 — 누른 것이 언제 접수되는가\n')
   console.log('  [기준] 접수는 **1프레임**. 2프레임 이상이면 플레이어는 "씹혔다"고 느낍니다.')

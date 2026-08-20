@@ -36,6 +36,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { simPerWall, announceSpeed } from './machine.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5211
@@ -70,6 +71,9 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/?lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  // ⏱ 이 프로브는 판당 20여 시뮬레이션초를 씁니다 — 느린 기계에서는
+  //    `npm run pace 2` 로 판수를 줄일 수 있습니다(RUNS, 2~9).
+  announceSpeed(await simPerWall(page), RUNS * 24, '판수를 줄이려면 `npm run pace 2`.')
 
   console.log(`\n🥁 보스 페이스 실험대 — ${RUNS}판, 같은 시작 · 같은 정책\n`)
 

@@ -37,6 +37,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { simPerWall, announceSpeed } from './machine.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5224
@@ -63,6 +64,7 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  announceSpeed(await simPerWall(page), 0)
 
   console.log('\n🔄 등 뒤를 잡을 **기회** — 적이 굳어 있는 동안 돌아갈 수 있는가\n')
 

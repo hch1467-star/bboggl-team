@@ -31,6 +31,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
+import { simPerWall, announceSpeed } from './machine.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5226
@@ -57,6 +58,9 @@ try {
   page.on('pageerror', (e) => errors.push(String(e)))
   await page.goto(`http://localhost:${PORT}/?lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  // ⏱ 예산은 안 적습니다 — 이 프로브가 쓰는 시뮬레이션 시간이 지연 격자와
+  //    적 종류에 따라 달라져서, 어림하면 지어낸 숫자가 됩니다.
+  announceSpeed(await simPerWall(page), 0)
 
   const t = await page.evaluate(() => window.__game.terrainInfo())
   const roster = await page.evaluate(() => window.__game.enemyRoster())
