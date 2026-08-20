@@ -39,6 +39,8 @@ import {
   GUARD,
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
+  LEVEL_DEAGGRO_MIN,
+  LEVEL_DEAGGRO_RATIO,
   PLAYER,
   BLEED,
   POISE,
@@ -105,11 +107,27 @@ let reachDistance: ((x: number, z: number) => number | null) | null = null
 export function setReachDistance(fn: ((x: number, z: number) => number | null) | null): void {
   reachDistance = fn
 }
+/**
+ * 🚪 **AI 가 지금 쓰고 있는 「그 적이 나에게 오는 거리」.**
+ *
+ * 프로브가 지형에서 다시 계산하면 *다른 함수*를 검사하게 됩니다. 실제로
+ * 한 번 방향을 반대로 재서 속았고, 그 다음엔 *"규칙이 안 도는지, 값이
+ * 다른지"* 를 못 갈랐습니다. 판단하는 쪽이 쓰는 값을 그대로 내보냅니다.
+ * `reachDistance` 가 아예 안 걸려 있으면(아레나) **null** 입니다 —
+ * 그 사실 자체가 답인 경우가 있습니다.
+ */
+export function reachDistanceOf(x: number, z: number): number | null {
+  return reachDistance ? reachDistance(x, z) : null
+}
 
 export function setAggroRangeOverride(range: number): void {
   aggroRangeOverride = range
 }
 
+/** 🚧 AI 가 지금 도는가 — 프로브가 **멈춘 게임**을 재고 규칙 탓을 하지 않게. */
+export function enemyAiRunning(): boolean {
+  return aiEnabled
+}
 export function setEnemyAiEnabled(enabled: boolean): void {
   aiEnabled = enabled
 }
@@ -139,6 +157,17 @@ const enemies = defineQuery(Enemy, Actor, Transform, Velocity, Health)
  * 게임 루프가 읽고 비웁니다. 사건은 사건이 일어난 자리에서 기록합니다.
  */
 export const spotEvents: { entity: number; x: number; z: number; heard: boolean }[] = []
+
+/**
+ * 🚪 **놓친 순간** — 걸어서 닿을 수 없게 되어 `aggro` 가 1 → 0 으로
+ * 돌아간 적들. `spotEvents` 의 짝입니다.
+ *
+ * 사건으로 내보내는 이유도 같습니다 — 이 규칙이 하는 일은 *"안 하는 것"*
+ * (예고를 안 띄우는 것)이라 상태만 봐서는 **일어났는지조차 알 수 없습니다.**
+ * 직선거리와 경로거리를 같이 실어서, 장부가 *"몇 배였길래 풀렸는가"* 를
+ * 그대로 말할 수 있게 합니다.
+ */
+export const deaggroEvents: { entity: number; straight: number; walk: number }[] = []
 
 const DEG = Math.PI / 180
 /** 이 각도 안에 플레이어가 들어와야 공격을 시작합니다(뒤통수에 대고 휘두르지 않도록). */
@@ -1418,8 +1447,44 @@ export function enemyAiSystem(
       }
       // 아직 못 봤으면 유예를 채워 둡니다 — 깨어난 뒤에도 잠깐 남습니다.
       Enemy.unawareT[e] = AWARE.ambushGrace
-    } else if (Enemy.unawareT[e] > 0) {
-      Enemy.unawareT[e] = Math.max(0, Enemy.unawareT[e] - dt)
+    } else {
+      if (Enemy.unawareT[e] > 0) Enemy.unawareT[e] = Math.max(0, Enemy.unawareT[e] - dt)
+      /**
+       * 🚪 **깬 뒤에도 「걸어서 닿는가」를 계속 묻습니다.**
+       *
+       * 지금까지 이 질문은 깨울 때 **딱 한 번** 했습니다. 그래서 깬 뒤에
+       * 플레이어가 벽 반대편으로 돌아가면, 그 적은 직선 6m 만 보고
+       * **영원히 예고를 띄웠습니다**(실측: 경로 78m). 문턱과 근거는
+       * balance.ts `LEVEL_DEAGGRO_RATIO` 한 곳에만 있습니다.
+       *
+       * ⚠️ **예고·판정 중에는 안 풉니다. 다만 후딜에서는 풉니다.**
+       *    이미 나간 공격을 지형 때문에 중간에 지우면 플레이어가 본 예고가
+       *    아무 이유 없이 사라집니다 — 그건 규칙이 아니라 마법입니다.
+       *
+       *    처음엔 *"공격 상태면 통째로 건너뛴다"* 로 적었는데, 프로브가
+       *    **한 번도 안 풀린다**고 했습니다. 벽에 붙은 적은 휘두름과 후딜을
+       *    끊임없이 반복해서 `state` 가 거의 항상 `Attack` 이기 때문입니다.
+       *    실제로 자동 플레이의 그 적도 `{"attacking":true,"recovering":true}`
+       *    였습니다. **후딜에는 화면에 아무 약속도 안 떠 있으므로**, 거기서
+       *    푸는 것은 아무것도 지우지 않습니다.
+       *
+       * ⚠️ 보스는 제외합니다. 보스에게는 아레나 리쉬라는 **다른 규칙**이
+       *    이미 있고, 둘을 겹치면 어느 쪽이 보스를 되돌렸는지 못 가립니다.
+       */
+      if (
+        !isBoss &&
+        !(
+          Actor.state[e] === ActorState.Attack &&
+          (Actor.phase[e] as AttackPhase) !== AttackPhase.Recovery
+        ) &&
+        effectiveDist > LEVEL_DEAGGRO_MIN &&
+        effectiveDist > dist * LEVEL_DEAGGRO_RATIO
+      ) {
+        // 다시 재웁니다 — 다음 프레임부터 **깨우는 쪽 문턱**이 다시 판단합니다.
+        Enemy.aggro[e] = 0
+        Enemy.unawareT[e] = AWARE.ambushGrace
+        deaggroEvents.push({ entity: e, straight: dist, walk: effectiveDist })
+      }
     }
 
     if (Enemy.aggro[e] === 0) {

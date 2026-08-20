@@ -450,6 +450,184 @@ try {
     )
   }
 
+  /**
+   * ── 🚪 **깬 뒤에도 「걸어서 닿는가」를 다시 묻는가** ────────────────────
+   *
+   * 자동 플레이가 「무너진 회랑」에서 이걸 찍었습니다:
+   *
+   *     가까운적 **6.0m** · **경로 78m** · {"aggro":true,"attacking":true}
+   *
+   * 벽 건너 6m 에서 돌진 예고를 띄우고 있었습니다. 깨우는 판정은 걸어야
+   * 하는 거리를 쓰는데 그 질문을 **한 번밖에** 안 했기 때문입니다.
+   *
+   * ⚠️ **자리를 좌표로 베껴 적지 않습니다.** (24,3) 은 이번 판에서 그랬던
+   *    자리일 뿐이고, 존을 한 번 손보면 그 좌표는 거짓이 됩니다. 대신
+   *    **성질**로 찾습니다 — *"직선은 가까운데 경로는 먼 자리"*. 그런 자리가
+   *    이 존에 없으면 그건 검사가 통과할 일이 아니라 **못 잰 것**입니다.
+   */
+  const unreach = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 16))
+    /**
+     * ⚠️ **시뮬 시계로 셉니다(`simElapsed`), 벽시계가 아니라.**
+     *
+     * 이 파일의 다른 절들은 `state().time`(벽시계)을 씁니다. 표시가 떴는지
+     * 같은 건 그걸로도 되지만, **적이 움직이는지**를 재려면 안 됩니다 —
+     * SwiftShader 에서 한 프레임이 0.2초라 「1.2초」가 실제로는 **여섯
+     * 프레임**입니다. 그래서 두 적 모두 스폰 자리 그대로였고, 저는 그걸
+     * 「규칙이 안 돈다」로 읽어 게임을 세 번 고치려 들었습니다.
+     * 게이트(「적이 실제로 움직였다」)가 없었으면 그대로 넘어갔을 자리입니다.
+     */
+    const now = () => G.state().simElapsed
+    const wait = async (sec) => {
+      const t0 = now()
+      const dl = Date.now() + 40000
+      while (now() - t0 < sec && Date.now() < dl) await sleep()
+    }
+    G.reset()
+    G.setAggroRange(14)
+    /**
+     * 🚧 **앞 절이 남긴 스위치를 스스로 되돌립니다.**
+     * 이 저장소는 켠 스위치를 안 끄고 다음 절로 넘어가 판을 통째로 망친
+     * 적이 있습니다(crowd 프로브의 무적 스위치). 여기서는 값이 아니라
+     * **되돌리는 것**이 공짜이므로 무조건 되돌립니다.
+     */
+    G.setPaused(false)
+    G.freezeEnemies(false)
+    await wait(0.5)
+    G.clearEnemies()
+    await wait(0.3)
+    const rule = G.awareInfo()
+    /**
+     * ⚠️ **처음엔 시작 지점 둘레만 훑었고, 게이트가 「그런 자리 없음」으로
+     *    잡았습니다.** 당연합니다 — 병이 난 곳은 존 안쪽의 「무너진 회랑」
+     *    이고 플레이어는 입구에서 시작합니다. 자를 안 옮기고 잰 셈입니다.
+     *
+     * 그래서 **플레이어를 옮겨 가며** 찾습니다. (24,3) 은 자동 플레이가
+     * 실제로 막혔던 자리라 **힌트로만** 먼저 넣고, 거기서 안 나오면 존을
+     * 성글게 훑습니다 — 좌표가 틀려도 검사가 살아남게.
+     */
+    const ring = (ox, oz) => {
+      let far = null
+      let near = null
+      for (let a = 0; a < 24 && !(far && near); a++) {
+        for (const r of [4, 6, 8]) {
+          const x = ox + Math.cos((a / 24) * Math.PI * 2) * r
+          const z = oz + Math.sin((a / 24) * Math.PI * 2) * r
+          /**
+           * ⚠️ **`pathStep` 은 방향이 반대입니다.** 저건 *내가 거기로* 가는
+           *    거리이고, 어그로 규칙이 쓰는 것은 *그 적이 나에게* 오는
+           *    거리입니다. 한쪽으로만 내려갈 수 있는 턱이 있으면 둘이
+           *    다릅니다 — 실제로 여기서 76m 를 보고 "적이 못 온다"고 읽었는데
+           *    그 적은 **턱을 뛰어내려** 올 수 있었습니다. 규칙이 쓰는 값을
+           *    그대로 물어봅니다.
+           */
+          const walk = G.walkToPlayer(x, z)
+          if (walk === null) continue
+          const straight = Math.hypot(x - ox, z - oz)
+          if (!far && walk > straight * rule.deaggroRatio && walk > rule.deaggroMin) {
+            far = { x, z, straight: Number(straight.toFixed(1)), walk: Number(walk.toFixed(1)) }
+          }
+          if (!near && walk < straight * 1.5) {
+            near = { x, z, straight: Number(straight.toFixed(1)), walk: Number(walk.toFixed(1)) }
+          }
+        }
+      }
+      return { far, near }
+    }
+    const spots = [[24, 3]]
+    for (let x = -56; x <= 56; x += 8) for (let z = -56; z <= 56; z += 8) spots.push([x, z])
+    let far = null
+    let near = null
+    let stood = null
+    for (const [ox, oz] of spots) {
+      // 순간이동도 경로 조회도 **그 프레임에** 끝납니다 — 기다릴 것이 없습니다.
+      G.teleportPlayer(ox, oz)
+      const p2 = G.state().player
+      // 못 서는 칸이면 게임이 다른 데로 밀어냅니다 — 그 경우 그 자리로 잽니다.
+      const got = ring(p2.x, p2.z)
+      if (got.far && got.near) {
+        far = got.far
+        near = got.near
+        stood = { x: Number(p2.x.toFixed(1)), z: Number(p2.z.toFixed(1)) }
+        break
+      }
+    }
+    const probe = async (spot) => {
+      if (!spot) return null
+      G.clearEnemies()
+      await wait(0.3)
+      const e = G.spawnEnemyKind('grunt', spot.x, spot.z, true)
+      await wait(0.3)
+      // **깨워 놓고** 봅니다 — 이 규칙이 고치는 것은 "안 깨는 것"이 아니라
+      // "깬 뒤에 다시 안 묻는 것"입니다.
+      G.wakeEnemy(e)
+      /**
+       * ⚠️ **깨운 그 자리에서 읽습니다.** 0.2초를 기다렸다가 읽었더니
+       *    「깬 적 없다」로 나왔습니다 — 규칙이 그 사이에 **이미 풀어
+       *    버렸기 때문**입니다. 게이트가 성공을 실패로 읽고 있었습니다.
+       */
+      const woke = G.enemyInfo(e)?.aggro
+      await wait(2.0)
+      const inf = G.enemyInfo(e)
+      const later = inf?.aggro
+      // 🚪 **AI 가 이 적을 몇 미터로 보고 있는가.** 프로브가 따로 계산한
+      //    값과 어긋나면, 규칙이 아니라 **자가 다른 것**입니다.
+      const aiWalk = inf?.walk ?? null
+      // 끝 시점의 **직선거리**도 같이 냅니다. 문턱은 비(比)라서, 적이
+      // 옆으로 밀려나 직선이 커지면 같은 경로거리로도 안 풀립니다.
+      const pp = G.state().player
+      const straightEnd = inf ? Math.hypot(inf.x - pp.x, inf.z - pp.z) : null
+      G.clearEnemies()
+      return {
+        woke,
+        later,
+        aiWalk: aiWalk === null ? null : Number(aiWalk.toFixed(1)),
+        straightEnd: straightEnd === null ? null : Number(straightEnd.toFixed(1)),
+        state: inf?.state ?? null,
+      }
+    }
+    const farR = await probe(far)
+    const nearR = await probe(near)
+    // 🚧 **AI 가 실제로 돌았는가.** 두 적이 1.2초 동안 한 발도 안 움직였다면
+    //    이 판은 규칙을 잰 것이 아니라 **멈춘 게임**을 잰 것입니다.
+    const fired = G.runStats().deaggroUnreachable ?? 0
+    const aiOn = G.awareInfo().enemyAiOn
+    return { rule: { ratio: rule.deaggroRatio, min: rule.deaggroMin }, far, near, farR, nearR, stood, fired, aiOn }
+  })
+  console.log(
+    `\n  [깬 뒤에 다시 묻기 — 문턱 직선의 ${unreach.rule.ratio}배 & ${unreach.rule.min}m 초과] 선 자리 ${unreach.stood ? `(${unreach.stood.x}, ${unreach.stood.z})` : '못 찾음'}\n` +
+      `    벽 너머   ${unreach.far ? `직선 ${unreach.far.straight}m · 경로 ${unreach.far.walk}m (${(unreach.far.walk / unreach.far.straight).toFixed(1)}배)` : '— 그런 자리를 못 찾음'}` +
+      `${unreach.farR ? ` → 깨움 ${unreach.farR.woke} · 2초 뒤 **${unreach.farR.later}** · AI가 본 거리 ${unreach.farR.aiWalk}m · 끝 직선 ${unreach.farR.straightEnd}m(상태 ${unreach.farR.state})` : ''}\n` +
+      `    같은 쪽   ${unreach.near ? `직선 ${unreach.near.straight}m · 경로 ${unreach.near.walk}m (${(unreach.near.walk / unreach.near.straight).toFixed(1)}배)` : '— 그런 자리를 못 찾음'}` +
+      `${unreach.nearR ? ` → 깨움 ${unreach.nearR.woke} · 2초 뒤 **${unreach.nearR.later}** · AI가 본 거리 ${unreach.nearR.aiWalk}m · 끝 직선 ${unreach.nearR.straightEnd}m(상태 ${unreach.nearR.state})` : ''}\n`,
+  )
+  check(
+    unreach.far !== null && unreach.near !== null,
+    '🚧 벽 너머 자리와 같은 쪽 자리를 **둘 다 찾았다** (비교의 게이트 — 한쪽만으로는 아무 말도 못 합니다)',
+    `벽 너머 ${unreach.far ? '있음' : '없음'} · 같은 쪽 ${unreach.near ? '있음' : '없음'}`,
+  )
+  check(
+    unreach.nearR !== null && unreach.near !== null && unreach.nearR.straightEnd !== unreach.near.straight,
+    '🚧 **적이 실제로 움직였다** = AI 가 돌았다 (멈춘 게임을 재고 규칙 탓을 하지 않게)',
+    `같은 쪽 ${unreach.near?.straight}m → ${unreach.nearR?.straightEnd}m · AI 켜짐 ${unreach.aiOn} · 규칙이 푼 횟수 ${unreach.fired}`,
+  )
+  check(
+    unreach.farR?.woke === true && unreach.nearR?.woke === true,
+    '🚧 두 적 **모두 실제로 깼다** (안 깬 것을 「풀렸다」로 읽지 않게)',
+    `벽 너머 ${unreach.farR?.woke} · 같은 쪽 ${unreach.nearR?.woke}`,
+  )
+  check(
+    unreach.farR?.later === false,
+    '🚪 **걸어서 못 오는 적은 나를 놓는다** (대응할 수 없는 예고는 난이도가 아니라 노이즈입니다)',
+    unreach.far ? `직선 ${unreach.far.straight}m · 경로 ${unreach.far.walk}m → aggro ${unreach.farR?.later}` : '',
+  )
+  check(
+    unreach.nearR?.later === true,
+    '🚪 **같은 쪽 적은 계속 쫓는다** (도망이 공짜가 되면 안 됩니다 — 푸는 것은 거리가 아니라 지형입니다)',
+    unreach.near ? `직선 ${unreach.near.straight}m · 경로 ${unreach.near.walk}m → aggro ${unreach.nearR?.later}` : '',
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
   console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)

@@ -44,6 +44,8 @@ import {
   LADDER_REACH,
   LEVEL_AGGRO_LEAD,
   LEVEL_AGGRO_MAX,
+  LEVEL_DEAGGRO_MIN,
+  LEVEL_DEAGGRO_RATIO,
   LEVEL_AGGRO_RANGE,
   HURT,
   hurtFlash,
@@ -176,6 +178,9 @@ import {
   readIdleReasons,
   setAggroRangeOverride,
   spotEvents,
+  deaggroEvents,
+  reachDistanceOf,
+  enemyAiRunning,
   setReachDistance,
   phaseEvents,
   resetAttackTokens,
@@ -576,6 +581,13 @@ class Game {
   private poiseBreaks = 0
   /** 처형이 실제로 몇 번 나갔는가 — 무방비 창을 쓰게 됐는지 재는 값입니다. */
   private finishers = 0
+  /**
+   * 🚪 걸어서 닿을 수 없게 되어 **어그로가 풀린 횟수**, 그리고 그중
+   * 가장 심했던 한 건(직선/경로). 안 하는 일은 세지 않으면 없는 일이 됩니다.
+   */
+  private deaggroCount = 0
+  private deaggroWorstWalk = 0
+  private deaggroWorstStraight = 0
   /** 그중 보스에게 들어간 것 */
   private bossFinishers = 0
   /** 그중 **예고 중에** 끊긴 것 — 🟢 반격만이 초록을 끊는지 재는 값입니다. */
@@ -767,6 +779,7 @@ class Game {
     sfx.stopMusic()
     encounterEvents.length = 0
     spotEvents.length = 0
+    deaggroEvents.length = 0
     this.defeatedBosses = new Set()
     this.bonfires = []
     this.anvils = []
@@ -1954,6 +1967,23 @@ class Game {
       sfx.spotted(sp.x, sp.z)
     }
     spotEvents.length = 0
+    /**
+     * 🚪 **놓친 순간** — 걸어서 닿을 수 없게 되어 어그로가 풀린 적.
+     *
+     * 화면 연출은 **일부러 안 붙입니다.** 들킨 순간(`!`)은 플레이어가
+     * 반응해야 하는 사건이지만, 이건 *"저 적은 이제 나에게 못 온다"* 는
+     * 사실이고 화면에는 **예고가 사라지는 것**으로 이미 나타납니다.
+     * 표시를 하나 더 띄우면 조용해진 것을 시끄럽게 알리는 꼴입니다.
+     * 대신 장부에는 남깁니다 — 안 하는 일은 세지 않으면 없는 일이 됩니다.
+     */
+    for (const d of deaggroEvents) {
+      this.deaggroCount++
+      if (d.walk > this.deaggroWorstWalk) {
+        this.deaggroWorstWalk = d.walk
+        this.deaggroWorstStraight = d.straight
+      }
+    }
+    deaggroEvents.length = 0
 
     // ---- 4. 사망 처리 ----
     healthSystem()
@@ -4575,6 +4605,16 @@ class Game {
    * 탓으로 잘못 기록될 뻔했습니다. **길찾기를 쓰는 쪽과 안 쓰는 쪽이 섞여
    * 있으면 계측이 거짓말을 합니다.**
    */
+  /**
+   * 🚪 그 자리에서 **나에게 오는** 걸어야 하는 거리(m). 어그로 규칙이 쓰는
+   * 바로 그 값입니다 — 프로브가 다른 방향으로 재다가 한 번 속았습니다.
+   */
+  debugWalkToPlayer(x: number, z: number): number | null {
+    const p = this.playerEntity
+    this.terrain?.buildPlayerField(Transform.x[p], Transform.z[p])
+    return this.terrain?.distanceToPlayer(x, z) ?? null
+  }
+
   debugPathStep(toX: number, toZ: number): { x: number; z: number; dist: number } | null {
     if (!this.terrain) return null
     const p = this.playerEntity
@@ -4889,6 +4929,10 @@ class Game {
     /** 무방비인 채로 죽은 적의 수 */
     brokenDeaths: number
     finishers: number
+    /** 🚪 걸어서 닿을 수 없어 어그로가 풀린 횟수 — 그리고 가장 심했던 한 건 */
+    deaggroUnreachable: number
+    deaggroWorstWalk: number
+    deaggroWorstStraight: number
     bossFinishers: number
     /** 연계가 예약된 횟수 — 실제 발동 수와 비교해 "안 나온다"의 원인을 가릅니다. */
     chainsArmed: number
@@ -5009,6 +5053,9 @@ class Game {
       breakHpAvg: this.poiseBreaks > 0 ? Number((this.breakHpSum / this.poiseBreaks).toFixed(3)) : 0,
       brokenDeaths: this.brokenDeaths,
       finishers: this.finishers,
+      deaggroUnreachable: this.deaggroCount,
+      deaggroWorstWalk: Number(this.deaggroWorstWalk.toFixed(1)),
+      deaggroWorstStraight: Number(this.deaggroWorstStraight.toFixed(1)),
       bossFinishers: this.bossFinishers,
       bleedPops: this.bleedPops,
       // 🔨 깎은 쪽이 센 강인도 누적 — 관측은 무너지는 한 방을 놓칩니다.
@@ -6409,6 +6456,10 @@ declare global {
         alertRadius: number
         markRange: number
         noiseRingRange: number
+        /** 🚪 어그로가 풀리는 문턱 — 직선 대비 경로의 배수, 그리고 최소 절대거리(m) */
+        deaggroRatio: number
+        deaggroMin: number
+        enemyAiOn: boolean
         /** 지금 이 순간 내 발소리가 닿는 거리(m) — 속도에 따라 변합니다. */
         hearNow: number
         playerSpeed: number
@@ -6792,6 +6843,16 @@ declare global {
       shortcutHint: () => 'ready' | 'locked' | 'open' | null
       walkTest: (fromX: number, fromZ: number, toX: number, toZ: number) => boolean
       pathStep: (toX: number, toZ: number) => { x: number; z: number; dist: number } | null
+      /**
+       * 🚪 **그 자리에서 「나에게 오는」 걸어야 하는 거리**(m). 길이 없으면 null.
+       *
+       * ⚠️ `pathStep(...).dist` 와 **방향이 반대**입니다. 저건 *내가 거기로*
+       *    가는 거리입니다. 한쪽으로만 내려갈 수 있는 턱이 있으면 둘은
+       *    다릅니다 — 실제로 이 프로브가 76m 를 보고 "적이 못 온다"고
+       *    읽었는데, 그 적은 **턱을 뛰어내려 4m 로** 올 수 있었습니다.
+       *    어그로 규칙이 쓰는 것은 **이 방향**입니다.
+       */
+      walkToPlayer: (x: number, z: number) => number | null
       distancesToward: (
         toX: number,
         toZ: number,
@@ -6867,6 +6928,9 @@ declare global {
         breakHpAvg: number
         brokenDeaths: number
         finishers: number
+        deaggroUnreachable: number
+        deaggroWorstWalk: number
+        deaggroWorstStraight: number
         bossFinishers: number
         chainsArmed: number
         chainsFired: number
@@ -7110,6 +7174,8 @@ window.__game = {
     return {
       hp: Number(Health.hp[entity].toFixed(1)),
       max: Health.max[entity],
+      /** 🚪 AI 가 쓰는 **그 적이 나에게 오는** 걸어야 하는 거리(m). 규칙이 없으면 null. */
+      walk: reachDistanceOf(Transform.x[entity], Transform.z[entity]),
       phase: Enemy.phase[entity],
       transitionT: Number(Enemy.transitionT[entity].toFixed(3)),
       x: Number(Transform.x[entity].toFixed(3)),
@@ -7450,6 +7516,14 @@ window.__game = {
       alertRadius: AWARE.alertRadius,
       markRange: AWARE.markRange,
       noiseRingRange: AWARE.noiseRingRange,
+      /**
+       * 🚪 **깬 뒤에도 「걸어서 닿는가」를 다시 묻는** 문턱 — 프로브가
+       * 4 와 20 을 베껴 적지 않게 게임이 내보냅니다.
+       */
+      deaggroRatio: LEVEL_DEAGGRO_RATIO,
+      deaggroMin: LEVEL_DEAGGRO_MIN,
+      /** 🚧 적 AI 가 지금 도는가 — 멈춘 게임을 재고 규칙 탓을 하지 않게. */
+      enemyAiOn: enemyAiRunning(),
       // 식이 아니라 **게임이 쓰는 그 함수**를 부릅니다(balance.ts 주석 참고).
       hearNow: hearDistance(speed),
       playerSpeed: speed,
@@ -7720,6 +7794,7 @@ window.__game = {
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),
   pathStep: (toX, toZ) => game.debugPathStep(toX, toZ),
+  walkToPlayer: (x, z) => game.debugWalkToPlayer(x, z),
   distancesToward: (toX, toZ, pts) => game.debugDistancesToward(toX, toZ, pts),
   terrainInfo: () => game.debugTerrainInfo(),
   /** 🗺 이 월드 좌표의 지형 단(段). 프로브가 낙차를 **찾아내는** 데 씁니다. */
