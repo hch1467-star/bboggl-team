@@ -925,6 +925,21 @@ export function noteBleedDecay(t: number, lost: number): void {
   if (Enemy.kind[t] === EnemyKind.Boss) bossBleedDecayed += lost
   bleedDecayedAll += lost
 }
+/**
+ * ⏸ **때릴 수 없어서 유예를 안 먹은 시간**(초). 규칙은 enemyAI 의 식는
+ * 블록에 한 번만 적혀 있고, 여기서는 **얼마나 그랬는지**만 셉니다.
+ *
+ * 왜 세는가: 이 규칙은 값을 *깎지 않는 것*이라 장부에 흔적이 안 남습니다.
+ * 안 남으면 다음 사람이 *"이거 실제로 일어나긴 하나?"* 를 물었을 때
+ * 코드를 읽고 상상해야 합니다 — 이 저장소가 여러 번 그래서 틀렸습니다.
+ * 초로 적어 두면 `× 식는 속도` 로 **살려 낸 몫**이 바로 나옵니다.
+ */
+export function noteBleedBlocked(t: number, seconds: number): void {
+  if (Enemy.kind[t] === EnemyKind.Boss) bossBleedBlocked += seconds
+  bleedBlockedAll += seconds
+}
+let bossBleedBlocked = 0
+let bleedBlockedAll = 0
 
 /**
  * ── 🩸 **「0회」가 왜 0회인지 말하게 만듭니다** ──────────────────────────
@@ -969,6 +984,10 @@ export function readBleedPeak(): {
   bossGapMax: number
   /** 유예(2.5초) 안에 이어진 타격의 비율 — 1에 가까울수록 압박이 안 끊긴 것 */
   bossGapInsideRate: number
+  /** ⏸ 보스가 **때릴 수 없는 상태**여서 유예를 안 먹은 시간(초) */
+  bossBlocked: number
+  /** ⏸ 같은 것, 적 전부 합쳐서 */
+  blockedAll: number
   decayedAll: number
   diedWith: number
   diedWithAvg: number
@@ -996,6 +1015,8 @@ export function readBleedPeak(): {
     bossGapAvg: bossGapCount > 0 ? bossGapSum / bossGapCount : 0,
     bossGapMax: bossGapMax,
     bossGapInsideRate: bossGapCount > 0 ? bossGapInside / bossGapCount : 0,
+    bossBlocked: bossBleedBlocked,
+    blockedAll: bleedBlockedAll,
   }
 }
 export function resetBleedPeak(): void {
@@ -1014,6 +1035,8 @@ export function resetBleedPeak(): void {
   bossGapCount = 0
   bossGapInside = 0
   bossGapMax = 0
+  bossBleedBlocked = 0
+  bleedBlockedAll = 0
   bossEverBled = false
   for (const k of Object.keys(bossDamageBySource)) bossDamageBySource[k] = [0, 0, 0]
   for (const k of Object.keys(mobDamageBySource)) delete mobDamageBySource[k]

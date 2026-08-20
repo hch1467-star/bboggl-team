@@ -73,7 +73,7 @@ import {
   longestReach,
   telegraphRadius,
 } from './config/enemyAttacks'
-import { BOSS_PHASES, NO_CHAIN } from './config/bossPhases'
+import { BOSS_PHASES, NO_CHAIN, PHASE_TRANSITION_TIME } from './config/bossPhases'
 import { GEAR_TIERS, rollAffixes, rollTier, tierDef } from './config/gear'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
 import { ENEMY_DEFS, bleedMaxOf, enemyDef, kindFromId } from './config/enemies'
@@ -4957,6 +4957,8 @@ class Game {
     bossBleedGapAvg: number
     bossBleedGapMax: number
     bossBleedGapInsideRate: number
+    /** ⏸ 보스가 **때릴 수 없는 상태**여서 유예를 안 먹은 시간(초) */
+    bossBleedBlocked: number
     /** 📊 보스가 받은 피해 — 출처 × 페이즈. 무엇이 보스를 녹이는지 가릅니다 */
     bossDamageBySource: Record<string, number[]>
     /** 📊 잡몹을 죽인 것 — 출처별 피해와 **마지막 한 방** 횟수. */
@@ -5029,6 +5031,7 @@ class Game {
       bossBleedGapAvg: Number(readBleedPeak().bossGapAvg.toFixed(2)),
       bossBleedGapMax: Number(readBleedPeak().bossGapMax.toFixed(2)),
       bossBleedGapInsideRate: Number(readBleedPeak().bossGapInsideRate.toFixed(2)),
+      bossBleedBlocked: Number(readBleedPeak().bossBlocked.toFixed(2)),
       focusFlow: readFocusFlow(),
       healPunished: readHealPunish(),
       mobDamageBySource: Object.fromEntries(
@@ -6146,6 +6149,8 @@ declare global {
         chains: Record<string, string>
         /** 🎬 전환 직후 반드시 나오는 첫 패턴(없으면 ''). */
         firstAttack: string
+        /** ⏸ 전환 연출의 길이(초) — 이 동안 보스는 무적입니다. 프로브가 1.25 를 베끼지 않게. */
+        transitionTime: number
       }[]
       /** 적 종류 검증용 — 표를 그대로 내보냅니다(스크립트가 수치를 베끼지 않도록). */
       enemyRoster: () => {
@@ -7080,6 +7085,8 @@ window.__game = {
       name: ph.name,
       enterBelow: ph.enterBelow,
       cooldownScale: ph.cooldownScale,
+      /** ⏸ 전환 연출 = 무적 구간의 길이. 페이즈마다 같지만 읽는 자리에서 바로 쓰이게 함께 냅니다. */
+      transitionTime: PHASE_TRANSITION_TIME,
       /** 🛡 받는 피해 배율 — 프로브가 0.7 을 **베껴 적지 않도록** 내보냅니다. */
       damageTakenScale: ph.damageTakenScale ?? 1,
       windups: attacksFor(EnemyKind.Boss).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),

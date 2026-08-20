@@ -62,7 +62,7 @@ const INTENT_TO_SFX: Record<AttackIntent, SfxIntent> = {
   [AttackIntent.Counter]: SfxIntent.Counter,
 }
 import { combatRng } from '../core/rng'
-import { isBehindPoint, noteBleedDecay } from './combat'
+import { isBehindPoint, noteBleedBlocked, noteBleedDecay } from './combat'
 import { time } from '../core/time'
 
 /**
@@ -1028,6 +1028,24 @@ export function enemyAiSystem(
         // 전환이 끝날 때까지 계속 무적을 덮어씁니다(healthSystem이 깎으므로).
         Health.invulnT[e] = Math.max(Health.invulnT[e], Enemy.transitionT[e])
         decayVelocity(e, dt, 10)
+        /**
+         * ⏸ **이 `continue` 가 출혈의 유예 시계도 함께 멈춥니다.**
+         *
+         * 아래 식는 블록이 통째로 건너뛰어지기 때문입니다. 부수 효과지만
+         * **옳은 부수 효과**입니다 — 전환 중에는 무적이라 때려도 안
+         * 들어가고, *"못 때린 시간"* 을 태만으로 계산하면 게임이 손을 묶어
+         * 놓고 그 값을 플레이어에게 물리는 셈이 됩니다.
+         *
+         * ⚠️ **부수 효과라서 조용히 사라질 수 있습니다.** 여기를 언젠가
+         *    `continue` 없이 풀어 쓰면 아무 오류 없이 규칙만 바뀝니다.
+         *    그래서 `npm run bleed` 가 **같은 보스·같은 체력**으로 등을 맞댄
+         *    두 창을 재서 못 박아 뒀습니다(창A 무적 −0 · 창B −22.3).
+         *    근거 전체는 balance.ts `BLEED` 의 ⏸ 노트에 있습니다.
+         *
+         * 여기서는 **얼마나 그랬는지만** 셉니다. 안 깎은 것은 장부에 흔적이
+         * 안 남아서, 안 세면 다음 사람이 코드를 읽고 상상해야 합니다.
+         */
+        if (Enemy.bleed[e] > 0) noteBleedBlocked(e, dt)
         continue
       }
       let want = phaseForHp(Health.hp[e] / Health.max[e])

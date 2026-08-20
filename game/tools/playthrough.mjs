@@ -3465,6 +3465,10 @@ try {
       bossBleedGapAvg: G.runStats().bossBleedGapAvg ?? 0,
       bossBleedGapMax: G.runStats().bossBleedGapMax ?? 0,
       bossBleedGapInsideRate: G.runStats().bossBleedGapInsideRate ?? 0,
+      bossBleedBlocked: G.runStats().bossBleedBlocked ?? 0,
+      // ⚠️ 식는 속도를 여기에 숫자로 적으면 규칙의 **두 번째 사본**이 됩니다.
+      //    이 저장소가 문턱을 베껴 적어 데인 자리가 한둘이 아닙니다 — 게임에게 물어봅니다.
+      bleedDecayPerSec: G.bleedInfo?.().decayPerSec ?? 0,
       bossDamageBySource: G.runStats().bossDamageBySource ?? {},
       mobDamageBySource: G.runStats().mobDamageBySource ?? {},
       focusFlow: G.runStats().focusFlow ?? {},
@@ -4233,6 +4237,10 @@ try {
     `              그중 **보스에게** — 터짐 ${log.bossBleedPops ?? 0}회 · 최고 ${log.bossBleedPeak ?? 0}/100\n` +
     `                 쌓은 총량 ${log.bossBleedApplied ?? 0} · 식어서 날아간 것 ${log.bossBleedDecayed ?? 0}\n` +
     `                 타격 간격 평균 ${log.bossBleedGapAvg ?? 0}초 · 최대 ${log.bossBleedGapMax ?? 0}초 · 유예 안에 이어진 비율 ${Math.round((log.bossBleedGapInsideRate ?? 0) * 100)}%\n` +
+    // ⏸ 「안 깎은 것」은 장부에 흔적이 안 남습니다 — 초로 적고, 규칙의 식는
+    //    속도를 곱해 **살려 낸 몫**까지 같이 적습니다. 0.0초면 그 판에서는
+    //    이 규칙이 한 번도 일하지 않은 것이고, 그것도 사실입니다.
+    `                 ⏸ 때릴 수 없어서 유예를 안 먹은 시간 ${log.bossBleedBlocked ?? 0}초 (살려 낸 몫 최대 ${Math.round((log.bossBleedBlocked ?? 0) * (log.bleedDecayPerSec || 0))})\n` +
     /**
      * 🩸 **이 한 줄이 「왜 96까지 갔다가 되돌아오는가」의 답입니다.**
      *
