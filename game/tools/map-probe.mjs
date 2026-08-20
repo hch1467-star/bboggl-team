@@ -1226,22 +1226,60 @@ try {
    *      한동안 여기서만 보스를 빼고 위에서는 안 뺐고, 그 결과 같은 화면에
    *      62m 와 46m 가 나란히 찍혔습니다. 규칙은 한 곳에만 둡니다.
    */
-  const tailRest = (() => {
+  /**
+   * ── 🔎 **복도를 끊는 적의 이름까지 댑니다** ─────────────────────────
+   *
+   * 이 검사가 빨개졌을 때 다음 할 일은 *"어느 적을 물릴 것인가"* 인데,
+   * 예전에는 미터만 찍어서 그걸 손으로 찾아야 했습니다. 실제로 한 번
+   * **다른 자로 재서** 엉뚱한 적을 범인으로 지목할 뻔했습니다 — 저는
+   * 「보스까지 직선거리」로 훑었고 이 검사는 **동선을 따라** 잽니다.
+   * 두 자가 다르면 답도 다릅니다.
+   *
+   * 그래서 **이 검사가 쓰는 그 자로** 범인을 집어 냅니다. 「사건은 사건이
+   * 일어난 자리에서 기록한다」의 짝입니다 — 판정한 자리에서 이름을 댑니다.
+   */
+  const tail = (() => {
     let n = 0
+    let blame = null
     for (let i = routeCells.length - 1; i >= 0; i--) {
       const c = routeCells[i]
-      const near = mobs.some(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
-      )
-      if (near) break
+      // 가장 깊이 파고든 적을 고릅니다 — 여유(거리 − 깨는 거리)가 가장 작은 놈.
+      let worst = null
+      for (const f of mobs) {
+        const d = Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL)
+        const slack = d - wakeOf(f.kind)
+        if (slack <= 0 && (worst === null || slack < worst.slack)) {
+          worst = { f, d: Number(d.toFixed(1)), slack: Number(slack.toFixed(1)) }
+        }
+      }
+      if (worst) {
+        blame = { ...worst, at: c }
+        break
+      }
       n++
     }
-    return n * CELL
+    return { metres: n * CELL, blame }
   })()
+  const tailRest = tail.metres
   check(
     tailRest >= breather,
     '**보스 앞 복도는 비어 있다** (숨 고르고 들어가게)',
-    `보스 직전 빈 구간 ${tailRest}m · 스태미나가 차는 거리 ${breather.toFixed(0)}m`,
+    `보스 직전 빈 구간 ${tailRest}m · 스태미나가 차는 거리 ${breather.toFixed(0)}m` +
+      (tail.blame
+        ? ` · 🔎 복도를 끊는 것 — ${tail.blame.f.kind}(${tail.blame.f.cx},${tail.blame.f.cz})` +
+          ` 가 동선 칸 (${tail.blame.at.cx},${tail.blame.at.cz}) 를 ${tail.blame.d}m 로 덮습니다` +
+          ` (깨는 ${wakeOf(tail.blame.f.kind)}m)` +
+          /**
+           * ⚠️ 여유를 **음수로 찍지 않습니다.** 초록일 때 "-1m 더 물려야
+           *    합니다" 라고 나오면 읽는 사람이 아직 모자란 줄 압니다.
+           *    그리고 여유는 **칸으로도** 보여 줍니다 — 동선은 2m 격자라
+           *    "1m 남았다" 는 사실상 **반 칸**이고, 다음 편집 한 번에
+           *    뒤집힙니다(「한 칸 차이의 초록은 운이다」).
+           */
+          (tailRest >= breather
+            ? ` · 여유 ${(tailRest - breather).toFixed(0)}m(${((tailRest - breather) / CELL).toFixed(1)}칸)`
+            : ` · ${(breather - tailRest).toFixed(0)}m 더 물려야 합니다`)
+        : ''),
   )
 
   /**
