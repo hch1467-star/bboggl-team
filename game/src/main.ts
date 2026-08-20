@@ -324,6 +324,29 @@ class Game {
   private treasureTotal = 0
   private treasuresFound = 0
   private regions: LevelRegion[] = []
+  /**
+   * 🗺 **구역 이웃 표** — 「지금 여기서 알려 줄 만한가」의 단위.
+   *
+   * 곁길 알림이 오랫동안 **거리**로 그 질문에 답하려 했는데, 재 보니
+   * 그 자로는 답이 없었습니다(secret 프로브의 ⛰️ 벽):
+   *
+   *     안 알려지는 보물을 담으려면 편도 문턱 **≥ 60m**
+   *     시작 지점에서 조용하려면              **< 52m**
+   *
+   * 52 < 60 이라 **어떤 값도 둘 다 만족하지 못합니다.** 게다가 다른 축인
+   * 「더 걷는 거리」는 최단 경로 위에서 **위치와 무관하게 일정**합니다
+   * (시작에서도 4m, 곁길 입구에서도 4m) — 즉 *"얼마나 비싼가"* 만 말하고
+   * *"지금인가"* 는 못 말합니다. 거리 둘로는 「지금」을 표현할 수 없습니다.
+   *
+   * 참고한 게임들은 이 질문을 **거리로 안 풉니다** — 할로우 나이트의
+   * 지도는 **지금 방**을 채우고, 소울류가 가르치는 단위는 **구역**이며,
+   * 로스트아크의 미니맵도 현재 구역입니다. 이 게임에도 구역이 있고
+   * HUD 가 이미 그 이름을 띄웁니다.
+   *
+   * 그래서 문턱을 **위상**으로 바꿉니다: *"지금 구역이거나 그 이웃"*.
+   * 판의 크기와 무관하고, 조율할 숫자가 없습니다.
+   */
+  private regionNeighbours = new Map<string, Set<string>>()
   /** 🏛 폐허 잔해 그룹 — 지형과 따로 답니다(render/props.ts). */
   private props: THREE.Group | null = null
   private propsInfo: PropsInfo | null = null
@@ -877,6 +900,7 @@ class Game {
     if (level) {
       this.levelName = level.name
       this.regions = level.regions ?? []
+      this.buildRegionNeighbours()
       this.levelW = level.w
       this.levelH = level.h
       this.terrain = new Terrain(level)
@@ -2343,16 +2367,9 @@ class Game {
 
     // --- 구역 판정: 가장 작은(= 가장 구체적인) 구역이 이깁니다 ---
     const { cx, cz } = worldToCell(px, pz, this.levelW, this.levelH)
-    let found: LevelRegion | null = null
-    let foundArea = Infinity
-    for (const r of this.regions) {
-      if (cx < r.x0 || cx > r.x1 || cz < r.z0 || cz > r.z1) continue
-      const area = (r.x1 - r.x0 + 1) * (r.z1 - r.z0 + 1)
-      if (area < foundArea) {
-        found = r
-        foundArea = area
-      }
-    }
+    // 규칙은 `regionAtCell` 한 곳에만 — 예전엔 여기와 디버그 훅이 서로
+    // 다른 규칙을 써서 겹치는 구역에서 답이 갈렸습니다(그 함수 주석).
+    const found = this.regionAtCell(cx, cz)
     if (found && found.name !== this.currentRegion) {
       this.currentRegion = found.name
       this.hud.showBanner(found.name, found.hint ?? '', 2.2)
@@ -2534,6 +2551,10 @@ class Game {
         if (d !== null) goalDist.set(c, d)
       }
     }
+    /** 지금 서 있는 구역 — 아래 위상 문의 기준입니다(루프 밖에서 한 번만). */
+    const hereCell = worldToCell(px, pz, this.levelW, this.levelH)
+    const hereName = this.regionAtCell(hereCell.cx, hereCell.cz)?.name ?? ''
+    const nearby = this.regionNeighbours.get(hereName)
     let best: { x: number; z: number; walk: number; extra: number } | null = null
     for (const c of cands) {
       /**
@@ -2572,7 +2593,34 @@ class Game {
        * balance.ts 가 적어 둔 *"사람에게는 권하고 계측기는 안 가는 틈"* 이
        * 값이 아니라 **자** 때문에 다시 열려 있었습니다.
        */
-      if (walk > NAV.sideHintRange) continue
+      /**
+       * ── 🗺 **「지금인가」는 거리가 아니라 구역이 답합니다** ────────────
+       *
+       * 여기엔 `walk > NAV.sideHintRange` 가 있었습니다. `npm run secret`
+       * 이 그 문턱이 **벽**임을 증명했습니다:
+       *
+       *     안 알려지는 보물을 담으려면 **≥ 60m** · 시작에서 조용하려면 **< 52m**
+       *
+       * 52 < 60 — 어떤 값도 둘 다 만족하지 못합니다. 그리고 다른 축인
+       * `extra` 는 최단 경로 위에서 **위치와 무관하게 일정**하므로
+       * (시작에서도 4m, 곁길 입구에서도 4m) *"지금인가"* 를 못 말합니다.
+       * **거리 둘로는 「지금」을 표현할 수 없었습니다.**
+       *
+       * 그래서 위상으로 바꿉니다 — *"지금 구역이거나 그 이웃"*
+       * (설계 근거는 `regionNeighbours` 선언부). 조율할 숫자가 없고
+       * 판 크기와 무관합니다. 실제로 이 존에서:
+       *   · 시작 구역의 이웃은 「무너진 성문」 하나뿐이고 거기엔 보물이
+       *     없습니다 → **시작 침묵이 저절로** 지켜집니다
+       *   · 보물 여섯 구역 **전부** 동선이 지나는 구역을 이웃으로 둡니다
+       *
+       * ⚠️ 구역이 없는 자리(구역 밖)에서는 예전처럼 거리로 거릅니다 —
+       *    위상을 못 쓰는 곳에서 **아무 문도 없이** 두면 안 됩니다.
+       */
+      const cCell = worldToCell(c.x, c.z, this.levelW, this.levelH)
+      const there = this.regionAtCell(cCell.cx, cCell.cz)?.name ?? ''
+      if (hereName && there) {
+        if (there !== hereName && !(nearby?.has(there) ?? false)) continue
+      } else if (walk > NAV.sideHintRange) continue
       if (extra > NAV.sideHintRange) continue
       // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
       // (이 문턱만은 **편도**로 봅니다: 물어보는 것이 *"이미 보이는가"* 라서.)
@@ -4843,14 +4891,57 @@ class Game {
    * 달라서, 경계를 넘어 두 점을 찍으면 **그림자가 아니라 색조**를
    * 재게 됩니다(`npm run depth` 의 게이트가 실제로 그렇게 걸렸습니다).
    */
+  /**
+   * 🗺 **이 칸이 어느 구역인가 — 규칙은 여기 하나뿐입니다.**
+   *
+   * ⚠️ 예전엔 두 곳에 **다른 규칙**이 있었습니다. HUD 배너는 *"가장 작은
+   *    구역"* 을 골랐고 디버그 훅은 *"먼저 찾은 구역"* 을 골랐습니다.
+   *    이 존은 구역이 **겹칩니다**(함몰지 가장자리 ↔ 남쪽 함몰지) —
+   *    겹치는 자리에서 두 규칙이 서로 다른 답을 냅니다. 화면에는 「함몰지
+   *    가장자리」가 뜨는데 프로브는 「남쪽 함몰지」로 읽는 식입니다.
+   *    이 저장소가 같은 병으로 여러 번 데였습니다(동선 사본 셋, 깨는 거리
+   *    두 곳). 한 곳에만 둡니다.
+   *
+   * 「가장 작은 구역」이 맞는 이유: 큰 구역 안에 작은 주머니를 겹쳐 놓는
+   * 것이 이 존의 작법이고, 그때 플레이어가 서 있는 곳은 **주머니**입니다.
+   */
+  /**
+   * 🗺 **이웃 표를 한 번만 만듭니다** — 구역 두 개가 맞닿거나 겹치면 이웃.
+   *
+   * 「맞닿는다」의 여유는 **한 칸**입니다. 이건 조율값이 아니라 격자의
+   * 최소 단위입니다 — 사각형 둘이 나란히 붙어 있으면 `x1 + 1 === x2` 라,
+   * 여유가 0 이면 **닿아 있는 구역이 이웃이 아니게** 됩니다.
+   */
+  private buildRegionNeighbours(): void {
+    this.regionNeighbours = new Map()
+    const touching = (a: LevelRegion, b: LevelRegion): boolean =>
+      !(a.x1 + 1 < b.x0 || b.x1 + 1 < a.x0 || a.z1 + 1 < b.z0 || b.z1 + 1 < a.z0)
+    for (const a of this.regions) {
+      const set = this.regionNeighbours.get(a.name) ?? new Set<string>()
+      for (const b of this.regions) if (b !== a && touching(a, b)) set.add(b.name)
+      this.regionNeighbours.set(a.name, set)
+    }
+  }
+
+  private regionAtCell(cx: number, cz: number): LevelRegion | null {
+    let found: LevelRegion | null = null
+    let foundArea = Infinity
+    for (const r of this.regions) {
+      if (cx < r.x0 || cx > r.x1 || cz < r.z0 || cz > r.z1) continue
+      const area = (r.x1 - r.x0 + 1) * (r.z1 - r.z0 + 1)
+      if (area < foundArea) {
+        found = r
+        foundArea = area
+      }
+    }
+    return found
+  }
+
   debugRegionAt(x: number, z: number): string {
     if (!this.terrain) return ''
     const { w, h } = this.terrain.level
     const cell = worldToCell(x, z, w, h)
-    const r = this.regions.find(
-      (g) => cell.cx >= g.x0 && cell.cx <= g.x1 && cell.cz >= g.z0 && cell.cz <= g.z1,
-    )
-    return r?.name ?? ''
+    return this.regionAtCell(cell.cx, cell.cz)?.name ?? ''
   }
 
   debugTerrainInfo(): {
