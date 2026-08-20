@@ -20,7 +20,7 @@
  * ⚠️ 모든 대기는 **시뮬레이션 시간**입니다. SwiftShader에서는 실시간의
  *    1/3~1/20로 흐르기 때문에 벽시계로 재면 전부 거짓이 됩니다.
  */
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
 /**
@@ -839,6 +839,27 @@ try {
      * 「사건은 사건이 일어난 자리에서 기록한다」 — 매 프레임 적습니다.
      */
     const archerChance = {}
+    /**
+     * 👣 **봇이 실제로 밟은 칸**(2m 격자로 접어 둡니다).
+     *
+     * ── 왜 생겼나 (숫자) ───────────────────────────────────────────
+     * `npm run map` 은 배치 검사를 전부 **「주 동선」**(화톳불→보스 최단로)
+     * 위에서 합니다. 쏘는 자에 대해서도 *"동선이 4m 를 지난다"* 고 합니다.
+     * 그런데 이 봇의 장부가 찍은 값은 **가장 가까이 36.5m** 였습니다.
+     * 32m 가 어긋납니다.
+     *
+     * 봇은 `G.objective()` 를 따라 걷습니다 — **게임의 화살표와 같은 값**
+     * 입니다. 즉 사람이 안내대로 걸어도 그 궁수를 못 만난다는 뜻입니다.
+     *
+     * 그렇다면 「주 동선」은 **아무도 걷지 않는 길**일 수 있는데, 그 위에서
+     * 하는 배치 검사 열 몇 개가 전부 없는 길을 재고 있는 셈입니다.
+     * 지난 회차에 동선을 세 곳에서 그리다 어긋난 것의 **한 단계 위**입니다.
+     * 그때 배운 것: 프로브가 없는 길을 재고 있으면, 레벨보다 프로브를
+     * 먼저 고쳐야 합니다.
+     *
+     * 그래서 판이 끝난 뒤 **발자국과 주 동선을 맞대 봅니다.**
+     */
+    const footCells = new Set()
     /** 최근 90 프레임의 가지 — 막혔을 때 되감아 봅니다. */
     const recentActs = []
     const actTotals = new Map()
@@ -934,6 +955,9 @@ try {
        *    (통과 같은 이유입니다). 쏘는 자는 물러나기(7m) 때문에 움직이니,
        *    좌표를 매 프레임 키로 쓰면 한 마리가 여러 마리로 세어집니다.
        */
+      // 👣 발자국. 2m 로 접어 두면 한 판이 수백 칸이라 가볍습니다.
+      footCells.add(`${Math.round(p.x / 2)},${Math.round(p.z / 2)}`)
+
       {
         // 판 전체를 덮는 반지름 — 잠든 적도 돌려주므로 「한 번도 안 깼다」가 잡힙니다.
         for (const t of G.threats(400)) {
@@ -3595,6 +3619,9 @@ try {
       barrelChance: Object.entries(barrelChance).map(([k, v]) => ({ at: k, ...v })),
       archerChance: Object.values(archerChance),
       archerRule: { wake: archerWake, min: archerMin, max: archerMax },
+      footCells: [...footCells],
+      /** 배치 검사가 쓰는 반지름 — 여기 14 를 베끼지 않게 게임에서 받습니다. */
+      aggroRange: G.terrainInfo().levelAggroRange,
       runAttacks: G.runStats().runAttacks ?? 0,
       rollAttacks: G.runStats().rollAttacks ?? 0,
       plungeAttacks: G.runStats().plungeAttacks ?? 0,
@@ -4047,6 +4074,86 @@ try {
       lastHp,
     }
   }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET, SPEND_BUDGET, USE_BARREL])
+
+  /**
+   * ── 👣 **「주 동선」을 정말로 걷는가** ──────────────────────────────
+   *
+   * `npm run map` 의 배치 검사 열 몇 개가 전부 **화톳불→보스 최단로** 위에서
+   * 이뤄집니다. 그런데 그 길을 사람이 걷는지 확인한 적이 **한 번도 없습니다.**
+   *
+   * 이번 판의 쏘는 자 장부가 그 틈을 드러냈습니다:
+   *     지도 — "동선이 궁수에게서 4m 를 지난다"
+   *     실측 — "가장 가까이 **36.5m**"
+   * 봇은 `G.objective()`(= 게임의 화살표)를 따라 걷는데도 그렇습니다.
+   *
+   * ⚠️ **판이 끝난 뒤에** 잽니다. `routeTrail` 은 흐름장을 다시 세우는데,
+   *    흐름장은 안내·적 AI가 함께 쓰는 공용 상태입니다. 판이 도는 중에
+   *    부르면 화살표가 흔들립니다(main.ts `sideHintT` 자리에 그 사고 기록이
+   *    있습니다 — 그때는 프레임까지 느려져 다른 검사 셋이 빨개졌습니다).
+   */
+  let routeWalk = null
+  try {
+    const lv = JSON.parse(
+      readFileSync(new URL('../src/levels/broken-gate.json', import.meta.url), 'utf8'),
+    )
+    const CELL = lv.cellSize ?? 2
+    const cellOf = (e) => ({
+      cx: Math.floor(e.x / CELL + lv.w / 2),
+      cz: Math.floor(e.z / CELL + lv.h / 2),
+    })
+    // map-probe 와 **같은 규약**으로 끝점을 고릅니다 — 다른 길을 재면 비교가 안 됩니다.
+    const fire = lv.entities
+      .filter((e) => e.kind === 'bonfire')
+      .map(cellOf)
+      .sort((a, b) => a.cx - b.cx)[0]
+    const bossC = cellOf(lv.entities.find((e) => e.kind === 'boss'))
+    const w = (c) => ({ x: (c.cx - lv.w / 2 + 0.5) * CELL, z: (c.cz - lv.h / 2 + 0.5) * CELL })
+    const f = w(fire)
+    const b = w(bossC)
+    const route = await page.evaluate(
+      ([fx, fz, bx, bz]) => window.__game.routeTrail(fx, fz, bx, bz),
+      [f.x, f.z, b.x, b.z],
+    )
+    /** 발자국을 월드 좌표로 되돌립니다(기록은 2m 격자였습니다). */
+    const feet = (log.footCells ?? []).map((s) => {
+      const [a, c] = s.split(',').map(Number)
+      return { x: a * 2, z: c * 2 }
+    })
+    const aggro = log.aggroRange ?? 14
+    const near = route.map((r) => {
+      let best = Infinity
+      for (const ft of feet) {
+        const d = Math.hypot(ft.x - r.x, ft.z - r.z)
+        if (d < best) best = d
+      }
+      return best
+    })
+    const covered = near.filter((d) => d <= aggro).length
+    // 가장 긴 **안 걸은 토막** — 어느 구간이 통째로 비었는지 자리까지 남깁니다.
+    let run = 0
+    let bestRun = 0
+    let bestAt = null
+    for (let i = 0; i < near.length; i++) {
+      if (near[i] > aggro) {
+        run++
+        if (run > bestRun) {
+          bestRun = run
+          bestAt = { from: route[i - run + 1], to: route[i] }
+        }
+      } else run = 0
+    }
+    routeWalk = {
+      cells: route.length,
+      covered,
+      pct: route.length ? Math.round((covered / route.length) * 100) : 0,
+      aggro,
+      gapM: bestRun * CELL,
+      gapAt: bestAt,
+      worst: Math.max(...near.map((d) => (Number.isFinite(d) ? d : 0))),
+    }
+  } catch (e) {
+    routeWalk = { error: String(e && e.message ? e.message : e) }
+  }
 
   /**
    * ── 판 하나의 기록을 **파일로도** 남깁니다 ────────────────────────
@@ -4524,6 +4631,27 @@ try {
         `                (${a.at}) — 가장 가까이 ${Number.isFinite(a.near) ? a.near.toFixed(1) : '?'}m` +
           ` · 깨는거리 안 ${a.inWake}프레임 · 사거리 안 ${a.inShot}프레임 · 예고 ${a.winding}프레임` +
           `${a.died !== null ? ` · ${a.died}초에 죽음` : ' · 살아남음'} — ${why}`,
+      )
+    }
+  }
+  /**
+   * 👣 **「주 동선」을 정말로 걸었는가.** `npm run map` 의 배치 검사가
+   * 딛고 선 전제입니다 — 여기가 낮으면 그 검사들은 **없는 길**을 잽니다.
+   */
+  if (routeWalk) {
+    if (routeWalk.error) {
+      console.log(`             👣 주 동선 대조 실패 — ${routeWalk.error}`)
+    } else {
+      console.log(
+        `             👣 주 동선 ${routeWalk.cells}칸 중 봇이 어그로(${routeWalk.aggro}m) 안으로 지난 칸 ` +
+          `**${routeWalk.covered}칸 (${routeWalk.pct}%)**` +
+          (routeWalk.gapM
+            ? `\n                안 지난 최장 토막 ${routeWalk.gapM}m` +
+              (routeWalk.gapAt
+                ? ` (${Math.round(routeWalk.gapAt.from.x)},${Math.round(routeWalk.gapAt.from.z)})→(${Math.round(routeWalk.gapAt.to.x)},${Math.round(routeWalk.gapAt.to.z)})`
+                : '') +
+              ` · 가장 멀리 벗어난 칸 ${routeWalk.worst.toFixed(0)}m`
+            : ''),
       )
     }
   }
