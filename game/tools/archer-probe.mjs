@@ -236,8 +236,18 @@ try {
       const G2 = window.__game
       const st = G2.state()
       w.samples++
-      const th = G2.threats(200)
-      const t0 = th.length ? th.reduce((b, x) => (x.dist < b.dist ? x : b), th[0]) : null
+      /**
+       * 🏹 **종류로 집습니다 — 「가장 가까운 적」이 아닙니다.**
+       *
+       * 처음엔 가장 가까운 적을 봤습니다. 궁수가 혼자인 ①② 에서는
+       * 우연히 맞았지만, 곁에 잡몹이 있는 ③ 에서 곧바로 거짓말을
+       * 했습니다: **「예고 3발인데 깨어 있던 0표본」**. 자는 적이 쏠 수는
+       * 없으니, 그 3발은 **잡몹의 것**이었습니다. 초록이 틀린 데이터
+       * 위에 떴습니다 — 이 저장소가 여러 번 데인 바로 그 모양입니다.
+       */
+      const th = G2.threats(400)
+      const t0 = th.find((x) => x.kind === 'archer') ?? null
+      w.archerEnt = t0 ? t0.entity : w.archerEnt
       if (t0) {
         w.minDist = Math.min(w.minDist, t0.dist)
         /**
@@ -273,7 +283,8 @@ try {
             walk: walk === null ? null : Number(walk.toFixed(2)),
           }
       }
-      const mine = G2.telegraphs()
+      // 그 **궁수의** 예고만 셉니다(위 주석의 사고 때문에 entity 로 거릅니다).
+      const mine = t0 ? G2.telegraphs().filter((g) => g.entity === t0.entity) : []
       const id = mine.length ? mine[0].attackId : ''
       // 같은 예고가 이어지는 동안은 한 번만 셉니다 — id 가 바뀌는 순간이 시작입니다.
       if (id && id !== prevId) {
@@ -513,15 +524,22 @@ try {
       w.why = {}
       w.crowdAwake = 0
       w.crowdInShot = 0
+      w.crowdSeen = 0
       G.teleportPlayer(x, z)
       const t0 = G.state().simElapsed
       const dl = Date.now() + 240000
       /** 이 실험 동안만 궁수를 따로 지켜봅니다 — 가장 가까운 적은 잡몹일 수 있습니다. */
       while (G.state().simElapsed < t0 + secs && Date.now() < dl) {
-        const a = G.threats(400).find(
-          (t) => t.kind === 'archer' && Math.hypot(t.x - x, t.z - z) < 6,
-        )
+        /**
+         * ⚠️ **거리로 찾지 않습니다.** 처음엔 서 있는 자리에서 6m 안의
+         * 궁수를 집었는데, 이 적은 붙으면 **물러납니다**(keepDistance 7m).
+         * 즉 재려는 그 순간에 반경 밖으로 나가 있을 수 있어, 「안 보였다」와
+         * 「없었다」가 같은 0 으로 보입니다. 판에 궁수는 한 마리뿐이므로
+         * **종류로** 집습니다.
+         */
+        const a = G.threats(400).find((t) => t.kind === 'archer')
         if (a) {
+          w.crowdSeen++
           if (a.aggro) w.crowdAwake++
           if (a.dist >= w.shotMin && a.dist <= w.shotMax) {
             w.crowdInShot++
@@ -535,6 +553,7 @@ try {
         hp: G.state().player.hp,
         awake: w.crowdAwake,
         inShot: w.crowdInShot,
+        seen: w.crowdSeen,
         why: w.why,
         tele: w.tele.length,
         others: G.threats(20).filter((t) => t.kind !== 'archer').length,
@@ -555,6 +574,15 @@ try {
    * 📐 **이 회차의 결론이 걸린 줄입니다.**
    * ②(혼자)와 ③(다른 적과 함께)의 차이가 곧 원인입니다.
    */
+  /**
+   * 🚧 **0 앞에 게이트를 세웁니다.** 「예고 0발」이 뜻을 가지려면 먼저
+   *    궁수를 실제로 보고 있었어야 합니다. 못 본 0 은 답이 아닙니다.
+   */
+  check(
+    crowd.seen > 0,
+    '🚧 실험 ③ 동안 쏘는 자를 **실제로 보고 있었다** (못 본 0 은 답이 아닙니다)',
+    `${crowd.seen}표본`,
+  )
   check(
     crowd.tele >= 1,
     '🏹 **다른 적이 곁에 있어도 쏜다** (「붙어 있는 잡몹을 상대하는 동안 계속 날아온다」는 설계 그대로)',
