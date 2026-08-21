@@ -200,8 +200,22 @@ export const spotEvents: { entity: number; x: number; z: number; heard: boolean 
 export const deaggroEvents: { entity: number; straight: number; walk: number }[] = []
 
 const DEG = Math.PI / 180
-/** 이 각도 안에 플레이어가 들어와야 공격을 시작합니다(뒤통수에 대고 휘두르지 않도록). */
-const ATTACK_FACING_TOLERANCE = 45 * DEG
+/**
+ * 이 각도 안에 플레이어가 들어와야 공격을 **시작**합니다(뒤통수에 대고
+ * 휘두르지 않도록).
+ *
+ * ⚠️ 이 값은 **닿는 각도가 아니라 시작해도 되는 각도**입니다. 둘은 다르고,
+ *    지금 13개 부채꼴 패턴 중 10개가 이 값보다 **좁은 반각**을 가집니다
+ *    (가장 좁은 `dragger_reel` 은 14° — 이 문턱의 1/3). 그래도 말이 되는
+ *    이유는 **예고 동안 스스로 돌아서 고치기 때문**입니다
+ *    (`WINDUP_TURN_BUDGET_DEG`). 즉 이 세 값은 **서로를 전제로** 정해져
+ *    있는데 파일이 셋 다 다릅니다 — 하나만 바꾸면 조용히 깨집니다.
+ *
+ *    그래서 밖으로 냅니다: `npm run rules` 의 「스스로 고칠 수 있는
+ *    만큼만 커밋을 허락한다」가 이 관계를 지킵니다.
+ */
+export const ATTACK_FACING_TOLERANCE_DEG = 45
+const ATTACK_FACING_TOLERANCE = ATTACK_FACING_TOLERANCE_DEG * DEG
 
 /**
  * 준비가 된 채로 이만큼(초) 조준을 못 맞추면 **홱 돌아봅니다.**
@@ -712,8 +726,14 @@ export function chainIndexFor(kind: number, phaseIdx: number, attackIndex: numbe
   return idx >= 0 ? idx : NO_CHAIN
 }
 
+/**
+ * ⚠️ `player` 는 **기본값을 주지 않습니다.** 기본값(-1 같은)을 두면 부르는
+ * 쪽에서 빠뜨려도 조용히 통과하고, `aimAtStart` 에는 말이 안 되는 각도가
+ * 남습니다. 「못 잰 것은 통과가 아니다」 — 빠뜨리면 컴파일이 막게 둡니다.
+ */
 function commitAttack(
   e: number,
+  player: number,
   kind: number,
   index: number,
   windupScale: number,
@@ -765,6 +785,20 @@ function commitAttack(
   Enemy.heldT[e] = holdT
   // 🕐 **실제로 건 값**을 남깁니다 — 읽는 쪽이 설정값을 다시 계산하지 않게.
   Enemy.windupLen[e] = Actor.timer[e]
+  /**
+   * 🎯 **예고를 거는 순간의 각도**도 같이 남깁니다(components.ts `aimAtStart`).
+   * 휘두를 때의 각도만으로는 *"처음부터 빗나가 있었다"* 와 *"예고 동안
+   * 벌어졌다"* 가 한 칸에 뭉칩니다.
+   */
+  {
+    const dx = Transform.x[player] - Transform.x[e]
+    const dz = Transform.z[player] - Transform.z[e]
+    const want = Math.atan2(dx, dz)
+    let d = want - Transform.rotY[e]
+    while (d > Math.PI) d -= Math.PI * 2
+    while (d < -Math.PI) d += Math.PI * 2
+    Enemy.aimAtStart[e] = Math.abs((d * 180) / Math.PI)
+  }
   Actor.hitsLeft[e] = 1
   Actor.nextHitT[e] = 0
   Enemy.chained[e] = chained ? 1 : 0
@@ -1288,7 +1322,7 @@ export function enemyAiSystem(
           Enemy.chainNext[e] = NO_CHAIN
           Actor.cooldownT[e] = 0
           chainsResumed++
-          commitAttack(e, kind, next, ph.windupScale, true)
+          commitAttack(e, playerEntity, kind, next, ph.windupScale, true)
         }
       }
       decayVelocity(e, dt, 9)
@@ -1663,7 +1697,7 @@ export function enemyAiSystem(
           if (next !== NO_CHAIN) {
             Enemy.chainNext[e] = NO_CHAIN
             Actor.cooldownT[e] = 0
-            commitAttack(e, kind, next, ph.windupScale, true)
+            commitAttack(e, playerEntity, kind, next, ph.windupScale, true)
           } else {
             Actor.cooldownT[e] = cfg.attackCooldown * ph.cooldownScale
           }
@@ -1870,7 +1904,7 @@ export function enemyAiSystem(
         if (attackAt(kind, opener).arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
-        commitAttack(e, kind, opener, ph.windupScale)
+        commitAttack(e, playerEntity, kind, opener, ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
       }
@@ -1888,7 +1922,7 @@ export function enemyAiSystem(
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
-        commitAttack(e, kind, list.indexOf(picked), ph.windupScale)
+        commitAttack(e, playerEntity, kind, list.indexOf(picked), ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
       }

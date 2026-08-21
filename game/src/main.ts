@@ -60,6 +60,7 @@ import {
   VIAL,
   WEAPON_UPGRADE,
   WORLD,
+  WINDUP_TURN_BUDGET_DEG,
 } from './config/balance'
 import {
   AttackIntent,
@@ -179,6 +180,7 @@ import {
   readIdleReasons,
   setAggroRangeOverride,
   wakeRangeOf,
+  ATTACK_FACING_TOLERANCE_DEG,
   spotEvents,
   deaggroEvents,
   reachDistanceOf,
@@ -6410,6 +6412,8 @@ declare global {
       testBehind: (ax: number, az: number, tx: number, tz: number, trot: number) => boolean
       /** 검증 스크립트가 수치를 하드코딩하지 않도록 튜닝 상수를 그대로 내보냅니다. */
       tuning: () => { backArcDeg: number }
+      /** 🎯 시작해도 되는 각도 · 예고 한 번에 돌 수 있는 각도 — 구현부 주석 참고. */
+      aimRule: () => { commitToleranceDeg: number; windupTurnBudgetDeg: number }
       /** 화면을 그 프레임에 멈춰 세웁니다(스크린샷용). */
       setPaused: (paused: boolean) => void
       idleReasons: () => { token: number; cooldown: number; facing: number; noPattern: number; committed: number }
@@ -6419,6 +6423,8 @@ declare global {
         hit: boolean
         dist: number
         angleDeg: number
+        /** 🎯 예고를 걸던 순간의 빗나감(도) — `angleDeg` 와 짝. combat.ts 참고. */
+        aimAtStart: number
         halfArcDeg: number
         reach: number
         invuln: boolean
@@ -6494,6 +6500,8 @@ declare global {
         approachSpeed: number
         attackRange: number
         keepDistance?: number
+        /** 🎯 도는 속도(도/초) — 예고 중 회전은 이 값과 `aimRule` 예산 중 작은 쪽입니다. */
+        turnSpeedDeg: number
         attackCycle: number
         /** 강인도 최대치 — "무너뜨리려면 얼마나 깎아야 하는가"의 기준입니다. */
         poiseMax: number
@@ -7303,6 +7311,25 @@ window.__game = {
   // 등 뒤 판정은 순수 기하 계산이라 엔티티 없이 그대로 검증할 수 있습니다.
   testBehind: (ax, az, tx, tz, trot) => isBehindPoint(ax, az, tx, tz, trot),
   tuning: () => ({ backArcDeg: COMBAT.backArcDeg }),
+  /**
+   * 🎯 **조준 규칙** — 세 파일에 흩어져 있는 세 값을 한 줄로 냅니다.
+   *
+   * · `commitToleranceDeg` — 시작해도 되는 각도 (enemyAI.ts)
+   * · `windupTurnBudgetDeg` — 예고 한 번에 돌 수 있는 각도 (balance.ts)
+   * · 패턴의 `arcDeg` 반값 — 실제로 닿는 각도 (enemyAttacks.ts)
+   *
+   * 셋은 **서로를 전제로** 정해져 있습니다: 닿는 각도보다 넓게 시작을
+   * 허락해 놓고, 모자란 몫은 예고 동안 돌아서 채우기로 한 것입니다.
+   * 그런데 파일이 셋 다 달라서, 예고를 줄이거나 부채꼴을 좁히면
+   * **아무 검사도 울리지 않은 채** 그 패턴이 확정 헛방이 됩니다.
+   *
+   * 프로브가 45·90 을 베껴 적으면 그 순간 이 파일들이 「또 하나의 진실」이
+   * 되므로 값은 게임이 알려 줍니다.
+   */
+  aimRule: () => ({
+    commitToleranceDeg: ATTACK_FACING_TOLERANCE_DEG,
+    windupTurnBudgetDeg: WINDUP_TURN_BUDGET_DEG,
+  }),
   setPaused: (paused) => game.debugSetPaused(paused),
   /**
    * 💢 **강인도 규칙을 그대로 물어봅니다** — 판정과 **같은 함수**입니다.
@@ -7401,6 +7428,12 @@ window.__game = {
         approachSpeed: d.moveSpeed * (d.approachSpeedScale ?? 1),
         attackRange: d.attackRange,
         keepDistance: d.keepDistance,
+        /**
+         * 🎯 **도는 속도**(도/초). 예고 중에는 이 값과 `aimRule` 의 예산 중
+         * **작은 쪽**이 실제 속도가 됩니다(`enemyAI` 예고 회전). 느린 적은
+         * 예산을 다 못 쓰므로, 예산만 보면 못 도는 적을 돈다고 셉니다.
+         */
+        turnSpeedDeg: d.turnSpeedDeg,
         /**
          * **한 번 공격하는 데 걸리는 전체 시간**(초). 프로브가 네 값을
          * 따로 받아 더하다가 하나를 빠뜨리는 일이 없도록 여기서 냅니다.

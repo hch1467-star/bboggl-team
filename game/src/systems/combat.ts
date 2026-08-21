@@ -255,6 +255,17 @@ export interface SwingRecord {
   dist: number
   /** 정면에서 벗어난 각도(도). */
   angleDeg: number
+  /**
+   * **예고를 걸던 순간** 정면에서 벗어나 있던 각도(도) — `angleDeg` 의 짝.
+   *
+   * 🎯 둘을 나란히 두어야 *"처음부터 빗나가 있었다"* 와 *"예고 동안
+   * 벌어졌다"* 가 갈립니다. 처방이 정반대라서 한 칸에 뭉치면 안 됩니다:
+   * 앞이면 **적의 자리·조준**을, 뒤면 **예고 중 추적 속도**를 봐야 합니다.
+   *
+   * ⚠️ 이 값은 **판정이 아닙니다.** `angleDeg` 와 마찬가지로 사람이 읽을
+   *    설명이고, 맞았는지는 `hit` 만이 답합니다.
+   */
+  aimAtStart: number
   /** 그 거리에서 실제로 허용된 반각(도) — 굵기 보정까지 포함합니다. */
   halfArcDeg: number
   /** 판정 사거리(m) — 대상 반지름까지 더한 값입니다. */
@@ -1525,7 +1536,18 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       let cur = openSwings.get(a)
       if (!cur) {
         cur = {
-          rec: { attackId: id, hit: false, dist, angleDeg: 0, halfArcDeg: 0, reach: 0, invuln: false },
+          rec: {
+            attackId: id,
+            hit: false,
+            dist,
+            angleDeg: 0,
+            // 예고 때 적어 둔 값을 **그대로 옮깁니다** — 여기서 다시 재면
+            // 이미 예고가 끝난 뒤라 "예고를 걸던 순간"이 아닙니다.
+            aimAtStart: Enemy.aimAtStart[a],
+            halfArcDeg: 0,
+            reach: 0,
+            invuln: false,
+          },
           minDist: Infinity,
           frame: time.frame,
         }

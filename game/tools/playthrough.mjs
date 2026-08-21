@@ -4490,12 +4490,17 @@ try {
       const by = new Map()
       for (const r of rows) {
         const k = r.attackId || '(이름없음)'
-        const e = by.get(k) ?? { n: 0, hit: 0, far: 0, wide: 0, invuln: 0, ang: 0, arc: 0 }
+        const e = by.get(k) ?? { n: 0, hit: 0, far: 0, wide: 0, invuln: 0, ang: 0, arc: 0, aim0: 0 }
         e.n++
         if (r.hit) e.hit++
         else if (r.invuln) e.invuln++
         else if (r.dist > r.reach) e.far++
-        else e.wide++
+        else {
+          e.wide++
+          // 🎯 **각도로 빗나간 것에만** 더합니다 — 맞은 휘두름까지 섞으면
+          //    "빗나감이 어디서 생겼나"를 묻는 칸이 아니게 됩니다.
+          e.aim0 += r.aimAtStart ?? 0
+        }
         e.ang += r.angleDeg
         e.arc += r.halfArcDeg
         by.set(k, e)
@@ -4509,18 +4514,58 @@ try {
               (e.hit / e.n) * 100,
             )}%) · 사거리 ${String(e.far).padStart(3)} · 각도 ${String(e.wide).padStart(3)} · 무적 ${String(
               e.invuln,
-            ).padStart(3)} · 평균 ${(e.ang / e.n).toFixed(0)}°/허용 ${(e.arc / e.n).toFixed(0)}°`,
+            ).padStart(3)} · 평균 ${(e.ang / e.n).toFixed(0)}°/허용 ${(e.arc / e.n).toFixed(0)}°${
+              e.wide > 0 ? ` · 각도빗나감은 예고시작 ${(e.aim0 / e.wide).toFixed(0)}°부터` : ''
+            }`,
         )
       const tot = rows.length
       const hit = rows.filter((r) => r.hit).length
       const inv = rows.filter((r) => !r.hit && r.invuln).length
       const far = rows.filter((r) => !r.hit && !r.invuln && r.dist > r.reach).length
       const wide = tot - hit - inv - far
+      /**
+       * ── 🎯 **각도로 빗나간 것을 한 번 더 가릅니다** ────────────────
+       *
+       * *"각도로 빗나갔다"* 는 아직 **처방이 아닙니다.** 같은 칸에 두
+       * 가지가 들어 있고 고칠 곳이 정반대입니다:
+       *
+       *   ① **처음부터 빗나가 있었다** — 예고를 걸 때 이미 옆을 보고
+       *      있었습니다. 고칠 곳은 **적의 자리·조준**(붙는 거리, 커밋
+       *      직전의 회전)입니다.
+       *   ② **예고 동안 벌어졌다** — 걸 때는 맞춰 봤는데 1.5초 사이에
+       *      플레이어가 옆으로 빠졌습니다. 고칠 곳은 **예고 중 추적
+       *      속도**이고, 이건 *플레이어가 잘한 것*일 수도 있습니다.
+       *
+       * ②를 ①로 착각하고 적의 조준을 세게 하면, **잘 피한 사람을
+       * 벌주게 됩니다.** 그래서 뭉쳐서 읽지 않습니다.
+       *
+       * ⚠️ **이건 판정이 아니라 관찰입니다.** 문턱을 두지 않는 이유:
+       *    `halfArcDeg` 는 *판정 순간의 거리*에서 나온 허용치인데
+       *    `aimAtStart` 는 *예고를 걸던 거리*의 각도입니다. 거리가
+       *    달라지면 굵기 보정도 달라지므로 둘을 맞대어 "넘었다/아니다"
+       *    를 선언하면 계측기의 정책을 게임의 결론으로 만드는 셈입니다.
+       *    아래 「이미 밖」은 그래서 **눈금이 아니라 눈짐작**입니다.
+       */
+      const wideRows = rows.filter((r) => !r.hit && !r.invuln && r.dist <= r.reach)
+      const split = (() => {
+        if (wideRows.length === 0) return ''
+        const a0 = wideRows.reduce((s, r) => s + (r.aimAtStart ?? 0), 0) / wideRows.length
+        const a1 = wideRows.reduce((s, r) => s + r.angleDeg, 0) / wideRows.length
+        // 예고를 걸 때 이미 그 순간의 허용치(판정 때의 값을 빌려 씁니다)를
+        // 넘어 있던 것 — 위 ⚠️ 대로 어림수입니다.
+        const already = wideRows.filter((r) => (r.aimAtStart ?? 0) > r.halfArcDeg).length
+        return (
+          `\n               ↳ 🎯 각도 ${wideRows.length}회 — 예고 시작 ${a0.toFixed(0)}° → 판정 ${a1.toFixed(0)}°` +
+          ` (벌어짐 ${a1 - a0 >= 0 ? '+' : ''}${(a1 - a0).toFixed(0)}°) · 시작부터 밖 ${already}회(눈짐작)`
+        )
+      })()
       return (
         `  📒 빗나간 이유 ${tot}회 (근접 부채꼴만 — 광역·화살 제외)${cut}\n` +
         `               합계 — 적중 ${hit}(${Math.round((hit / tot) * 100)}%) · 사거리 ${far}(${Math.round(
           (far / tot) * 100,
-        )}%) · 각도 ${wide}(${Math.round((wide / tot) * 100)}%) · 무적 ${inv}(${Math.round((inv / tot) * 100)}%)\n` +
+        )}%) · 각도 ${wide}(${Math.round((wide / tot) * 100)}%) · 무적 ${inv}(${Math.round((inv / tot) * 100)}%)` +
+        split +
+        '\n' +
         lines.join('\n')
       )
     })(),

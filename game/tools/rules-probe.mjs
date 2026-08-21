@@ -739,6 +739,86 @@ try {
     `달리기 ${runSpeed.toFixed(1)} m/s vs ${fastest.name} ${fastest.approachSpeed.toFixed(1)} m/s`,
   )
 
+  /**
+   * ---- 9. 🎯 **스스로 고칠 수 있는 만큼만 커밋을 허락한다** ----
+   *
+   * ── 왜 이 관계가 있는지 모르고 지나갈 뻔했는가 ───────────────────
+   * 적이 공격을 **시작해도 되는 각도**는 하나로 정해져 있고(45°), 실제로
+   * **닿는 각도**는 패턴마다 다릅니다. 세어 보니 부채꼴 13개 중 **10개**가
+   * 시작 문턱보다 좁습니다 — 가장 좁은 🟣`dragger_reel` 은 반각 14°,
+   * 문턱의 1/3입니다. 그러니까 이 게임은 **닿지 않는 각도에서 시작하는
+   * 것을 일부러 허락**하고 있습니다.
+   *
+   * 그게 고장이 아닌 이유는 **예고 동안 돌아서 고치기로** 했기 때문입니다.
+   * 즉 세 값이 서로를 전제로 서 있습니다:
+   *
+   *     시작 문턱(45°) − 반각(패턴마다) ≤ 예고 동안 돌 수 있는 각도
+   *
+   * 그런데 이 셋은 **파일이 셋 다 다릅니다** (enemyAI · enemyAttacks ·
+   * balance). 예고를 줄이거나 부채꼴을 좁히면 관계가 조용히 깨지고, 그
+   * 패턴은 *"허락은 받았는데 절대 못 맞히는"* 확정 헛방이 됩니다. 화면에는
+   * 예고가 멀쩡히 뜨므로 **플레이어에겐 배울 것이 하나 사라진 것**이고,
+   * 지금까지 이걸 보는 검사는 하나도 없었습니다.
+   *
+   * ⚠️ **예산은 두 값 중 작은 쪽입니다.** `WINDUP_TURN_BUDGET_DEG` 만
+   *    보면 느린 적을 빠르다고 세게 됩니다 — 실제 회전은
+   *    `min(turnSpeedDeg, 예산/예고)` 이라서, 예고가 짧으면 예산이 남아도
+   *    몸이 못 따라갑니다. 그래서 `min(turnSpeedDeg × 예고, 예산)` 으로
+   *    잡습니다.
+   *
+   * ⚠️ **여기서 "실제로 빗나가는가"를 묻는 것이 아닙니다.** 그건 움직이는
+   *    플레이어가 있어야 답할 수 있고 `npm run play` 의 🎯 칸이 봅니다.
+   *    이 검사는 **최악으로 허락된 각도에서 시작해도 스스로 고칠 수 있는
+   *    여지가 남아 있는가**만 봅니다 — 값이 아니라 값 사이입니다.
+   */
+  const aim = await page.evaluate(() => window.__game.aimRule())
+  /**
+   * 보스는 페이즈마다 예고가 배율로 줄어듭니다. **가장 짧은 예고**로
+   * 봐야 합니다 — 평상시로 재면 3단계에서만 깨진 것을 못 잡습니다.
+   */
+  const bossTuning = await page.evaluate(() => window.__game.bossTuning())
+  const minWindupOf = (id, fallback) => {
+    const xs = bossTuning.flatMap((ph) => ph.windups.filter((w) => w.id === id).map((w) => w.seconds))
+    return xs.length > 0 ? Math.min(...xs) : fallback
+  }
+  const aimRows = roster.flatMap((r) =>
+    r.attacks
+      /**
+       * 반각이 문턱보다 **넓은** 패턴은 뺍니다 — 🟡 광역처럼 시작을 허락한
+       * 어떤 각도에서도 이미 닿으므로, 되돌릴 몫이 음수라 물을 것이
+       * 없습니다.
+       *
+       * ⚠️ 🏹 화살은 **뺀 것이 아니라 들어옵니다**(재고 나서 고친 주석 —
+       *    처음엔 "화살은 제외"라고 적어 놓고 실제로는 11개 안에 두 개가
+       *    들어와 있었습니다). 들어오는 편이 맞습니다: 화살도 조준해서
+       *    쏘고, 예고 중에 돌아서 고칩니다. 다만 **닿는 판정은 부채꼴이
+       *    아니라 날아가는 몸**이라 여기 반각은 *"쏘는 방향"* 이지
+       *    맞는 폭이 아닙니다.
+       */
+      .filter((a) => a.arcDeg / 2 < aim.commitToleranceDeg)
+      .map((a) => {
+        const windup = minWindupOf(a.id, a.windup)
+        const budget = Math.min(r.turnSpeedDeg * windup, aim.windupTurnBudgetDeg)
+        const need = aim.commitToleranceDeg - a.arcDeg / 2
+        return { from: r.name, id: a.id, half: a.arcDeg / 2, windup, budget, need }
+      }),
+  )
+  check(
+    aimRows.length > 0 && aimRows.every((w) => w.budget >= w.need),
+    '🎯 **닿는 각도보다 넓게 시작을 허락한 만큼, 예고 동안 되돌릴 수 있다**',
+    `부채꼴 ${aimRows.length}개(문턱 ${aim.commitToleranceDeg}° 보다 좁은 것만) · ` +
+      aimRows
+        // 여유가 적은 순으로 — 통과해도 **어디가 아슬아슬한지**는 보여야
+        // 합니다. 「한 칸 차이의 초록은 운이다」.
+        .sort((a, b) => a.budget - a.need - (b.budget - b.need))
+        .slice(0, 4)
+        .map(
+          (w) =>
+            `${w.id} 반각 ${w.half}° → 되돌릴 몫 ${w.need}° / 예고 ${w.windup.toFixed(2)}초에 ${w.budget.toFixed(0)}° (여유 ${(w.budget - w.need).toFixed(0)}°)`,
+        )
+        .join(' · '),
+  )
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
 } catch (err) {
