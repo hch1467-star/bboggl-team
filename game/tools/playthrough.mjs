@@ -4082,6 +4082,22 @@ try {
        *    옆에 그대로 적습니다 — 조용히 자르지 않습니다.
        */
       swings: G.swings?.() ?? [],
+      /**
+       * 🎨 **색 표를 같이 실어 옵니다.**
+       *
+       * 장부의 줄은 `attackId` 만 들고 있어서, 색별로 세려면 id→색 표가
+       * 필요합니다. 그 표를 프로브에 적어 두면 색이 늘어나는 날 **여기만
+       * 옛 표**를 들게 됩니다(이 저장소가 🟢 을 그렇게 놓친 적이 있습니다).
+       * 게임에게 묻습니다.
+       */
+      intentOfAttack: Object.fromEntries(
+        G.enemyRoster().flatMap((r) => r.attacks.map((a) => [a.id, a.intent])),
+      ),
+      colorTable: G.reactionBudget().colors.map((c) => ({
+        intent: c.intent,
+        emoji: c.emoji,
+        label: c.label,
+      })),
       enemySwings: G.runStats().enemySwings,
       enemyHits: G.runStats().enemyHits,
       counters: G.counterCount(),
@@ -4782,6 +4798,63 @@ try {
       )
     }
   }
+  /**
+   * ── 🎨 **색을 몇 번 겪었는가** ─────────────────────────────────────
+   *
+   * ── 왜 이 줄이 필요해졌는가 ──────────────────────────────────────
+   * 기둥 2는 *"색마다 다른 대응"* 입니다. 그런데 **한 판에 각 색을 몇 번
+   * 겪는지**를 보고서가 한 번도 안 말했습니다. 색이 하나라도 0에 가까우면
+   * 그 색은 코드에만 있고 게임에는 없는 것인데, 그걸 알 방법이 없었습니다.
+   *
+   * 실제로 손으로 세어 보고서야 알았습니다 — 한 판에서 🟣 **1회**.
+   * 한 번은 가르치는 것이 아닙니다.
+   *
+   * ⚠️ **색 표는 게임이 줍니다**(`reactionBudget`). 여기 이모지를 적어
+   *    두면 색이 늘어나는 날 이 줄만 옛 표를 듭니다 — 이 저장소가 🟢 을
+   *    정확히 그렇게 놓쳤습니다(프로브에 "4색"이라 적어 둔 채 다섯째가
+   *    들어와 있었습니다).
+   *
+   * ⚠️ **🟢 반격은 이 장부에 안 잡힙니다.** 잘 대응하면 예고가 반격으로
+   *    끊겨서 판정이 아예 안 납니다 — 즉 *"잘할수록 0에 가까워지는"* 색
+   *    입니다. 그래서 별도 계수기(`greenEvents`)를 함께 씁니다. 한 자로
+   *    재려다 **잘한 사람을 못 겪은 것으로** 셀 뻔했습니다.
+   *
+   * ⚠️ 이건 **판정이 아니라 장부**입니다. 몇 번이 옳은지는 아무도 모릅니다.
+   *    판마다 편차도 큽니다(요약 기록: 보스 🟣 는 9판 중 4판에만 나옴).
+   *    한 판을 보고 처방을 세우지 마십시오 — **여러 판**을 보십시오.
+   */
+  ;(() => {
+    const rows = log.swings ?? []
+    const table = log.colorTable ?? []
+    const intentOf = log.intentOfAttack ?? {}
+    if (table.length === 0) {
+      console.log('  🎨 색별 겪음  색 표를 못 받았습니다 — 아래 결론을 세우지 마십시오')
+      return
+    }
+    const n = new Map(table.map((c) => [c.intent, 0]))
+    let unknown = 0
+    for (const r of rows) {
+      const i = intentOf[r.attackId]
+      if (i === undefined) unknown++
+      else n.set(i, (n.get(i) ?? 0) + 1)
+    }
+    const green = table.find((c) => c.label.includes('때려'))
+    console.log(
+      `  🎨 색별 겪음  ` +
+        table
+          .map((c) => {
+            const cnt = n.get(c.intent) ?? 0
+            // 🟢 만 별도 계수기를 씁니다 — 위 ⚠️ 참고.
+            const shown = green && c.intent === green.intent ? (log.greenEvents ?? 0) : cnt
+            return `${c.emoji} ${shown}회`
+          })
+          .join(' · ') +
+        (unknown ? ` · ⚠️ 색을 못 찾은 줄 ${unknown}개` : '') +
+        `\n              ⚠️ 판정이 아니라 장부입니다. 판마다 편차가 큽니다 — **한 판으로 처방하지 마십시오**` +
+        `\n              ⚠️ 🟢 은 판정 장부에 안 잡혀 별도 계수기입니다(잘 대응하면 예고가 끊겨서 판정이 안 남)`,
+    )
+  })()
+
   const distTotal =
     log.boss.fought && log.boss.dist
       ? log.boss.dist.near + log.boss.dist.mid + log.boss.dist.far + log.boss.dist.away
