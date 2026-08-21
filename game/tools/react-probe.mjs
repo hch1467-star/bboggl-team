@@ -680,20 +680,46 @@ try {
              * 답을 그대로 씁니다. 다시 재면 판정의 사본이 생깁니다.
              */
             const rec = G.swings().find((s) => s.attackId === atkId) ?? null
+            const hurt = before - me2.hp
+            /**
+             * ⚠️ **「맞았는가」는 장부가 아니라 체력이 답합니다.**
+             *
+             * 처음엔 `rec.hit` 을 그대로 읽었다가 `받은 피해 0 · 판정 적중`
+             * 이라는 말이 안 되는 줄을 냈습니다. 두 값이 **다른 것을 세고
+             * 있었기** 때문입니다:
+             *
+             *   · 장부의 `hit` — 판정이 살아 있는 **매 프레임**을 보고,
+             *     한 프레임이라도 *"도형 안 + 무적 아님"* 이면 참
+             *   · 실제 피해 — 그 휘두름의 **피해 프레임 한 번**에만 들어감
+             *
+             * 그래서 구르기 무적이 **피해 프레임만 덮고 나머지 판정
+             * 프레임은 못 덮은** 경우, 장부는 적중이라 하고 체력은 안
+             * 깎입니다. 둘 다 맞는 말이고 **묻는 것이 다릅니다** —
+             * 장부는 *"잡힐 수 있었나"*, 체력은 *"잡혔나"*.
+             *
+             * 이 실험이 묻는 것은 **넘겼는가**이므로 체력이 먼저입니다.
+             * 장부는 넘겼을 때 **왜 넘겼는지**를 설명하는 데만 씁니다.
+             */
+            const why =
+              hurt > 0
+                ? '적중'
+                : !rec
+                  ? '판정없음'
+                  : rec.dist > rec.reach
+                    ? '사거리'
+                    : rec.invuln || rec.hit
+                      ? '무적'
+                      : '각도'
             return {
-              hurt: before - me2.hp,
+              hurt,
               dist: Math.hypot(me2.x - es2.x, me2.z - es2.z),
               windup: wlen,
-              why: rec
-                ? rec.hit
-                  ? '적중'
-                  : rec.invuln
-                    ? '무적'
-                    : rec.dist > rec.reach
-                      ? '사거리'
-                      : '각도'
-                : '판정없음',
-              rec,
+              why,
+              // 원자료도 같이 냅니다 — 위 사다리가 또 틀렸을 때 **사다리를
+              // 의심할 수 있게**. 요약만 남기면 다음 사람은 요약을 믿습니다.
+              raw: rec
+                ? `hit=${rec.hit ? 1 : 0} inv=${rec.invuln ? 1 : 0} d=${rec.dist.toFixed(1)}/${rec.reach.toFixed(1)} a=${rec.angleDeg.toFixed(0)}/${rec.halfArcDeg.toFixed(0)}`
+                : '없음',
             }
           },
           [hookIdx, at, mode, frac, hook.id],
@@ -801,10 +827,23 @@ try {
          */
         const byRange = escaped.filter(([, r]) => r.why !== '각도')
         if (byRange.length > 0) {
-          console.log(
-            `     [관측] ${byRange.map(([n, r]) => `${n}`).join('·')} 는 **${byRange[0][1].why}** 로 빠졌습니다` +
-              ` — 옆으로 굴러도 사거리 밖(${byRange.map(([, r]) => `${r.dist.toFixed(1)}m`).join('·')})이면 🟣 의 정답을 옆걸음으로 이룬 것입니다`,
-          )
+          /**
+           * ⚠️ **타이밍마다 따로 적습니다.** 한 줄에 묶어 대표 이유를 하나
+           *    쓰면, 이유가 섞였을 때 조용히 하나로 뭉칩니다 — 실제로 그렇게
+           *    적었다가 「사거리로 빠졌다」와 「무적으로 넘겼다」를 한 말로
+           *    내보냈습니다. 셋은 서로 다른 색의 답입니다:
+           *      사거리 → 🟣 의 정답 · 무적 → 🔵 의 정답 · 각도 → 🔴 의 정답
+           */
+          for (const [n, r] of byRange) {
+            console.log(
+              `     [관측] ${n} 는 **${r.why}** 로 넘겼습니다 (끝난 거리 ${r.dist.toFixed(1)}m · ${r.raw})` +
+                (r.why === '사거리'
+                  ? ' — 옆으로 굴렀는데 🟣 의 정답(물러나기)이 이루어진 것입니다'
+                  : r.why === '무적'
+                    ? ' — 옆이 아니라 **구르기 무적**으로 넘긴 것이라 🔵 의 답에 가깝습니다'
+                    : ''),
+            )
+          }
         }
       }
     }
