@@ -476,11 +476,23 @@ for (const t of ent('treasure')) {
      * 그래서 **걸을 수 있는 칸 전부**를 훑습니다. 6천 칸이라 느릴 줄
      * 알았는데 여전히 몇 초입니다.
      */
+    /**
+     * ⚠️ **걸어서 닿는 칸만 셉니다.**
+     *
+     * 처음엔 「걸을 수 있는 칸」(= VOID 가 아닌 칸)만 걸렀다가, 높은 순으로
+     * 뽑힌 후보 넷이 **전부 벽 위**였습니다 — 시작 지점에서 **닿을 수가
+     * 없는** 자리입니다. 거기 적을 두면 DESIGN.md 가 못 박아 둔 바로 그것이
+     * 됩니다: *"영영 못 다가오면서 계속 쏘는 적."*
+     *
+     * VOID 가 아닌 것과 **갈 수 있는 것**은 다릅니다. h5 벽 위는 바닥이지만
+     * h2 에서 3단이라 못 올라갑니다. 이 지도는 그런 칸이 아주 많습니다.
+     */
     const t0 = Date.now()
     const spots = []
     for (let cz = 0; cz < H; cz++) {
       for (let cx = 0; cx < W; cx++) {
         if (h[cz * W + cx] === VOID) continue
+        if (fromSpawn.cost[cz * W + cx] < 0) continue // 걸어서 못 닿는 자리
         if (blocks(cx, cz)) spots.push([cx, cz])
       }
     }
