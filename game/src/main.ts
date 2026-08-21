@@ -1888,13 +1888,14 @@ class Game {
      * 를 말하지만, 항아리는 아무것도 깔지 않습니다 — 깔면 플레이어는
      * 항아리도 위험한 물건으로 배웁니다.
      *
-     * 대신 **소리 파문**을 그립니다. 크기는 고함과 같은 `alertRadius`
-     * 이고(적을 깨우는 규칙이 쓰는 바로 그 값), 그래야 *"이만큼이
-     * 들렸다"* 가 보고 배울 수 있는 사실이 됩니다.
+     * 그리고 **파문도 안 그립니다.** 한때 소리 파문을 그렸는데, 그건
+     * *"이만큼 들렸다"* 는 규칙이 있을 때만 참말입니다. 규칙을 뺐으니
+     * 그림도 같이 빼야 합니다 — 안 그러면 화면이 **없는 규칙을
+     * 가르칩니다**(번복 기록은 balance.ts `URN`).
+     *
+     * 남는 것은 **부서지는 느낌**뿐입니다. 그거면 됩니다.
      */
     for (const ev of urnBreakEvents) {
-      const gy = Transform.y[ev.entity]
-      this.vfx.spawnGroundShape(ev.x, gy, ev.z, 0, AWARE.alertRadius, 360, 0xcfd6dd, 0.5, 'outline')
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2
         this.vfx.spawnHitSpark(ev.x + Math.cos(a) * 0.35, ev.y, ev.z + Math.sin(a) * 0.35, 0.6)

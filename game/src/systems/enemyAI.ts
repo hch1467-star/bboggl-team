@@ -64,7 +64,7 @@ const INTENT_TO_SFX: Record<AttackIntent, SfxIntent> = {
   [AttackIntent.Counter]: SfxIntent.Counter,
 }
 import { combatRng } from '../core/rng'
-import { isBehindPoint, noteBleedBlocked, noteBleedDecay, urnBreakEvents } from './combat'
+import { isBehindPoint, noteBleedBlocked, noteBleedDecay } from './combat'
 import { time } from '../core/time'
 
 /**
@@ -2083,47 +2083,25 @@ export function enemyAiSystem(
   }
 
   /**
-   * ── 🏺 **깨진 항아리 소리** ──────────────────────────────────────
+   * ── 🏺 **항아리 소리는 적을 깨우지 않습니다** ────────────────────
    *
-   * 항아리를 부수면 소리가 나고, 그 소리를 들은 적이 깨어납니다. 이것이
-   * 이 물건의 **대가**입니다 — 없으면 잡동사니를 전부 부수는 것이 공짜라
-   * 탐험이 아니라 **인터랙션 세금**이 됩니다(설계는 balance.ts `URN`).
+   * 한 번 넣었다가 **뺐습니다.** 넣을 때의 논리는 이랬습니다:
+   * *"부수는 데 대가가 있어야 잡동사니를 전부 부수는 것이 공짜가 아니게
+   * 된다."* 규칙으로는 말이 되는데, **재미의 방향이 반대**였습니다.
    *
-   * ⚠️ 거리를 **고함과 같게** 씁니다(`AWARE.alertRadius`). 화면에 그려지는
-   *    파문이 고함 거리로 그려지므로(balance.ts `spotFlash` 주석), 여기에
-   *    다른 숫자를 적으면 **보이는 크기와 실제 규칙이 어긋납니다.**
-   *    이 저장소가 문턱을 베껴 적어 데인 것이 이미 여러 번입니다.
+   * 대가를 붙이면 플레이어는 항아리 앞에서 **망설입니다.** 그런데 이
+   * 물건이 존재하는 이유는 *"시원하게 부수고 다니는 것"* 이고, 부수는
+   * 김에 뭔가 나오면 *"역시 내 감이 맞았다"* 가 되는 것입니다. 망설이게
+   * 만들면 그 감각이 통째로 사라집니다 — 세금을 피하려다 **재미 쪽에
+   * 세금을 매긴** 셈이었습니다.
    *
-   * ⚠️ 깨우는 자리를 여기 둔 이유: `combat.ts` 는 사건만 냅니다. *"누가
-   *    언제 깨어나는가"* 의 규칙이 두 곳에 있으면, 한쪽만 고치는 날
-   *    소리로 깨는 것과 보고 깨는 것이 다른 규칙이 됩니다.
+   * 그래서 적은 **가까이 가면 반응하는 정도**로만 둡니다(이미 있는
+   * 시야·청각 규칙 그대로). 항아리는 소음원이 아닙니다.
    *
-   * ⚠️ 보스는 뺍니다 — 위 고함 그물과 **같은 이유**입니다(보스는 조우
-   *    연출이 깨웁니다). 여기서만 예외를 안 두면 항아리 하나로 보스전이
-   *    시작되는 일이 생깁니다.
+   * ⚠️ 남겨 두는 이유: 다음에 누가 *"항아리에 대가를 붙이면 어떨까"* 를
+   *    다시 떠올릴 때, **이미 해 봤고 왜 뺐는지**가 여기 적혀 있어야
+   *    합니다. 지운 자리는 아무 말도 안 합니다.
    */
-  for (const ev of urnBreakEvents) {
-    for (let j = 0; j < enemies.count; j++) {
-      const o = ids[j]
-      if (!isAlive(o) || Enemy.aggro[o] !== 0) continue
-      if (Enemy.kind[o] === EnemyKind.Boss) continue
-      const ddx = Transform.x[o] - ev.x
-      const ddz = Transform.z[o] - ev.z
-      if (ddx * ddx + ddz * ddz > AWARE.alertRadius * AWARE.alertRadius) continue
-      Enemy.aggro[o] = 1
-      // 🔊 **들은 것**입니다 — 고함과 같은 신호로 나가야 원인이 읽힙니다.
-      spotEvents.push({ entity: o, x: Transform.x[o], z: Transform.z[o], heard: true })
-      /**
-       * ⚠️ 고함과 달리 **기습 유예를 안 지웁니다.**
-       *
-       * 소리는 *"저쪽에서 뭔가 깨졌다"* 이지 *"네가 저기 있다"* 가
-       * 아닙니다. 깨어나되 아직 나를 못 본 상태여야, 항아리로 적을
-       * 끌어내고 등을 잡는 **선택**이 성립합니다. 여기서 유예를
-       * 지우면 항아리는 그냥 벌이 됩니다.
-       */
-      Enemy.unawareT[o] = Math.max(Enemy.unawareT[o], AWARE.ambushGrace)
-    }
-  }
 
   // 이번 프레임에 초록 예고 중인 적을 표시해 두고, 빠진 것들을 결산합니다.
   for (let i = 0; i < enemies.count; i++) {

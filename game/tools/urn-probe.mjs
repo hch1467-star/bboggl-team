@@ -8,7 +8,7 @@
  *
  * ── 이 물건의 설계를 세 문장으로 (balance.ts `URN`) ────────────────
  *   ① 한 대면 부서진다 — 체력 싸움이 아니라 **판단**이라야 합니다
- *   ② 부서지면 **소리가 나고 근처 적이 깨어난다** — 이것이 대가입니다
+ *   ② 부수는 데 **대가가 없다** — 망설이게 만들면 재미가 사라집니다
  *   ③ 그중 어떤 것은 **보물을 품고 있다** — 확률이 아니라 배치입니다
  *
  * 셋 다 *"코드에 그렇게 적혀 있다"* 가 아니라 **눌러서** 확인합니다.
@@ -18,10 +18,10 @@
  * 옛 규칙을 지킵니다.** `awareInfo()` 가 게임이 실제로 쓰는 값을 냅니다.
  *
  * ── ⚠️ 이 프로브가 스스로를 못 믿는 자리 ────────────────────────────
- * *"소리를 듣고 깨어났다"* 와 *"원래 보고 깨어났다"* 는 겉으로 같습니다.
- * 그래서 항아리를 **적의 등 뒤 쪽**, 시야 밖에 세웁니다. 그렇게 안 하면
- * 이 검사는 소리가 없어도 통과합니다 — 「빈 표본으로 통과하지 않게」와
- * 같은 종류의 함정이고, 여기서는 **표본이 아니라 원인**이 비어 있습니다.
+ * *"안 깨어났다"* 는 **원인이 없어도 참**이 됩니다 — 애초에 못 깨어날
+ * 자리에 세워 두면 무엇을 해도 초록입니다. 그래서 게이트를 둡니다:
+ * 적이 정말 자고 있었는가, 항아리가 정말 깨졌는가. 둘 다 아니면 그
+ * 판은 **아무것도 말하지 않은 것**입니다.
  */
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -55,10 +55,11 @@ try {
   await page.goto(`http://localhost:${PORT}/?mode=arena&lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
 
-  console.log('\n🏺 항아리 — 부수는 데 대가가 있고, 그중 하나가 진짜입니다\n')
+  console.log('\n🏺 항아리 — 마음껏 부수고, 그중 하나가 진짜입니다\n')
 
   const aware = await page.evaluate(() => window.__game.awareInfo())
-  console.log(`  [규칙 — 게임이 알려 준 값] 소리가 닿는 거리 ${aware.alertRadius}m\n`)
+  // 거리는 **적이 안 깨어나는지** 확인할 자리를 잡는 데만 씁니다(규칙이 아닙니다).
+  console.log(`  [참고] 고함이 닿는 거리 ${aware.alertRadius}m — 항아리는 이 소리를 내지 않습니다\n`)
 
   /**
    * ── ① 한 대면 부서지는가 ──────────────────────────────────────
@@ -84,9 +85,9 @@ try {
     G.spawnUrn(p.x, p.z + 1.6, false)
     await runFor(0.2)
     const before = G.urns().length
-    G.press('KeyJ')
+    G.press('Mouse0')
     await sleep()
-    G.release('KeyJ')
+    G.release('Mouse0')
     await runFor(1.2)
     return { before, after: G.urns().filter((u) => !u.broken).length }
   })
@@ -102,29 +103,33 @@ try {
   )
 
   /**
-   * ── ② 소리가 적을 깨우는가 ────────────────────────────────────
+   * ── ② **부수는 데 대가가 없어야 합니다** ──────────────────────
    *
-   * ── ⚠️ 첫 판을 이렇게 짰다가 못 쓰게 됐습니다 ──────────────────
-   * 항아리를 플레이어 앞에 세우고 칼로 깼습니다. 그런데 소리 거리가 7m
-   * 라 **가까운 적도 플레이어에게서 5m 안**에 서게 되고, 그 적은 소리와
-   * 무관하게 **나를 보고** 깨어납니다. 게이트가 잡았습니다 —
-   * `가까운 true · 먼 true`, 즉 **깨기도 전에 둘 다 깨어 있었습니다.**
-   * 통과했다면 소리가 아예 없어도 초록인 검사였습니다. 표본이 아니라
-   * **원인**이 비어 있는 초록입니다.
+   * 한때 여기에 *"깨면 소리가 나고 근처 적이 깨어난다"* 를 재는 검사가
+   * 셋 있었습니다. 규칙째로 뺐습니다 — 대가를 붙이면 플레이어가 항아리
+   * 앞에서 **망설이고**, 그러면 *"시원하게 부수고 다니는"* 감각이
+   * 사라집니다(설계와 번복 기록은 balance.ts `URN`).
    *
-   * ── 그래서 플레이어를 빼 버립니다 ──────────────────────────────
-   * 항아리와 적들을 **플레이어에게서 멀리** 세우고, 칼 대신
-   * `damageEntity` 로 부숩니다. 그러면 깨어날 이유가 **소리 하나**만
-   * 남습니다.
+   * 그래서 지금은 **반대쪽**을 잽니다: 자고 있던 적이 항아리가 깨져도
+   * **그대로 자고 있는가.** 뺐다고 검사까지 지우면, 다음에 누가 소리를
+   * 다시 붙였을 때 **아무 말도 안 나옵니다.** 「없던 것은 기능이 아니라
+   * 눈금이었습니다」의 반대 방향 짝입니다.
    *
-   * ⚠️ 이건 편법이 아니라 통이 이미 증명한 길입니다 — 부서짐 조건이
-   *    「체력이 0이 되면」 하나로 모여 있어서, **어떤 피해원으로 깨든
-   *    같은 규칙**이 돕니다(combat.ts 통 가지 주석). 그 설계 덕분에
-   *    플레이어를 실험에서 뺄 수 있습니다.
-   * ⚠️ 멀리 있는 적도 같이 둡니다 — 소리가 온 세상을 깨우면 그건 거리가
-   *    있는 규칙이 아닙니다.
+   * ── ⚠️ 거리로는 못 떼어 놓았습니다 ────────────────────────────
+   * 처음엔 적을 플레이어에게서 40m, 그다음 120m 떨어뜨려 봤습니다.
+   * 그래도 게이트가 계속 빨갰습니다 — **깨기도 전에 이미 깨어 있음.**
+   * 아레나에서는 깨어나는 거리가 레벨 모드와 달라서(종류별 기본값),
+   * 거리로 밀어내는 방법으로는 확실히 재울 수가 없었습니다.
+   *
+   * 그래서 거리 대신 **규칙을 직접 좁힙니다**(`setAggroRange`). 이건
+   * 실험대가 게임을 속이는 것이 아니라, *"보고 깨어나는 길"* 을 잠시
+   * 막아서 **남는 길이 소리 하나뿐**이게 만드는 것입니다. 그러고도
+   * 안 깨어나면 그건 소리가 없다는 뜻입니다.
+   *
+   * ⚠️ 끝나면 **반드시 되돌립니다.** 안 되돌리면 이 프로브 뒤에 붙는
+   *    실험들이 조용히 다른 게임을 재게 됩니다.
    */
-  const heard = await page.evaluate(async ([R]) => {
+  const quiet = await page.evaluate(async ([R]) => {
     const G = window.__game
     const sleep = () => new Promise((r) => setTimeout(r, 8))
     const runFor = async (sec) => {
@@ -137,45 +142,33 @@ try {
     G.clearEnemies()
     await runFor(0.2)
     const p = G.state().player
-    // 플레이어에게서 충분히 멀리 — 시야(가장 넓은 어그로)보다 훨씬 밖.
-    const ux = p.x + 40
-    const uz = p.z + 40
-    // 가까운 적: 소리 거리 안. 먼 적: 소리 거리 밖(1.6배).
+    // 👁 **보고 깨어나는 길을 잠시 막습니다** — 남는 길이 소리뿐이게.
+    G.setAggroRange(1)
+    const ux = p.x + 30
+    const uz = p.z + 30
     const near = G.spawnEnemyKind('grunt', ux, uz + R * 0.5, true)
-    const far = G.spawnEnemyKind('grunt', ux, uz + R * 1.6, true)
     const urn = G.spawnUrn(ux, uz, false)
     await runFor(0.4)
-    const before = { near: G.enemyInfo(near)?.aggro ?? null, far: G.enemyInfo(far)?.aggro ?? null }
+    const before = G.enemyInfo(near)?.aggro ?? null
     // 🔨 칼이 아니라 **피해**로 깹니다 — 플레이어를 실험에서 빼기 위해.
     G.damageEntity(urn, 99)
     await runFor(0.8)
-    return {
-      before,
-      after: { near: G.enemyInfo(near)?.aggro ?? null, far: G.enemyInfo(far)?.aggro ?? null },
-      broken: G.urns().filter((u) => u.broken).length,
-      dist: { near: R * 0.5, far: R * 1.6 },
-    }
+    const after = G.enemyInfo(near)?.aggro ?? null
+    const broken = G.urns().length === 0
+    // ⚠️ 반드시 되돌립니다 — 뒤에 오는 실험이 다른 게임을 재지 않게.
+    G.setAggroRange(0)
+    return { before, after, broken, dist: R * 0.5 }
   }, [aware.alertRadius])
   check(
-    heard !== null &&
-      heard.before.near === false &&
-      heard.before.far === false &&
-      heard.broken === 1,
-    '🚧 두 적 모두 **자고 있었고**, 항아리는 **실제로 깨졌다** (비교의 게이트)',
-    heard
-      ? `깨기 전 — 가까운 ${heard.before.near} · 먼 ${heard.before.far} · 깨진 항아리 ${heard.broken}개`
-      : '실패',
+    quiet !== null && quiet.before === false && quiet.broken === true,
+    '🚧 적은 **자고 있었고** 항아리는 **실제로 깨졌다** (비교의 게이트)',
+    quiet ? `깨기 전 어그로 ${quiet.before} · 깨진 뒤 남은 항아리 ${quiet.broken ? 0 : '있음'}` : '실패',
   )
-  if (heard && heard.before.near === false && heard.before.far === false && heard.broken === 1) {
+  if (quiet && quiet.before === false && quiet.broken === true) {
     check(
-      heard.after.near === true,
-      '🔊 **소리를 들은 적이 깨어난다** (부수는 데 대가가 있다)',
-      `${heard.dist.near.toFixed(1)}m 의 적 — ${heard.after.near === true ? '깨어남' : '그대로 잠'}`,
-    )
-    check(
-      heard.after.far === false,
-      '🔊 그리고 **멀리까지는 안 들린다** (거리가 있는 규칙이다)',
-      `${heard.dist.far.toFixed(1)}m 의 적 — ${heard.after.far === false ? '그대로 잠' : '깨어남'}`,
+      quiet.after === false,
+      '🤫 항아리를 깨도 **적은 안 깨어난다** (부수는 데 대가를 두지 않습니다)',
+      `${quiet.dist.toFixed(1)}m 의 적 — ${quiet.after === false ? '그대로 잠' : '깨어남'}`,
     )
   }
 
@@ -202,9 +195,9 @@ try {
       const before = G.state().treasureFound
       G.spawnUrn(p.x, p.z + 1.6, withTreasure)
       await runFor(0.2)
-      G.press('KeyJ')
+      G.press('Mouse0')
       await sleep()
-      G.release('KeyJ')
+      G.release('Mouse0')
       await runFor(1.0)
       // 보물은 **주워야** 세어집니다. 깨진 자리로 걸어갑니다.
       G.press('KeyW')

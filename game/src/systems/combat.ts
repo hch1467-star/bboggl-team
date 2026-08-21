@@ -1337,7 +1337,9 @@ function explodeBarrel(b: number): void {
       continue
     }
 
-    if (Actor.state[t] === ActorState.Dead) continue
+    // ⚠️ `Actor` 를 **있는지 묻고** 읽습니다 — 없는 컴포넌트를 읽으면
+    //    앞서 그 번호를 쓰던 것이 남긴 값이 나옵니다(위 ☠️ 주석).
+    if (hasComponent(Actor, t) && Actor.state[t] === ActorState.Dead) continue
 
     if (hasComponent(Player, t)) {
       /**
@@ -1670,7 +1672,17 @@ function applyHit(a: number, spec: AttackSpec): boolean {
     for (let j = 0; j < tcount; j++) {
       const t = tids[j]
       if (t === a) continue
-      if (Actor.state[t] === ActorState.Dead) continue
+      /**
+       * ⚠️ 여기서도 `Actor` 를 **있는지 묻고** 읽습니다(위 ☠️ 주석).
+       *
+       * 그리고 통·항아리는 **일부러 건너뜁니다.** 안 그러면 화살이
+       * 항아리에 막히게 되는데, 그건 「엄폐물이 하나 늘었다」는 **설계
+       * 변경**이지 이 버그의 수정이 아닙니다. 쓰레기값을 읽어서 우연히
+       * 지금처럼 동작하던 것을, 재지도 않고 반대로 뒤집지 않습니다.
+       * (항아리가 화살을 막아야 하는가는 **아직 아무도 정하지 않았습니다.**)
+       */
+      if (hasComponent(Barrel, t) || hasComponent(Urn, t)) continue
+      if (hasComponent(Actor, t) && Actor.state[t] === ActorState.Dead) continue
       const d = shapeDist(t)
       if (d < 0 || d >= nearest) continue
       nearest = d
@@ -1728,7 +1740,31 @@ function applyHit(a: number, spec: AttackSpec): boolean {
       continue
     }
 
-    if (Actor.state[t] === ActorState.Dead) continue
+    /**
+     * ── ☠️ **죽음은 `Actor` 가 있는 것만 물을 수 있습니다** ──────────
+     *
+     * 통과 항아리는 `Actor` 가 **없습니다**(움직이지도 휘두르지도
+     * 않으니까요). 그런데 `Actor.state[t]` 를 그냥 읽으면 — 이 ECS 는
+     * 컴포넌트를 **엔티티 번호로 인덱싱한 배열**로 들고 있고 **번호를
+     * 재사용**하므로 — *앞서 그 번호를 쓰던 적이 죽으면서 남긴 `Dead`* 를
+     * 그대로 읽을 수 있습니다. 그러면 멀쩡한 통·항아리가 **이미 죽은 것**
+     * 으로 걸러져 칼이 그냥 통과합니다.
+     *
+     * 이 저장소가 `Barrel.lit`·`Enemy.breaks`·`guardT` 에서 이미 세 번
+     * 데인 병과 같은 뿌리입니다. 다만 그 셋은 **초기화를 빠뜨린 것**이고
+     * 이건 **없는 컴포넌트를 읽은 것**이라 모양이 다릅니다.
+     *
+     * ⚠️ **이 줄이 실제로 무언가를 고쳤다는 증거는 없습니다.**
+     *    항아리가 칼에 안 부서지길래 여기를 의심했는데, 진짜 원인은
+     *    **프로브가 게임에 없는 키(`KeyJ` — 에디터의 모루 키)를 누르고
+     *    있던 것**이었습니다. 그러니 이 수정은 *"재서 잡은 버그"* 가
+     *    아니라 *"읽다가 발견한 위험"* 입니다. 고쳐 두는 편이 맞지만,
+     *    **잡았다고 말하지는 않습니다** — 「재기 전의 설명은 결론이
+     *    아니다」는 제 추리에도 똑같이 적용됩니다.
+     *
+     * 규칙: **컴포넌트가 있는지 묻지 않고 그 값을 읽지 않습니다.**
+     */
+    if (hasComponent(Actor, t) && Actor.state[t] === ActorState.Dead) continue
     if (Health.invulnT[t] > 0) continue
 
     const dist = shapeDist(t)
