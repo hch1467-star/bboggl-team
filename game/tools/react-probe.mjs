@@ -603,7 +603,7 @@ try {
        */
       const arm = async (mode, frac) =>
         page.evaluate(
-          async ([idx, dist, how, delayFrac]) => {
+          async ([idx, dist, how, delayFrac, atkId]) => {
             const G = window.__game
             const sleep = () => new Promise((r) => setTimeout(r, 6))
             const runFor = async (sec) => {
@@ -626,6 +626,9 @@ try {
             G.setHp(G.playerEntity(), 100)
             await runFor(0.2)
             if (!G.forceAttack(b, idx)) return null
+            // 📒 장부를 비우고 시작합니다 — 앞선 시도의 줄이 섞이면
+            //    "왜 안 맞았나"의 답이 다른 판의 것이 됩니다.
+            G.swings()
             /**
              * 예고 길이는 **게임에게 묻습니다** — 페이즈 배율과 뜸이 이미
              * 반영된 값입니다. 그 몫만큼 기다렸다가 구릅니다.
@@ -662,13 +665,38 @@ try {
             for (const k of keys) G.release(k)
             const me2 = G.state().player
             const es2 = G.entityState(b)
+            /**
+             * 🔎 **넘겼다면 왜 넘겼는지**를 게임에게 묻습니다.
+             *
+             * "받은 피해 0" 만으로는 답이 갈리지 않습니다. 옆으로 구르면
+             * 각도도 벌어지지만 **거리도** 벌어지기 때문입니다:
+             *
+             *   · **각도**로 빠졌다면 → 🟣 의 답이 🔴(구르기)과 같아진 것
+             *   · **사거리**로 빠졌다면 → 🟣 의 답(물러나기)이 그대로 산 것.
+             *     옆으로 구른 것이 우연히 거리도 벌어 준 것뿐입니다.
+             *
+             * 처방이 정반대라 뭉쳐 두면 안 됩니다. 그리고 여기서 각도를
+             * 다시 재지 않습니다 — 판정을 내린 자리(`combat.ts` 장부)의
+             * 답을 그대로 씁니다. 다시 재면 판정의 사본이 생깁니다.
+             */
+            const rec = G.swings().find((s) => s.attackId === atkId) ?? null
             return {
               hurt: before - me2.hp,
               dist: Math.hypot(me2.x - es2.x, me2.z - es2.z),
               windup: wlen,
+              why: rec
+                ? rec.hit
+                  ? '적중'
+                  : rec.invuln
+                    ? '무적'
+                    : rec.dist > rec.reach
+                      ? '사거리'
+                      : '각도'
+                : '판정없음',
+              rec,
             }
           },
-          [hookIdx, at, mode, frac],
+          [hookIdx, at, mode, frac, hook.id],
         )
       /**
        * 세 타이밍: **이르게 · 절반 · 늦게.** 이른 쪽은 지난 회차와 같은
@@ -689,10 +717,10 @@ try {
           sides
             .map(
               ([name, r]) =>
-                `     옆으로 구르기 ${name.padEnd(4)} — ${r ? `받은 피해 ${r.hurt} · 끝난 거리 ${r.dist.toFixed(1)}m` : '실패'}`,
+                `     옆으로 구르기 ${name.padEnd(4)} — ${r ? `받은 피해 ${r.hurt} · 끝난 거리 ${r.dist.toFixed(1)}m · 판정 ${r.why}` : '실패'}`,
             )
             .join('\n') +
-          `\n     뒤로 구르기        — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m` : '실패'}`,
+          `\n     뒤로 구르기        — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m · 판정 ${back.why}` : '실패'}`,
       )
       check(
         sides.every(([, r]) => r !== null) && back !== null,
@@ -706,15 +734,38 @@ try {
          *    "평균은 맞더라"는 답이 될 수 없습니다.
          */
         const escaped = sides.filter(([, r]) => r.hurt === 0)
+        /**
+         * 🔎 **각도로 빠진 것만이 색을 지웁니다.**
+         *
+         * 옆으로 구르면 각도도 벌어지지만 **거리도** 벌어집니다. 사거리로
+         * 빠졌다면 그건 🟣 의 정답(물러나기)을 옆걸음으로 이룬 것일 뿐이라
+         * 색이 겹친 것이 아닙니다. 그래서 판정 이유까지 보고 가릅니다 —
+         * 「빗나간 이유를 사건이 일어난 자리에서 적는다」의 값을 그대로
+         * 씁니다(여기서 각도를 다시 재지 않습니다).
+         */
+        const byAngle = escaped.filter(([, r]) => r.why === '각도')
         check(
-          escaped.length === 0,
+          byAngle.length === 0,
           '🟣 **옆으로 굴러서는 못 넘긴다** (색마다 다른 대응 — 답이 겹치면 색이 하나 줄어듭니다)',
-          escaped.length === 0
-            ? `세 타이밍 모두 맞음 — ${sides.map(([n, r]) => `${n} ${r.hurt}`).join(' · ')} · 뒤로 ${back.hurt}`
-            : `**${escaped.map(([n]) => n).join('·')} 구르면 안 맞습니다** — ` +
-              `${sides.map(([n, r]) => `${n} ${r.hurt}`).join(' · ')}` +
+          byAngle.length === 0
+            ? `각도로 빠진 타이밍 없음 — ${sides.map(([n, r]) => `${n} ${r.hurt}(${r.why})`).join(' · ')} · 뒤로 ${back.hurt}(${back.why})`
+            : `**${byAngle.map(([n]) => n).join('·')} 구르면 각도로 빠집니다** — ` +
+              `${sides.map(([n, r]) => `${n} ${r.hurt}(${r.why})`).join(' · ')}` +
               ` · 🟣 의 답이 🔴 과 같아집니다(실전 장부: 예고 시작 0° → 판정 88°)`,
         )
+        /**
+         * 판정과 별개로 **거리로 빠진 것도 적어 둡니다.** 색이 겹친 것은
+         * 아니지만 *"옆으로 굴렀는데 물러나기가 된다"* 는 것 자체가 설계
+         * 판단거리입니다 — 판정으로 만들지 않는 이유는 그게 정답의
+         * 성립이지 위반이 아니기 때문입니다.
+         */
+        const byRange = escaped.filter(([, r]) => r.why !== '각도')
+        if (byRange.length > 0) {
+          console.log(
+            `     [관측] ${byRange.map(([n, r]) => `${n}`).join('·')} 는 **${byRange[0][1].why}** 로 빠졌습니다` +
+              ` — 옆으로 굴러도 사거리 밖(${byRange.map(([, r]) => `${r.dist.toFixed(1)}m`).join('·')})이면 🟣 의 정답을 옆걸음으로 이룬 것입니다`,
+          )
+        }
       }
     }
   }
