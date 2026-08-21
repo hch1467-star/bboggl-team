@@ -417,5 +417,97 @@ for (const t of ent('treasure')) {
   )
 }
 
+/**
+ * ── 📍 **어디에 두면 못 피하는가** — `ROUTE_SPOT=<반경>` ────────────
+ *
+ * 위 🎯 는 *"이 적을 피할 수 있나"* 를 답합니다. 그런데 실제로 필요한
+ * 것은 반대 방향이었습니다 — **어디로 옮겨야 만나는가.**
+ *
+ * 실측이 그 질문을 만들었습니다: 한 판에서 쏘는 자를 **0프레임** 겪었고
+ * (`npm run play`), 그 자리는 「40m 로도 못 막는」 축이었습니다. 쿨다운을
+ * 어떻게 만져도 만나질 않으니 아무 일도 안 일어납니다. 고칠 것은 적이
+ * 아니라 **자리**입니다.
+ *
+ * 그래서 경로 위 칸을 전부 훑어 *"여기에 이 반경짜리 적을 두면 못
+ * 피하는가"* 를 냅니다. 손으로 후보를 찍어 `ROUTE_EDIT` 로 하나씩
+ * 재던 일을 **한 번에** 합니다.
+ *
+ * ── ⚠️ 반경은 **직접 넣어야 합니다** ──────────────────────────────
+ * 기본값을 두지 않습니다. 두면 그 순간 이 파일이 게임 설정을 **베껴
+ * 적은 것**이 되고(맨 위 선언), 게임이 값을 바꾸는 날 조용히 갈라집니다.
+ * 실제 값은 `npm run map` 이 게임에게 물어서 압니다 — 거기서 보고
+ * 여기에 넣으십시오.
+ *
+ *   ROUTE_SPOT=14 npm run route
+ *
+ * ⚠️ 여기서 나온 칸은 **후보**입니다. 「못 피한다」는 지형만의 답이고,
+ *    그 자리가 **싸울 만한 자리인지**(넓이·낙차·다른 적과의 조합)는
+ *    `npm run map` 과 `npm run play` 가 봅니다.
+ */
+{
+  const R = Number(process.env.ROUTE_SPOT)
+  if (Number.isFinite(R) && R > 0) {
+    const blocks = (cx, cz) => {
+      const g = h.slice()
+      const rc = Math.ceil(R / CELL)
+      for (let dz = -rc; dz <= rc; dz++) {
+        for (let dx = -rc; dx <= rc; dx++) {
+          const nx = cx + dx
+          const nz = cz + dz
+          if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue
+          if (Math.hypot(dx * CELL, dz * CELL) > R) continue
+          g[nz * W + nx] = VOID
+        }
+      }
+      if (g[sz * W + sx] === VOID || g[bz * W + bx] === VOID) return false
+      return flood(g, sx, sz).cost[bz * W + bx] < 0
+    }
+    /**
+     * ⚠️ **경로 위 칸만 훑으면 안 됩니다.**
+     *
+     * 처음에 `route` 만 돌렸다가 말이 안 되는 답을 얻었습니다 — 위 🎯 는
+     * 폭발통(-31,1)이 **반경 8m 면 못 피한다**고 했는데 여기서는 **반경
+     * 14m 로 0칸**이라고 했습니다. 더 큰 반경이 더 못 막을 수는 없습니다.
+     *
+     * 원인은 단순합니다: 그 폭발통은 **경로 위가 아니라 옆**에 있습니다.
+     * 막는 것은 자기가 선 칸이 아니라 **인지 반경이 덮는 칸들**이라,
+     * 길 옆에 서 있어도 길을 덮을 수 있습니다.
+     *
+     * 그래서 **걸을 수 있는 칸 전부**를 훑습니다. 6천 칸이라 느릴 줄
+     * 알았는데 여전히 몇 초입니다.
+     */
+    const t0 = Date.now()
+    const spots = []
+    for (let cz = 0; cz < H; cz++) {
+      for (let cx = 0; cx < W; cx++) {
+        if (h[cz * W + cx] === VOID) continue
+        if (blocks(cx, cz)) spots.push([cx, cz])
+      }
+    }
+    const secs = ((Date.now() - t0) / 1000).toFixed(1)
+    if (spots.length === 0) {
+      console.log(
+        `\n  📍 반경 ${R}m 로 **못 피하게 만들 수 있는 칸이 하나도 없습니다** (${secs}초).` +
+          ` 이 지도에서는 그 반경으로 「꼭 만나는 적」을 만들 수 없습니다 —` +
+          ` 반경을 키우든지 지형을 좁히든지 둘 중 하나입니다.`,
+      )
+    } else {
+      const sx2 = spots.map(([cx]) => wx(cx))
+      const sz2 = spots.map(([, cz]) => wz(cz))
+      console.log(
+        `\n  📍 반경 ${R}m 면 **못 피하는 자리 ${spots.length}칸** (${secs}초) —` +
+          ` x ${Math.min(...sx2).toFixed(0)}~${Math.max(...sx2).toFixed(0)}m ·` +
+          ` z ${Math.min(...sz2).toFixed(0)}~${Math.max(...sz2).toFixed(0)}m`,
+      )
+      // 가장자리보다 **가운데**가 안전합니다 — 지형을 조금 손봐도 안 흔들립니다.
+      const mid = spots[Math.floor(spots.length / 2)]
+      console.log(
+        `     가운데 후보 (${wx(mid[0]).toFixed(0)},${wz(mid[1]).toFixed(0)})` +
+          ` · 후보는 지형만의 답입니다 — 싸울 만한 자리인지는 \`map\`·\`play\` 가 봅니다`,
+      )
+    }
+  }
+}
+
 console.log(`\n  예산(${BUDGET}m) 밖 ${overBudget}개 · 시야(${EYE}m) 밖 ${overEye}개`)
 console.log('  ⚠️ 판정은 `npm run secret` 이 합니다 — 여기 숫자는 **방향을 고르는 용도**입니다.\n')
