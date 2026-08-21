@@ -707,8 +707,39 @@ try {
         ['절반', 0.5],
         ['늦게', 0.8],
       ]
+      /**
+       * ── 🎲 **한 번 눌러 보고 답을 정하지 않습니다** ────────────────────
+       *
+       * 이 실험을 두 번 돌렸더니 **같은 타이밍이 다른 답**을 냈습니다:
+       *
+       *     1회차  옆으로 늦게 — 받은 피해  0 · 끝난 거리 13.5m
+       *     2회차  옆으로 늦게 — 받은 피해 16 · 끝난 거리 10.1m
+       *
+       * 게임의 난수는 씨앗이라 여기가 흔들릴 곳이 아닙니다. 흔들리는 것은
+       * **실험대 쪽**입니다 — 이 실험대는 `setTimeout(6ms)` 로 게임을
+       * 들여다보며 "예고의 80%가 지났으면 구른다"를 누르는데, GPU 없는
+       * 컨테이너에서는 그 눈금이 프레임마다 튑니다. 늦은 구르기는 판정과
+       * **0.1초 안쪽**에서 겹치므로, 그 튐이 그대로 답을 뒤집습니다.
+       *
+       * 그러니 한 번의 초록은 「한 칸 차이의 초록은 운이다」 그 자체입니다.
+       * **여러 번 눌러 보고, 한 번이라도 빠지면 빠지는 것으로** 봅니다 —
+       * 플레이어는 판마다 다시 주사위를 굴리지 않고, 되는 것을 찾아
+       * 그것만 씁니다.
+       *
+       * ⚠️ 흔들림 자체도 적습니다. *"세 번 중 한 번만 빠진다"* 와 *"세 번
+       *    다 빠진다"* 는 설계에 다른 말을 합니다 — 앞은 **타이밍 창**이고
+       *    뒤는 **그냥 되는 답**입니다.
+       */
+      const TRIES = 3
       const sides = []
-      for (const [name, frac] of TIMINGS) sides.push([name, await arm('side', frac)])
+      for (const [name, frac] of TIMINGS) {
+        const runs = []
+        for (let i = 0; i < TRIES; i++) runs.push(await arm('side', frac))
+        // 대표값은 **가장 잘 빠진 판**입니다. 최악을 고르면 "안 된다"는
+        // 결론이 실험대의 느림 덕분에 나올 수 있습니다.
+        const best = runs.filter(Boolean).sort((a, b) => a.hurt - b.hurt)[0] ?? null
+        sides.push([name, best, runs])
+      }
       const back = await arm('back', 0.17)
       const side = sides[0][1] // 지난 회차와 같은 타이밍 — 아래 비교의 기준
       console.log(
@@ -716,8 +747,13 @@ try {
           `${side ? ` (예고 ${side.windup.toFixed(2)}초)` : ''}\n` +
           sides
             .map(
-              ([name, r]) =>
-                `     옆으로 구르기 ${name.padEnd(4)} — ${r ? `받은 피해 ${r.hurt} · 끝난 거리 ${r.dist.toFixed(1)}m · 판정 ${r.why}` : '실패'}`,
+              ([name, r, runs]) =>
+                `     옆으로 구르기 ${name.padEnd(4)} — ${
+                  r ? `받은 피해 ${r.hurt} · 끝난 거리 ${r.dist.toFixed(1)}m · 판정 ${r.why}` : '실패'
+                }   [${TRIES}번: ${runs.map((x) => (x ? `${x.hurt}(${x.why})` : '실패')).join(' ')}]${
+                  // 🎲 답이 판마다 갈렸으면 **그 사실 자체가 결론**입니다.
+                  new Set(runs.map((x) => (x ? x.why : '실패'))).size > 1 ? ' ⚠️ 판마다 다름' : ''
+                }`,
             )
             .join('\n') +
           `\n     뒤로 구르기        — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m · 판정 ${back.why}` : '실패'}`,
@@ -733,7 +769,11 @@ try {
          *    평균 내지 않습니다 — 되는 것을 찾아서 그것만 씁니다. 그러니
          *    "평균은 맞더라"는 답이 될 수 없습니다.
          */
-        const escaped = sides.filter(([, r]) => r.hurt === 0)
+        // ⚠️ **대표값이 아니라 모든 판**을 봅니다. 대표값만 보면 한 판만
+        //    빠진 타이밍이 "안 빠지는 것"으로 묻힙니다.
+        const escaped = sides
+          .map(([n, , runs]) => [n, runs.filter(Boolean).find((x) => x.hurt === 0) ?? null, runs])
+          .filter(([, r]) => r !== null)
         /**
          * 🔎 **각도로 빠진 것만이 색을 지웁니다.**
          *
