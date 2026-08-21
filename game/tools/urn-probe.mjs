@@ -24,6 +24,7 @@
  * 판은 **아무것도 말하지 않은 것**입니다.
  */
 import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -224,6 +225,80 @@ try {
       '🎁 그리고 **빈 항아리에서는 안 나온다** (안 그러면 숨긴 것이 숨은 것이 아닙니다)',
       `주운 것 ${holds.empty}개`,
     )
+  }
+
+  /**
+   * ── ④ 🔎 **숨긴 것에 단서가 있는가** ─────────────────────────────
+   *
+   * 여기서부터는 물건이 아니라 **레벨**을 봅니다. 항아리가 잘 부서지고
+   * 보물이 잘 나와도, 그 보물이 **아무 단서 없이** 놓여 있으면 찾는
+   * 방법은 「전부 부수기」뿐입니다. 그건 탐험이 아니라 청소입니다.
+   *
+   * 오공·젤다가 파는 감각은 *"저기 뭔가 있을 것 같은데"* → **정말
+   * 있었다** 입니다. 그러려면 **의심할 거리**가 화면에 있어야 하고,
+   * 이 게임에서 그것은 **무더기**입니다 — 항아리 하나는 잡동사니지만
+   * 여럿이 모여 있으면 *"사람이 쌓은 것"* 으로 읽힙니다.
+   *
+   * 그래서 두 방향을 다 봅니다. 한쪽만 재면 거짓말이 통과합니다:
+   *   · 보물이 **무더기 안에** 있는가 — 아니면 순전한 운입니다
+   *   · 무더기에 **뭔가 들어 있는가** — 아니면 단서가 거짓말입니다
+   *
+   * ⚠️ 레벨 파일을 **직접 읽습니다.** 이 검사가 묻는 것은 게임의 동작이
+   *    아니라 **배치**라서, 브라우저를 거칠 이유가 없습니다.
+   * ⚠️ 「무더기」의 크기(3)와 반경은 **여기서 정합니다.** 게임에는 그런
+   *    규칙이 없으니까요 — 이건 게임의 규칙이 아니라 **레벨 설계의
+   *    약속**이고, 계측기가 그 약속을 들고 있는 것이 맞습니다. 대신
+   *    그 사실을 여기 적어 둡니다. 「계측기의 정책을 게임의 결론으로
+   *    만들지 않는다」.
+   */
+  {
+    const level = JSON.parse(
+      await readFile(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'),
+    )
+    const urnEnts = (level.entities ?? []).filter((e) => e.kind === 'urn' || e.kind === 'urnFull')
+    const full = urnEnts.filter((e) => e.kind === 'urnFull')
+    // 무더기로 읽히는 거리 — 한 화면(22m) 안이 아니라 **한눈에** 들어와야
+    // 하므로 훨씬 좁게 잡습니다. 4m 는 항아리 두 칸 거리입니다.
+    const NEAR = 4
+    const CLUSTER = 3
+    const around = (e) =>
+      urnEnts.filter((o) => Math.hypot(o.x - e.x, o.z - e.z) <= NEAR).length
+    check(
+      urnEnts.length > 0 && full.length > 0,
+      '🚧 레벨에 항아리와 **보물 든 항아리**가 둘 다 있다 (비교의 게이트)',
+      `항아리 ${urnEnts.length}개 · 그중 보물 ${full.length}개`,
+    )
+    if (urnEnts.length > 0 && full.length > 0) {
+      const lonely = full.filter((e) => around(e) < CLUSTER)
+      check(
+        lonely.length === 0,
+        `🔎 **숨긴 보물은 전부 무더기 안에 있다** (${NEAR}m 안에 ${CLUSTER}개 이상 — 운이 아니라 감으로 찾게)`,
+        lonely.length === 0
+          ? full.map((e) => `(${e.x.toFixed(0)},${e.z.toFixed(0)}) 이웃 ${around(e)}개`).join(' · ')
+          : lonely.map((e) => `❗(${e.x.toFixed(0)},${e.z.toFixed(0)}) 이웃 ${around(e)}개뿐`).join(' · '),
+      )
+      /**
+       * 반대쪽 — **빈 무더기**가 있으면 단서가 거짓말이 됩니다. 한 번
+       * 속으면 다음 무더기는 안 봅니다. 그러면 이 물건 전체가 죽습니다.
+       */
+      const clusters = []
+      const seen = new Set()
+      for (const e of urnEnts) {
+        if (seen.has(e)) continue
+        const group = urnEnts.filter((o) => Math.hypot(o.x - e.x, o.z - e.z) <= NEAR)
+        if (group.length < CLUSTER) continue
+        for (const g of group) seen.add(g)
+        clusters.push(group)
+      }
+      const empty = clusters.filter((g) => !g.some((o) => o.kind === 'urnFull'))
+      check(
+        clusters.length > 0 && empty.length === 0,
+        '🔎 그리고 **빈 무더기가 없다** (한 번 속으면 다음 무더기는 안 봅니다)',
+        `무더기 ${clusters.length}개 — ${clusters
+          .map((g) => `${g.length}개들이(${g.some((o) => o.kind === 'urnFull') ? '보물 있음' : '❗비었음'})`)
+          .join(' · ')}`,
+      )
+    }
   }
 
   console.log('')
