@@ -306,5 +306,94 @@ for (const t of ent('treasure')) {
       ` · 동선에서 ${eye.toFixed(1).padStart(5)}m${eye <= EYE ? '' : ' ❌'}`,
   )
 }
+/**
+ * ── 🎯 **피해서 지나갈 수 있는가 — 적마다** ─────────────────────────
+ *
+ * ── 배치 교리가 틀렸습니다 ────────────────────────────────────────
+ * 지금까지 배치를 「**동선에서 몇 m**」로 물었습니다(`npm run map`).
+ * 그 물음은 **복도**에서만 뜻이 있습니다. 이 지도의 동쪽 절반은
+ * 복도가 아니라 **벌판**입니다 — 위에서 잰 그대로:
+ *
+ *     북쪽 마루 회랑을 통째로 막아도 202m → **206m** (겨우 4m)
+ *     막은 뒤에도 여전히 「목이 없습니다」 — 한 줄 남쪽에 또 평행한 길
+ *
+ * 벌판에서는 「동선에서 2m」가 **아무것도 보장하지 않습니다.** 그 줄
+ * 옆으로 20m 떨어져 걸어도 같은 시간에 보스에 닿기 때문입니다. 실제로
+ * `map` 이 2m 라고 인증한 쏘는 자를 봇은 **21.8m 밖으로 지나쳤습니다.**
+ *
+ * ── 그래서 질문을 바꿉니다 ────────────────────────────────────────
+ * 「가까운가」가 아니라 **「피할 수 있는가」** 입니다:
+ *
+ *     이 적의 **인지 반경 안 칸을 전부 지운 뒤에도** 보스에 닿는가?
+ *       · 닿는다  → **피해서 갈 수 있습니다.** 만나는 것은 선택입니다
+ *       · 안 닿는다 → **반드시 만납니다.** 이게 「꼭 만나야 하는 적」입니다
+ *
+ * 엘든 링이 다리·문에 위협을 두는 것이 정확히 이 성질을 만드는 일이고,
+ * 오공·NRFTW 는 복도를 좁혀서 같은 결과를 얻습니다. 셋 다 **거리가
+ * 아니라 위상(topology)** 을 쓰고 있었습니다.
+ *
+ * ── ⚠️ 인지 반경을 **여기 적지 않습니다** ─────────────────────────
+ * 그건 게임 설정이고, 이 파일은 스케치라 베껴 적으면 조용히 갈라집니다
+ * (맨 위 선언). 대신 **지형만으로 답할 수 있는 것**을 냅니다:
+ *
+ *     이 자리에서 **반경이 몇 m를 넘으면** 피할 수 없게 되는가
+ *
+ * 이 값은 순수한 기하이고, 게임의 실제 인지 반경과 **맞대어 보는 것은
+ * `npm run map` 의 몫**입니다. 도구가 각자 아는 것만 말합니다.
+ *
+ * ⚠️ 원형으로 지웁니다 — 인지는 부채꼴(`AWARE.frontArcDeg`)이지만
+ *    방향은 적이 어디를 보느냐에 달렸습니다. 원은 **가장 후한** 가정이라,
+ *    여기서 「피할 수 있다」가 나오면 실제로는 **더 쉽게** 피합니다.
+ */
+{
+  const foes = level.entities.filter(
+    (e) => !['spawn', 'treasure', 'bonfire', 'anvil', 'ladder', 'boss', 'urn', 'urnFull'].includes(e.kind),
+  )
+  const reachableWithout = (ex, ez, r) => {
+    const g = h.slice()
+    const [ecx, ecz] = cellOf(ex, ez)
+    const rc = Math.ceil(r / CELL)
+    for (let dz = -rc; dz <= rc; dz++) {
+      for (let dx = -rc; dx <= rc; dx++) {
+        const cx = ecx + dx
+        const cz = ecz + dz
+        if (cx < 0 || cz < 0 || cx >= W || cz >= H) continue
+        if (Math.hypot(dx * CELL, dz * CELL) > r) continue
+        g[cz * W + cx] = VOID
+      }
+    }
+    // 시작·보스가 지워졌으면 그 반경은 뜻이 없습니다(둘은 못 피합니다).
+    if (g[sz * W + sx] === VOID || g[bz * W + bx] === VOID) return true
+    return flood(g, sx, sz).cost[bz * W + bx] >= 0
+  }
+  console.log('\n  🎯 피해서 지나갈 수 있는가 — **반경이 이만큼을 넘어야** 못 피합니다')
+  const lines = []
+  for (const e of foes) {
+    let need = null
+    // 2m 씩 키워 봅니다. 40m 까지 안 막히면 사실상 못 막는 자리입니다.
+    for (let r = 2; r <= 40; r += 2) {
+      if (!reachableWithout(e.x, e.z, r)) {
+        need = r
+        break
+      }
+    }
+    lines.push({ e, need })
+  }
+  lines.sort((a, b) => (a.need ?? 999) - (b.need ?? 999))
+  for (const { e, need } of lines.slice(0, 8)) {
+    console.log(
+      `     ${e.kind.padEnd(9)} (${String(Math.round(e.x)).padStart(4)},${String(Math.round(e.z)).padStart(4)})  ` +
+        (need === null
+          ? '**40m 로도 못 막습니다** — 이 자리는 어떤 적을 놔도 피해서 갑니다'
+          : `반경 **${need}m** 이상이면 못 피합니다`),
+    )
+  }
+  const never = lines.filter((l) => l.need === null).length
+  console.log(
+    `     — 전부 ${lines.length}마리 중 **40m 로도 못 막는 자리 ${never}마리**.` +
+      ` 실제 인지 반경과 맞대는 것은 \`npm run map\` 의 몫입니다.`,
+  )
+}
+
 console.log(`\n  예산(${BUDGET}m) 밖 ${overBudget}개 · 시야(${EYE}m) 밖 ${overEye}개`)
 console.log('  ⚠️ 판정은 `npm run secret` 이 합니다 — 여기 숫자는 **방향을 고르는 용도**입니다.\n')
