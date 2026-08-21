@@ -2662,8 +2662,10 @@ try {
         for (const sc of G.shortcutInfo() ?? []) {
           const rec = (ladderChance[sc.key] ??= {
             near: Infinity,
+            nearLo: Infinity,
             nearWalk: Infinity,
             ready: 0,
+            sawLocked: 0,
             saving: sc.saving ?? 0,
             opened: false,
           })
@@ -2675,8 +2677,29 @@ try {
             const st = G.pathStep(sc.hiWorldX, sc.hiWorldZ)
             rec.nearWalk = st ? st.dist : Infinity
           }
+          /**
+           * 🪜 **아래쪽에 얼마나 가까이 갔는지도 따로 셉니다.**
+           *
+           * ── 왜 나눠야 하는가 ────────────────────────────────────
+           * `near` 는 **위쪽 지점까지의 거리**만 잽니다. 그런데 사다리는
+           * **위 칸에 서 있어야만** 내릴 수 있습니다(terrain.ts
+           * `shortcutNear` — *"아래에서도 올릴 수 있게 하면 「저 위에 길이
+           * 있다」는 정보가 사라지고 그냥 버튼 하나가 됩니다"*).
+           *
+           * 그래서 「가장 가까이 1.6m 인데 안내가 안 떴다」가 세 가지를
+           * 한 칸에 담고 있었습니다:
+           *   · **위 칸에 섰는데** 안 떴다  → 진짜 버그
+           *   · **아래쪽**을 지났다        → 설계대로(나중에 위에서 열라는 뜻)
+           *   · **옆 칸**을 지났다         → 아무 일도 아님
+           *
+           * 처방이 셋 다 다릅니다. 뭉쳐 두면 멀쩡한 설계를 버그로 읽습니다.
+           */
+          const dLo = Math.hypot(sc.loWorldX - p.x, sc.loWorldZ - p.z)
+          if (dLo < (rec.nearLo ?? Infinity)) rec.nearLo = dLo
           // 안내는 「지금 서 있는 자리」에 대한 것이라 가장 가까운 사다리에만 셉니다.
           if (hintNow === 'ready' && d <= 4) rec.ready++
+          // 🔒 아래에서 **잠긴 것을 본** 프레임 — 이건 실패가 아니라 **정보**입니다.
+          if (hintNow === 'locked' && dLo <= 4) rec.sawLocked = (rec.sawLocked ?? 0) + 1
         }
       }
       if (G.shortcutHint() === 'ready') {
@@ -4314,9 +4337,13 @@ try {
       ? '내렸다'
       : r.ready > 0
         ? `**안내는 떴는데 안 눌렸다**(${r.ready}프레임)`
-        : r.near <= 4
-          ? '**곁에 갔는데 안내가 안 떴다**'
-          : r.nearWalk > 40
+        : r.near <= 2
+          ? '**위 칸에 섰는데 안내가 안 떴다** ← 이것만 버그입니다'
+          : (r.sawLocked ?? 0) > 0
+            ? `아래에서 **잠긴 것을 봤다**(${r.sawLocked}프레임) — 설계대로입니다(나중에 위에서 여는 것)`
+            : r.near <= 4
+              ? `옆을 지났습니다(위 지점 ${r.near.toFixed(1)}m · 아래 ${(r.nearLo ?? Infinity).toFixed(1)}m) — **위 칸에는 안 섰습니다**`
+              : r.nearWalk > 40
             ? '**곁에 간 적이 없다**(예산 밖)'
             : '**곁에 간 적이 없다**'
     console.log(
