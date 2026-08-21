@@ -6453,6 +6453,8 @@ declare global {
         /** ⏳ 그중 뜸 들인 몫 */
         held: number
         opacity: number
+        /** ⏳ 차오른 몫(0~1) — 1이면 지금이 판정. visuals.ts 참고. */
+        grow: number
       }[]
       /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
       spawnTestEnemy: (x: number, z: number, rotY?: number, asleep?: boolean) => number

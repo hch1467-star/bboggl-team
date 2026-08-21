@@ -590,8 +590,11 @@ try {
       while (G.state().elapsed < dl) {
         const t = G.telegraphs().find((x) => x.entity === e)
         if (t) {
-          const r = (byId[t.attackId] ??= { timing: t.timing, inside: [], outside: [] })
+          const r = (byId[t.attackId] ??= { timing: t.timing, inside: [], outside: [], gIn: [], gOut: [] })
           ;(t.left <= win ? r.inside : r.outside).push(t.opacity)
+          // ⏳ 차오른 몫도 같은 자리에서 받아 둡니다 — 투명도와 **같은
+          //    표본**이어야 둘을 맞대어 볼 수 있습니다.
+          ;(t.left <= win ? r.gIn : r.gOut).push(t.grow)
         }
         await new Promise((r2) => setTimeout(r2, 8))
       }
@@ -604,6 +607,8 @@ try {
       outWindow: r.outside.length ? Math.max(...r.outside) : null,
       nIn: r.inside.length,
       nOut: r.outside.length,
+      growIn: r.gIn.length ? Math.max(...r.gIn) : null,
+      growOut: r.gOut.length ? Math.max(...r.gOut) : null,
     }))
   })
   for (const b of beat) {
@@ -633,6 +638,36 @@ try {
     timing.length > 0 && timing.every((b) => b.inWindow >= 0.999),
     '   타이밍 색은 창 안에서 **끝까지 밝아진다** (「지금」이 보인다)',
     timing.map((b) => `${b.atk} ${b.outWindow}→${b.inWindow}`).join(' · '),
+  )
+  /**
+   * ── ⏳ **차오르는 몫이 진실을 말하는가** ─────────────────────────
+   *
+   * 요청으로 들어온 신호입니다 — *"공격범위 표시한 후 색이 차오르는 식으로
+   * 저스트회피 타이밍을 맞출 수 있게끔."* 밝은 부채꼴이 가운데에서 자라
+   * **바깥 선에 닿는 순간이 판정**이라고 말하고 있으므로, 그 말이 사실인지
+   * 재야 합니다. **재지 않은 신호는 도움이 아니라 거짓말이 될 수 있습니다.**
+   *
+   * 위 「지금」 신호와 **다른 것을 봅니다.** 그쪽은 *타이밍으로 푸는 색에만*
+   * 켜지는 마지막 순간 번쩍임이고, 이쪽은 **모든 색**이 내내 들고 있는
+   * 시계입니다. 🟡·🟣 에게도 *"몇 초 남았나"* 는 참말이고 필요한 정보입니다 —
+   * 걸어 나가는 데도 남은 시간을 알아야 하니까요. 거짓말이 되는 것은
+   * *"지금 눌러라"* 뿐입니다.
+   *
+   * ⚠️ 0.999 가 아니라 **0.9** 로 잽니다. 표본은 8ms 간격으로 훑으므로
+   *    정확히 판정 프레임을 집는다는 보장이 없습니다. 「아무도 못 넘는
+   *    문턱은 눈금이 아니라 벽」이고, 반대로 표본 간격을 무시한 문턱은
+   *    운으로 갈리는 눈금입니다.
+   */
+  const grown = beat.filter((b) => b.nIn > 0 && b.nOut > 0)
+  check(
+    grown.length > 0 && grown.every((b) => b.growIn >= 0.9),
+    '   ⏳ 차오르는 몫이 **판정 즈음 가득 찬다** (닿는 순간이 판정이라는 말이 사실이다)',
+    grown.map((b) => `${b.atk} 창밖 ${b.growOut} → 창안 ${b.growIn}`).join(' · '),
+  )
+  check(
+    grown.length > 0 && grown.every((b) => b.growOut < b.growIn),
+    '   ⏳ 그리고 **자라는 중**이다 (멈춰 있으면 시계가 아니라 그림입니다)',
+    grown.map((b) => `${b.atk} ${b.growOut}→${b.growIn}`).join(' · '),
   )
   check(
     nonTiming.length > 0 && nonTiming.every((b) => b.inWindow < 0.999),

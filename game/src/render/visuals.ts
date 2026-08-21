@@ -125,6 +125,19 @@ interface Visual {
   /** 적이 공격을 준비할 때 지면에 뜨는 예고 부채꼴 */
   telegraph?: THREE.Mesh
   telegraphMat?: THREE.MeshBasicMaterial
+  /**
+   * ⏳ **차오르는 몫** — 같은 부채꼴을 한 장 더 겹쳐서 **가운데부터
+   * 바깥으로 자라게** 합니다. 밝은 가장자리가 바깥 선에 닿는 순간이
+   * 곧 판정입니다.
+   *
+   * 왜 따로 두는가: 기존 예고는 **투명도만** 차올랐습니다. 그건
+   * *"점점 위험해진다"* 는 말하지만 ***"몇 초 남았다"*** 는 말하지
+   * 않습니다 — 진하기는 눈이 절대값으로 못 읽습니다(옆에 비교 대상이
+   * 없으니까요). **길이**는 읽습니다. 로스트아크의 지면 장판이 차오르는
+   * 것도, 리듬 게임의 노트가 선까지 내려오는 것도 같은 이유입니다.
+   */
+  telegraphFill?: THREE.Mesh
+  telegraphFillMat?: THREE.MeshBasicMaterial
   telegraphWindup: number
   /** 머리 위 체력바 (적 전용) */
   hpBar?: THREE.Group
@@ -726,6 +739,35 @@ export class Visuals {
       group.add(telegraph)
       visual.telegraph = telegraph
       visual.telegraphMat = telegraphMat
+
+      /**
+       * ⏳ 차오르는 몫 — **같은 지오메트리**를 씁니다. 따로 만들면 두
+       * 도형이 어긋날 수 있고, 그러면 "밝은 끝이 바깥 선에 닿는 순간"이
+       * 판정과 다른 자리를 가리킵니다. 눈금과 눈금이 재는 것은 같은
+       * 도형이어야 합니다.
+       *
+       * `renderOrder` 를 예고보다 살짝 위로 둡니다 — 아래 깔린 예고가
+       * 「범위」, 위에 자라는 것이 「남은 시간」입니다.
+       */
+      const telegraphFillMat = new THREE.MeshBasicMaterial({
+        color: 0xff5a3c,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+      const telegraphFill = new THREE.Mesh(
+        this.telegraphGeos.get(attacksFor(enemyKind)[0].id)!,
+        telegraphFillMat,
+      )
+      // 예고보다 아주 조금 위 — 같은 높이면 z-파이팅으로 지글거립니다.
+      telegraphFill.position.y = 0.05
+      telegraphFill.renderOrder = 2
+      telegraphFill.visible = false
+      group.add(telegraphFill)
+      visual.telegraphFill = telegraphFill
+      visual.telegraphFillMat = telegraphFillMat
+
       visual.telegraphWindup = isBoss ? BOSS.windup : GRUNT.windup
 
       // 등 뒤 구역 — 그룹의 로컬 +Z가 정면이므로 180° 돌려 후방을 향하게 합니다.
@@ -1054,6 +1096,7 @@ export class Visuals {
     this.scene.remove(v.group)
     v.material.dispose()
     v.telegraphMat?.dispose()
+    v.telegraphFillMat?.dispose()
     v.backZoneMat?.dispose()
     v.pillarMat?.dispose()
     this.items.delete(entity)
@@ -1193,6 +1236,7 @@ export class Visuals {
           const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
           const geo = this.telegraphGeos.get(def.id)
           if (geo && v.telegraph.geometry !== geo) v.telegraph.geometry = geo
+          if (geo && v.telegraphFill && v.telegraphFill.geometry !== geo) v.telegraphFill.geometry = geo
           v.telegraph.visible = true
           if (winding) {
             /**
@@ -1320,14 +1364,72 @@ export class Visuals {
               // "무엇"이 흔들려서, 언제만 알려 주려던 신호가 색을 덮습니다.
               v.telegraphMat.opacity = 1
             }
+            /**
+             * ── ⏳ **차오르는 몫 — 「몇 초 남았나」를 길이로 말합니다** ──
+             *
+             * 요청: *"공격범위 표시한 후 색이 차오르는 식으로 저스트회피
+             * 타이밍을 맞출 수 있게끔."*
+             *
+             * 지금까지 예고는 **투명도만** 차올랐습니다. 그런데 진하기는
+             * 눈이 **절대값으로 못 읽습니다** — 옆에 비교할 대상이 없으니
+             * "지금 0.6쯤 진하다"를 알 수가 없습니다. 그래서 있는 정보가
+             * *"점점 위험해진다"* 까지였고, 저스트 회피에 필요한
+             * ***"지금 0.2초 남았다"*** 는 화면에 아예 없었습니다.
+             *
+             * **길이는 절대값으로 읽힙니다.** 밝은 부채꼴이 가운데에서
+             * 자라 바깥 선에 **닿는 순간**이 판정입니다 — 비교 대상(바깥
+             * 선)이 같은 화면에 늘 함께 있으니까요. 리듬 게임의 노트가
+             * 판정선까지 내려오는 것, 로스트아크의 지면 장판이 차오르는
+             * 것이 전부 같은 문법입니다.
+             *
+             * ⚠️ **밑에 깔린 예고는 그대로 둡니다.** 그것이 「범위」이고
+             *    위에 자라는 것이 「남은 시간」입니다. 하나로 합치면
+             *    (예: 부채꼴 자체를 키우면) 차오르는 동안에는 **얼마나
+             *    넓은 공격인지**를 알 수 없게 되어, 자리를 잡아야 하는
+             *    🟡·🟣 가 답할 수 없는 색이 됩니다.
+             *
+             * ⚠️ 분모는 위에서 이미 구한 `p` 를 **그대로** 씁니다. 여기서
+             *    다시 나누면 차오름의 규칙이 두 벌이 되고, 페이즈 배율을
+             *    고치는 날 한쪽만 따라갑니다.
+             */
+            if (v.telegraphFill && v.telegraphFillMat) {
+              v.telegraphFill.visible = true
+              // 0에서 시작하면 처음 몇 프레임이 점처럼 보입니다. 눈에
+              // 잡히는 최소 크기에서 출발해 1로 끝냅니다.
+              const grow = 0.12 + Math.max(0, Math.min(1, p)) * 0.88
+              v.telegraphFill.scale.set(grow, 1, grow)
+              v.telegraphFillMat.color.setHex(INTENT_COLOR[def.intent])
+              /**
+               * 밝기는 **끝에서만** 확 올립니다. 내내 밝으면 밑에 깔린
+               * 범위 표시를 덮어서, 「범위」와 「남은 시간」이 다시 한
+               * 신호로 뭉칩니다.
+               */
+              v.telegraphFillMat.opacity = 0.35 + p * p * 0.5
+            }
           } else {
             // 터지는 순간만 흰색으로 날립니다 — "지금이 판정"이 색과 무관하게 읽혀야 합니다.
             v.telegraphMat.opacity = 0.8
             v.telegraphMat.color.setHex(0xfff0d0)
+            /**
+             * 차오르던 몫은 **가득 찬 채로 같이 하얗게** 터집니다.
+             * 여기서 숨기면 "닿는 순간이 판정"이라고 가르쳐 놓고 정작
+             * 닿는 그림을 안 보여 주게 됩니다 — 배운 것이 확인되는
+             * 프레임이 없으면 다음에도 못 믿습니다.
+             */
+            if (v.telegraphFill && v.telegraphFillMat) {
+              v.telegraphFill.visible = true
+              v.telegraphFill.scale.set(1, 1, 1)
+              v.telegraphFillMat.opacity = 0.85
+              v.telegraphFillMat.color.setHex(0xfff0d0)
+            }
           }
         } else if (v.telegraph.visible) {
           v.telegraph.visible = false
           v.telegraphMat.opacity = 0
+          if (v.telegraphFill && v.telegraphFillMat) {
+            v.telegraphFill.visible = false
+            v.telegraphFillMat.opacity = 0
+          }
         }
       }
 
@@ -1526,6 +1628,12 @@ export class Visuals {
     held: number
     /** 지금 그려진 투명도 — 「지금」 신호가 켜지면 1이 됩니다 */
     opacity: number
+    /**
+     * ⏳ **차오른 몫**(0~1) — 밝은 부채꼴이 바깥 선까지 자란 비율.
+     * 1 이면 지금이 판정입니다. 투명도와 달리 눈이 **절대값으로**
+     * 읽을 수 있는 신호라, 이 값이 진짜 「언제」를 말합니다.
+     */
+    grow: number
   }[] {
     const out: {
       entity: number
@@ -1536,6 +1644,7 @@ export class Visuals {
       windup: number
       held: number
       opacity: number
+      grow: number
     }[] = []
     for (const [e, v] of this.items.entries()) {
       if (!v.telegraph?.visible || !v.telegraphMat) continue
@@ -1553,6 +1662,9 @@ export class Visuals {
         /** ⏳ 그중 뜸 들인 몫 */
         held: Number(Enemy.heldT[e].toFixed(3)),
         opacity: Number(v.telegraphMat.opacity.toFixed(3)),
+        // 화면에 실제로 그려진 크기를 그대로 냅니다 — 프로브가 예고
+        // 길이로 다시 계산하면 차오름 규칙의 사본이 생깁니다.
+        grow: Number((v.telegraphFill?.visible ? v.telegraphFill.scale.x : 0).toFixed(3)),
       })
     }
     return out

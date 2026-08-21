@@ -785,11 +785,11 @@ try {
           `\n     뒤로 구르기        — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m · 판정 ${back.why}` : '실패'}`,
       )
       check(
-        sides.every(([, r]) => r !== null) && back !== null,
+        sides.length === TIMINGS.length && sides.every(([, r]) => r !== null) && back !== null,
         '🚧 🟣 네 답을 모두 실제로 눌러 봤다 (비교의 게이트)',
         `${sides.map(([n, r]) => `${n} ${r ? '○' : '×'}`).join(' · ')} · 뒤 ${back ? '○' : '×'}`,
       )
-      if (sides.every(([, r]) => r !== null) && back) {
+      if (sides.length === TIMINGS.length && sides.every(([, r]) => r !== null) && back) {
         /**
          * ⚠️ **하나라도 통하면 통하는 것입니다.** 플레이어는 세 타이밍을
          *    평균 내지 않습니다 — 되는 것을 찾아서 그것만 씁니다. 그러니
