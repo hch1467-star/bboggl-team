@@ -15,6 +15,7 @@ import {
   ATTACK_COMMIT_GAP,
   MAX_CONCURRENT_ATTACKERS,
   MAX_CONCURRENT_WIDE,
+  MAX_CONCURRENT_RANGED,
   SNARE_MOVE_SCALE,
   WIDE_ARC_DEG,
   attackAt,
@@ -622,15 +623,35 @@ function grantAttackTokens(
 ): Set<number> {
   const granted = new Set<number>()
 
+  /**
+   * 🏹 **날아가는 공격만 쓰는 적인가.** 근거는 enemyAttacks.ts
+   * `MAX_CONCURRENT_RANGED` 주석 — 요약하면 *"근접의 동시성을 막으려고
+   * 만든 줄에 원거리를 세우면 원거리는 벌만 받고 근접의 위험은 하나도
+   * 안 줄어든다"* 입니다.
+   *
+   * ⚠️ **종류 이름으로 가르지 않습니다.** `kind === Archer` 로 적으면
+   *    새 원거리 적을 넣는 날 그 적만 조용히 옛 줄에 섭니다. 묻는 것은
+   *    이름이 아니라 **하는 일**입니다 — 가진 패턴이 전부 날아가는가.
+   */
+  const isRanged = (kind: number): boolean => {
+    const list = attacksFor(kind)
+    return list.length > 0 && list.every((a) => a.projectile === true)
+  }
+
   // 이미 공격 중인 적이 토큰을 쥐고 있는 것으로 칩니다.
   let busy = 0
   let wideBusy = 0
+  let rangedBusy = 0
   const waiting: { e: number; d: number; w: number }[] = []
+  const waitingRanged: { e: number; d: number; w: number }[] = []
   for (let i = 0; i < count; i++) {
     const e = ids[i]
     if (!isAlive(e) || Actor.state[e] === ActorState.Dead) continue
     if (Actor.state[e] === ActorState.Attack) {
-      busy++
+      // 🏹 쏘는 중인 적은 **근접 줄의 자리를 안 먹습니다.** 안 그러면
+      //    빼 준 의미가 없습니다 — 기다리는 쪽만 바뀔 뿐입니다.
+      if (isRanged(Enemy.kind[e])) rangedBusy++
+      else busy++
       const def = attackAt(Enemy.kind[e], Enemy.attackIndex[e])
       if (def.arcDeg >= WIDE_ARC_DEG) wideBusy++
       continue
@@ -649,7 +670,9 @@ function grantAttackTokens(
      *    "토큰은 받았는데 못 쓰는" 적이 조용히 생깁니다.
      */
     if (!hasAttackInBand(attacksFor(Enemy.kind[e]), d)) continue
-    waiting.push({ e, d, w: Enemy.waitT[e] })
+    // 🏹 **줄을 나눕니다** — 같은 줄에 두면 순서가 섞여서, 슬롯을 따로
+    //    둔 것이 아무 일도 하지 않습니다.
+    ;(isRanged(Enemy.kind[e]) ? waitingRanged : waiting).push({ e, d, w: Enemy.waitT[e] })
   }
 
   // 광역 여유분은 **항상 먼저** 갱신합니다.
@@ -658,6 +681,21 @@ function grantAttackTokens(
   wideSlotsLeft = MAX_CONCURRENT_WIDE - wideBusy
 
   if (commitGapT > 0) return granted // 아직 다음 차례가 아닙니다
+
+  /**
+   * 🏹 **원거리 몫을 먼저 나눠 줍니다** — 근접 자리가 없어도 쏠 수 있게.
+   * 이 줄은 `MAX_CONCURRENT_RANGED` 만 봅니다(근접 `busy` 와 무관).
+   */
+  let rangedFree = MAX_CONCURRENT_RANGED - rangedBusy
+  if (rangedFree > 0 && waitingRanged.length > 0) {
+    waitingRanged.sort((a, b) => (Math.abs(b.w - a.w) > 0.25 ? b.w - a.w : a.d - b.d))
+    for (const w of waitingRanged) {
+      if (rangedFree <= 0) break
+      granted.add(w.e)
+      rangedFree--
+    }
+  }
+
   let free = MAX_CONCURRENT_ATTACKERS - busy
   if (free <= 0) return granted
 
