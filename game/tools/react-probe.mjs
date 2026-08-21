@@ -579,9 +579,31 @@ try {
     const hook = hookIdx >= 0 ? bossRow.attacks[hookIdx] : null
     if (hook) {
       const at = (hook.minRange + Math.min(hook.maxRange ?? hook.reach, hook.reach)) / 2
-      const arm = async (mode) =>
+      /**
+       * ── ⏱ **언제 구르느냐를 같이 흔듭니다** ──────────────────────────
+       *
+       * 지난 회차에 이 실험대는 **한 타이밍만** 눌러 보고 「옆으로는 못
+       * 넘긴다」를 초록으로 냈습니다. 그런데 실전 장부는 정반대였습니다:
+       *
+       *     boss_hook — 예고를 걸 때 **0°**(정면) → 휘두를 때 **88°**
+       *     binder_cocoon — **0°** → **124°**
+       *
+       * 적은 정확히 조준하고 시작했고, 빗나감은 **예고 동안 전부** 생겼습니다.
+       * 실험대는 예고 0.25초에 굴렀고(=이른 구르기) 맞았습니다. 그러면
+       * 남는 설명은 하나입니다 — **실전은 더 늦게 구른다.**
+       *
+       * 이르게 구르면 적에게 되돌릴 시간이 남고, 늦게 구르면 안 남습니다.
+       * 그러니 「옆으로는 못 넘긴다」는 **타이밍 하나짜리 초록**이었습니다.
+       * 「한 칸 차이의 초록은 운이다」와 같은 병이라 같은 처방을 씁니다 —
+       * **답이 하나라도 통하면 통하는 것**으로 봅니다.
+       *
+       * ⚠️ 지연은 초가 아니라 **예고의 몫**으로 줍니다. 예고 길이를 여기
+       *    베껴 적으면 페이즈 배율을 바꾸는 날 이 실험이 조용히 다른
+       *    타이밍을 재게 됩니다. 길이는 게임에게 묻습니다(`enemyInfo`).
+       */
+      const arm = async (mode, frac) =>
         page.evaluate(
-          async ([idx, dist, how]) => {
+          async ([idx, dist, how, delayFrac]) => {
             const G = window.__game
             const sleep = () => new Promise((r) => setTimeout(r, 6))
             const runFor = async (sec) => {
@@ -604,7 +626,16 @@ try {
             G.setHp(G.playerEntity(), 100)
             await runFor(0.2)
             if (!G.forceAttack(b, idx)) return null
-            await runFor(0.25)
+            /**
+             * 예고 길이는 **게임에게 묻습니다** — 페이즈 배율과 뜸이 이미
+             * 반영된 값입니다. 그 몫만큼 기다렸다가 구릅니다.
+             *
+             * ⏱ 구르기는 **시작 시점**이 아니라 **끝나는 시점**이 판정과
+             *    겹쳐야 의미가 있으므로, 늦은 쪽은 예고가 거의 다 찬
+             *    자리에서 누릅니다.
+             */
+            const wlen = G.enemyInfo(b)?.windup ?? 1.5
+            await runFor(Math.max(0.05, wlen * delayFrac))
             // 보스 → 나 방향. 뒤로는 그 반대, 옆으로는 90° 돌린 쪽.
             const me = G.state().player
             const es = G.entityState(b)
@@ -634,30 +665,55 @@ try {
             return {
               hurt: before - me2.hp,
               dist: Math.hypot(me2.x - es2.x, me2.z - es2.z),
+              windup: wlen,
             }
           },
-          [hookIdx, at, mode],
+          [hookIdx, at, mode, frac],
         )
-      const side = await arm('side')
-      const back = await arm('back')
+      /**
+       * 세 타이밍: **이르게 · 절반 · 늦게.** 이른 쪽은 지난 회차와 같은
+       * 자리라 예전 결과와 맞대어 볼 수 있고, 늦은 쪽이 실전에 가깝습니다.
+       */
+      const TIMINGS = [
+        ['이르게', 0.17],
+        ['절반', 0.5],
+        ['늦게', 0.8],
+      ]
+      const sides = []
+      for (const [name, frac] of TIMINGS) sides.push([name, await arm('side', frac)])
+      const back = await arm('back', 0.17)
+      const side = sides[0][1] // 지난 회차와 같은 타이밍 — 아래 비교의 기준
       console.log(
-        `\n  🟣 ${hook.id} 를 ${at.toFixed(1)}m 에서 강제로 세우고 두 답을 눌러 봤습니다\n` +
-          `     옆으로 구르기 — ${side ? `받은 피해 ${side.hurt} · 끝난 거리 ${side.dist.toFixed(1)}m` : '실패'}\n` +
-          `     뒤로 구르기   — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m` : '실패'}`,
+        `\n  🟣 ${hook.id} 를 ${at.toFixed(1)}m 에서 강제로 세우고 눌러 봤습니다` +
+          `${side ? ` (예고 ${side.windup.toFixed(2)}초)` : ''}\n` +
+          sides
+            .map(
+              ([name, r]) =>
+                `     옆으로 구르기 ${name.padEnd(4)} — ${r ? `받은 피해 ${r.hurt} · 끝난 거리 ${r.dist.toFixed(1)}m` : '실패'}`,
+            )
+            .join('\n') +
+          `\n     뒤로 구르기        — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m` : '실패'}`,
       )
       check(
-        side !== null && back !== null,
-        '🚧 🟣 두 답을 모두 실제로 눌러 봤다 (비교의 게이트)',
-        `옆 ${side ? '○' : '×'} · 뒤 ${back ? '○' : '×'}`,
+        sides.every(([, r]) => r !== null) && back !== null,
+        '🚧 🟣 네 답을 모두 실제로 눌러 봤다 (비교의 게이트)',
+        `${sides.map(([n, r]) => `${n} ${r ? '○' : '×'}`).join(' · ')} · 뒤 ${back ? '○' : '×'}`,
       )
-      if (side && back) {
+      if (sides.every(([, r]) => r !== null) && back) {
+        /**
+         * ⚠️ **하나라도 통하면 통하는 것입니다.** 플레이어는 세 타이밍을
+         *    평균 내지 않습니다 — 되는 것을 찾아서 그것만 씁니다. 그러니
+         *    "평균은 맞더라"는 답이 될 수 없습니다.
+         */
+        const escaped = sides.filter(([, r]) => r.hurt === 0)
         check(
-          side.hurt > 0,
+          escaped.length === 0,
           '🟣 **옆으로 굴러서는 못 넘긴다** (색마다 다른 대응 — 답이 겹치면 색이 하나 줄어듭니다)',
-          side.hurt > 0
-            ? `옆으로 ${side.hurt} 맞음 · 뒤로 ${back.hurt} 맞음`
-            : `**옆으로도 안 맞습니다**(${side.hurt}) — 🟣 의 답이 🔴 과 같아집니다` +
-              ` · 실전에서도 각도로 4/4 빗나갔습니다`,
+          escaped.length === 0
+            ? `세 타이밍 모두 맞음 — ${sides.map(([n, r]) => `${n} ${r.hurt}`).join(' · ')} · 뒤로 ${back.hurt}`
+            : `**${escaped.map(([n]) => n).join('·')} 구르면 안 맞습니다** — ` +
+              `${sides.map(([n, r]) => `${n} ${r.hurt}`).join(' · ')}` +
+              ` · 🟣 의 답이 🔴 과 같아집니다(실전 장부: 예고 시작 0° → 판정 88°)`,
         )
       }
     }
