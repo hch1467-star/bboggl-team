@@ -1,4 +1,4 @@
-import { BARREL, PLAYER, VIAL, WORLD } from '../config/balance'
+import { BARREL, PLAYER, URN, VIAL, WORLD } from '../config/balance'
 import { NO_CHAIN } from '../config/bossPhases'
 import { enemyDef, kindFromId } from '../config/enemies'
 import type { Bonfire } from './bonfire'
@@ -17,13 +17,14 @@ import {
   Stamina,
   Status,
   Transform,
+  Urn,
   Velocity,
 } from '../core/components'
 import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
 import type { LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
-import { KIND_BARREL, KIND_PLAYER, KIND_TREASURE, renderKindForEnemy } from '../render/visuals'
+import { KIND_BARREL, KIND_PLAYER, KIND_TREASURE, KIND_URN, renderKindForEnemy } from '../render/visuals'
 
 /** 스폰 전용 RNG. 전투 RNG와 분리해야 재현성이 깨지지 않습니다. */
 const spawnRng = new Rng(20260807)
@@ -253,6 +254,44 @@ export function spawnTreasure(x: number, z: number): number {
 }
 
 /**
+ * 🏺 **항아리** — 부술 수 있는 잡동사니. 설계 근거는 balance.ts `URN`.
+ *
+ * 통과 **같은 부품**을 씁니다(Transform·Body·Health). 그래야 아무
+ * 무기·스킬로나 칠 수 있습니다 — 이유는 아래 `spawnBarrel` 주석과 같습니다.
+ *
+ * 체력 1: **한 대면 부서집니다.** 항아리에 체력을 주면 이 물건이 묻는
+ * 질문("깨면 소리가 나는데 그래도 깰까")이 "몇 대 남았지"로 바뀝니다.
+ */
+export function spawnUrn(x: number, z: number, holds = false): number {
+  const e = createEntity()
+  addComponent(Transform, e)
+  addComponent(Body, e)
+  addComponent(Health, e)
+  addComponent(Urn, e)
+  addComponent(Renderable, e)
+  Transform.x[e] = x
+  Transform.y[e] = 0
+  Transform.z[e] = z
+  Transform.rotY[e] = 0
+  Body.radius[e] = URN.radius
+  Body.height[e] = URN.height
+  Health.hp[e] = 1
+  Health.max[e] = 1
+  Health.invulnT[e] = 0
+  Health.flashT[e] = 0
+  Urn.holds[e] = holds ? 1 : 0
+  /**
+   * ⚠️ **`broken` 을 반드시 0으로 지웁니다.** 통이 정확히 이 자리를
+   *    빠뜨려 **두 번째부터 안 터졌습니다**(아래 `Barrel.lit` 주석).
+   *    같은 규칙: **spawn 함수는 자기가 쓰는 칸을 하나도 빼지 않고
+   *    초기화합니다.**
+   */
+  Urn.broken[e] = 0
+  Renderable.kind[e] = KIND_URN
+  return e
+}
+
+/**
  * 💥 **폭발통** — 때리면 도화선이 붙는 통.
  *
  * `Health` 를 주는 이유는 체력 싸움을 시키려는 게 아니라, `combat.ts` 의
@@ -453,6 +492,19 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
       e = spawnTreasure(item.x, item.z)
       treasureTotal++
     } else if (item.kind === 'barrel') e = spawnBarrel(item.x, item.z)
+    // 🏺 겉모습은 같고 **안에 든 것만** 다릅니다(format.ts 참고).
+    else if (item.kind === 'urn') e = spawnUrn(item.x, item.z, false)
+    else if (item.kind === 'urnFull') {
+      e = spawnUrn(item.x, item.z, true)
+      /**
+       * 🎁 **항아리 속 보물도 총 개수에 셉니다.**
+       *
+       * 안 세면 *"보물 3/5 를 먹었다"* 의 분모가 틀리고, 그러면 진행도
+       * 표시와 `npm run play` 의 수거율이 **다른 것을 세게** 됩니다.
+       * 숨겼다는 것은 찾기 어렵다는 뜻이지 없다는 뜻이 아닙니다.
+       */
+      treasureTotal++
+    }
     if (e < 0) continue
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     entities.push(e)

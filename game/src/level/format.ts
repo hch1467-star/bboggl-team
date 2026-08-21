@@ -89,6 +89,10 @@ export type EntityKind =
   | 'archer'
   | 'anvil'
   | 'barrel'
+  /** 🏺 항아리 — 부술 수 있는 잡동사니. 근거는 balance.ts `URN`. */
+  | 'urn'
+  /** 🏺 보물이 든 항아리 — 겉모습은 위와 **똑같습니다**(숨기는 것이 목적). */
+  | 'urnFull'
   /** 🛡️ 정예 — 잡몹과 **같은 공격**을 쓰는 큰 개체. 근거는 balance.ts `ELITE`. */
   | 'elite'
 
@@ -105,6 +109,8 @@ export const ENTITY_KINDS: EntityKind[] = [
   'archer',
   'anvil',
   'barrel',
+  'urn',
+  'urnFull',
   'elite',
 ]
 
@@ -121,6 +127,8 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   archer: '쏘는 자 🔴(원거리)',
   anvil: '모루(강화만)',
   barrel: '폭발통 💥',
+  urn: '항아리 🏺(빈 것)',
+  urnFull: '항아리 🏺(보물 있음)',
   elite: '정예 🛡️(잡몹과 같은 색)',
 }
 
@@ -146,6 +154,10 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   // 예고 🟡 과 같은 색입니다 — 통이 만드는 것이 노랑이라, 에디터에서도
   // 그 사실이 먼저 보여야 합니다.
   barrel: 0xffd23f,
+  // 🏺 게임 안에서는 둘이 **똑같이** 생겼습니다(숨기는 것이 목적).
+  //    에디터에서만 갈라 보입니다 — 배치하는 사람은 알아야 하니까요.
+  urn: 0x8a7360,
+  urnFull: 0xffd479,
   // 잡몹과 **같은 예고 색**입니다 — 같은 공격을 쓰니까요. 에디터에서
   // 둘을 가르는 것은 색이 아니라 라벨이라야 그 사실이 안 흐려집니다.
   elite: 0xc0453f,

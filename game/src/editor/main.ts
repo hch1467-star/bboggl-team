@@ -138,6 +138,13 @@ class Editor {
       // 그림이라야 배치하며 보는 것과 플레이하며 보는 것이 어긋나지 않습니다.
       elite: new THREE.CapsuleGeometry(0.66, 0.9, 4, 10),
       treasure: new THREE.OctahedronGeometry(0.55),
+      /**
+       * 🏺 항아리 둘은 **같은 도형**입니다 — 게임 안에서 똑같이 생겼다는
+       * 사실이 지도 위에서도 보여야, 배치하는 사람이 「이건 눈으로는 못
+       * 가린다」를 알고 자리를 고릅니다. 가르는 것은 색뿐입니다.
+       */
+      urn: new THREE.SphereGeometry(0.36, 8, 6),
+      urnFull: new THREE.SphereGeometry(0.36, 8, 6),
       boss: new THREE.CapsuleGeometry(0.7, 1.5, 4, 10),
       // 게임 안과 같은 실루엣 규칙 — 얽는 자는 가늘고 크게, 끄는 자는 낮고 넓게.
       binder: new THREE.CapsuleGeometry(0.34, 1.3, 4, 8),

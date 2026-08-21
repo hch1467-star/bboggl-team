@@ -18,6 +18,7 @@ import {
   PLAYER,
   POISE,
   barrelFuse,
+  URN,
   barrelStaminaLoss,
   hurtFlash,
 } from '../config/balance'
@@ -26,6 +27,7 @@ import {
   ActorState,
   AttackPhase,
   Barrel,
+  Urn,
   Body,
   Enemy,
   EnemyKind,
@@ -1203,6 +1205,45 @@ const players = defineQuery(Player, Stamina)
  *    두 번째로 구현해야 하고, 두 벌이 된 순간 한쪽만 고치는 날이 옵니다.
  *    지금 규칙은 그 위험 자체를 없앱니다.
  */
+/**
+ * 🏺 **항아리가 부서진 사건.** 화면·소리·그리고 **적을 깨우는 일**이
+ * 전부 이걸 보고 움직입니다.
+ *
+ * ⚠️ 여기서 적을 직접 깨우지 않습니다. *"누가 언제 깨어나는가"* 의 규칙은
+ *    `enemyAI` 한 곳에 있어야 합니다 — 두 벌이 되면 한쪽만 고치는 날
+ *    화면에 그려지는 파문과 실제 규칙이 어긋나고, 그러면 **보고 배운 것이
+ *    틀린 것**이 됩니다.
+ */
+export const urnBreakEvents: (BreakEvent & { holds: boolean })[] = []
+const urns = defineQuery(Urn, Transform, Health)
+
+/**
+ * 🏺 **항아리** — 부서지면 소리가 나고, 안에 든 것이 나옵니다.
+ *
+ * 통(`barrelSystem`)과 나란히 두되 **도화선이 없습니다.** 항아리는
+ * 시간을 주는 물건이 아니라 **소리를 내는 물건**입니다(balance.ts `URN`).
+ */
+export function urnSystem(): void {
+  const ids = urns.run()
+  for (let i = 0; i < urns.count; i++) {
+    const u = ids[i]
+    /**
+     * ⚠️ `broken` 을 안 보면 **매 프레임 다시 부서집니다** — 조건이
+     *    「체력 ≤ 0」 이라 부서진 뒤에도 영원히 참이기 때문입니다.
+     *    통이 정확히 이 자리에서 데였습니다(`Barrel.lit`).
+     */
+    if (Health.hp[u] > 0 || Urn.broken[u] === 1) continue
+    Urn.broken[u] = 1
+    urnBreakEvents.push({
+      entity: u,
+      x: Transform.x[u],
+      y: Transform.y[u] + URN.height * 0.5,
+      z: Transform.z[u],
+      holds: Urn.holds[u] === 1,
+    })
+  }
+}
+
 export function barrelSystem(dt: number): void {
   const ids = barrels.run()
   const count = barrels.count
@@ -1723,6 +1764,37 @@ function applyHit(a: number, spec: AttackSpec): boolean {
        *    한 번도 안 줄고 있었습니다. 점화 조건을 **「체력이 0이 되면」**
        *    하나로 모으면, 앞으로 어떤 피해원이 생겨도 저절로 통합니다.
        */
+      if (Health.hp[t] > 0) Health.hp[t] = 0
+      landed = true
+      continue
+    }
+
+    /**
+     * 🏺 **항아리도 같은 자리에서 처리합니다.**
+     *
+     * ── 왜 이 가지가 필요했는가 (프로브가 잡았습니다) ──────────────
+     * 항아리를 넣고 `npm run urn` 을 돌렸더니 *"한 대면 부서진다"* 가
+     * 빨갛게 나왔습니다 — 한 번 휘둘렀는데 멀쩡했습니다. 이유는 여기
+     * **가지가 없어서**였습니다. 항아리는 통 가지를 그냥 지나쳐 아래
+     * **적용 경로**로 흘러갔고, 거기서는 각도·강인도·치명타처럼 적에게만
+     * 있는 것을 보다가 조용히 아무 일도 안 일어났습니다.
+     *
+     * 주석에는 *"통과 같은 부품을 쓰니 아무 무기로나 칠 수 있다"* 고
+     * 적어 두고, 정작 **칠 수 있게 만드는 줄**을 안 적은 것입니다.
+     * 통이 정확히 같은 종류의 일을 한 번 겪었습니다(체력이 한 번도
+     * 안 줄고 있었던 것).
+     *
+     * 통과 **같은 모양**으로 둡니다:
+     *   · 여기서는 **체력만** 0으로 만듭니다. 부서짐 처리는 `urnSystem`
+     *     한 곳뿐이라, 앞으로 어떤 피해원이 생겨도 저절로 통합니다.
+     *   · `landed = true` — 친 것도 **맞은 것**이라 히트스톱·소리가
+     *     나야 합니다. 안 그러면 허공을 벤 것처럼 보입니다.
+     *
+     * ⚠️ 적은 여기 못 옵니다(통과 같은 이유 — 위 진영 검사). 일부러
+     *    그렇습니다: 적이 휘두르다 항아리를 깨서 **자기 동료를 깨우는**
+     *    일이 생기면, 플레이어가 만든 소리와 구분이 안 됩니다.
+     */
+    if (hasComponent(Urn, t)) {
       if (Health.hp[t] > 0) Health.hp[t] = 0
       landed = true
       continue

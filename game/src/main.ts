@@ -26,6 +26,7 @@ import {
 import {
   AWARE,
   BARREL,
+  URN,
   BLEED,
   barrelFuse,
   barrelStaminaLoss,
@@ -96,6 +97,7 @@ import {
   Stamina,
   Status,
   Transform,
+  Urn,
   Velocity,
 } from './core/components'
 import { AttackPhase } from './core/components'
@@ -142,6 +144,8 @@ import {
   barrelSystem,
   barrelLitEvents,
   barrelBlastEvents,
+  urnSystem,
+  urnBreakEvents,
   countLivingEnemies,
   justGuardEvents,
   perfectDodgeEvents,
@@ -244,6 +248,8 @@ import {
   enemyCountForWave,
   respawnLevelEnemies,
   spawnBarrel,
+  spawnUrn,
+  spawnTreasure,
   spawnEnemy,
   spawnFromLevel,
   spawnGrunt,
@@ -270,6 +276,8 @@ import { shopItemKey, shopStock, type ShopItem } from './systems/shop'
  */
 const pickups = defineQuery(Transform, Pickup)
 const enemyQuery = defineQuery(Transform, Enemy, Health)
+// 🏺 항아리 — 디버그 훅이 "진짜가 어디 있었나"를 답할 수 있게.
+const urnQuery = defineQuery(Transform, Urn)
 
 class Game {
   private readonly renderer: THREE.WebGLRenderer
@@ -1156,6 +1164,13 @@ class Game {
      * 규칙보다 짧아집니다. 붙는 것과 타는 것은 다른 프레임의 일입니다.
      */
     barrelSystem(time.dt)
+    /**
+     * 🏺 항아리는 **도화선이 없으므로** 판정 바로 뒤에 결산합니다.
+     * 통과 나란히 두는 이유는 하나입니다 — 둘 다 *"때려서 부수는 물건"*
+     * 이라 어느 하나만 다른 프레임에 처리되면 같은 한 대에 대한 반응이
+     * 한 프레임 어긋납니다.
+     */
+    urnSystem()
 
     // ---- 3. 타격 피드백 ----
     // 손맛의 3요소(정지 + 흔들림 + 숫자)를 여기서 한꺼번에 터뜨립니다.
@@ -1865,6 +1880,41 @@ class Game {
       destroyEntity(blast.entity)
     }
     barrelBlastEvents.length = 0
+
+    /**
+     * ── 🏺 **항아리가 깨졌습니다** ────────────────────────────────
+     *
+     * 통과 **다른 그림**을 씁니다. 통은 🟡 장판을 깔아 *"여기서 나가라"*
+     * 를 말하지만, 항아리는 아무것도 깔지 않습니다 — 깔면 플레이어는
+     * 항아리도 위험한 물건으로 배웁니다.
+     *
+     * 대신 **소리 파문**을 그립니다. 크기는 고함과 같은 `alertRadius`
+     * 이고(적을 깨우는 규칙이 쓰는 바로 그 값), 그래야 *"이만큼이
+     * 들렸다"* 가 보고 배울 수 있는 사실이 됩니다.
+     */
+    for (const ev of urnBreakEvents) {
+      const gy = Transform.y[ev.entity]
+      this.vfx.spawnGroundShape(ev.x, gy, ev.z, 0, AWARE.alertRadius, 360, 0xcfd6dd, 0.5, 'outline')
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2
+        this.vfx.spawnHitSpark(ev.x + Math.cos(a) * 0.35, ev.y, ev.z + Math.sin(a) * 0.35, 0.6)
+      }
+      this.cam.addTrauma(URN.trauma)
+      sfx.impact(false, false, ev.x, ev.z)
+      /**
+       * 🎁 **안에 든 것이 나옵니다.** 항아리가 있던 자리에 그대로 세웁니다 —
+       * 튀어나가게 하면 지형(계단·구덩이)에 따라 못 줍는 자리에 떨어질 수
+       * 있고, 그러면 *"분명 나왔는데 없어졌다"* 가 됩니다.
+       */
+      if (ev.holds) {
+        const t = spawnTreasure(ev.x, ev.z)
+        Transform.y[t] = this.terrain ? this.terrain.groundYAt(ev.x, ev.z) : 0
+        this.visuals.attach(t, Renderable.kind[t])
+      }
+      this.visuals.detach(ev.entity)
+      destroyEntity(ev.entity)
+    }
+    urnBreakEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -4522,6 +4572,40 @@ class Game {
   }
 
   /**
+   * 🏺 실험대 — 항아리를 세웁니다. `holds` 면 안에 보물이 들어 있습니다.
+   *
+   * 통과 **같은 모양의 훅**을 두는 이유: 프로브가 항아리만 다른 방식으로
+   * 세우면, 게임이 실제로 세우는 길과 다른 길을 재게 됩니다.
+   */
+  debugSpawnUrn(x: number, z: number, holds = false): number {
+    const e = spawnUrn(x, z, holds)
+    if (this.terrain) Transform.y[e] = this.terrain.groundYAt(x, z)
+    this.visuals.attach(e, Renderable.kind[e])
+    return e
+  }
+
+  /**
+   * 🏺 실험대 — 지금 서 있는 항아리들. **안에 든 것까지** 냅니다.
+   *
+   * ⚠️ 이건 **디버그 전용**입니다. 게임 화면은 안에 든 것을 절대 안
+   *    보여 줍니다(그게 숨기는 것의 전부니까요). 프로브가 *"진짜가 정말
+   *    거기 있었나"* 를 물으려면 답을 아는 창구가 하나는 있어야 합니다.
+   */
+  debugUrns(): { entity: number; x: number; z: number; holds: boolean; broken: boolean }[] {
+    const out: { entity: number; x: number; z: number; holds: boolean; broken: boolean }[] = []
+    for (const e of urnQuery.run().slice(0, urnQuery.count)) {
+      out.push({
+        entity: e,
+        x: Number(Transform.x[e].toFixed(3)),
+        z: Number(Transform.z[e].toFixed(3)),
+        holds: Urn.holds[e] === 1,
+        broken: Urn.broken[e] === 1,
+      })
+    }
+    return out
+  }
+
+  /**
    * 🏆 **장비 등급의 규칙과 지금 상태** — 프로브가 표를 베껴 적지 않게.
    *
    * `tiers` 는 규칙 그 자체이고, `weapons` 는 지금 이 판의 상태입니다.
@@ -7064,6 +7148,10 @@ declare global {
       travelInfo: () => { lit: number; opened: boolean; key: string }
       /** 🧪 실험대 전용 — 통을 하나 세웁니다(연쇄·반경 검사를 세우려면 필요). */
       spawnBarrel: (x: number, z: number) => number
+      /** 🏺 항아리를 세웁니다. holds 면 안에 보물이 들어 있습니다. */
+      spawnUrn: (x: number, z: number, holds?: boolean) => number
+      /** 🏺 지금 서 있는 항아리들 — **안에 든 것까지**(디버그 전용). */
+      urns: () => { entity: number; x: number; z: number; holds: boolean; broken: boolean }[]
       /** 🏪 상점의 지금 재고 — 프로브가 값을 베끼지 않게. */
       shopInfo: () => {
         atAnvil: boolean
@@ -8168,6 +8256,8 @@ window.__game = {
   /** 🧪 실험대 전용 — 원하는 등급/시드를 무기에 끼웁니다(등급 비교를 세우려면 필요). */
   setGear: (weaponIndex, tier, seed) => game.debugSetGear(weaponIndex, tier, seed),
   spawnBarrel: (x, z) => game.debugSpawnBarrel(x, z),
+  spawnUrn: (x, z, holds) => game.debugSpawnUrn(x, z, holds),
+  urns: () => game.debugUrns(),
   shortcutInfo: () => game.debugShortcutInfo(),
   shortcutHint: () => game.debugShortcutHint(),
   walkTest: (fromX, fromZ, toX, toZ) => game.debugWalkTest(fromX, fromZ, toX, toZ),

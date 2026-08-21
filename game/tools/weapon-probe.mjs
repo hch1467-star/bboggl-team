@@ -1202,21 +1202,71 @@ try {
    * 그보다 좁으면 같은 판단이 판마다 다른 결과를 냅니다.
    */
   const EDGE = 0.08
+  /**
+   * ── 📏 **눈금보다 가는 것을 묻지 않습니다** ──────────────────────
+   *
+   * ── 무엇이 잘못돼 있었는가 ────────────────────────────────────
+   * 이 검사는 **두 관측값**을 견줍니다 — 창 길이와 착탄 시각. 위 주석이
+   * 이미 진단해 두었습니다: *"둘 다 흔들리는데 기준(0.08초)이 그 흔들림과
+   * 비슷한 크기라, 한 번씩만 재면 검사가 게임과 무관하게 빨강·초록을
+   * 오갑니다."*
+   *
+   * 그런데 **처방이 한쪽에만 적용돼 있었습니다.** 착탄 시각은 3회
+   * 중앙값으로 굵게 만들었는데(`lines`), 창 길이(`punishSec`)는 관측
+   * 5회의 **최솟값** 그대로입니다. 두 값을 견주는 검사인데 한쪽만
+   * 다듬은 셈입니다.
+   *
+   * 실제로 그래서 이런 줄이 나왔습니다:
+   *
+   *     ❌ 롱소드 3타가 잡몹 반격창(0.72초) 끝과 **0.067초** (문턱 0.08)
+   *
+   * 차이가 **0.013초**입니다. 이 컨테이너는 8~20fps 라 **한 프레임이
+   * 0.05초**이고, 창 값 자체가 그 눈금 위에서 관측된 최솟값입니다.
+   * 즉 이 계측기는 0.067 과 0.08 을 **가를 수 없습니다.**
+   *
+   * ── 그래서 셋으로 나눕니다 ────────────────────────────────────
+   * 「못 잰 것은 통과가 아니다」 — 그리고 **실패도 아닙니다.** 분해능
+   * 안쪽은 판정하지 않고 `[못 잼]` 으로 적습니다. 여기서 ❌ 를 내면
+   * *계측기의 한계를 게임의 결론으로* 만드는 것이고, ✅ 를 내면 *못 잰
+   * 것을 통과로* 만드는 것입니다. 둘 다 이 저장소가 금지한 쪽입니다.
+   *
+   * ⚠️ 분해능은 **관측에서 나옵니다** — 짧은 봉우리의 관측 폭입니다.
+   *    여기에 0.05 를 적어 두면 더 빠른 기계에서도 그 굵기를 그대로
+   *    쓰게 되어, **계측기가 좋아져도 검사는 안 좋아집니다.**
+   * ⚠️ 짧은 봉우리 표본이 2개 미만이면 폭을 낼 수 없습니다. 그때는
+   *    분해능을 모르는 것이므로 **경계에 걸친 것을 전부 `[못 잼]`** 으로
+   *    돌립니다 — 모르면 판정하지 않습니다.
+   */
+  const fastGaps = punishGaps.filter((g) => g <= punishSec * 1.5)
+  const resolution =
+    fastGaps.length >= 2 ? Math.max(...fastGaps) - Math.min(...fastGaps) : Infinity
   const edges = []
+  const unmeasurable = []
   for (const win of windows) {
     for (const l of lines) {
       for (let i = 0; i < l.at.length; i++) {
-        const gap = win.sec - l.at[i]
-        if (Math.abs(gap) < EDGE) {
-          edges.push(`${l.name} ${i + 1}타가 ${win.name}(${win.sec.toFixed(2)}초) 끝과 ${Math.abs(gap).toFixed(3)}초`)
-        }
+        const gap = Math.abs(win.sec - l.at[i])
+        if (gap >= EDGE + resolution) continue // 확실히 안전
+        const line = `${l.name} ${i + 1}타가 ${win.name}(${win.sec.toFixed(2)}초) 끝과 ${gap.toFixed(3)}초`
+        // 문턱보다 **분해능만큼 더 작아야** 걸쳤다고 말합니다.
+        if (gap < EDGE - resolution) edges.push(line)
+        else unmeasurable.push(line)
       }
     }
+  }
+  if (unmeasurable.length > 0) {
+    console.log(
+      `     [못 잼] 이 계측기의 분해능 ±${Number.isFinite(resolution) ? resolution.toFixed(3) : '?'}초 안이라 판정하지 않습니다` +
+        ` (짧은 봉우리 ${fastGaps.length}회: ${fastGaps.join(', ')}) — ${unmeasurable.join(' · ')}`,
+    )
   }
   check(
     edges.length === 0,
     '창 경계에 **종이 한 장 차이로 걸친 타**가 없다 (판단이 동전 던지기가 되지 않게)',
-    edges.length ? edges.join(' · ') : `모든 타가 창 끝에서 ${EDGE}초 넘게 떨어져 있습니다`,
+    edges.length
+      ? edges.join(' · ')
+      : `모든 타가 창 끝에서 ${EDGE}초 넘게 떨어져 있습니다` +
+        (unmeasurable.length ? ` · ⚠️ 단 ${unmeasurable.length}건은 **못 잼**(위 줄 참고)` : ''),
   )
 
   /**

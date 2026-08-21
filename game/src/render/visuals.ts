@@ -21,6 +21,7 @@ import {
 import {
   AWARE,
   BARREL,
+  URN,
   BOSS,
   COMBAT,
   FOCUS,
@@ -81,6 +82,15 @@ export const KIND_TREASURE = 2
  * (적은 `renderKindForEnemy` 로 100+ 를 씁니다 — 겹치지 않습니다).
  */
 export const KIND_BARREL = 3
+/**
+ * 🏺 항아리. 통과 나란히 놓입니다 — 설계 근거는 balance.ts `URN`.
+ *
+ * ⚠️ 통과 **다르게 생겨야** 합니다. 둘 다 "부술 수 있는 물건"이지만
+ *    하나는 터지고 하나는 안 터집니다. 같아 보이면 플레이어는 항아리를
+ *    깰 때마다 폭발을 각오하게 되고, 그러면 잡동사니가 잡동사니로
+ *    안 읽힙니다.
+ */
+export const KIND_URN = 4
 
 /**
  * 적의 렌더 종류는 **EnemyKind 에 상수를 더한 값**입니다.
@@ -576,6 +586,11 @@ export class Visuals {
       return
     }
 
+    if (kind === KIND_URN) {
+      this.attachUrn(entity, group)
+      return
+    }
+
     const isPlayer = kind === KIND_PLAYER
     // 이 엔티티가 어떤 적인지. 색·크기·예고 도형이 전부 여기서 나옵니다.
     const enemyKind: EnemyKind = hasComponent(Enemy, entity) ? Enemy.kind[entity] : EnemyKind.Grunt
@@ -1029,6 +1044,50 @@ export class Visuals {
     this.scene.add(group)
     // `floats: false` — 보물은 둥둥 뜨지만 통은 **땅에 붙어** 있어야 합니다.
     // 뜨는 물건은 이 게임에서 "주워라"라는 뜻이라, 통이 뜨면 오해가 됩니다.
+    this.items.set(entity, { group, material: bodyMat, floats: false, telegraphWindup: 0 })
+  }
+
+  /**
+   * 🏺 **항아리** — 통과 한눈에 갈려야 합니다.
+   *
+   * 통은 🟡 색으로 **빛납니다**("건드리면 노랑이 깔린다"는 예고입니다).
+   * 항아리는 그 반대로 **안 빛나는 흙색**입니다. 이 게임의 문법에서
+   * 빛나는 것은 *"쓸 수 있는 물건"* 이고, 항아리는 도구가 아니라
+   * **잡동사니**여야 합니다 — 잡동사니로 보여야 그 사이에 숨은 것이
+   * 숨은 것이 됩니다.
+   *
+   * ⚠️ **안에 보물이 들었는지는 그리지 않습니다.** 겉으로 표시하면
+   *    "숨겼다"가 성립하지 않습니다. 가려내는 단서는 물건 하나가 아니라
+   *    **배치**여야 합니다(레벨이 정합니다 — components.ts `Urn.holds`).
+   *
+   * 실루엣은 통보다 **낮고 배가 부릅니다**(위아래가 좁은 항아리형).
+   * 색이 안 보이는 사람에게도 갈리는 것은 결국 모양입니다.
+   */
+  private attachUrn(entity: number, group: THREE.Group): void {
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x8a7360,
+      roughness: 0.95,
+      metalness: 0.03,
+    })
+    const body = new THREE.Mesh(
+      // 위가 좁고(0.55배) 배가 부른 형태 — 원기둥인 통과 실루엣이 갈립니다.
+      new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(0.001, 0),
+          new THREE.Vector2(URN.radius * 0.62, 0),
+          new THREE.Vector2(URN.radius, URN.height * 0.42),
+          new THREE.Vector2(URN.radius * 0.55, URN.height),
+          new THREE.Vector2(URN.radius * 0.66, URN.height * 1.06),
+        ],
+        10,
+      ),
+      bodyMat,
+    )
+    body.castShadow = true
+    group.add(body)
+
+    this.scene.add(group)
+    // 통과 같은 이유로 **땅에 붙습니다** — 뜨는 물건은 "주워라"라는 뜻입니다.
     this.items.set(entity, { group, material: bodyMat, floats: false, telegraphWindup: 0 })
   }
 
