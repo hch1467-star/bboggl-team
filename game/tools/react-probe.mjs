@@ -551,6 +551,119 @@ try {
   )
 
   /**
+   * ── 🟣 **정답이 하나인가 — 옆으로 굴러도 넘어가는가** ────────────────
+   *
+   * 위 검사는 *"의도한 답(물러나기)이 성립하는가"* 를 봅니다. 그런데
+   * 자동 플레이 9판을 세어 보니 아무도 그 답을 쓰지 않았습니다:
+   *
+   *     boss_hook — 9판 중 4판에 나옴 · **적중 4회 전부 0(0%)**
+   *     빗나간 이유 **각도 3** · 사거리 1
+   *     휘두르는 순간 플레이어 **54~58°** · 허용 반부채꼴 **35°**
+   *
+   * 즉 실전에서는 **옆으로 비켜서** 넘기고 있습니다. 그게 정답이어도
+   * 되는지는 설계 판단이지만, 판단하려면 먼저 **정말 통하는지** 알아야
+   * 합니다. 통한다면 이 색의 답은 둘이고, 그중 **싼 쪽이 이깁니다.**
+   *
+   * 기둥 2 는 *"색마다 다른 대응"* 입니다. 🟣 의 실질 정답이 🔴 과 같은
+   * 구르기라면 색이 하나 줄어든 것과 같습니다 — 세키로가 危 하나에 답을
+   * 셋(점프·간파·회피) 두고 **모션으로 어느 것인지 가르치는** 이유가
+   * 그것입니다. 답이 겹치면 기호가 남아도 배울 것이 없습니다.
+   *
+   * ⚠️ 패턴을 **강제로** 세웁니다(`forceAttack`). 6.5m 에서 갈고리는
+   *    열 발 중 한 발이라(`npm run pace` 물러난 손), 기다려서 재면
+   *    표본이 안 모입니다. 묻는 것은 빈도가 아니라 **성립 여부**입니다.
+   */
+  {
+    const bossRow = roster.find((r) => r.id === 'boss')
+    const hookIdx = (bossRow?.attacks ?? []).findIndex((a) => a.intent === PULL)
+    const hook = hookIdx >= 0 ? bossRow.attacks[hookIdx] : null
+    if (hook) {
+      const at = (hook.minRange + Math.min(hook.maxRange ?? hook.reach, hook.reach)) / 2
+      const arm = async (mode) =>
+        page.evaluate(
+          async ([idx, dist, how]) => {
+            const G = window.__game
+            const sleep = () => new Promise((r) => setTimeout(r, 6))
+            const runFor = async (sec) => {
+              const t = G.state().elapsed + sec
+              const dl = Date.now() + 30000
+              while (G.state().elapsed < t && Date.now() < dl) await sleep()
+            }
+            G.reset()
+            await runFor(0.3)
+            G.clearEnemies()
+            await runFor(0.2)
+            const p0 = G.state().player
+            const b = G.spawnBoss(p0.x + dist, p0.z)
+            if (b == null) return null
+            G.setHp(b, 100000)
+            await runFor(0.2)
+            const bs = G.entityState(b)
+            G.teleportPlayer(bs.x - dist, bs.z)
+            G.setStamina(100)
+            G.setHp(G.playerEntity(), 100)
+            await runFor(0.2)
+            if (!G.forceAttack(b, idx)) return null
+            await runFor(0.25)
+            // 보스 → 나 방향. 뒤로는 그 반대, 옆으로는 90° 돌린 쪽.
+            const me = G.state().player
+            const es = G.entityState(b)
+            const ax = me.x - es.x
+            const az = me.z - es.z
+            const L = Math.hypot(ax, az) || 1
+            const dx = how === 'back' ? ax / L : -az / L
+            const dz = how === 'back' ? az / L : ax / L
+            const cam = G.cameraAxes()
+            const fwd = dx * cam.forwardX + dz * cam.forwardZ
+            const right = dx * cam.rightX + dz * cam.rightZ
+            const keys = []
+            if (fwd > 0.25) keys.push('KeyW')
+            if (fwd < -0.25) keys.push('KeyS')
+            if (right > 0.25) keys.push('KeyD')
+            if (right < -0.25) keys.push('KeyA')
+            for (const k of keys) G.press(k)
+            await sleep()
+            const before = G.state().player.hp
+            G.press('Space')
+            await sleep()
+            G.release('Space')
+            await runFor(1.8)
+            for (const k of keys) G.release(k)
+            const me2 = G.state().player
+            const es2 = G.entityState(b)
+            return {
+              hurt: before - me2.hp,
+              dist: Math.hypot(me2.x - es2.x, me2.z - es2.z),
+            }
+          },
+          [hookIdx, at, mode],
+        )
+      const side = await arm('side')
+      const back = await arm('back')
+      console.log(
+        `\n  🟣 ${hook.id} 를 ${at.toFixed(1)}m 에서 강제로 세우고 두 답을 눌러 봤습니다\n` +
+          `     옆으로 구르기 — ${side ? `받은 피해 ${side.hurt} · 끝난 거리 ${side.dist.toFixed(1)}m` : '실패'}\n` +
+          `     뒤로 구르기   — ${back ? `받은 피해 ${back.hurt} · 끝난 거리 ${back.dist.toFixed(1)}m` : '실패'}`,
+      )
+      check(
+        side !== null && back !== null,
+        '🚧 🟣 두 답을 모두 실제로 눌러 봤다 (비교의 게이트)',
+        `옆 ${side ? '○' : '×'} · 뒤 ${back ? '○' : '×'}`,
+      )
+      if (side && back) {
+        check(
+          side.hurt > 0,
+          '🟣 **옆으로 굴러서는 못 넘긴다** (색마다 다른 대응 — 답이 겹치면 색이 하나 줄어듭니다)',
+          side.hurt > 0
+            ? `옆으로 ${side.hurt} 맞음 · 뒤로 ${back.hurt} 맞음`
+            : `**옆으로도 안 맞습니다**(${side.hurt}) — 🟣 의 답이 🔴 과 같아집니다` +
+              ` · 실전에서도 각도로 4/4 빗나갔습니다`,
+        )
+      }
+    }
+  }
+
+  /**
    * ---- 4. 🟢 — 반응하고 **예고 안에 한 대를 꽂을 수 있는가** ----
    *
    * 🟢 은 피하는 것이 정답이 **아닌** 유일한 색입니다(enemyAttacks.ts).
