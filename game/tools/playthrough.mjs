@@ -4081,18 +4081,25 @@ try {
        *    **"끝에서 400번"** 입니다. 세는 대상이 잘렸다는 사실은 숫자
        *    옆에 그대로 적습니다 — 조용히 자르지 않습니다.
        */
-      swings: G.swings?.() ?? [],
-      /**
-       * 🎨 **색 표를 같이 실어 옵니다.**
-       *
-       * 장부의 줄은 `attackId` 만 들고 있어서, 색별로 세려면 id→색 표가
-       * 필요합니다. 그 표를 프로브에 적어 두면 색이 늘어나는 날 **여기만
-       * 옛 표**를 들게 됩니다(이 저장소가 🟢 을 그렇게 놓친 적이 있습니다).
-       * 게임에게 묻습니다.
-       */
-      intentOfAttack: Object.fromEntries(
-        G.enemyRoster().flatMap((r) => r.attacks.map((a) => [a.id, a.intent])),
-      ),
+      ...(() => {
+        /**
+         * ⚠️ **`swings()` 는 읽으면 비웁니다.** 두 번 부르면 두 번째는
+         *    빈 배열입니다 — 실제로 색 셈을 붙이면서 한 번 그렇게 짰습니다.
+         *    한 번만 받아서 나눠 씁니다.
+         */
+        const rows = G.swings?.() ?? []
+        const intentOf = Object.fromEntries(
+          G.enemyRoster().flatMap((r) => r.attacks.map((a) => [a.id, a.intent])),
+        )
+        const seen = {}
+        let unknown = 0
+        for (const r of rows) {
+          const i = intentOf[r.attackId]
+          if (i === undefined) unknown++
+          else seen[i] = (seen[i] ?? 0) + 1
+        }
+        return { swings: rows, colorSeen: seen, colorUnknown: unknown }
+      })(),
       colorTable: G.reactionBudget().colors.map((c) => ({
         intent: c.intent,
         emoji: c.emoji,
@@ -4823,27 +4830,33 @@ try {
    *    판마다 편차도 큽니다(요약 기록: 보스 🟣 는 9판 중 4판에만 나옴).
    *    한 판을 보고 처방을 세우지 마십시오 — **여러 판**을 보십시오.
    */
+  /**
+   * ⚠️ **셈은 로그에 담고, 보고서는 읽기만 합니다.**
+   *
+   * 처음엔 여기서 바로 세어 인쇄했습니다. 이 저장소가 **두 번** 적어 둔
+   * 실수를 제가 세 번째로 한 것입니다(bench.mjs 「맞은 이유」·「갈림길」
+   * 주석): *"playthrough 의 보고서에만 넣어 두고 벤치를 돌렸는데, 벤치는
+   * 자기 집계를 따로 찍기 때문에 **40분을 돌리고도 장부가 한 글자도 안
+   * 나왔습니다.**"*
+   *
+   * 그리고 이 값은 **여러 판을 봐야만** 뜻이 있습니다 — 한 판에 🟣 가
+   * 1회였다가 다음 판에 3회였습니다. 즉 벤치에서 못 쓰면 **쓸 데가 거의
+   * 없는 값**입니다. 그래서 `log.colorSeen` 에 담습니다.
+   */
   ;(() => {
-    const rows = log.swings ?? []
     const table = log.colorTable ?? []
-    const intentOf = log.intentOfAttack ?? {}
     if (table.length === 0) {
       console.log('  🎨 색별 겪음  색 표를 못 받았습니다 — 아래 결론을 세우지 마십시오')
       return
     }
-    const n = new Map(table.map((c) => [c.intent, 0]))
-    let unknown = 0
-    for (const r of rows) {
-      const i = intentOf[r.attackId]
-      if (i === undefined) unknown++
-      else n.set(i, (n.get(i) ?? 0) + 1)
-    }
+    const seen = log.colorSeen ?? {}
     const green = table.find((c) => c.label.includes('때려'))
+    const unknown = log.colorUnknown ?? 0
     console.log(
       `  🎨 색별 겪음  ` +
         table
           .map((c) => {
-            const cnt = n.get(c.intent) ?? 0
+            const cnt = seen[c.intent] ?? 0
             // 🟢 만 별도 계수기를 씁니다 — 위 ⚠️ 참고.
             const shown = green && c.intent === green.intent ? (log.greenEvents ?? 0) : cnt
             return `${c.emoji} ${shown}회`

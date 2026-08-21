@@ -363,6 +363,59 @@ console.log(
     }
   }
   /**
+   * ── 🎨 **색을 몇 번 겪는가 — 여러 판의 중앙값** ────────────────────
+   *
+   * 아래 「색별 맞은 이유」는 **맞은 것**을 셉니다. 이 절은 다른 것을
+   * 묻습니다 — **겪기는 하는가.** 색이 코드에 있어도 한 판에 한 번도
+   * 안 나오면 그 색은 게임에 없는 것입니다.
+   *
+   * ── ⚠️ 왜 벤치여야 하는가 ────────────────────────────────────────
+   * 판마다 편차가 큽니다. 같은 게임으로 두 판을 돌렸더니:
+   *
+   *     1판차  🔴 7 · 🟡 5 · 🔵 5 · 🟣 **1** · 🟢 5
+   *     2판차  🔴 7 · 🟡 7 · 🔵 6 · 🟣 **3** · 🟢 6
+   *
+   * 🟣 가 세 배입니다. 한 판을 보고 *"🟣 가 모자라니 끄는 자를 늘리자"*
+   * 로 갔으면 **있지도 않은 문제를 고치는** 것이었습니다. 그래서 이
+   * 숫자는 **중앙값과 범위**로만 봅니다.
+   *
+   * ⚠️ 🟢 은 판정 장부에 안 잡힙니다 — 잘 대응하면 예고가 반격으로
+   *    끊겨서 판정이 아예 안 납니다. *"잘할수록 0에 가까워지는"* 색이라
+   *    별도 계수기(`greenEvents`)를 씁니다. 한 자로 재면 **잘한 사람을
+   *    못 겪은 것으로** 셉니다.
+   */
+  {
+    const table = logs.find((l) => (l.colorTable ?? []).length)?.colorTable ?? []
+    if (table.length === 0) {
+      console.log('                 🎨 색별 겪음 — 색 표가 없습니다 ⚠️ 계측기를 먼저 의심하십시오')
+    } else {
+      const green = table.find((c) => c.label.includes('때려'))
+      const med = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0
+      const cells = table.map((c) => {
+        const per = logs.map((l) =>
+          green && c.intent === green.intent ? (l.greenEvents ?? 0) : (l.colorSeen ?? {})[c.intent] ?? 0,
+        )
+        return `${c.emoji} ${med(per)}회(${Math.min(...per)}~${Math.max(...per)})`
+      })
+      console.log(`                 🎨 색별 겪음 — 중앙값(최소~최대) · ${logs.length}판`)
+      console.log(`                    ${cells.join(' · ')}`)
+      // 한 판이라도 0이면 그 색은 **판에 따라 아예 안 배웁니다.**
+      const missed = table.filter((c) =>
+        logs.some(
+          (l) =>
+            (green && c.intent === green.intent ? (l.greenEvents ?? 0) : (l.colorSeen ?? {})[c.intent] ?? 0) === 0,
+        ),
+      )
+      if (missed.length) {
+        console.log(
+          `                    ⚠️ **한 판이라도 0회였던 색** — ${missed.map((c) => c.emoji).join(' ')}` +
+            ` · 그 판을 한 사람은 이 색을 **한 번도 안 배웁니다**`,
+        )
+      }
+    }
+  }
+
+  /**
    * 🎨 **색별로 다시 봅니다 — 색마다 답이 다르기 때문입니다.**
    *
    * `안누름 30` 만 보면 *"구르기를 안 쓴다"* 로 읽히지만, 🟡 광역의 정답은
