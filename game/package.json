@@ -79,7 +79,8 @@
     "rhythm": "node tools/rhythm-probe.mjs",
     "archer": "node tools/archer-probe.mjs",
     "fill": "node tools/fill-preview.mjs",
-    "urn": "node tools/urn-probe.mjs"
+    "urn": "node tools/urn-probe.mjs",
+    "hide": "node tools/hide-preview.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",
