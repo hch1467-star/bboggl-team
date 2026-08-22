@@ -4813,11 +4813,25 @@ class Game {
    * 베껴 다시 계산하면 규칙이 두 벌이 되고, 벽 규칙은 이제 막 생겨서
    * 두 벌이 갈라질 여지가 가장 큽니다.
    */
-  debugWalls(): { key: string; x: number; z: number; open: boolean }[] {
+  debugWalls(): { key: string; x: number; z: number; open: boolean; standing: boolean }[] {
     if (!this.terrain) return []
+    /**
+     * `open` 과 `standing` 은 **다른 것**입니다:
+     *   · `open`     — **길**이 뚫렸는가 (지형의 통행 규칙)
+     *   · `standing` — **몸통**이 아직 서 있는가 (화면에 보이는 것)
+     *
+     * 둘을 한 칸으로 답하면 세이브를 넘긴 뒤의 어긋남 — *"길은 뚫렸는데
+     * 벽이 서 있다"* — 을 **물어볼 수조차 없습니다.** 실제로 그 버그가
+     * 생길 수 있는 자리가 있어서(`removeBrokenWalls`), 여기서 갈라 답합니다.
+     */
+    const standing = new Set<string>()
+    for (let e = 0; e < 4096; e++) {
+      if (!isAlive(e) || !hasComponent(CrackedWall, e)) continue
+      standing.add(`${CrackedWall.cx[e]},${CrackedWall.cz[e]}`)
+    }
     return this.terrain.shortcuts
       .filter((s) => s.kind === 'wall')
-      .map((s) => ({ key: s.key, x: s.x, z: s.z, open: s.open }))
+      .map((s) => ({ key: s.key, x: s.x, z: s.z, open: s.open, standing: standing.has(s.key) }))
   }
 
   /**
@@ -7394,8 +7408,8 @@ declare global {
       }
       /** 🧪 실험대 전용 — 등급/시드를 직접 끼웁니다. */
       setGear: (weaponIndex: number, tier: number, seed: number) => void
-      /** 🧱 금 간 벽 — 어디에 있고 부숴졌는가. */
-      walls: () => { key: string; x: number; z: number; open: boolean }[]
+      /** 🧱 금 간 벽 — 길이 뚫렸는가(`open`)와 몸통이 서 있는가(`standing`)는 다릅니다. */
+      walls: () => { key: string; x: number; z: number; open: boolean; standing: boolean }[]
       /** 지금 **걸어서** 그 자리에 닿는가 — 벽 뒤인지를 게임에게 묻는 창. */
       walkableFromPlayer: (x: number, z: number) => boolean
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
