@@ -5418,6 +5418,36 @@ class Game {
    * 묶여 있어서 그 비용이 그대로 **측정값을 흔듭니다**(느려진 봇이 더 못
    * 싸우고, 그게 밸런스 변화로 잘못 기록됩니다).
    */
+  /**
+   * ── 🧭 **지금 이 자리에서 안내가 «무엇을 가리킬 것인가»** ──────────────
+   *
+   * ── 왜 필요했는가 ────────────────────────────────────────────────
+   * `npm run secret` 의 「보물마다 알 방법이 하나는 있다」가 **같은 코드로
+   * 4/6 과 5/6 을 오갔습니다.** 원인은 게임이 아니라 **재는 법**이었습니다:
+   * 화면의 안내는 **타이머로 하나씩** 뜨는데(`sideHintT`), 프로브는 봇이
+   * 걷는 동안 *"지금 화면에 떠 있는 글"* 을 표본으로 주웠습니다. 봇이
+   * 그 자리를 몇 프레임에 지나가느냐에 따라 같은 지도가 다른 답을 냅니다.
+   *
+   * ⚠️ 흔들리는 검사는 **없는 것보다 나쁩니다** — 멀쩡한 배치를 고치게
+   *    만듭니다. 이 저장소는 실제로 그럴 뻔한 적이 있습니다(`findSideHint`
+   *    의 「알림 자리 돌리기」를 넣었다가 효과 없어 되돌린 기록).
+   *
+   * 그래서 **타이머를 빼고 규칙만** 묻습니다. 게임이 *"이 자리에서라면
+   * 무엇을 가리킬 것인가"* 를 그때그때 다시 계산해 답합니다 — 규칙은
+   * `findSideHint` 한 곳 그대로이고, 프로브는 **고르는 규칙**을 재게 됩니다.
+   *
+   * ⚠️ 화면에 **뜨는 것**(타이머·한 번에 하나)은 여전히 별개입니다.
+   *    그건 `sideHint()` 가 답하고, 이 훅은 *"고를 것이 있었는가"* 만
+   *    답합니다 — 처방이 다른 둘을 한 칸에 담지 않습니다.
+   */
+  debugSideHintAtHere(): { dir: string; dist: number; x: number; z: number } | null {
+    const p = this.playerEntity
+    const px = Transform.x[p]
+    const pz = Transform.z[p]
+    const obj = this.findObjective(px, pz)
+    return this.findSideHint(px, pz, obj ? { x: obj.x, z: obj.z } : null)
+  }
+
   debugDistancesToward(
     toX: number,
     toZ: number,
@@ -7673,7 +7703,9 @@ declare global {
    * 같은 문자열이어야 하므로 HUD 가 받은 값을 그대로 돌려줍니다 —
    * 이 저장소가 지연 공격에서 배운 것: **규칙이 아니라 도달한 것**을 봅니다.
    */
-  sideHint: () => { text: string; range: number; near: number }
+      sideHint: () => { text: string; range: number; near: number }
+      /** 🧭 지금 자리에서 안내가 **무엇을 고를 것인가** — 타이머 없이 규칙만. */
+      sideHintHere: () => { dir: string; dist: number; x: number; z: number } | null
       /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
       punishHealInfo: () => { rangeMult: number; cutTo: number }
       weaponTable: () => {
@@ -8741,6 +8773,8 @@ window.__game = {
     })),
   /** 🍶 회복 노림의 규칙값 — 프로브가 문턱을 베끼지 않게 게임이 알려 줍니다. */
   /** 🧭 지금 화면에 뜬 곁길 한 줄 — 규칙이 아니라 **도달한 것**을 봅니다. */
+  /** 🧭 **지금 자리에서 안내가 무엇을 고를 것인가** — 타이머 없이 규칙만. */
+  sideHintHere: () => game.debugSideHintAtHere(),
   sideHint: () => ({
     text: game.debugSideHintText(),
     at: game.debugSideHintAt(),

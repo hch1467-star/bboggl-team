@@ -293,7 +293,31 @@ try {
           .sort((p, q) => p.d - q.d)[0]
         if (!near) return { open: false, lit: false, why: '통이 없습니다' }
         // 통을 쳐서 불을 붙이고 — 도화선이 다 탈 때까지 기다립니다.
-        g.teleportPlayer(near.b.x + 1.6, near.b.z)
+        /**
+         * ── ⚠️ **서는 자리를 「+x 로 1.6m」로 짓지 않습니다** ──────────────
+         *
+         * 두꺼운 벽이 새 자리로 옮겨간 뒤 이 검사가 **흔들렸습니다**
+         * (같은 코드로 초록·빨강). 이유는 새 통의 동쪽 칸이 **한 단 높기**
+         * 때문입니다 — `+x 로 1.6m` 가 하필 그 턱 위였고, 그 자리에서
+         * 휘두르면 판정이 들쭉날쭉했습니다.
+         *
+         * 방향을 지어내지 않고 **게임에게 묻습니다**: 네 방향 중
+         *   · 걸어갈 수 있고
+         *   · 통과 **같은 지형 단**에 있는
+         * 자리를 씁니다. 그러면 통이 어디로 옮겨가도 이 검사가 따라옵니다.
+         */
+        const lvl = g.terrainLevelAt(near.b.x, near.b.z)
+        const spot =
+          [
+            [1.8, 0],
+            [-1.8, 0],
+            [0, 1.8],
+            [0, -1.8],
+          ]
+            .map(([ox, oz]) => ({ x: near.b.x + ox, z: near.b.z + oz }))
+            .find((q) => g.walkableFromPlayer(q.x, q.z) && g.terrainLevelAt(q.x, q.z) === lvl) ??
+          { x: near.b.x + 1.6, z: near.b.z }
+        g.teleportPlayer(spot.x, spot.z)
         await new Promise((r) => setTimeout(r, 300))
         /**
          * 🎯 ⑥ 과 **같은 이유로** 휘두르기 직전에 다시 겨눕니다 — 한 번
@@ -310,7 +334,11 @@ try {
           await new Promise((r) => setTimeout(r, 400))
         }
         // ⚠️ 폭발에 휘말리지 않게 물러납니다 — 재려는 것은 벽이지 플레이어가 아닙니다.
-        g.teleportPlayer(near.b.x + 12, near.b.z)
+        // 물러나는 것도 같은 방향의 반대쪽으로 — 폭발에 안 휘말리게.
+        g.teleportPlayer(
+          near.b.x + (spot.x - near.b.x) * 6,
+          near.b.z + (spot.z - near.b.z) * 6,
+        )
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 100))
           const w = g.walls().find((v) => v.key === key)
