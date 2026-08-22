@@ -162,6 +162,7 @@ import {
   swingRecords,
   flushSwingRecords,
   poiseDamage,
+  countInBlast,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -4993,13 +4994,22 @@ class Game {
    */
   debugBarrelInfo(): {
     blast: number
+    /** 🔥 불이 옮겨 붙는 거리 — **피해 반경과 다른 숫자**입니다(balance.ts `BARREL.chain`). */
+    chain: number
     fuse: number
     staminaLoss: number
     blown: number
     caught: number
-    barrels: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[]
+    barrels: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number; catches: number }[]
   } {
-    const out: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[] = []
+    const out: {
+      entity: number
+      x: number
+      z: number
+      fuseT: number
+      fuseTotal: number
+      catches: number
+    }[] = []
     for (let e = 0; e < 4096; e++) {
       if (!isAlive(e) || !hasComponent(Barrel, e)) continue
       out.push({
@@ -5008,10 +5018,17 @@ class Game {
         z: Number(Transform.z[e].toFixed(3)),
         fuseT: Number(Barrel.fuseT[e].toFixed(3)),
         fuseTotal: Number(Barrel.fuseTotal[e].toFixed(3)),
+        /**
+         * 💥 지금 터지면 휘말릴 적의 수 — **게임의 폭발이 쓰는 그 함수**로
+         * 셉니다(combat.ts `countInBlast`). 프로브가 거리를 다시 재면
+         * 몸 굵기를 빼먹고 게임보다 좁은 원을 재게 됩니다.
+         */
+        catches: countInBlast(Transform.x[e], Transform.z[e]),
       })
     }
     return {
       blast: BARREL.blast,
+      chain: BARREL.chain,
       fuse: barrelFuse(),
       staminaLoss: barrelStaminaLoss(),
       blown: this.barrelsBlown,
@@ -7680,11 +7697,20 @@ declare global {
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
       barrelInfo: () => {
         blast: number
+        chain: number
         fuse: number
         staminaLoss: number
         blown: number
         caught: number
-        barrels: { entity: number; x: number; z: number; fuseT: number; fuseTotal: number }[]
+        barrels: {
+          entity: number
+          x: number
+          z: number
+          fuseT: number
+          fuseTotal: number
+          /** 💥 지금 터지면 휘말릴 적의 수 — 게임의 폭발이 쓰는 그 함수로 셉니다. */
+          catches: number
+        }[]
       }
       shortcutInfo: () => {
         key: string

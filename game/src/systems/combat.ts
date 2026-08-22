@@ -1317,7 +1317,16 @@ export function barrelSystem(dt: number): void {
 }
 
 /** 💥 이 자리에서 지금 터지면 몇 **마리**가 담기는가 (플레이어·통은 뺍니다). */
-function countInBlast(bx: number, bz: number): number {
+/**
+ * 💥 이 자리에서 터지면 **몇 마리가 휘말리는가.**
+ *
+ * ⚠️ `export` 인 이유: `npm run barrel` 이 *"놓인 통마다 반경 안에 적이
+ *    있는가"* 를 잽니다. 프로브가 `hypot <= blast` 로 직접 세면 **몸
+ *    굵기를 빼먹어** 게임보다 좁은 원을 재게 됩니다 — 실제로 그렇게
+ *    세다가 4.5m 의 끄는 자를 「없다」로 읽고, 지도가 어긋난 줄 알았습니다.
+ *    규칙은 한 곳에만 두고, 세는 것도 여기서 합니다.
+ */
+export function countInBlast(bx: number, bz: number): number {
   const tids = targets.run()
   let n = 0
   for (let j = 0; j < targets.count; j++) {
@@ -1352,7 +1361,16 @@ function explodeBarrel(b: number): void {
      * 입니다. 폭발만 중심으로 재면 "그린 원에 몸이 걸쳤는데 안 맞았다"가
      * 생기고, 그건 이 저장소가 이미 한 번 고친 종류의 어긋남입니다.
      */
-    if (Math.hypot(dx, dz) > BARREL.blast + Body.radius[t]) continue
+    const dist = Math.hypot(dx, dz)
+    /**
+     * 📏 **두 반경 중 넓은 쪽으로 먼저 거릅니다.**
+     *
+     * ⚠️ 예전에는 여기서 `BARREL.blast` 로 잘랐습니다. 그러면 불이 번지는
+     *    거리가 피해 반경보다 넓어질 수가 없습니다 — **거르는 자리가
+     *    규칙을 정해 버린** 것입니다. 아래 각 가지가 자기 반경으로 다시
+     *    재고, 이 줄은 **거를 뿐** 아무것도 정하지 않습니다.
+     */
+    if (dist > Math.max(BARREL.blast, BARREL.chain) + Body.radius[t]) continue
 
     /**
      * 💥 **연쇄** — 반경 안의 다른 통에도 불이 붙습니다.
@@ -1361,13 +1379,25 @@ function explodeBarrel(b: number): void {
      * 즉 연쇄는 즉발이 아니라 **한 박자 뒤**에 옵니다 — 플레이어에게도
      * 적에게도 다시 한 번 *"걸어서 이탈"* 할 시간이 주어집니다.
      * 이미 불붙은 통은 건드리지 않으므로 무한 연쇄가 생길 수 없습니다.
+     *
+     * ⚠️ **여기만 `BARREL.chain` 을 씁니다** — 불이 번지는 거리는 피해를
+     *    주는 거리보다 넓습니다. 왜 나눴는지는 balance.ts `BARREL.chain`
+     *    주석에 숫자와 함께 있습니다.
      */
     if (hasComponent(Barrel, t)) {
+      if (dist > BARREL.chain + Body.radius[t]) continue
       // 옆 통은 **체력만 깎습니다.** 불은 다음 프레임에 `barrelSystem` 이
       // 붙입니다 — 점화 경로가 하나여야 연쇄도 규칙대로 한 박자 뒤에 옵니다.
       if (Health.hp[t] > 0) Health.hp[t] = 0
       continue
     }
+
+    /**
+     * ⚠️ **여기부터는 전부 「피해 반경」입니다.** 통이 아닌 것에게 넓은
+     *    반경을 그대로 흘리면, 불이 번지는 거리를 넓히는 순간 폭발이
+     *    조용히 두 배로 세집니다. 가지마다 자기 자를 씁니다.
+     */
+    if (dist > BARREL.blast + Body.radius[t]) continue
 
     /**
      * 🧱💥 **벽은 폭발로 열립니다** — 두꺼운 벽의 유일한 답입니다.

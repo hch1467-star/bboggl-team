@@ -168,6 +168,22 @@ try {
    *
    * 대가가 없으면 통은 "항상 누르는 공짜 버튼"입니다. 스태미나를 가득
    * 채워 두고 한가운데 서서 확인합니다 — **체력은 그대로, 스태미나는 규칙만큼.**
+   *
+   * ── ⚠️ **이 검사는 오래 빨간 채로 있었습니다 — 계측기 탓입니다** ────
+   * 예전에는 도화선 전후의 스태미나를 **빼서** 봤습니다:
+   *
+   *     ❌ 휘말린 나는 스태미나를 잃는다 — 111 → 94 (규칙 -36)
+   *
+   * 111 − 94 = 17 이라 빨갛습니다. 그런데 통은 규칙대로 36을 가져갔습니다.
+   * **스태미나가 그 사이에 회복되기 때문**입니다 — 도화선 1초 + 여유
+   * 0.25초 동안 저절로 차오릅니다. 즉 이 검사는 *"통이 얼마를 가져갔나"*
+   * 가 아니라 *"통이 가져간 것에서 회복분을 뺀 나머지"* 를 재고 있었고,
+   * 그 값에는 아무 규칙도 없습니다.
+   *
+   * 그래서 **한 프레임의 낙폭**을 봅니다. 회복은 프레임당 아주 작고
+   * 폭발은 한 프레임에 통째로 들어오므로, 가장 큰 낙폭이 곧 통이
+   * 가져간 값입니다. 회복 속도를 몰라도 되는 것이 요점입니다 —
+   * 회복률을 여기 적으면 그 값을 손보는 날 이 검사가 또 거짓이 됩니다.
    */
   const self = await page.evaluate(async () => {
     const G = window.__game
@@ -179,14 +195,23 @@ try {
     await window.__t.runFor(0.2)
     const before = G.state().player
     G.damageEntity(b, 1)
-    await window.__t.runFor(info.fuse + 0.25)
-    const after = G.state().player
-    return { before, after, loss: info.staminaLoss }
+    // 프레임마다 지켜보며 **가장 큰 한 번의 낙폭**을 찾습니다.
+    let prev = before.stamina
+    let drop = 0
+    const until = G.state().elapsed + info.fuse + 0.25
+    const deadline = Date.now() + 30000
+    while (G.state().elapsed < until && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 8))
+      const s = G.state().player.stamina
+      if (prev - s > drop) drop = prev - s
+      prev = s
+    }
+    return { before, after: G.state().player, drop: Number(drop.toFixed(2)), loss: info.staminaLoss }
   })
   check(
-    Math.abs(self.before.stamina - self.after.stamina - self.loss) < 1.5,
+    Math.abs(self.drop - self.loss) < 1.5,
     '💥 휘말린 나는 **스태미나를 잃는다** (통이 공짜 버튼이 되지 않게)',
-    `${self.before.stamina} → ${self.after.stamina} (규칙 -${self.loss})`,
+    `한 프레임 낙폭 -${self.drop} vs 규칙 -${self.loss}`,
   )
   check(
     self.after.hp === self.before.hp,
@@ -217,10 +242,29 @@ try {
     if (cam.forwardX > 0.25 || cam.forwardZ > 0.25) keys.push('KeyW')
     else keys.push('KeyS')
     for (const k of keys) G.press(k)
-    await window.__t.runFor(info.fuse + 0.3)
+    // ⚠️ 위 3번과 **같은 자로 잽니다** — 앞뒤 차이가 아니라 한 프레임 낙폭.
+    //    걷는 동안에도 스태미나는 저절로 차오르므로, 뺄셈으로는
+    //    "통에 안 맞았다"와 "맞았는데 그만큼 회복했다"를 못 가릅니다.
+    let prev = before
+    let drop = 0
+    const until = G.state().elapsed + info.fuse + 0.3
+    const deadline = Date.now() + 30000
+    while (G.state().elapsed < until && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 8))
+      const s = G.state().player.stamina
+      if (prev - s > drop) drop = prev - s
+      prev = s
+    }
     for (const k of keys) G.release(k)
     const p = G.state().player
-    return { before, after: p.stamina, dist: Math.hypot(p.x, p.z), R: info.blast }
+    return {
+      before,
+      after: p.stamina,
+      drop: Number(drop.toFixed(2)),
+      loss: info.staminaLoss,
+      dist: Math.hypot(p.x, p.z),
+      R: info.blast,
+    }
   })
   check(
     escape.dist > escape.R,
@@ -228,9 +272,9 @@ try {
     `걸어간 거리 ${escape.dist.toFixed(1)}m > 반경 ${escape.R}m`,
   )
   check(
-    escape.after === escape.before,
+    escape.drop < escape.loss * 0.5,
     '🚶 나간 사람은 **아무것도 안 잃는다** (읽고 답한 값이 있다)',
-    `스태미나 ${escape.before} → ${escape.after}`,
+    `가장 큰 낙폭 -${escape.drop} (휘말렸다면 -${escape.loss})`,
   )
 
   /**
@@ -266,6 +310,82 @@ try {
   )
 
   /**
+   * ---- 5.5 🔥 **불은 폭발보다 멀리 번진다** ----
+   *
+   * ── 왜 이 셋을 같이 봐야 하는가 ─────────────────────────────────
+   * `BARREL.blast`(피해)와 `BARREL.chain`(불) 을 나눈 날 만든 검사입니다.
+   * 예전에는 한 숫자가 둘을 다 맡았고, 그래서 **불을 넓히려면 폭발이
+   * 세지는** 상태였습니다. 나눈 것이 실제로 나뉘었는지는 한 방향만
+   * 봐서는 알 수 없습니다:
+   *
+   *   ① 피해 반경 **밖**, 불 반경 **안** 의 통에 불이 붙는가  → 넓어졌나
+   *   ② 그 거리에 선 **사람은 안 다치는가**                  → 폭발까지 같이 넓어지진 않았나
+   *   ③ 그 거리가 **근접 무기 최대 도달보다 먼가**            → 「연쇄로만 닿는 자리」가 존재하나
+   *
+   * ①만 있으면 폭발이 통째로 두 배가 된 고장이 통과합니다. ③이 없으면
+   * 숫자는 나뉘었는데 **아무 배치도 못 만드는** 상태를 못 알아챕니다 —
+   * 나누기 **전**이 정확히 그 상태였습니다(불 4.5m < 칼 5.7m).
+   */
+  const far = await page.evaluate(async () => {
+    const G = window.__game
+    G.clearEnemies()
+    const info = G.barrelInfo()
+    // 두 반경의 **한가운데** — 피해에는 안 걸리고 불에는 걸리는 자리.
+    const gap = (info.blast + info.chain) / 2
+    const a = G.spawnBarrel(0, 0)
+    const b = G.spawnBarrel(gap, 0)
+    // 사람도 같은 거리에 세웁니다(반대편) — 폭발이 여기까지 오는지 보려고.
+    G.teleportPlayer(-gap, 0)
+    await window.__t.runFor(0.3)
+    const hpBefore = G.state().player.hp
+    G.damageEntity(a, 1)
+    await window.__t.runFor(info.fuse + 0.15)
+    const second = G.barrelInfo().barrels.find((x) => x.entity === b)
+    return {
+      gap,
+      blast: info.blast,
+      chain: info.chain,
+      lit: !!second && second.fuseTotal > 0,
+      hurt: Number((hpBefore - G.state().player.hp).toFixed(2)),
+    }
+  })
+  check(
+    far.lit,
+    `🔥 피해 반경 **밖**(${far.gap.toFixed(1)}m > ${far.blast}m)의 통에도 불이 옮는다`,
+    `불 반경 ${far.chain}m`,
+  )
+  check(
+    far.hurt === 0,
+    '🔥 같은 거리의 **사람은 안 다친다** (불만 넓어졌지 폭발은 그대로)',
+    `${far.gap.toFixed(1)}m 에서 잃은 체력 ${far.hurt}`,
+  )
+
+  /**
+   * ③ **근접 무기 최대 도달**은 게임이 계산해 줍니다(`reachUpperBound` —
+   * 사거리 + 파고들기). 여기에 3.5·2.2 같은 숫자를 베껴 적으면 무기를
+   * 손보는 날 이 검사만 옛 세상에 남습니다.
+   */
+  const reach = await page.evaluate(() => {
+    const G = window.__game
+    let max = 0
+    let who = ''
+    for (const w of G.weaponTable()) {
+      for (const c of w.comboSteps ?? []) {
+        if (c.reachUpperBound > max) {
+          max = c.reachUpperBound
+          who = `${w.name} ${c.name}`
+        }
+      }
+    }
+    return { max, who, chain: G.barrelInfo().chain }
+  })
+  check(
+    reach.chain > reach.max,
+    '🔥 불이 **칼보다 멀리** 간다 (「연쇄로만 닿는 자리」가 존재한다)',
+    `불 ${reach.chain}m > 칼 ${reach.max}m (${reach.who}) · 창 ${(reach.chain - reach.max).toFixed(1)}m`,
+  )
+
+  /**
    * ---- 6. 존에 실제로 놓여 있는가 ----
    *
    * 아레나에서 아무리 잘 돌아도 **존에 없으면 없는 기능**입니다.
@@ -273,26 +393,64 @@ try {
    */
   await page.goto(`http://localhost:${PORT}/?lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
+  /**
+   * ── ⚠️ **이 검사가 「할 일이 두 가지인 물건」을 하나로 보고 있었습니다** ──
+   *
+   * 예전 문장은 *"놓인 통마다 반경 안에 **적이 있다**"* 였고, 오래
+   * 빨간 채였습니다:
+   *
+   *     ❌ 0마리 · 2마리 · 0마리 · 1마리
+   *
+   * 그런데 0마리 중 하나는 **두꺼운 벽을 여는 통**입니다. 적이 없는 게
+   * 맞습니다 — 그 통의 일은 싸움이 아니라 **문을 여는 것**입니다.
+   * 검사가 *"아무 일도 안 나는 통"* 을 잡으려던 것인데 통의 할 일이
+   * 그새 둘로 늘었고, 문장은 하나만 알고 있었습니다.
+   *
+   * 그래서 **할 일을 갈래마다 셉니다.** 이 저장소가 이번 세션에 계속
+   * 확인한 규칙 그대로 — 처방이 다른 둘을 한 칸에 담지 않습니다.
+   * 넓히는 것이지 **무르게 하는 것이 아닙니다**: 적도 벽도 없는 통은
+   * 여전히 빨갛습니다.
+   */
   const inZone = await page.evaluate(() => {
     const G = window.__game
-    const b = G.barrelInfo().barrels
-    const foes = G.levelFoes()
-    const blast = G.barrelInfo().blast
-    return b.map((x) => ({
+    const info = G.barrelInfo()
+    /**
+     * ⚠️ `G.walls?.() ?? []` 로 쓰지 않습니다. 훅 이름을 틀리면 **조용히
+     *    빈 배열**이 나오고, 그건 「빈 표본으로 통과」와 같은 종류의
+     *    거짓입니다(`npm run guard` 가 `.every()` 에 대해 잡는 그것).
+     *    실제로 여기서 한 번 당했습니다 — `debugWalls` 라고 썼는데
+     *    바깥으로 나가는 이름은 `walls` 라, 벽이 0개로 세어졌습니다.
+     *    이름이 틀리면 **소리를 내며 죽어야** 합니다.
+     */
+    const walls = G.walls()
+    return info.barrels.map((x) => ({
       x: x.x,
       z: x.z,
-      near: foes.filter((f) => Math.hypot(f.x - x.x, f.z - x.z) <= blast).length,
+      /**
+       * ⚠️ 적은 **게임이 셉니다**(`catches`). 여기서 `hypot <= blast` 로
+       *    직접 세다가 한 번 틀렸습니다 — 게임의 규칙은 `blast + 대상의
+       *    몸 굵기`라 제가 **더 좁은 원**을 재고 있었고, 4.5m 에 선
+       *    끄는 자를 「없다」로 읽었습니다. 지도가 어긋난 줄 알고 배치를
+       *    의심하던 참이었습니다.
+       */
+      foes: x.catches,
+      walls: walls.filter((w) => Math.hypot(w.x - x.x, w.z - x.z) <= info.blast + 1).length,
+      // 🔥 연쇄용으로 놓인 통인가 — 불 반경 안의 다른 통.
+      kin: info.barrels.filter(
+        (o) => o.entity !== x.entity && Math.hypot(o.x - x.x, o.z - x.z) <= info.chain,
+      ).length,
     }))
   })
+  const jobOf = (b) =>
+    b.foes >= 1 ? `적 ${b.foes}` : b.walls >= 1 ? '벽' : b.kin >= 1 ? `연쇄 ${b.kin}` : '**없음**'
   console.log(
-    `\n  [존] 놓인 통 ${inZone.length}개 — ` +
-      inZone.map((b) => `(${b.x},${b.z}) 반경 안 적 ${b.near}마리`).join(' · '),
+    `\n  [존] 놓인 통 ${inZone.length}개 — ` + inZone.map((b) => `(${b.x},${b.z}) ${jobOf(b)}`).join(' · '),
   )
   check(inZone.length > 0, '💥 **존에 통이 실제로 놓여 있다** (아레나에서만 되는 기능이 아니다)', `${inZone.length}개`)
   check(
-    inZone.length > 0 && inZone.every((b) => b.near >= 1),
-    '💥 놓인 통마다 반경 안에 **적이 있다** (놓기만 하고 아무 일도 안 나지 않게)',
-    inZone.map((b) => `${b.near}마리`).join(' · '),
+    inZone.length > 0 && inZone.every((b) => b.foes >= 1 || b.walls >= 1 || b.kin >= 1),
+    '💥 놓인 통마다 **할 일이 있다** (적을 잡거나 · 벽을 열거나 · 불을 옮기거나)',
+    inZone.map(jobOf).join(' · '),
   )
 
   console.log('')
