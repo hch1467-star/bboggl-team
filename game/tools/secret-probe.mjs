@@ -425,15 +425,45 @@ try {
     return r.st + r.tb - r.sb
   }
 
-  const seen = []
+  const all = []
   for (const v of walk.treasures) {
-    seen.push({
+    all.push({
       ...v,
       d: nearest(v.x, v.z),
       walk: await walkNear(v.x, v.z),
       extra: await detour(v.x, v.z),
     })
   }
+  /**
+   * ── 🧱 **벽 뒤의 보물은 다른 자로 재야 합니다** ────────────────────
+   *
+   * 금 간 벽이 생기면서 *"걸어서 못 가는 보물"* 이 처음으로 생겼습니다.
+   * 이 프로브를 그대로 두었더니 **터졌습니다**(`extra` 가 null 인데
+   * `.toFixed()` 를 불렀습니다). 터진 것은 고맙게도 **조용히 통과하지
+   * 않았다**는 뜻입니다.
+   *
+   * 그런데 고치는 방향이 둘입니다:
+   *   ① null 을 건너뛴다 → **분모에서 사라집니다.** 「빈 표본으로 통과하지
+   *      않게」의 정반대 — 숨긴 보물일수록 아무 검사도 안 받게 됩니다
+   *   ② **다른 무리로 갈라 다른 것을 묻는다**
+   *
+   * ②를 고릅니다. 이 저장소가 이번 세션에 여덟 번 만난 실패가
+   * *"처방이 다른 둘이 한 칸에 담기면 정확히 거꾸로 읽힌다"* 였고,
+   * 여기가 정확히 그 모양입니다:
+   *
+   *     길로 가는 보물 — *"싸게 갈 수 있고, 알 방법이 있는가"*
+   *     벽 뒤 보물    — *"**알 방법이 없어야** 하고, 대신 **벽이 보여야** 한다"*
+   *
+   * 두 번째 줄의 앞 절을 눈여겨보십시오. 벽 뒤 보물에 빛기둥이나 안내가
+   * 붙으면 그건 **통과가 아니라 실패**입니다 — 비밀을 일러바친 것이니까요.
+   * 같은 칸에 담았다면 이 뒤집힘을 영영 못 봤을 것입니다.
+   *
+   * ⚠️ 「걸어서 못 감」으로 가릅니다(`extra === null`). 「벽 뒤」라고
+   *    이름 붙은 것을 세지 않습니다 — 못 가는 이유가 벽이든 아니든
+   *    **못 가면 다른 자로 재야 한다**는 것이 요점입니다.
+   */
+  const seen = all.filter((v) => v.extra !== null)
+  const walled = all.filter((v) => v.extra === null)
   /**
    * ── 💥 **놓아 둔 것을 아무도 안 만나면 없는 것과 같습니다** ────────────
    *
@@ -489,6 +519,12 @@ try {
 
   const hidden = seen.filter((v) => v.d > t.cameraViewSize)
   console.log('')
+  for (const v of walled) {
+    console.log(
+      `    🧱 (${Math.round(v.x)}, ${Math.round(v.z)})  **벽 뒤** — 걸어서 못 갑니다(부수기 전에는)` +
+        `  눈으로 ${v.d.toFixed(1)}m`,
+    )
+  }
   for (const v of seen) {
     const ok = v.d <= t.cameraViewSize
     console.log(
@@ -521,6 +557,41 @@ try {
           .map((v) => `(${Math.round(v.x)}, ${Math.round(v.z)}) 더 걷는 ${v.extra.toFixed(0)}m`)
           .join(' · '),
   )
+
+  /**
+   * ── 🧱 **벽 뒤 보물 — 세 가지를 묻습니다** ──────────────────────────
+   *
+   * ① **벽이 실제로 있는가.** 보물이 그냥 못 가는 자리에 놓인 것과
+   *    「벽 뒤에 숨은 것」은 완전히 다릅니다. 앞은 버그이고 뒤는 설계인데,
+   *    거리만 보면 **똑같이 「못 감」** 으로 보입니다.
+   * ② **벽이 동선에서 보이는가**(카메라 22m). 이 저장소가 「가림벽 뒤
+   *    주머니」에서 정확히 여기서 실패했습니다 — 벽은 잘 서 있었는데
+   *    길에서 안 보여서, 비밀이 아니라 이스터에그가 되었습니다.
+   * ③ **부수기 전에 안내가 일러바치지 않는가**(`npm run wall` ④ 와 짝).
+   *
+   * ⚠️ ②는 **거리만** 봅니다. 「그 방향이 화면에 잡히는가」는 그림으로만
+   *    확인됩니다(`npm run hide`). 못 재는 것을 잰 척하지 않습니다.
+   */
+  if (walled.length > 0) {
+    const wallsAt = await page.evaluate(() => window.__game.walls())
+    check(
+      wallsAt.length > 0,
+      `🧱 **벽 뒤 보물에는 벽이 있다** (그냥 못 가는 자리가 아니라)`,
+      `벽 뒤 보물 ${walled.length}개 · 금 간 벽 ${wallsAt.length}개`,
+    )
+    for (const w of wallsAt) {
+      const d = nearest(w.x, w.z)
+      check(
+        d <= t.cameraViewSize,
+        `🧱 **금 간 벽이 동선에서 보인다** (알아볼 수 없는 비밀은 비밀이 아닙니다)`,
+        `(${Math.round(w.x)}, ${Math.round(w.z)}) 동선에서 ${d.toFixed(1)}m ` +
+          `${d <= t.cameraViewSize ? `≤ 카메라 ${t.cameraViewSize}m` : `> 카메라 ${t.cameraViewSize}m`}`,
+      )
+    }
+    console.log(
+      `       ⚠️ 거리만 잰 것입니다 — 실제로 화면에 잡히는지는 \`npm run hide\` 의 그림이 봅니다`,
+    )
+  }
 
   console.log('')
   /**

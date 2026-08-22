@@ -12,6 +12,7 @@ import { chromium } from 'playwright'
 import { existsSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { ensureFreshBuild } from './fresh-build.mjs'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const OUT = path.join(ROOT, 'tools', 'shots')
@@ -22,6 +23,9 @@ const PREINSTALLED = ['/opt/pw-browsers/chromium']
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 mkdirSync(OUT, { recursive: true })
 
+// 🏗 **찍기 전에 짓습니다.** 이 도구는 소스가 아니라 `dist/` 를 찍습니다 —
+//    안 지으면 옛 게임의 그림을 지금 것으로 믿게 됩니다(fresh-build.mjs).
+await ensureFreshBuild(ROOT)
 const server = await preview({
   root: ROOT,
   preview: { port: PORT, strictPort: true, host: '127.0.0.1' },

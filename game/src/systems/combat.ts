@@ -19,6 +19,7 @@ import {
   POISE,
   barrelFuse,
   URN,
+  CRACKED_WALL,
   barrelStaminaLoss,
   hurtFlash,
 } from '../config/balance'
@@ -28,6 +29,7 @@ import {
   AttackPhase,
   Barrel,
   Urn,
+  CrackedWall,
   Body,
   Enemy,
   EnemyKind,
@@ -1244,6 +1246,36 @@ export function urnSystem(): void {
   }
 }
 
+/**
+ * 🧱 **금 간 벽** — 부서지면 지형의 통행 규칙이 바뀝니다.
+ *
+ * 항아리와 **나란히** 두되 안에 든 것이 없습니다. 벽이 내놓는 것은
+ * 물건이 아니라 **길**이고, 길을 여는 것은 이 파일이 아니라 지형입니다 —
+ * 그래서 여기서는 *"부서졌다"* 만 알리고, `terrain.breakWall()` 을 부르는
+ * 일은 `main.ts` 가 합니다(전투가 지형을 직접 만지기 시작하면 「규칙은
+ * 한 곳에만」이 무너집니다).
+ */
+export const wallBreakEvents: (BreakEvent & { cx: number; cz: number })[] = []
+const crackedWalls = defineQuery(CrackedWall, Transform, Health)
+
+export function crackedWallSystem(): void {
+  const ids = crackedWalls.run()
+  for (let i = 0; i < crackedWalls.count; i++) {
+    const c = ids[i]
+    // ⚠️ 항아리 `broken` 과 같은 이유 — 안 보면 매 프레임 다시 부서집니다.
+    if (Health.hp[c] > 0 || CrackedWall.broken[c] === 1) continue
+    CrackedWall.broken[c] = 1
+    wallBreakEvents.push({
+      entity: c,
+      x: Transform.x[c],
+      y: Transform.y[c] + CRACKED_WALL.height * 0.5,
+      z: Transform.z[c],
+      cx: CrackedWall.cx[c],
+      cz: CrackedWall.cz[c],
+    })
+  }
+}
+
 export function barrelSystem(dt: number): void {
   const ids = barrels.run()
   const count = barrels.count
@@ -1682,6 +1714,14 @@ function applyHit(a: number, spec: AttackSpec): boolean {
        * (항아리가 화살을 막아야 하는가는 **아직 아무도 정하지 않았습니다.**)
        */
       if (hasComponent(Barrel, t) || hasComponent(Urn, t)) continue
+      /**
+       * 🧱 금 간 벽도 건너뜁니다 — 다만 **이유가 위와 다릅니다.**
+       * 위의 둘은 *"아직 아무도 안 정했다"* 이지만, 벽은 정했습니다:
+       * 통행을 막는 것은 **지형**이고 이 몸통은 *"칼이 닿는가"* 만
+       * 담당합니다(world.ts `spawnCrackedWall`). 화살을 여기서 막으면
+       * **지형이 하는 일을 몸통이 한 벌 더** 하게 됩니다.
+       */
+      if (hasComponent(CrackedWall, t)) continue
       if (hasComponent(Actor, t) && Actor.state[t] === ActorState.Dead) continue
       const d = shapeDist(t)
       if (d < 0 || d >= nearest) continue
@@ -1831,6 +1871,20 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      *    일이 생기면, 플레이어가 만든 소리와 구분이 안 됩니다.
      */
     if (hasComponent(Urn, t)) {
+      if (Health.hp[t] > 0) Health.hp[t] = 0
+      landed = true
+      continue
+    }
+    /**
+     * 🧱 **금 간 벽도 한 대면 무너집니다** — 근거는 balance.ts
+     * `CRACKED_WALL` 의 「산나비의 규칙」 문단입니다. 어려운 일은
+     * 기계가 하고, 플레이어 몫은 **알아보는 것** 하나입니다.
+     *
+     * ⚠️ 적은 여기 못 옵니다(위 진영 검사) — 항아리와 **같은 이유**가
+     *    아니라 더 센 이유로 그렇습니다: 적이 벽을 부수면 **플레이어가
+     *    아직 알아보지도 못한 비밀이 저절로 열립니다.**
+     */
+    if (hasComponent(CrackedWall, t)) {
       if (Health.hp[t] > 0) Health.hp[t] = 0
       landed = true
       continue

@@ -145,6 +145,13 @@ class Editor {
        */
       urn: new THREE.SphereGeometry(0.36, 8, 6),
       urnFull: new THREE.SphereGeometry(0.36, 8, 6),
+      /**
+       * 🧱 금 간 벽 — **납작한 판**입니다. 지도 위에서 이것만은 「사물」이
+       * 아니라 「벽」으로 보여야, 놓는 사람이 *"이 칸 경계를 막는다"* 를
+       * 알아봅니다. (실제로 어느 경계를 막는지는 지형이 정합니다 —
+       * terrain.ts `buildWalls`. 후보가 둘 이상이면 세우지 않고 경고합니다.)
+       */
+      crackedWall: new THREE.BoxGeometry(1.7, 1.2, 0.3),
       boss: new THREE.CapsuleGeometry(0.7, 1.5, 4, 10),
       // 게임 안과 같은 실루엣 규칙 — 얽는 자는 가늘고 크게, 끄는 자는 낮고 넓게.
       binder: new THREE.CapsuleGeometry(0.34, 1.3, 4, 8),

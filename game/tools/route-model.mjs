@@ -369,7 +369,18 @@ for (const t of ent('treasure')) {
  */
 {
   const foes = level.entities.filter(
-    (e) => !['spawn', 'treasure', 'bonfire', 'anvil', 'ladder', 'boss', 'urn', 'urnFull'].includes(e.kind),
+    /**
+     * 🧱 금 간 벽을 뺍니다 — 이건 적이 아니라 **사물**입니다. 안 빼면
+     * *"34마리 중"* 처럼 마릿수가 조용히 늘어나고, 「피할 수 있는가」의
+     * 분모가 틀립니다.
+     *
+     * ⚠️ 폭발통(`barrel`)은 **일부러 그대로 둡니다.** 예전부터 여기
+     *    들어 있었고, 통은 실제로 피해를 줍니다 — *"피해서 지나갈 수
+     *    있는가"* 가 통에도 유효한 물음입니다. 벽을 빼는 김에 통까지
+     *    빼면 **재던 것이 조용히 바뀝니다.**
+     */
+    (e) =>
+      !['spawn', 'treasure', 'bonfire', 'anvil', 'ladder', 'boss', 'urn', 'urnFull', 'crackedWall'].includes(e.kind),
   )
   const reachableWithout = (ex, ez, r) => {
     const g = h.slice()
@@ -518,6 +529,43 @@ for (const t of ent('treasure')) {
           ` · 후보는 지형만의 답입니다 — 싸울 만한 자리인지는 \`map\`·\`play\` 가 봅니다`,
       )
     }
+  }
+}
+
+/**
+ * ── 🧱 **금 간 벽은 「보이는가」로 재야 합니다** ────────────────────
+ *
+ * 벽 뒤의 방은 보물처럼 **더 걷는 거리**로도 재집니다(위 목록에 이미
+ * 나옵니다). 그런데 이 물건의 값은 거리에 있지 않습니다 — 값은
+ * *"알아볼 수 있는가"* 하나이고, 알아보려면 **화면에 들어와야** 합니다.
+ *
+ * 이 저장소는 정확히 여기서 한 번 실패했습니다(make-zone.mjs 「가림벽
+ * 뒤 주머니」): 벽은 잘 서 있었는데 **길에서 안 보여서** 비밀이 아니라
+ * 이스터에그가 되었습니다. 그때 남긴 처방이 *"동선에서 22m(카메라) 안"*
+ * 이었으므로, 여기서 그 처방을 **자로 만듭니다.**
+ *
+ * ⚠️ 이 자는 **거리만** 봅니다. 「그 방향이 화면 위쪽인가」·「다른
+ *    지형에 가려지는가」는 못 잽니다 — 그건 그림으로 봐야 합니다
+ *    (`npm run hide`). 못 재는 것을 잰 척하지 않습니다.
+ */
+{
+  const walls = level.entities.filter((e) => e.kind === 'crackedWall')
+  if (walls.length > 0) {
+    console.log(`\n  🧱 금 간 벽 ${walls.length}개 — **동선에서 보이는가**`)
+    for (const e of walls) {
+      const [cx, cz] = cellOf(e.x, e.z)
+      let near = Infinity
+      for (const [rx, rz] of route) {
+        const d = Math.hypot(wx(rx) - wx(cx), wz(rz) - wz(cz))
+        if (d < near) near = d
+      }
+      const ok = near <= EYE
+      console.log(
+        `     (${wx(cx).toFixed(0)},${wz(cz).toFixed(0)})  동선에서 ${near.toFixed(1)}m` +
+          (ok ? '  ✅ 화면에 들어옵니다' : `  ❌ 카메라(${EYE}m) 밖 — 알아볼 수가 없습니다`),
+      )
+    }
+    console.log('     ⚠️ 거리만 잰 것입니다. 실제로 보이는지는 `npm run hide` 로 그림을 봐야 합니다')
   }
 }
 

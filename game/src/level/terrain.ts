@@ -48,7 +48,30 @@ export interface Shortcut {
   /** 아래에서 위로 향하는 방향(정규화 XZ) */
   dirX: number
   dirZ: number
-  /** 내려져 있는가. 내려지면 양방향으로 통행 가능. */
+  /**
+   * ── 🧱 **왜 「금 간 벽」이 사다리와 같은 부품인가** ───────────────────
+   *
+   * 둘은 하는 일이 **글자 그대로 같습니다**: *"평소에는 못 지나가는 칸
+   * 경계가, 어떤 일이 있고 나면 양쪽으로 열린다."* 다른 것은 **여는
+   * 방법**뿐입니다 — 사다리는 위에서 내리고, 벽은 칩니다.
+   *
+   * 그래서 새 장치를 안 만들고 여기에 `kind` 한 칸을 답니다. 이렇게 하면
+   * **이미 맞춰 둔 것들이 전부 공짜로 따라옵니다:**
+   *
+   *   · 길찾기 캐시 무효화 — `field` 키에 이미 열림 상태가 들어 있습니다
+   *   · 세이브 — `openShortcutKeys()` 가 좌표로 저장합니다(부순 벽은 계속 열려 있습니다)
+   *   · 적 이동 · 화살표 안내 — 전부 같은 `canStepCell` 을 봅니다
+   *
+   * 따로 만들었다면 이 넷을 **하나하나 다시 맞춰야** 했고, 하나라도
+   * 빠뜨리면 *"벽을 부쉈는데 적이 안 따라 들어온다"* 같은 조용한 어긋남이
+   * 생겼을 것입니다. 「규칙은 한 곳에만」이 지형에서 뜻하는 바가 이것입니다.
+   *
+   * ⚠️ 대신 **갈라야 하는 자리가 생깁니다.** 벽은 「위/아래」가 없어서
+   *    `shortcutNear`(위에서 내리기)에 걸리면 안 됩니다. 그 자리에 이
+   *    `kind` 검사가 서 있습니다.
+   */
+  kind: 'ladder' | 'wall'
+  /** 내려져 있는가(벽이면: 부숴져 있는가). 열리면 양방향으로 통행 가능. */
   open: boolean
   /** 걷힌 채로 돌아갔을 때 걸어야 하는 거리(m) — `shortcutSaving` 이 채웁니다. */
   saving?: number | null
@@ -312,10 +335,180 @@ export class Terrain {
         hiY: best * HEIGHT_STEP,
         dirX: dx / len,
         dirZ: dz / len,
+        kind: 'ladder',
         open: false,
         key: `${cx},${cz}`,
       })
     }
+    this.buildWalls()
+  }
+
+  /**
+   * 🧱 'crackedWall' 엔티티를 **막힌 칸 경계**로 바꿉니다.
+   *
+   * ── 레벨에는 「벽 뒤 첫 칸」에 놓습니다 ──────────────────────────
+   * 벽이 막는 것은 칸이 아니라 **칸과 칸 사이**라, 어느 쪽 경계를 막을지를
+   * 정해야 합니다. 사다리와 같은 이유로 **각도를 데이터로 받지 않습니다** —
+   * 에디터에서 방향을 틀려도 화면에서는 그럴듯해 보이기 때문입니다.
+   *
+   * ── 그래서 지형에서 유도합니다: **플레이어가 오는 쪽을 막습니다** ──
+   * 시작 지점에서 걸어서 퍼뜨리되 **이 벽 칸만 빼고** 퍼뜨립니다. 그러면
+   * 이웃 중 *"벽이 없었어도 시작 지점에서 걸어올 수 있는 칸"* 이 곧
+   * 바깥이고, 나머지가 방입니다. 문턱값도 넓이 어림도 필요 없습니다.
+   *
+   * ⚠️ **바깥이 정확히 하나일 때만** 세웁니다. 둘이면 그 방은 입구가
+   *    둘이라 막아도 옆으로 돌아가지고(= 비밀이 아니고), 없으면 그 방은
+   *    애초에 아무도 못 가는 곳입니다. 둘 다 **화면에서는 절대 안 보이는**
+   *    어긋남이라, 조용히 하나를 고르지 않고 **경고를 찍고 안 세웁니다.**
+   *    (안 세운 벽은 그려지지도 않습니다 — world.ts `spawnFromLevel` 이
+   *     레벨 목록이 아니라 이 결과에서 벽을 꺼내기 때문입니다.)
+   */
+  private buildWalls(): void {
+    const { w, h } = this.level
+    const walls = this.level.entities.filter((e) => e.kind === 'crackedWall')
+    if (walls.length === 0) return
+    const spawn = this.level.entities.find((e) => e.kind === 'spawn')
+    if (!spawn) {
+      console.warn('시작 지점이 없어 금 간 벽의 방향을 정할 수 없습니다 — 벽을 세우지 않습니다.')
+      return
+    }
+    const start = worldToCell(spawn.x, spawn.z, w, h)
+
+    for (const e of walls) {
+      const { cx, cz } = worldToCell(e.x, e.z, w, h)
+      const here = this.levelAtCell(cx, cz)
+      if (here === VOID) {
+        console.warn(`금 간 벽이 바닥 없는 칸(${cx},${cz})에 있습니다 — 무시합니다.`)
+        continue
+      }
+      const sides: [number, number][] = []
+      for (const [nx, nz] of [
+        [cx - 1, cz],
+        [cx + 1, cz],
+        [cx, cz - 1],
+        [cx, cz + 1],
+      ]) {
+        const v = this.levelAtCell(nx, nz)
+        // 「걸어서 오갈 수 있는 경계」만 후보입니다. 이미 못 가는 쪽을
+        // 막는 것은 아무 일도 안 하는 것이고, 그건 조용히 지나갑니다.
+        if (v === VOID || Math.abs(v - here) > MAX_CLIMB) continue
+        sides.push([nx, nz])
+      }
+      const reach = this.reachableSkipping(start.cx, start.cz, cx, cz)
+      const outside = sides.filter(([nx, nz]) => reach[nz * w + nx] === 1)
+      if (outside.length !== 1) {
+        console.warn(
+          `금 간 벽(${cx},${cz}) — 시작 지점에서 걸어올 수 있는 이웃이 ` +
+            `${outside.length}개입니다(1개여야 합니다). 벽을 세우지 않습니다.`,
+        )
+        continue
+      }
+      const [ox, oz] = outside[0]
+      const inW = cellToWorld(cx, cz, w, h)
+      const outW = cellToWorld(ox, oz, w, h)
+      const dx = outW.x - inW.x
+      const dz = outW.z - inW.z
+      const len = Math.hypot(dx, dz) || 1
+      this.shortcuts.push({
+        // 방 쪽이 `lo`, 바깥(동선) 쪽이 `hi` 입니다. 벽에는 위아래가 없지만
+        // 부품을 같이 쓰므로 자리를 비워 둘 수는 없습니다 — 뜻은 `kind` 가 정합니다.
+        loX: cx,
+        loZ: cz,
+        hiX: ox,
+        hiZ: oz,
+        x: (inW.x + outW.x) / 2,
+        z: (inW.z + outW.z) / 2,
+        loY: here * HEIGHT_STEP,
+        hiY: this.levelAtCell(ox, oz) * HEIGHT_STEP,
+        dirX: dx / len,
+        dirZ: dz / len,
+        kind: 'wall',
+        open: false,
+        key: `${cx},${cz}`,
+      })
+      this.walls++
+    }
+  }
+
+  /**
+   * 한 칸을 **없는 셈 치고** 시작 칸에서 걸어 닿는 칸을 표시합니다.
+   *
+   * ⚠️ 일부러 **단차 규칙만** 봅니다(내려가기는 자유, 오르기는 MAX_CLIMB).
+   *    다른 벽이나 걷힌 사다리는 안 봅니다 — 여기서 알고 싶은 것은
+   *    *"벽이 하나도 없었다면 어느 쪽에서 걸어왔겠는가"* 이기 때문입니다.
+   *    벽끼리 서로를 가려 주면 **방향이 벽을 놓는 순서에 따라 달라집니다.**
+   */
+  private reachableSkipping(sx: number, sz: number, skipX: number, skipZ: number): Uint8Array {
+    const { w, h } = this.level
+    const seen = new Uint8Array(w * h)
+    if (this.levelAtCell(sx, sz) === VOID) return seen
+    if (sx === skipX && sz === skipZ) return seen
+    seen[sz * w + sx] = 1
+    const stack: number[] = [sz * w + sx]
+    while (stack.length > 0) {
+      const i = stack.pop() as number
+      const cx = i % w
+      const cz = (i - cx) / w
+      const from = this.levelAtCell(cx, cz)
+      for (const [nx, nz] of [
+        [cx - 1, cz],
+        [cx + 1, cz],
+        [cx, cz - 1],
+        [cx, cz + 1],
+      ]) {
+        if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+        if (nx === skipX && nz === skipZ) continue
+        const j = nz * w + nx
+        if (seen[j]) continue
+        const to = this.levelAtCell(nx, nz)
+        if (to === VOID || to - from > MAX_CLIMB) continue
+        seen[j] = 1
+        stack.push(j)
+      }
+    }
+    return seen
+  }
+
+  /**
+   * 막혀 있는 벽이 이 칸 경계에 서 있는가.
+   *
+   * ⚠️ 이 검사는 길찾기의 **가장 안쪽 고리**(6336칸 × 이웃 4개)에 들어갑니다.
+   *    그래서 벽이 하나도 없으면 **아예 안 부릅니다** — 벽이 없는 레벨이
+   *    이 기능 때문에 느려지면 안 됩니다.
+   */
+  private sealedBetween(aX: number, aZ: number, bX: number, bZ: number): boolean {
+    for (const s of this.shortcuts) {
+      if (s.kind !== 'wall' || s.open) continue
+      if (s.loX === aX && s.loZ === aZ && s.hiX === bX && s.hiZ === bZ) return true
+      if (s.loX === bX && s.loZ === bZ && s.hiX === aX && s.hiZ === aZ) return true
+    }
+    return false
+  }
+
+  /**
+   * 이 레벨에 금 간 벽이 **몇 개 있는가**(부쉈는지와 무관).
+   *
+   * 「부숴지지 않은 벽이 있는가」로 세지 않습니다 — 그러면 부술 때마다
+   * 다시 세어야 하고, 세는 것을 빠뜨리면 **부순 뒤에 벽이 되살아납니다.**
+   * 개수는 레벨을 읽는 순간 정해지고 그 뒤로 안 변하는 값이라야 안전합니다.
+   */
+  private walls = 0
+
+  /**
+   * 🧱 **벽을 부숩니다.** 부순 벽은 사다리를 내린 것과 똑같이 취급됩니다 —
+   * 세이브에 좌표로 남고, 길찾기 캐시는 열림 상태가 키에 들어 있어 저절로
+   * 다시 만들어집니다.
+   *
+   * @returns 실제로 이번에 열렸으면 true(이미 열려 있었으면 false).
+   */
+  breakWall(key: string): boolean {
+    for (const s of this.shortcuts) {
+      if (s.kind !== 'wall' || s.key !== key) continue
+      if (s.open) return false
+      s.open = true
+      return true
+    }
+    return false
   }
 
   /** 세이브에서 읽은 열린 사다리 목록을 반영합니다. */
@@ -356,6 +549,12 @@ export class Terrain {
     if (to === VOID) return false
     const from = this.levelAtCell(fromX, fromZ)
     if (from === VOID) return false
+    /**
+     * 🧱 **막힌 벽은 단차보다 먼저 봅니다.** 아래 `to - from <= MAX_CLIMB` 는
+     *    걸어갈 수 있으면 곧바로 통과시키는 지름길이라, 그 뒤에 두면
+     *    **평지에 세운 벽이 아무 일도 안 합니다.**
+     */
+    if (this.walls > 0 && this.sealedBetween(fromX, fromZ, toX, toZ)) return false
     if (to - from <= MAX_CLIMB) return true
     const s = this.shortcutBetween(fromX, fromZ, toX, toZ)
     return s !== null && s.open
@@ -617,6 +816,10 @@ export class Terrain {
   /** 두 칸을 잇는 사다리가 있으면 돌려줍니다(방향 무관). */
   private shortcutBetween(aX: number, aZ: number, bX: number, bZ: number): Shortcut | null {
     for (const s of this.shortcuts) {
+      // 🧱 여기는 **못 오를 단차를 오르는** 이야기뿐입니다. 벽은 평지에
+      //    서므로 이 물음에 답이 될 수 없고, 답이 되면 「부순 벽으로
+      //    절벽을 오른다」는 없는 규칙이 생깁니다.
+      if (s.kind !== 'ladder') continue
       if (s.loX === aX && s.loZ === aZ && s.hiX === bX && s.hiZ === bZ) return s
       if (s.loX === bX && s.loZ === bZ && s.hiX === aX && s.hiZ === aZ) return s
     }
@@ -664,6 +867,22 @@ export class Terrain {
     if (to === VOID) return false
     const from = this.levelAtWorld(fromX, fromZ)
     if (from === VOID) return true // 이미 이상한 곳에 있다면 탈출은 허용
+    /**
+     * 🧱 위 `canStepCell` 과 **같은 자리에** 같은 검사가 섭니다.
+     *
+     * ⚠️ 두 벌인 것이 마음에 걸립니다만, 이 둘은 원래부터 두 벌입니다 —
+     *    하나는 **칸**으로(길찾기), 하나는 **월드 좌표**로(실제 이동) 묻고
+     *    단차 규칙도 이미 각자 적혀 있습니다. 한 벌로 합치려면 매 프레임
+     *    좌표→칸 변환이 길찾기 안쪽 고리에 들어갑니다. 대신 **빠뜨리면
+     *    어떻게 되는지**를 적어 둡니다: 여기를 빼면 길찾기만 막히고
+     *    **플레이어는 벽을 그냥 통과합니다.**
+     */
+    if (this.walls > 0) {
+      const { w, h } = this.level
+      const a = worldToCell(fromX, fromZ, w, h)
+      const b = worldToCell(toX, toZ, w, h)
+      if (this.sealedBetween(a.cx, a.cz, b.cx, b.cz)) return false
+    }
     if (to - from <= MAX_CLIMB) return true
     // 못 오를 단차라도 **내려진 사다리**가 그 두 칸을 이어 주면 오를 수 있습니다.
     // 사다리가 없거나 아직 걷혀 있으면 여기서 막힙니다.
@@ -688,6 +907,10 @@ export class Terrain {
     let best: { s: Shortcut; fromTop: boolean } | null = null
     let bestD = reach
     for (const s of this.shortcuts) {
+      // 🧱 벽에는 「위에서 내린다」가 없습니다 — 치는 것으로만 열립니다.
+      //    이걸 빼면 벽 앞에서 상호작용 안내가 뜨고, 그 순간 이 물건의
+      //    수수께끼(*"어떻게 열지?"*)가 **버튼 하나로 바뀝니다.**
+      if (s.kind !== 'ladder') continue
       const d = Math.hypot(s.x - x, s.z - z)
       if (d > bestD) continue
       // 칸으로도 판정합니다. 거리만 보면 낙차 위아래가 XZ상 가까워서

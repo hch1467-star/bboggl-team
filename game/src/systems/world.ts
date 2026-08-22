@@ -1,4 +1,4 @@
-import { BARREL, PLAYER, URN, VIAL, WORLD } from '../config/balance'
+import { BARREL, CRACKED_WALL, PLAYER, URN, VIAL, WORLD } from '../config/balance'
 import { NO_CHAIN } from '../config/bossPhases'
 import { enemyDef, kindFromId } from '../config/enemies'
 import type { Bonfire } from './bonfire'
@@ -18,13 +18,21 @@ import {
   Status,
   Transform,
   Urn,
+  CrackedWall,
   Velocity,
 } from '../core/components'
 import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
 import type { LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
-import { KIND_BARREL, KIND_PLAYER, KIND_TREASURE, KIND_URN, renderKindForEnemy } from '../render/visuals'
+import {
+  KIND_BARREL,
+  KIND_CRACKED_WALL,
+  KIND_PLAYER,
+  KIND_TREASURE,
+  KIND_URN,
+  renderKindForEnemy,
+} from '../render/visuals'
 
 /** 스폰 전용 RNG. 전투 RNG와 분리해야 재현성이 깨지지 않습니다. */
 const spawnRng = new Rng(20260807)
@@ -292,6 +300,51 @@ export function spawnUrn(x: number, z: number, holds = false): number {
 }
 
 /**
+ * 🧱 **금 간 벽** — 치면 무너지고, 무너진 자리가 길이 됩니다.
+ *
+ * 항아리·통과 **같은 부품**(Transform·Body·Health)을 씁니다. 이유도
+ * 같습니다: 대상 질의가 그 셋을 보므로, 갖춰 두면 **아무 무기·스킬로나**
+ * 칠 수 있습니다. 벽 전용 판정을 따로 만들면 새 스킬이 생기는 날
+ * "이것만 벽을 못 깬다"가 조용히 생깁니다.
+ *
+ * ⚠️ **몸통은 칸 경계 한가운데**에 섭니다(칸의 중심이 아닙니다). 벽은
+ *    칸이 아니라 **칸과 칸 사이**를 막는 물건이라, 칸 중심에 세우면
+ *    메시와 실제로 막히는 자리가 1m 어긋납니다.
+ *
+ * @param cx,cz 벽이 속한 **칸** 좌표 — 지형의 `Shortcut.key` 와 짝입니다.
+ */
+export function spawnCrackedWall(x: number, z: number, cx: number, cz: number): number {
+  const e = createEntity()
+  addComponent(Transform, e)
+  addComponent(Body, e)
+  addComponent(Health, e)
+  addComponent(CrackedWall, e)
+  addComponent(Renderable, e)
+  Transform.x[e] = x
+  Transform.y[e] = 0
+  Transform.z[e] = z
+  Transform.rotY[e] = 0
+  /**
+   * 몸 굵기는 **얇게** 둡니다. 통행을 막는 것은 이 원이 아니라 **지형**
+   * 이라(terrain.ts `sealedBetween`), 여기 큰 원을 두면 벽 앞에서 밀려
+   * 나기만 하고 **막는 일은 두 벌**이 됩니다. 이 원이 하는 일은
+   * *"칼이 닿는가"* 하나뿐입니다.
+   */
+  Body.radius[e] = CRACKED_WALL.thickness
+  Body.height[e] = CRACKED_WALL.height
+  Health.hp[e] = 1
+  Health.max[e] = 1
+  Health.invulnT[e] = 0
+  Health.flashT[e] = 0
+  CrackedWall.cx[e] = cx
+  CrackedWall.cz[e] = cz
+  // ⚠️ 항아리 `broken` 과 같은 이유로 **반드시** 지웁니다.
+  CrackedWall.broken[e] = 0
+  Renderable.kind[e] = KIND_CRACKED_WALL
+  return e
+}
+
+/**
  * 💥 **폭발통** — 때리면 도화선이 붙는 통.
  *
  * `Health` 를 주는 이유는 체력 싸움을 시키려는 게 아니라, `combat.ts` 의
@@ -507,6 +560,26 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     }
     if (e < 0) continue
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
+    entities.push(e)
+  }
+
+  /**
+   * 🧱 **금 간 벽은 레벨 목록이 아니라 지형에서 꺼냅니다.**
+   *
+   * 레벨에는 `crackedWall` 이 **칸 한가운데**에 적혀 있는데, 실제로
+   * 막히는 자리는 **칸과 칸 사이**입니다. 그 경계를 계산하는 곳은 이미
+   * 지형입니다(`buildWalls`). 여기서 한 번 더 계산하면 두 벌이 되고,
+   * 두 벌이 갈라지는 날 **보이는 벽과 막히는 자리가 어긋납니다** —
+   * 화면만 봐서는 절대 못 찾는 종류의 어긋남입니다.
+   *
+   * 덤으로 하나가 저절로 맞습니다: 지형이 **세우기를 거부한 벽**
+   * (열린 방향이 둘 이상이라 경고만 찍힌 벽)은 여기에도 안 나옵니다.
+   * 즉 **안 막히는 벽이 그려지는 일이 없습니다.**
+   */
+  for (const s of terrain.shortcuts) {
+    if (s.kind !== 'wall') continue
+    const e = spawnCrackedWall(s.x, s.z, s.loX, s.loZ)
+    Transform.y[e] = terrain.groundYAt(s.x, s.z)
     entities.push(e)
   }
   return { player, entities, treasureTotal, bonfires, anvils }

@@ -22,6 +22,7 @@ import {
   AWARE,
   BARREL,
   URN,
+  CRACKED_WALL,
   BOSS,
   COMBAT,
   FOCUS,
@@ -91,6 +92,14 @@ export const KIND_BARREL = 3
  *    안 읽힙니다.
  */
 export const KIND_URN = 4
+
+/**
+ * 🧱 **금 간 벽** — 부수면 뒤쪽으로 길이 열립니다(terrain.ts `Shortcut.kind`).
+ *
+ * 항아리와 번호를 나누는 이유는 생김새가 아니라 **하는 일**입니다.
+ * 자세한 근거는 core/components.ts `CrackedWall` 주석에 있습니다.
+ */
+export const KIND_CRACKED_WALL = 5
 
 /**
  * 적의 렌더 종류는 **EnemyKind 에 상수를 더한 값**입니다.
@@ -179,6 +188,11 @@ interface Visual {
   /** 멀리서도 보이는 빛기둥 (보물 전용) */
   pillar?: THREE.Mesh
   pillarMat?: THREE.MeshBasicMaterial
+  /**
+   * 🧱 **벽 뒤라 빛기둥을 끈다**(main.ts `syncHiddenTreasures`).
+   * 켜고 끄는 판단은 `syncTreasure` 한 곳에서만 합니다 — 위 주석 참고.
+   */
+  pillarHidden?: boolean
 }
 
 /** 부채꼴 예고 지오메트리. 부채꼴 중심이 로컬 +Z를 향하도록 미리 눕혀 둡니다. */
@@ -588,6 +602,11 @@ export class Visuals {
 
     if (kind === KIND_URN) {
       this.attachUrn(entity, group)
+      return
+    }
+
+    if (kind === KIND_CRACKED_WALL) {
+      this.attachCrackedWall(entity, group)
       return
     }
 
@@ -1063,6 +1082,70 @@ export class Visuals {
    * 실루엣은 통보다 **낮고 배가 부릅니다**(위아래가 좁은 항아리형).
    * 색이 안 보이는 사람에게도 갈리는 것은 결국 모양입니다.
    */
+  /**
+   * 🧱 **금 간 벽** — 이 물건은 **눈에 띄어야 일을 합니다.**
+   *
+   * ── 지난 실패가 정한 모양 ────────────────────────────────────────
+   * 앞선 「가림벽 뒤 주머니」는 *"길에서 벽이 안 보인다"* 로 실패했습니다
+   * (tools/make-zone.mjs 의 기록). 숨기는 일을 벽이 아니라 카메라
+   * 프레임이 하고 있었고, 그러면 *"저기 뭔가 있을 것 같다"* 는 **앞
+   * 절이 통째로 없습니다.** 의심할 수 없는 비밀은 비밀이 아닙니다.
+   *
+   * 그래서 여기서는 반대로 갑니다 — **주변 성벽과 갈라 보이게** 만듭니다:
+   *
+   *   ① 색이 다릅니다      — 성벽보다 밝고 누런 돌
+   *   ② 금이 그어져 있습니다 — 얇은 검은 띠 셋(대각선)
+   *   ③ 살짝 빛납니다      — emissive 0.1. 화톳불·보물만큼은 아니지만
+   *                          *"이건 지형이 아니라 사물이다"* 를 만듭니다
+   *
+   * ⚠️ **보물처럼 빛내지는 않습니다.** 밝게 만들수록 알아볼 확률은
+   *    올라가지만, 그만큼 *"내가 찾아냈다"* 가 *"게임이 알려 줬다"* 로
+   *    바뀝니다. 이 물건의 값어치는 **알아보는 것**에 있으므로,
+   *    빛은 「사물이다」까지만 말하고 「여기 보물이 있다」는 말하지
+   *    않아야 합니다. 그 경계가 이 0.1 입니다.
+   */
+  private attachCrackedWall(entity: number, group: THREE.Group): void {
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xa89272,
+      emissive: new THREE.Color(0x6b5a3c),
+      emissiveIntensity: 0.1,
+      roughness: 0.9,
+      metalness: 0.05,
+    })
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(CRACKED_WALL.width, CRACKED_WALL.height, CRACKED_WALL.thickness),
+      material,
+    )
+    slab.position.y = CRACKED_WALL.height * 0.5
+    slab.castShadow = true
+    group.add(slab)
+
+    /**
+     * 금 — 얇은 판을 벽 **양면에 살짝 띄워** 붙입니다. 텍스처를 쓰지 않는
+     * 이유는 이 저장소에 이미지 자원이 하나도 없기 때문이고, 그 규칙을
+     * 이것 하나 때문에 깨지 않습니다.
+     */
+    const crackMat = new THREE.MeshBasicMaterial({ color: 0x2b2118 })
+    const cracks: [number, number, number][] = [
+      [-0.35, 0.62, 0.5],
+      [0.18, 0.34, -0.7],
+      [0.42, 0.74, 0.35],
+    ]
+    for (const [ox, oy, rot] of cracks) {
+      for (const side of [-1, 1]) {
+        const crack = new THREE.Mesh(new THREE.PlaneGeometry(0.06, CRACKED_WALL.height * 0.45), crackMat)
+        crack.position.set(ox, CRACKED_WALL.height * oy, (side * CRACKED_WALL.thickness) / 2 + side * 0.01)
+        crack.rotation.z = rot
+        if (side < 0) crack.rotation.y = Math.PI
+        group.add(crack)
+      }
+    }
+
+    this.scene.add(group)
+    // 항아리·통과 같은 이유로 **땅에 붙습니다.**
+    this.items.set(entity, { group, material, floats: false, telegraphWindup: 0 })
+  }
+
   private attachUrn(entity: number, group: THREE.Group): void {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: 0x8a7360,
@@ -1147,6 +1230,28 @@ export class Visuals {
       pillar,
       pillarMat,
     })
+  }
+
+  /**
+   * 🧱 **벽 뒤 보물의 빛기둥을 끕니다.**
+   *
+   * ── 왜 필요한가 (그림이 잡아냈습니다) ────────────────────────────
+   * 금 간 벽을 넣고 길에서 찍은 그림에 **벽 뒤 보물의 빛기둥이 그대로
+   * 서 있었습니다.** 빛기둥은 벽을 뚫고 보이니까요(`secret` 프로브도
+   * 그 사실을 전제로 직선거리를 씁니다).
+   *
+   * 그러면 이 비밀은 **찾기 전에 이미 발견됩니다.** 안내를 막아 놓고
+   * (길찾기가 못 가는 곳을 안 가리킵니다) 빛으로 알려 주면, 막은 쪽이
+   * 아무 뜻이 없습니다. 이 물건의 값은 *"역시 나는 게임을 안다"* 인데
+   * 게임이 먼저 손가락질하면 그 값은 **지불되기 전에 사라집니다.**
+   *
+   * ⚠️ 몸통(팔면체)과 후광은 **그대로 둡니다.** 벽을 부수고 들어선
+   *    사람에게는 방 안에서 보여야 하고, 그건 이미 「알아본 뒤」라
+   *    빼앗을 것이 없습니다. 끄는 것은 **멀리서도 보이는 것** 하나뿐입니다.
+   */
+  setPillarVisible(entity: number, on: boolean): void {
+    const v = this.items.get(entity)
+    if (v) v.pillarHidden = !on
   }
 
   detach(entity: number): void {
@@ -1916,8 +2021,15 @@ export class Visuals {
     // 기둥까지 같이 떠다니면 밑동이 공중에 떠서 단서가 아니라 UFO처럼 보입니다.
     if (v.pillar && v.pillarMat) {
       const d = Math.hypot(Transform.x[e] - playerX, Transform.z[e] - playerZ)
-      // 안개 far 밖의 기둥은 어차피 안 보입니다. 그리지 않으면 그만큼 공짜입니다.
-      const visible = d > 4 && d < PILLAR_MAX_DIST
+      /**
+       * 안개 far 밖의 기둥은 어차피 안 보입니다. 그리지 않으면 그만큼 공짜입니다.
+       *
+       * 🧱 **`pillarHidden` 도 여기서 봅니다.** 처음에는 `setPillarVisible` 이
+       *    `pillar.visible` 을 직접 껐는데, 이 줄이 **매 프레임 다시 켰습니다** —
+       *    끄는 곳과 켜는 곳이 둘이면 매 프레임 도는 쪽이 이깁니다.
+       *    그래서 끄는 쪽은 **깃발만 세우고**, 켜고 끄는 판단은 여기 한 곳입니다.
+       */
+      const visible = !v.pillarHidden && d > 4 && d < PILLAR_MAX_DIST
       v.pillar.visible = visible
       if (visible) {
         const far = Math.min(1, Math.max(0, (d - 6) / 14))

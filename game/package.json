@@ -81,7 +81,8 @@
     "fill": "node tools/fill-preview.mjs",
     "urn": "node tools/urn-probe.mjs",
     "hide": "node tools/hide-preview.mjs",
-    "tripods": "node --experimental-strip-types tools/tripod-probe.mjs"
+    "tripods": "node --experimental-strip-types tools/tripod-probe.mjs",
+    "wall": "node tools/wall-probe.mjs"
   },
   "devDependencies": {
     "@types/three": "^0.181.0",

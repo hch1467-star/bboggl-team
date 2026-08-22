@@ -4146,6 +4146,11 @@ try {
       fireSkips,
       /** 끝까지 안 주운 보물과, 그동안 **가장 가까이 갔던 거리** */
       detourBudget: TREASURE_DETOUR,
+      /**
+       * 🧱 금 간 벽의 자리와 열림 상태 — 위 「못 주운 보물」이
+       *    *"길이 없다"* 와 *"벽이 있다"* 를 가르는 데 씁니다.
+       */
+      walls: G.walls ? G.walls() : [],
       untakenTreasures: G.treasurePositions()
         .filter((t) => !t.taken)
         .map((t) => ({
@@ -4475,9 +4480,28 @@ try {
   const untaken = log.untakenTreasures ?? []
   if (untaken.length) {
     console.log(`  🧭 못 주운 보물 ${untaken.length}개 (예산 ${log.detourBudget ?? 40}m)`)
+    /**
+     * 🧱 **「길이 없다」와 「벽이 있다」를 가릅니다.**
+     *
+     * 금 간 벽이 생기면서 *"걸어서는 못 가지만 부수면 갈 수 있는"* 보물이
+     * 처음으로 생겼습니다. 그대로 두면 장부가 이렇게 찍힙니다:
+     *
+     *     (-37,-13) 가장 가까이 **경로 못 찾음** · 그때 막던 것: ?
+     *
+     * 이건 「지도가 잘못됐다」로 읽힙니다. 실제로는 **봇이 벽을 안
+     * 부술 뿐**이고, 그건 지도의 흠이 아니라 **계측기의 한계**입니다.
+     * 처방이 정반대라(지도를 고친다 / 봇을 고친다) 한 칸에 담으면 안 됩니다 —
+     * 이 저장소가 이번 세션에 아홉 번 만난 그 실패입니다.
+     */
+    const walls = log.walls ?? []
+    const behindWall = (t) =>
+      t.best < 0 && walls.some((w) => !w.open && Math.hypot(w.x - t.x, w.z - t.z) < 12)
     for (const t of untaken) {
+      const why = behindWall(t)
+        ? '**금 간 벽 뒤** — 봇은 벽을 안 부숩니다(지도가 아니라 봇의 한계)'
+        : `그때 막던 것: ${t.block ?? '?'}`
       console.log(
-        `              (${t.x}, ${t.z})  가장 가까이 ${t.best >= 0 ? `${Math.round(t.best)}m` : '경로 못 찾음'} · 그때 막던 것: ${t.block ?? '?'}`,
+        `              (${t.x}, ${t.z})  가장 가까이 ${t.best >= 0 ? `${Math.round(t.best)}m` : '경로 못 찾음'} · ${why}`,
       )
     }
   }

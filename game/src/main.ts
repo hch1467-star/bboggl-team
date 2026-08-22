@@ -27,6 +27,7 @@ import {
   AWARE,
   BARREL,
   URN,
+  CRACKED_WALL,
   BLEED,
   barrelFuse,
   barrelStaminaLoss,
@@ -98,6 +99,7 @@ import {
   Status,
   Transform,
   Urn,
+  CrackedWall,
   Velocity,
 } from './core/components'
 import { AttackPhase } from './core/components'
@@ -146,6 +148,8 @@ import {
   barrelBlastEvents,
   urnSystem,
   urnBreakEvents,
+  wallBreakEvents,
+  crackedWallSystem,
   countLivingEnemies,
   justGuardEvents,
   perfectDodgeEvents,
@@ -278,6 +282,8 @@ const pickups = defineQuery(Transform, Pickup)
 const enemyQuery = defineQuery(Transform, Enemy, Health)
 // 🏺 항아리 — 디버그 훅이 "진짜가 어디 있었나"를 답할 수 있게.
 const urnQuery = defineQuery(Transform, Urn)
+/** 🎁 보물 — 벽 뒤에 있는 것의 빛기둥을 끄기 위해 훑습니다(`syncHiddenTreasures`). */
+const treasureQuery = defineQuery(Transform, Pickup)
 
 class Game {
   private readonly renderer: THREE.WebGLRenderer
@@ -560,7 +566,8 @@ class Game {
   private shopAnvil: { x: number; y: number; z: number } | null = null
   /** 🏪 이미 산 물건들. 세이브에 남습니다 — 재입고가 없으니 이게 곧 재고입니다. */
   private boughtItems = new Set<string>()
-  private ladderVisuals: { setOpen: (open: boolean) => void }[] = []
+  // 🧱 벽 자리는 null 입니다 — 번호로 `terrain.shortcuts` 와 짝을 맞춥니다.
+  private ladderVisuals: ({ setOpen: (open: boolean) => void } | null)[] = []
   /** 지금까지 쉰 횟수 — 자동 플레이 봇이 **추측하지 않고 읽도록** 노출합니다. */
   private restCount = 0
   /**
@@ -943,10 +950,22 @@ class Game {
       for (const f of this.bonfires) this.visuals.addBonfire(f.x, f.y, f.z)
       this.anvils = spawned.anvils
       for (const a of this.anvils) this.visuals.addAnvil(a.x, a.y, a.z)
-      this.ladderVisuals = this.terrain.shortcuts.map((s) => this.visuals.addLadder(s))
+      /**
+       * 🧱 **금 간 벽에는 사다리를 안 그립니다.** 두 장치가 같은 부품을
+       *    쓰기 때문에(terrain.ts `Shortcut.kind`) 여기서 갈라 주지 않으면
+       *    벽 자리에 사다리가 한 짝 서게 됩니다.
+       *
+       * ⚠️ 그래도 **자리는 비워 둡니다**(null). `syncLadderVisuals` 가
+       *    번호로 짝을 맞추므로, 걸러서 배열을 줄이면 그 뒤의 사다리들이
+       *    전부 **한 칸씩 밀린 상태를 따라가게** 됩니다.
+       */
+      this.ladderVisuals = this.terrain.shortcuts.map((s) =>
+        s.kind === 'ladder' ? this.visuals.addLadder(s) : null,
+      )
       this.playerEntity = spawned.player
       this.visuals.attach(this.playerEntity, Renderable.kind[this.playerEntity])
       for (const e of spawned.entities) this.visuals.attach(e, Renderable.kind[e])
+      this.syncHiddenTreasures()
       this.treasureTotal = spawned.treasureTotal
 
       // ---- 세이브 복원 (systems/save.ts 설계 노트: 얻은 것은 남고, 싸움은 처음부터) ----
@@ -965,6 +984,20 @@ class Game {
         // 켰다고 다시 걷히면 알아낸 것을 빼앗는 셈이 됩니다.
         this.terrain.applyOpenShortcuts(save.ladders)
         this.syncLadderVisuals()
+        /**
+         * 🧱 **이미 부순 벽은 다시 세우지 않습니다.**
+         *
+         * 벽의 열림 상태는 사다리와 같은 곳에 저장되므로(`openShortcutKeys`)
+         * 위 한 줄로 **길은** 열린 채 돌아옵니다. 그런데 **몸통**은 다릅니다 —
+         * `spawnFromLevel` 이 벽 하나당 하나씩 이미 세워 놓은 뒤라,
+         * 그대로 두면 *"길은 뚫려 있는데 벽이 서 있는"* 그림이 됩니다.
+         *
+         * 먹은 보물·잡은 보스와 **완전히 같은 모양의 문제**이고, 그래서
+         * 바로 아래 두 줄과 나란히 같은 방식으로 치웁니다.
+         */
+        this.removeBrokenWalls()
+        // 🎁 벽이 열린 채로 시작하면 그 방 보물은 더 이상 숨은 것이 아닙니다.
+        this.syncHiddenTreasures()
         // 이미 먹은 보물은 아예 치웁니다. 남겨두면 다시 먹혀서 각인석이 무한정 생깁니다.
         this.removeTakenTreasures()
         // 이미 잡은 보스도 치웁니다. 안 하면 게임을 다시 켤 때마다 보스가
@@ -1171,6 +1204,7 @@ class Game {
      * 한 프레임 어긋납니다.
      */
     urnSystem()
+    crackedWallSystem()
 
     // ---- 3. 타격 피드백 ----
     // 손맛의 3요소(정지 + 흔들림 + 숫자)를 여기서 한꺼번에 터뜨립니다.
@@ -1916,6 +1950,44 @@ class Game {
       destroyEntity(ev.entity)
     }
     urnBreakEvents.length = 0
+
+    /**
+     * ── 🧱 **금 간 벽이 무너집니다** ────────────────────────────────
+     *
+     * 항아리와 나란히 두되 **내놓는 것이 다릅니다**: 항아리는 물건을,
+     * 벽은 **길**을 내놓습니다. 그래서 여기서 하는 일의 핵심은
+     * `terrain.breakWall()` 한 줄이고, 나머지는 전부 *"방금 큰 일이
+     * 일어났다"* 를 몸에 전하는 연출입니다.
+     *
+     * ⚠️ **열렸을 때만** 연출합니다. `breakWall` 이 false 를 돌려주는
+     *    경우(이미 열린 벽·짝이 없는 벽)에 소리와 흔들림만 나면,
+     *    플레이어는 *"열린 줄 알았는데 안 열렸다"* 를 겪습니다.
+     *    이 저장소의 「못 잰 것은 통과가 아니다」와 같은 자리입니다.
+     */
+    for (const ev of wallBreakEvents) {
+      const opened = this.terrain ? this.terrain.breakWall(`${ev.cx},${ev.cz}`) : false
+      if (opened) {
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2
+          this.vfx.spawnHitSpark(ev.x + Math.cos(a) * 0.7, ev.y, ev.z + Math.sin(a) * 0.7, 0.9)
+        }
+        this.cam.addTrauma(CRACKED_WALL.trauma)
+        sfx.impact(true, false, ev.x, ev.z)
+        /**
+         * 🧭 **길이 바뀌었으니 안내도 다시 그립니다.** 거리장은 열림
+         *    상태가 캐시 키에 들어 있어 저절로 다시 만들어지지만,
+         *    그건 *"다음에 물을 때"* 입니다. 여기서 지워 두지 않으면
+         *    부순 그 프레임의 화살표가 **아직 벽이 있는 지도**를
+         *    가리킵니다.
+         */
+        this.terrain?.buildPlayerField(Transform.x[this.playerEntity], Transform.z[this.playerEntity])
+        // 🎁 방금 열린 방의 보물은 이제 **숨은 것이 아닙니다** — 빛기둥을 켭니다.
+        this.syncHiddenTreasures()
+      }
+      this.visuals.detach(ev.entity)
+      destroyEntity(ev.entity)
+    }
+    wallBreakEvents.length = 0
 
     // ---- 3.8 무너짐 연출 ----
     //
@@ -2679,7 +2751,27 @@ class Game {
       // 눈앞에 있으면 알려 줄 필요가 없습니다 — 빛기둥이 이미 보입니다.
       // (이 문턱만은 **편도**로 봅니다: 물어보는 것이 *"이미 보이는가"* 라서.)
       if (walk < NAV.sideHintNear) continue
-      // 고르는 기준도 **더 걷는 거리**입니다 — 가장 싸게 얻는 것을 권합니다.
+      /**
+       * 고르는 기준도 **더 걷는 거리**입니다 — 가장 싸게 얻는 것을 권합니다.
+       *
+       * ── ⚠️ **자리가 하나라 싼 것이 비싼 것을 영원히 가립니다** ─────────
+       * 알림 자리는 하나인데 후보는 여럿입니다. 그래서 같은 구역에 후보가
+       * 둘 있으면 싼 쪽만 계속 뜹니다. 이 존에서 실제로 그렇습니다:
+       *
+       *     (35,35) 더 걷는  4m  — 「함몰지 가장자리」  ← 늘 이깁니다
+       *     (13,47) 더 걷는 12m  — 「남쪽 함몰지」      ← 한 번도 안 뜸
+       *
+       * **고쳐 보고 되돌렸습니다.** *"이미 말한 것보다 아직 안 말한 것을
+       * 먼저"* 라는 순환 규칙을 넣고 `npm run secret` 을 다시 돌렸더니
+       * **알려진 보물이 그대로 4/6** 이었습니다 — 넷도 같은 넷이었습니다.
+       * (13,47) 이 안 뜨는 진짜 이유는 자리 다툼이 아니라 **가까이서 재면
+       * 더 걷는 거리가 예산을 넘기 때문**입니다: 남쪽 함몰지는 일방통행이라
+       * 회랑에서 내려가면 되돌아 나오는 값(ONE_WAY_COST)이 얹힙니다.
+       * 시작 지점에서 잰 12m 는 그 값이 안 얹힌 수였습니다.
+       *
+       * 효과가 없는 변경은 남기지 않습니다 — 남기면 다음 사람이 *"이건
+       * 무엇을 고친 것이지"* 를 다시 풀어야 합니다.
+       */
       if (!best || extra < best.extra) best = { x: c.x, z: c.z, walk, extra }
     }
     if (!best) return null
@@ -3358,11 +3450,58 @@ class Game {
     this.persistProgress()
   }
 
+  /**
+   * 🎁 **아직 벽 뒤에 있는 보물의 빛기둥을 끕니다.**
+   *
+   * 「숨었는가」를 **깃발로 들고 다니지 않습니다.** 지형에게 *"지금
+   * 걸어서 닿는가"* 를 물어서 그때그때 정합니다. 깃발로 두면 레벨을
+   * 고치는 날 깃발과 지형이 갈라지고, 그러면 **벽이 없는데 안 보이는
+   * 보물**이나 그 반대가 조용히 생깁니다.
+   *
+   * ⚠️ 비용 때문에 **매 프레임 부르지 않습니다.** 보물 하나마다 격자
+   *    전체(6336칸)를 한 번 훑으므로, 답이 바뀔 수 있는 순간에만
+   *    부릅니다 — 레벨을 연 직후와 **벽이 부서졌을 때**. 그 둘 말고는
+   *    「걸어서 닿는가」가 바뀔 길이 없습니다(사다리는 위로만 여는
+   *    장치라 보물을 가두지 않습니다).
+   */
+  private syncHiddenTreasures(): void {
+    if (!this.terrain) return
+    const ids = treasureQuery.run()
+    for (let i = 0; i < treasureQuery.count; i++) {
+      const e = ids[i]
+      this.terrain.buildFlowField(Transform.x[e], Transform.z[e])
+      const reach = this.terrain.pathDistance(Transform.x[this.playerEntity], Transform.z[this.playerEntity])
+      this.visuals.setPillarVisible(e, reach !== null)
+    }
+  }
+
+  /**
+   * 🧱 세이브에 **부순 것으로 적힌 벽**의 몸통을 치웁니다.
+   *
+   * `removeTakenTreasures` · `removeDefeatedBosses` 와 같은 계약입니다:
+   * *"세이브가 「이미 끝난 일」이라고 말하는 것은 판이 시작될 때 이미
+   * 없어야 한다."*
+   */
+  private removeBrokenWalls(): void {
+    if (!this.terrain) return
+    const open = new Set(
+      this.terrain.shortcuts.filter((s) => s.kind === 'wall' && s.open).map((s) => s.key),
+    )
+    if (open.size === 0) return
+    for (let e = 0; e < 4096; e++) {
+      if (!isAlive(e) || !hasComponent(CrackedWall, e)) continue
+      if (!open.has(`${CrackedWall.cx[e]},${CrackedWall.cz[e]}`)) continue
+      this.visuals.detach(e)
+      destroyEntity(e)
+    }
+  }
+
   private syncLadderVisuals(): void {
     if (!this.terrain) return
     for (let i = 0; i < this.ladderVisuals.length; i++) {
       const s = this.terrain.shortcuts[i]
-      if (s) this.ladderVisuals[i].setOpen(s.open)
+      const v = this.ladderVisuals[i]
+      if (s && v) v.setOpen(s.open)
     }
   }
 
@@ -3462,7 +3601,13 @@ class Game {
    */
   private tryTravel(p: number, atFire: boolean): void {
     const lit = this.bonfires.filter((f) => f.lit)
-    const opened = (this.terrain?.shortcuts ?? []).some((s) => s.open)
+    /**
+     * 🧱 **벽을 부순 것은 지름길을 연 것이 아닙니다.** 순간이동의 조건은
+     *    *"돌아오는 길을 스스로 만들었는가"* 인데, 벽은 막다른 방을 여는
+     *    물건이라 돌아오는 길과 아무 상관이 없습니다. `kind` 로 가르지
+     *    않으면 항아리 방 하나를 연 사람이 **순간이동을 얻습니다.**
+     */
+    const opened = (this.terrain?.shortcuts ?? []).some((s) => s.kind === 'ladder' && s.open)
     const ready = atFire && lit.length >= 2 && opened
     this.hud.setTravel(atFire && lit.length >= 2, opened)
     if (!ready || !consumePress(TRAVEL_KEY)) return
@@ -4661,6 +4806,34 @@ class Game {
   }
 
   /**
+   * 🧱 **금 간 벽의 상태** — 계측기가 「비밀」을 알아볼 수 있게.
+   *
+   * `walkable` 이 이 창의 핵심입니다: *"지금 이 자리까지 걸어갈 수
+   * 있는가"* 를 **게임의 길찾기에게** 물어본 값입니다. 프로브가 지형을
+   * 베껴 다시 계산하면 규칙이 두 벌이 되고, 벽 규칙은 이제 막 생겨서
+   * 두 벌이 갈라질 여지가 가장 큽니다.
+   */
+  debugWalls(): { key: string; x: number; z: number; open: boolean }[] {
+    if (!this.terrain) return []
+    return this.terrain.shortcuts
+      .filter((s) => s.kind === 'wall')
+      .map((s) => ({ key: s.key, x: s.x, z: s.z, open: s.open }))
+  }
+
+  /**
+   * 지금 플레이어가 **걸어서** 그 자리에 닿을 수 있는가.
+   *
+   * ⚠️ 「닿을 수 있다」는 판이 진행되면 바뀝니다(벽을 부수면 열립니다).
+   *    그래서 이 값은 **물어본 순간의 답**입니다 — 프로브가 판 시작에
+   *    한 번 물어 두고 나중까지 그 답을 쓰면 안 됩니다.
+   */
+  debugWalkableFromPlayer(x: number, z: number): boolean {
+    if (!this.terrain) return false
+    this.terrain.buildFlowField(x, z)
+    return this.terrain.pathDistance(Transform.x[this.playerEntity], Transform.z[this.playerEntity]) !== null
+  }
+
+  /**
    * 💥 **폭발통의 상태와 규칙** — 프로브가 반경·도화선을 베껴 적지 않게.
    *
    * `blast`·`fuse`·`staminaLoss` 는 게임이 **실제로 쓰는 값**이고,
@@ -4709,20 +4882,25 @@ class Game {
   }[] {
     if (!this.terrain) return []
     const { w, h } = this.terrain.level
-    return this.terrain.shortcuts.map((s) => {
-      const lo = cellToWorld(s.loX, s.loZ, w, h)
-      const hi = cellToWorld(s.hiX, s.hiZ, w, h)
-      return {
-        key: s.key,
-        open: s.open,
-        rise: Math.round((s.hiY - s.loY) / HEIGHT_STEP),
-        loWorldX: lo.x,
-        loWorldZ: lo.z,
-        hiWorldX: hi.x,
-        hiWorldZ: hi.z,
-        saving: this.terrain!.shortcutSaving(s),
-      }
-    })
+    // 🧱 계측기가 읽는 「사다리 장부」입니다 — 벽이 섞이면 `npm run play` 의
+    //    *"사다리 0/2 내림"* 분모가 조용히 늘어납니다. 못 잰 것을 통과로
+    //    만들지 않는 것과 같은 이유로, **안 센 것을 분모에 넣지 않습니다.**
+    return this.terrain.shortcuts
+      .filter((s) => s.kind === 'ladder')
+      .map((s) => {
+        const lo = cellToWorld(s.loX, s.loZ, w, h)
+        const hi = cellToWorld(s.hiX, s.hiZ, w, h)
+        return {
+          key: s.key,
+          open: s.open,
+          rise: Math.round((s.hiY - s.loY) / HEIGHT_STEP),
+          loWorldX: lo.x,
+          loWorldZ: lo.z,
+          hiWorldX: hi.x,
+          hiWorldZ: hi.z,
+          saving: this.terrain!.shortcutSaving(s),
+        }
+      })
   }
 
   /** 지금 화면에 뜬 사다리 안내 상태. */
@@ -5607,7 +5785,7 @@ class Game {
   debugTravelInfo(): { lit: number; opened: boolean; key: string } {
     return {
       lit: this.bonfires.filter((f) => f.lit).length,
-      opened: (this.terrain?.shortcuts ?? []).some((s) => s.open),
+      opened: (this.terrain?.shortcuts ?? []).some((s) => s.kind === 'ladder' && s.open),
       key: TRAVEL_KEY,
     }
   }
@@ -7216,6 +7394,10 @@ declare global {
       }
       /** 🧪 실험대 전용 — 등급/시드를 직접 끼웁니다. */
       setGear: (weaponIndex: number, tier: number, seed: number) => void
+      /** 🧱 금 간 벽 — 어디에 있고 부숴졌는가. */
+      walls: () => { key: string; x: number; z: number; open: boolean }[]
+      /** 지금 **걸어서** 그 자리에 닿는가 — 벽 뒤인지를 게임에게 묻는 창. */
+      walkableFromPlayer: (x: number, z: number) => boolean
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */
       barrelInfo: () => {
         blast: number
@@ -8249,6 +8431,8 @@ window.__game = {
   bossSwingLog: () => game.debugBossSwingLog(),
   levelFoes: () => game.debugLevelFoes(),
   travelInfo: () => game.debugTravelInfo(),
+  walls: () => game.debugWalls(),
+  walkableFromPlayer: (x, z) => game.debugWalkableFromPlayer(x, z),
   barrelInfo: () => game.debugBarrelInfo(),
   gearInfo: () => game.debugGearInfo(),
   shopInfo: () => game.debugShopInfo(),
