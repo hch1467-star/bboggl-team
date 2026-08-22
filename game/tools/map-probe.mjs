@@ -355,17 +355,51 @@ try {
   // 사다리와 무관하게, **시작 지점에서 모든 화톳불·보물·보스에 걸어서 닿아야**
   // 합니다. 지형을 손으로 그리다 보면 한 칸 차이로 섬이 생기는데, 그건
   // 플레이해 보기 전에는 절대 눈에 안 띕니다.
+  /**
+   * ── ⚠️ **「모든 배치물은 닿아야 한다」가 더는 참이 아닙니다** ──────────
+   *
+   * 이 검사는 *"지형을 손으로 그리다 한 칸 차이로 섬이 생기는 것"* 을
+   * 잡으려고 만들었고, 그 목적은 지금도 옳습니다. 그런데 그 뒤에
+   * **일부러 못 가게 둔 배치물**이 생겼습니다:
+   *   · 🧱 부술 수 있는 벽 **뒤**의 보물 — 벽을 부숴야 들어갑니다
+   *   · 🎁💥 **선반 위**의 보물과 통 — 폭발로 떨어뜨려야 줍습니다
+   * 둘 다 「섬」이 아니라 **설계**입니다. 그대로 두면 이 검사는
+   * *"퍼즐을 없애라"* 고 말하게 됩니다.
+   *
+   * ⚠️ 그리고 이 줄은 **선반 장치를 놓은 회차부터 계속 빨간불이었습니다.**
+   *    저는 그동안 `map` 을 안 돌렸습니다. 이 저장소가 이번 세션에 두 번째로
+   *    겪는 「안 읽은 빨강」입니다(첫 번째는 `upgrade` 의 정련석 줄).
+   *
+   * ── 무르게 하지 않고 **갈래를 나눕니다** ──────────────────────────
+   *   · 닿는 것이 **기본**입니다 — 아래 첫 검사 그대로.
+   *   · 못 닿는 것은 **답이 있어야** 합니다 — 폭발 반경 안에 통이 있거나,
+   *     부술 수 있는 벽이 곁에 있거나. 답이 없으면 그건 **섬**이고
+   *     여전히 빨강입니다.
+   * (장치가 실제로 굴러가는지는 `npm run drop` · `npm run wall` 이 봅니다.
+   *  여기서는 *"이게 섬인가 설계인가"* 만 가릅니다.)
+   */
   const spawn = cellOf(level.entities.find((e) => e.kind === 'spawn'))
+  const blastR = await page.evaluate(() => window.__game.barrelInfo().blast)
+  const barrelsAt = level.entities.filter((e) => e.kind === 'barrel')
+  const wallsAt = level.entities.filter((e) => e.kind === 'crackedWall' || e.kind === 'thickWall')
   const unreachable = []
+  const byDesign = []
   for (const e of level.entities) {
     if (e.kind === 'spawn' || e.kind === 'ladder') continue
     const c = cellOf(e)
-    if (!Number.isFinite(bfs(spawn, c, maxClimb, false))) unreachable.push(`${e.kind}(${c.cx},${c.cz})`)
+    if (Number.isFinite(bfs(spawn, c, maxClimb, false))) continue
+    const near = (list, r) => list.some((o) => Math.hypot(o.x - e.x, o.z - e.z) <= r)
+    // 💥 폭발이 닿으면 「떨어뜨리기」, 벽이 곁이면 「벽 뒤」 — 둘 다 답이 있습니다.
+    if (near(barrelsAt, blastR)) byDesign.push(`${e.kind}(${c.cx},${c.cz})💥`)
+    else if (near(wallsAt, 4)) byDesign.push(`${e.kind}(${c.cx},${c.cz})🧱`)
+    else unreachable.push(`${e.kind}(${c.cx},${c.cz})`)
   }
   check(
     unreachable.length === 0,
-    '시작 지점에서 모든 배치물에 사다리 없이도 닿는다',
-    unreachable.length ? unreachable.join(' · ') : `${level.entities.length - 2}개 전부`,
+    '시작 지점에서 못 닿는 배치물이 **섬이 아니다** (답이 있거나 · 걸어서 닿거나)',
+    unreachable.length
+      ? `**답이 없습니다** — ${unreachable.join(' · ')}`
+      : `걸어서 닿는 것 ${level.entities.length - 2 - byDesign.length}개 · 답이 있어 일부러 못 가게 둔 것 ${byDesign.length}개${byDesign.length ? ` (${byDesign.join(' · ')})` : ''}`,
   )
 
   /**
@@ -489,6 +523,87 @@ try {
       ],
     )
   ).map((p) => ({ cx: Math.floor(p.x / CELL + level.w / 2), cz: Math.floor(p.z / CELL + level.h / 2) }))
+  /**
+   * ── 🧭 **이 선이 「게임이 안내하는 길」과 같은가** ─────────────────────
+   *
+   * ── 오래 품고 있던 의심 ──────────────────────────────────────────
+   * 이 파일의 배치 검사 열 몇 개가 전부 **「주 동선」**(화톳불→보스 최단로)
+   * 위에서 이뤄집니다. `tools/playthrough.mjs` 에 이런 의심이 적혀
+   * 있었습니다:
+   *
+   *     *"「주 동선」은 **아무도 걷지 않는 길**일 수 있는데, 그 위에서 하는
+   *       배치 검사 열 몇 개가 전부 없는 길을 재고 있는 셈입니다."*
+   *
+   * 그럴 만한 이유가 있었습니다 — 봇이 판마다 이 선의 **절반**밖에
+   * 안 지납니다(49~52%). 그 절반이 **길이 틀려서**인지 **봇이 딴 데로
+   * 새서**인지는 아무도 안 재 봤습니다. 처방이 정반대입니다:
+   * 앞이면 **프로브를 고쳐야** 하고, 뒤면 **봇을 고쳐야** 합니다.
+   *
+   * ── 재 봤습니다 ──────────────────────────────────────────────────
+   *     주 동선 100칸 · 안내를 따라 걸은 길 104걸음
+   *     서로 14m 안으로 덮는 비율 **양방향 100%** · 가장 먼 어긋남 **4m**
+   *
+   * **같은 길입니다.** 의심은 풀렸고, 봇의 49% 는 길이 아니라
+   * **봇의 발** 이야기입니다(곁길·전투로 새는 것).
+   *
+   * ⚠️ 그래서 이 사실을 **검사로 올립니다.** 지금 초록인 성질이고,
+   *    안내 규칙(`findObjective`)이나 길찾기를 손보는 날 둘이 갈라지면
+   *    **그때 빨개져야** 합니다 — 안 그러면 이 파일의 검사 전부가
+   *    조용히 없는 길을 재게 됩니다.
+   */
+  {
+    const guide = await page.evaluate(async () => {
+      const G = window.__game
+      const nap = () => new Promise((r) => setTimeout(r, 8))
+      G.reset()
+      await nap()
+      G.freezeEnemies(true)
+      await nap()
+      const out = []
+      let guard = 0
+      while (guard++ < 4000) {
+        const obj = G.objective()
+        if (!obj) break
+        const p = G.state().player
+        out.push({ x: p.x, z: p.z })
+        if (obj.walkDist <= 1.5) {
+          G.teleportPlayer(obj.x, obj.z)
+          await nap()
+          const next = G.objective()
+          if (!next || (Math.abs(next.x - obj.x) < 0.01 && Math.abs(next.z - obj.z) < 0.01)) break
+          continue
+        }
+        const step = G.pathStep(obj.x, obj.z)
+        if (!step) break
+        G.teleportPlayer(step.x, step.z)
+        await nap()
+      }
+      G.freezeEnemies(false)
+      G.reset()
+      await nap()
+      return out
+    })
+    const routeW = routeCells.map((c) => ({
+      x: (c.cx - level.w / 2 + 0.5) * CELL,
+      z: (c.cz - level.h / 2 + 0.5) * CELL,
+    }))
+    const nearestTo = (pts, q) => {
+      let b = Infinity
+      for (const p of pts) b = Math.min(b, Math.hypot(p.x - q.x, p.z - q.z))
+      return b
+    }
+    const rToG = routeW.map((r) => nearestTo(guide, r))
+    const gToR = guide.map((g) => nearestTo(routeW, g))
+    // 문턱은 **어그로 거리**를 씁니다 — 이 파일의 다른 배치 검사가 쓰는 자와 같게.
+    const LIM = 14
+    const pct = (arr) => Math.round((arr.filter((d) => d <= LIM).length / Math.max(1, arr.length)) * 100)
+    const worst = Math.round(Math.max(0, ...rToG, ...gToR))
+    check(
+      guide.length > 20 && pct(rToG) >= 95 && pct(gToR) >= 95,
+      '🧭 **「주 동선」이 게임이 안내하는 길과 같은 선이다** (없는 길 위에서 배치를 재지 않게)',
+      `주 동선 ${routeW.length}칸 · 안내 ${guide.length}걸음 · 서로 ${LIM}m 안 ${pct(rToG)}%/${pct(gToR)}% · 가장 먼 어긋남 ${worst}m`,
+    )
+  }
   {
     // 🧭 동선 자체를 눈금으로 남깁니다 — 이 선이 틀리면 아래 배치 검사가
     //    전부 **없는 길**을 재게 됩니다. 그때 제일 먼저 볼 줄입니다.
