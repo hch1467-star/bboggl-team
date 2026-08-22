@@ -6086,6 +6086,14 @@ class Game {
       urnChests: number
       anvils: number
       bonfires: number
+      /**
+       * 🧭 **소비처와 끝점의 자리** — 개수만으로는 못 묻는 질문이 있습니다.
+       * *"불티가 80 모였다"* 와 *"그걸 쓸 수 있다"* 는 다른 말이고,
+       * 둘을 가르는 것은 **모루가 어디 서 있는가**뿐입니다.
+       */
+      anvilAt: { x: number; z: number }[]
+      bonfireAt: { x: number; z: number }[]
+      bossAt: { x: number; z: number } | null
     }
   } {
     const items = this.levelData?.entities ?? []
@@ -6096,6 +6104,9 @@ class Game {
     let urnChests = 0
     let anvils = 0
     let bonfires = 0
+    const anvilAt: { x: number; z: number }[] = []
+    const bonfireAt: { x: number; z: number }[] = []
+    let bossAt: { x: number; z: number } | null = null
     for (const it of items) {
       const kind = kindFromId(it.kind)
       if (kind !== null) {
@@ -6103,6 +6114,7 @@ class Game {
         const row = foes.get(def.id) ?? { id: def.id, count: 0, ember: def.ember }
         row.count++
         foes.set(def.id, row)
+        if (kind === EnemyKind.Boss) bossAt = { x: it.x, z: it.z }
         continue
       }
       if (it.kind === 'treasure') chests++
@@ -6110,8 +6122,13 @@ class Game {
       //    보상이 같으니 공급으로도 같이 세야 합니다. 따로 내보내는 이유는
       //    "숨어 있다"와 "놓여 있다"를 프로브가 나눠 말할 수 있게 하려고.
       else if (it.kind === 'urnFull') urnChests++
-      else if (it.kind === 'anvil') anvils++
-      else if (it.kind === 'bonfire') bonfires++
+      else if (it.kind === 'anvil') {
+        anvils++
+        anvilAt.push({ x: it.x, z: it.z })
+      } else if (it.kind === 'bonfire') {
+        bonfires++
+        bonfireAt.push({ x: it.x, z: it.z })
+      }
     }
     return {
       weapon: {
@@ -6132,6 +6149,9 @@ class Game {
         urnChests,
         anvils,
         bonfires,
+        anvilAt,
+        bonfireAt,
+        bossAt,
       },
     }
   }
@@ -7371,6 +7391,9 @@ declare global {
           urnChests: number
           anvils: number
           bonfires: number
+          anvilAt: { x: number; z: number }[]
+          bonfireAt: { x: number; z: number }[]
+          bossAt: { x: number; z: number } | null
         }
       }
       /** 무기 강화 검증용 */
@@ -7387,6 +7410,8 @@ declare global {
         damagePerLevel: number
         levels: number[]
         atStation: boolean
+        /** 안 되면 **왜** — `'foe'`(적이 막음) · `'away'`(안 닿음) · `''`(된다). */
+        blockedBy: '' | 'foe' | 'away'
       }
       /**
        * 🌀 **지금 무기 축이 놓인 각도**(라디안). `y` 가 좌우, `x` 가 위아래.

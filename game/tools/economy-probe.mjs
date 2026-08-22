@@ -209,6 +209,135 @@ try {
   check(eco.zone.anvils >= 1, '무기를 강화할 모루가 지도에 있다', `${eco.zone.anvils}곳`)
   check(eco.zone.bonfires >= 1, '성수병을 강화할 화톳불이 지도에 있다', `${eco.zone.bonfires}곳`)
 
+  /**
+   * ---- 🧭 **돈이 모이는 것과 쓸 수 있는 것은 다른 말입니다** ----
+   *
+   * 위 검사 ① 은 *"첫 강화는 존의 4분의 1을 돌기 전에 산다"* 고 말하지만,
+   * 그건 **지갑 얘기일 뿐**입니다. 불티가 80 모여도 모루가 존 끝에만
+   * 있으면 첫 강화는 *"가는 길에 하는 일"* 이 아니라 **끝나고 정산하는
+   * 일**이 됩니다. 그 상태라면 「처음 손에 쥔 불티를 무엇에 쓸까」라는
+   * 선택 자체가 존 안에 없습니다.
+   *
+   * ⚠️ 제가 ① 을 써 놓고 이 구멍을 못 봤습니다. **재기 전의 설명은
+   *    결론이 아닙니다** — 그래서 거리를 직접 잽니다.
+   *
+   * 거리는 **게임의 길찾기**에게 묻습니다(`walkToPlayer`). 격자 BFS 를
+   * 여기서 다시 짜면 `npm run route` 와 같은 처지가 됩니다 —
+   * 규칙을 베낀 자는 검사로 쓸 수 없습니다.
+   */
+  const reach = await page.evaluate((spots) => {
+    const G = window.__game
+    const p = G.state().player
+    return {
+      from: { x: Number(p.x.toFixed(1)), z: Number(p.z.toFixed(1)) },
+      walk: spots.map((s) => {
+        const d = G.walkToPlayer(s.x, s.z)
+        return { ...s, walk: d === null ? null : Number(d.toFixed(1)) }
+      }),
+    }
+  }, [
+    ...eco.zone.anvilAt.map((a) => ({ ...a, label: '모루' })),
+    ...eco.zone.bonfireAt.map((b) => ({ ...b, label: '화톳불' })),
+    ...(eco.zone.bossAt ? [{ ...eco.zone.bossAt, label: '보스' }] : []),
+  ])
+  const walkOf = (label) =>
+    reach.walk.filter((w) => w.label === label && w.walk !== null).map((w) => w.walk)
+  const zoneLength = walkOf('보스')[0] ?? null
+  const anvilWalks = walkOf('모루').sort((a, b) => a - b)
+  const fireWalks = walkOf('화톳불').sort((a, b) => a - b)
+  const pct = (d) => (zoneLength ? `${Math.round((d / zoneLength) * 100)}%` : '?')
+
+  console.log(`  🧭 시작 지점(${reach.from.x}, ${reach.from.z})에서 **걸어서**:`)
+  console.log(`     존 길이(→보스) ${zoneLength}m`)
+  console.log(`     모루   ${anvilWalks.map((d) => `${d}m(${pct(d)})`).join(' · ')}`)
+  console.log(`     화톳불 ${fireWalks.map((d) => `${d}m(${pct(d)})`).join(' · ')}`)
+
+  /**
+   * ---- ⑧ **강화할 수 있는 첫 자리가 존의 절반 안에 있다** ----
+   *
+   * ── ⚠️ **여기서 제가 한 번 틀렸습니다 (기록)** ────────────────────
+   * 처음엔 이렇게 적었습니다 — *"첫 **모루**가 존의 절반 안에 있다"*.
+   * 재 보니 모루는 114m(69%)·138m(83%) 로 둘 다 존의 뒤쪽 3분의 1에만
+   * 있었고, 저는 *"앞의 69% 동안은 성수병밖에 못 산다 → 「생존이냐
+   * 화력이냐」라는 선택이 지도 때문에 사라졌다"* 는 결론까지 갔습니다.
+   * 모루를 앞으로 옮기자는 처방을 쓰기 직전이었습니다.
+   *
+   * **그 결론이 틀렸습니다.** main.ts 는 이렇게 되어 있습니다:
+   *
+   *     this.canSpendHere = atFire || nearAnvil
+   *
+   * 무기 강화는 **화톳불에서도 됩니다.** 그리고 이 존의 첫 화톳불은
+   * 시작 지점에서 **4m(2%)** 입니다. 엘든 링의 축복이 하는 일을 이 게임은
+   * 이미 하고 있었습니다. 고칠 것은 게임이 아니라 **제 검사**였습니다.
+   *
+   * ── 그래서 자리를 **게임에게 물어봅니다** ─────────────────────────
+   * 「모루 또는 화톳불」이라고 여기에 적으면 그게 바로 베껴 적는 것이고,
+   * 언젠가 규칙이 바뀌면 이 검사는 조용히 거짓이 됩니다 — 방금 제가
+   * 당한 것이 정확히 그 모양입니다(코드를 안 읽고 지도만 보고 판단).
+   * 그래서 후보 자리마다 **가서 서 보고** `atStation` 을 읽습니다.
+   *
+   * ⚠️ `blockedBy === 'foe'` 도 **자리로 칩니다.** 그건 *"소비처에 닿았는데
+   *    적이 14m 안에 있다"* 는 뜻이라 자리는 맞습니다(main.ts `spendBlock`).
+   *    적을 치우는 것은 플레이어의 일이지 지도의 문제가 아닙니다.
+   */
+  const stations = await page.evaluate(async (spots) => {
+    const G = window.__game
+    const home = G.state().player
+    const out = []
+    for (const s of spots) {
+      G.teleportPlayer(s.x, s.z)
+      // 한 프레임으로는 소비처 판정이 안 돕니다 — 갱신을 기다립니다.
+      const t = G.state().elapsed + 0.25
+      const dl = Date.now() + 20000
+      while (G.state().elapsed < t && Date.now() < dl) await new Promise((r) => setTimeout(r, 8))
+      const wu = G.weaponUpgradeInfo()
+      out.push({ ...s, station: wu.atStation || wu.blockedBy === 'foe', why: wu.blockedBy })
+    }
+    G.teleportPlayer(home.x, home.z)
+    return out
+  }, reach.walk.filter((w) => w.label !== '보스' && w.walk !== null))
+
+  const spendWalks = stations
+    .filter((s) => s.station)
+    .map((s) => s.walk)
+    .sort((a, b) => a - b)
+  console.log(
+    `     강화되는 자리(게임에게 물음): ${stations.map((s) => `${s.label} ${s.walk}m ${s.station ? '⚒️' : `✖(${s.why})`}`).join(' · ')}`,
+  )
+
+  /**
+   * 왜 절반인가 — `balance.ts` 는 *"성수병 첫 강화(60)보다 무기 첫
+   * 강화(80)가 비싸다. 처음 손에 쥔 불티는 생존에 쓰는 것이 기본값"* 이라는
+   * **선택**을 설계해 뒀습니다. 그 선택이 성립하려면 둘 다 **같은 자리에서
+   * 살 수 있어야** 합니다. 강화 자리가 존 끝에만 있으면 그건 고민이 아니라
+   * 순서가 됩니다.
+   *
+   * 참고한 게임들이 전부 같은 자리에 있습니다 — 다크 소울의 안드레이는
+   * 성벽 초반, 엘든 링의 축복은 어디에나. 강화는 **여정 중에 하는 일**이지
+   * 정산이 아닙니다.
+   */
+  if (zoneLength !== null && spendWalks.length > 0) {
+    check(
+      spendWalks[0] <= zoneLength * 0.5,
+      '강화할 수 있는 첫 자리가 존의 절반 안에 있다 (강화는 정산이 아니라 여정 중의 일)',
+      `${spendWalks[0]}m / ${zoneLength}m = ${pct(spendWalks[0])}`,
+    )
+  } else {
+    check(false, '강화할 수 있는 첫 자리가 존의 절반 안에 있다', '강화되는 자리를 하나도 못 찾았습니다')
+  }
+
+  /**
+   * 👁 **모루까지의 거리에는 판정을 안 답니다.**
+   *
+   * 모루가 화톳불과 다른 점은 강화가 아니라 **상점**입니다(gear.ts `SHOP` —
+   * 모루 둘 × 여섯 = 열둘, 재입고 없음). *"살 수 있는 물건을 존 앞쪽에서도
+   * 보여줘야 하는가"* 는 이 저장소가 아직 안 정한 질문입니다. 지금 답을
+   * 정해 문턱으로 세우면, 계측기가 게임의 결론을 대신 내는 것이 됩니다.
+   */
+  if (zoneLength !== null && anvilWalks.length > 0) {
+    console.log(`     👁 상점(모루)은 ${pct(anvilWalks[0])} 지점부터 — 판정 없음(아직 안 정한 질문)`)
+  }
+
   // ---- 👁 판정을 안 다는 표 ----
   /**
    * ⚠️ **여기에는 초록/빨강을 안 답니다.**
