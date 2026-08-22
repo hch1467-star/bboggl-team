@@ -1364,6 +1364,113 @@ try {
    *    공격을 가진 적**을 뽑습니다 — 새 적에게 속박을 주면 이 검사가
    *    저절로 따라옵니다.
    */
+  /**
+   * ── 🎨 **색을 통째로 피해 갈 수 있는가** ────────────────────────────
+   *
+   * ── 왜 이 자가 필요해졌는가 ──────────────────────────────────────
+   * 자동 플레이가 판마다 이렇게 찍습니다:
+   *
+   *     🎨 색별 겪음  🔴 11회 · 🟡 8회 · 🔵 **2회** · 🟣 4회 · 🟢 5회
+   *
+   * 그런데 그건 **한 판의 장부**라 처방이 안 나옵니다 — 봇이 안 간 것인지
+   * 지도가 안 만나게 한 것인지 구분이 안 됩니다. 이 게임의 4색은
+   * **언어**이고, 두 번 들은 말은 배울 수가 없습니다. 그래서 지형에게
+   * 직접 묻습니다:
+   *
+   *     **"이 색을 던지는 적을 전부 피해서 보스까지 갈 수 있는가?"**
+   *
+   * ⚠️ **기존 🎯 와 묻는 것이 다릅니다.** `npm run route` 의 🎯 는 적을
+   *    **하나씩** 지워 봅니다. 그래서 두 갈래 길에 하나씩 세워 둔 색은
+   *    거기서 둘 다 「피할 수 있다」로 나오지만, 실제로는 **어느 길로 가도
+   *    만납니다.** 하나씩 묻는 자로는 「그 색을 배우는가」에 답할 수 없습니다.
+   *
+   * ⚠️ 원으로 지우는 것은 **가장 후한 가정**입니다(실제 인지는 부채꼴).
+   *    그러니 여기서 「피할 수 있다」가 나오면 실제로는 더 쉽게 피합니다.
+   *
+   * ⚠️ 여기서 「만난다」는 **깨어난다**까지입니다. 깨어난 적이 실제로
+   *    예고를 띄우고 그걸 보고 배우는지는 `npm run play` 의 🎨 장부가 봅니다 —
+   *    지형이 답할 수 있는 데까지만 답합니다.
+   */
+  {
+    const rosterColor = await page.evaluate(() => window.__game.enemyRoster())
+    const aggroM = await page.evaluate(() => window.__game.terrainInfo().levelAggroRange)
+    /** 색 → 그 색을 던지는 적 id 들. **로스터에서 뽑습니다** — 새 적이 생겨도 따라옵니다. */
+    const byColor = new Map()
+    for (const r of rosterColor) {
+      for (const a2 of r.attacks) {
+        if (!byColor.has(a2.color)) byColor.set(a2.color, new Set())
+        byColor.get(a2.color).add(r.id)
+      }
+    }
+    const spawnC = cellOf(level.entities.find((e) => e.kind === 'spawn'))
+    const bossC = cellOf(level.entities.find((e) => e.kind === 'boss'))
+    // 한 칸의 크기는 위에서 쓰던 값과 같습니다(격자 2m).
+    const cell = 2
+    const rc = Math.ceil(aggroM / cell)
+    const lines = []
+    let dodgeable = 0
+    let measured = 0
+    for (const [color, ids] of byColor) {
+      /**
+       * ⚠️ **보스는 뺍니다.** 보스는 반드시 만나므로 보스가 던지는 색은
+       *    전부 「못 피한다」가 됩니다 — 그러면 이 자는 *"보스가 있는가"*
+       *    를 재게 되고, 물어보려던 **잡몹 배치**에 대해 아무 말도
+       *    안 하게 됩니다.
+       */
+      const foes = level.entities.filter((e) => e.kind !== 'boss' && ids.has(e.kind))
+      /**
+       * ⚠️ **빈 표본으로 통과시키지 않습니다.** 그 색을 던지는 잡몹이
+       *    하나도 없으면 아래 흘리기는 당연히 보스에 닿는데, 그건
+       *    *"피할 수 있다"* 가 아니라 *"애초에 없다"* 입니다.
+       */
+      if (foes.length === 0) {
+        lines.push(`     ${color} — **잡몹 중에 이 색을 던지는 적이 없습니다**(피할 수 있는 게 아니라 없는 것)`)
+        continue
+      }
+      measured++
+      const blocked = new Set()
+      for (const e of foes) {
+        const c = cellOf(e)
+        for (let dz = -rc; dz <= rc; dz++) {
+          for (let dx = -rc; dx <= rc; dx++) {
+            const cx = c.cx + dx
+            const cz = c.cz + dz
+            if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) continue
+            if (Math.hypot(dx, dz) * cell > aggroM) continue
+            blocked.add(cz * level.w + cx)
+          }
+        }
+      }
+      // 사다리는 **내려져 있다고** 봅니다 — 가장 많은 길이 열린 상태에서도
+      // 못 피한다면 그건 확실한 「만난다」입니다.
+      const reach = blocked.has(spawnC.cz * level.w + spawnC.cx)
+        ? undefined
+        : bfs(spawnC, bossC, maxClimb, true, blocked)
+      const canDodge = reach !== undefined
+      if (canDodge) dodgeable++
+      lines.push(
+        `     ${color} — 잡몹 ${foes.length}마리 · ` +
+          (canDodge
+            ? '**피해서 갈 수 있습니다** — 판에 따라 한 번도 안 나옵니다'
+            : '어느 길로 가도 만납니다'),
+      )
+    }
+    console.log(`\n  🎨 **색을 통째로 피해 갈 수 있는가** (인지 ${aggroM}m · 원으로 후하게)`)
+    for (const l of lines) console.log(l)
+    /**
+     * ⚠️ **판정으로 걸지 않습니다.** 「모든 색을 반드시 만나야 한다」는
+     *    아직 아무도 정한 규칙이 아닙니다 — 소울류는 오히려 못 만나고
+     *    지나가는 적을 일부러 둡니다. 여기서 정하고 싶은 것은 *"몇 개가
+     *    그런가"* 이고, 그 수를 보고 사람이 정할 일입니다.
+     *    **재기 전의 설명을 결론으로 만들지 않습니다.**
+     */
+    check(
+      measured > 0,
+      '🎨 **색마다 피할 수 있는지 실제로 쟀다** (빈 표본으로 통과하지 않게)',
+      `${measured}색 측정 · 그중 피해 갈 수 있는 색 ${dodgeable}개`,
+    )
+  }
+
   {
     const rosterCC = await page.evaluate(() => window.__game.enemyRoster())
     const ccIds = rosterCC

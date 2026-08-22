@@ -1,40 +1,35 @@
 /**
- * 가르치는 순서 검증 — `npm run teach`
+ * 🎨 **색을 가르치는 계약 — `npm run teach`**
  *
- * ── 왜 이걸 재게 됐나 ───────────────────────────────────────────
- * 이 프로젝트에는 **"4색을 잡몹이 가르치게"** 라는 항목이 있고 완료로
- * 표시돼 있습니다. 적 종류를 늘려서 색마다 다른 대응을 가르치겠다는
- * 것이었습니다. 그런데 **가르치는 순서**는 한 번도 확인한 적이 없습니다.
+ * ── 이 게임의 계약 ────────────────────────────────────────────────
+ * *"색은 **처음 볼 때 한 번** 설명한다."* (main.ts 「처음 보는 색이면
+ * 정답을 한 번」). 기둥 2가 4색 예고인 게임에서 이건 곁가지가 아니라
+ * **규칙을 알려 주는 유일한 자리**입니다.
  *
- * 순서가 중요한 이유는 소울류·오공이 전부 같은 방식을 쓰기 때문입니다:
- * 새 문법은 **혼자, 안전하게** 처음 만나게 합니다. 언데드 애실럼의 첫
- * 방, 림그레이브의 첫 병사가 그렇습니다. 새것을 둘 이상 겹쳐 놓으면
- * 플레이어는 무엇 때문에 죽었는지 못 가리고, 못 가리면 못 배웁니다.
+ * ── 그런데 아무도 안 재고 있었습니다 ──────────────────────────────
+ * 그 사이에 계약이 두 군데서 깨져 있었습니다:
  *
- * 반대 사례도 이미 우리 안에 있습니다. 잡몹 연계를 넣을 때 🔴→🟡 이
- * 아니라 🔴→🔴 로 간 이유가 정확히 이것이었습니다:
+ * ① **판을 새로 시작해도 다시 안 가르쳤습니다.** `seenIntents` 선언부에
+ *    *"판을 새로 시작하는 사람은 대개 다시 배우고 싶은 사람"* 이라고
+ *    적어 놓고, `reset()` 에서 그 집합을 **안 지웠습니다.** 프로브는
+ *    전부 `reset()` 으로 시작하므로, 계측기들도 이 사실을 못 봤습니다.
  *
- *   > 새것을 둘 겹치면 둘 다 못 배우고 "그냥 죽었다"만 남습니다.
+ * ② **보스가 처음 가르치는 색이 있었습니다.** `npm run map` 의 🎨 검사가
+ *    다섯 색 전부 피해 갈 수 있다고 답했고, 못 피하는 자리는 스폰 58m
+ *    안과 보스 13m 안뿐입니다. 즉 🔵 속박·🟣 강제이동을 **보스가
+ *    휘두르는 순간** 처음 배우는 판이 실제로 있을 수 있습니다.
  *
- * 같은 잣대를 **존 배치**에는 대 본 적이 없습니다.
- *
- * ── 어떻게 재는가 ──────────────────────────────────────────────
- * 주 동선을 게임의 길찾기로 그리고(`secret`·`retry` 와 같은 방식),
- * 적 하나하나가 그 선의 **몇 번째 걸음** 근처에 있는지로 등장 순서를
- * 정합니다. 제가 "이 적이 먼저"라고 정하지 않습니다 — 길이 정합니다.
- *
- * ⚠️ 어그로 거리도 제가 안 정합니다. `terrainInfo().levelAggroRange` 를
- *    그대로 씁니다. "같이 만난다"의 뜻이 곧 "둘 다 깨어난다" 이므로,
- *    기준은 게임이 실제로 쓰는 그 거리여야 합니다.
+ * 이 프로브는 계약을 **네 조각**으로 나눠 잽니다. 조각마다 처방이
+ * 다르기 때문입니다 — 한 칸에 담으면 어느 쪽이 깨졌는지 못 가릅니다.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
-const PORT = 5217
+const PORT = 5273
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 
 let pass = 0
@@ -59,213 +54,149 @@ try {
   await page.goto(`http://localhost:${PORT}/?lowfx=1`)
   await page.waitForFunction(() => window.__game?.ready === true, null, { timeout: 60000 })
 
-  console.log('\n🎓 가르치는 순서 검증 — 새 적을 혼자 만나는가\n')
+  console.log('\n🎨 색을 가르치는 계약 — 처음 볼 때 한 번, 그리고 늦지 않게\n')
 
-  const t = await page.evaluate(() => window.__game.terrainInfo())
-  const roster = await page.evaluate(() => window.__game.enemyRoster())
-  console.log(`  [설정] 존 어그로 ${t.levelAggroRange}m\n`)
-
-  const trail = await page.evaluate(async () => {
+  /**
+   * ── ① **판을 새로 시작하면 다시 배운다** ─────────────────────────
+   *
+   * 여기가 제일 조용히 깨져 있던 자리입니다. 페이지를 켠 직후에는
+   * 당연히 비어 있으므로 **한 번 배우게 한 뒤 다시 시작해서** 봅니다 —
+   * 안 그러면 이 검사는 "새 페이지는 깨끗하다"는 당연한 말만 하게 됩니다.
+   */
+  const teachOnce = await page.evaluate(async () => {
     const G = window.__game
-    const sleep = () => new Promise((r) => setTimeout(r, 8))
+    const sleep = () => new Promise((r) => setTimeout(r, 16))
+    G.reset()
+    await sleep()
+    const p = G.playerEntity()
+    const px = G.state().player.x
+    const pz = G.state().player.z
+    // 바로 앞에 한 마리 세워 두면 곧 예고를 겁니다 — 그게 「처음 보는 색」입니다.
+    G.spawnTestEnemy(px + 2.2, pz)
+    for (let i = 0; i < 240 && G.seenIntents().length === 0; i++) {
+      G.step(1, 0.05)
+      await sleep()
+    }
+    return { seen: G.seenIntents().length, alive: p >= 0 }
+  })
+  check(
+    teachOnce.seen > 0,
+    '① **잡몹 하나만 세워도 색을 가르친다** (계약이 실제로 도는가)',
+    `배운 색 ${teachOnce.seen}개`,
+  )
+
+  const afterReset = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 16))
+    G.reset()
+    await sleep()
+    return G.seenIntents().length
+  })
+  check(
+    afterReset === 0,
+    '① **판을 새로 시작하면 배운 것이 지워진다** (다시 배울 수 있게)',
+    afterReset === 0 ? '0개' : `**${afterReset}개가 남았습니다** — 새 판에서 안내가 영영 안 뜹니다`,
+  )
+
+  /**
+   * ── ② **보스를 만나기 전에 못 본 색이 있으면, 조우에서 가르친다** ──
+   *
+   * 아무것도 안 만나고 보스 앞으로 갑니다(적을 얼려 둡니다). 그러면
+   * 「한 번도 못 본 색으로 보스를 만나는 판」이 그대로 재현됩니다.
+   */
+  const enc = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 16))
     G.reset()
     await sleep()
     G.freezeEnemies(true)
     await sleep()
-    const out = []
-    let guard = 0
-    while (guard++ < 4000) {
-      const obj = G.objective()
-      if (!obj) break
-      const p = G.state().player
-      out.push({ x: p.x, z: p.z })
-      if (obj.walkDist <= 1.5) break
-      const step = G.pathStep(obj.x, obj.z)
-      if (!step) break
-      G.teleportPlayer(step.x, step.z)
+    const before = G.seenIntents().slice()
+    /**
+     * 보스 자리는 **목표 안내를 따라가서** 찾습니다 — 좌표를 프로브가
+     * 외우면 지도를 고치는 날 이 검사만 옛 자리로 갑니다.
+     *
+     * ⚠️ 목표는 **이어집니다**(수문장 → … → 보스). 이름으로 고르려다
+     *    첫 목표인 수문장에서 멈춰 **조우가 0** 이 났습니다. 이름을 안 보고
+     *    *"목표가 더 안 바뀔 때까지"* 따라갑니다 — 그 마지막이 보스입니다.
+     */
+    let last = null
+    for (let i = 0; i < 80; i++) {
+      const o = G.objective()
+      if (!o) break
+      if (last && Math.abs(o.x - last.x) < 0.01 && Math.abs(o.z - last.z) < 0.01) break
+      last = { x: o.x, z: o.z }
+      G.teleportPlayer(o.x, o.z)
+      await sleep()
+      G.step(1, 0.05)
+    }
+    /**
+     * ⚠️ **여기서 얼음을 풉니다.** 조우 판정은 적 AI 안에 있어서, 얼린
+     *    채로는 보스 앞에 서 있어도 **영원히 조우가 안 됩니다**(실제로
+     *    `encounter 0` 이 두 번 났습니다). 오는 길에만 얼려 두는 것이
+     *    이 프로브가 원하는 것 — *"아무것도 안 만나고 보스 앞에 선다"* — 입니다.
+     */
+    G.freezeEnemies(false)
+    await sleep()
+    for (let i = 0; i < 200; i++) {
+      G.step(1, 0.05)
+      await sleep()
+      if ((G.bossEncounter()?.encounter ?? 0) > 0 && G.seenIntents().length > before.length) break
+    }
+    const hint = document.getElementById('colorHint')
+    return {
+      before,
+      after: G.seenIntents().slice(),
+      engaged: G.bossEncounter()?.encounter ?? 0,
+      hintText: hint && hint.style.display !== 'none' ? (hint.textContent ?? '') : '',
+    }
+  })
+  check(enc.engaged > 0, '② 보스와 **실제로 조우했다** (측정이 성립했다)', `encounter ${enc.engaged}`)
+  const learned = enc.after.filter((i) => !enc.before.includes(i))
+  check(
+    learned.length > 0,
+    '② **못 본 색을 조우 순간에 가르친다** (보스가 휘두른 뒤가 아니라)',
+    learned.length > 0
+      ? `조우에서 배운 색 ${learned.length}개 (그 전 ${enc.before.length}개 → ${enc.after.length}개)`
+      : '**하나도 안 가르쳤습니다** — 첫 🔵 를 보스의 속박으로 배우게 됩니다',
+  )
+  check(
+    enc.hintText !== '',
+    '② 그리고 그 안내가 **화면에 실제로 떠 있다** (규칙이 도는 것과 보이는 것은 다릅니다)',
+    enc.hintText ? `"${enc.hintText.slice(0, 40)}"` : '화면에 아무것도 없습니다',
+  )
+
+  /**
+   * ── ③ **이미 배운 색은 다시 안 가르친다** ────────────────────────
+   *
+   * 계약의 뒷절입니다 — *"색마다 **한 번만**."* 반복되면 안내가 아니라
+   * 잔소리가 되고, 잔소리는 다음 안내까지 같이 무시하게 만듭니다.
+   */
+  const again = await page.evaluate(async () => {
+    const G = window.__game
+    const sleep = () => new Promise((r) => setTimeout(r, 16))
+    const n = G.seenIntents().length
+    for (let i = 0; i < 200; i++) {
+      G.step(1, 0.05)
       await sleep()
     }
-    return out
-  })
-  check(trail.length > 20, '주 동선을 그렸다', `${trail.length}걸음`)
-
-  const level = JSON.parse(readFileSync(path.join(ROOT, 'src/levels/broken-gate.json'), 'utf8'))
-  const kinds = new Set(roster.map((r) => r.id))
-  const foes = level.entities.filter((e) => kinds.has(e.kind) && e.kind !== 'boss')
-
-  /**
-   * 등장 순서 = **동선에서 가장 가까운 걸음의 번호**. 걸음은 순서대로
-   * 쌓였으므로 그 번호가 곧 "얼마나 앞에서 만나는가" 입니다.
-   * 동선에서 어그로 거리보다 먼 적은 **지나가며 안 깨우므로** 뺍니다.
-   */
-  const placed = []
-  for (const f of foes) {
-    let best = { i: -1, d: Infinity }
-    for (let i = 0; i < trail.length; i++) {
-      const d = Math.hypot(trail[i].x - f.x, trail[i].z - f.z)
-      if (d < best.d) best = { i, d }
-    }
-    if (best.d <= t.levelAggroRange) placed.push({ ...f, step: best.i, off: best.d })
-  }
-  placed.sort((a, b) => a.step - b.step)
-
-  const nameOf = (id) => roster.find((r) => r.id === id)?.name ?? id
-  const colorsOf = (id) => {
-    const r = roster.find((x) => x.id === id)
-    return r ? [...new Set(r.attacks.map((a) => a.color))].join('') : ''
-  }
-
-  // 종류별 **첫 등장**
-  const first = new Map()
-  for (const p of placed) if (!first.has(p.kind)) first.set(p.kind, p)
-  const order = [...first.values()].sort((a, b) => a.step - b.step)
-
-  console.log('  [등장 순서] 주 동선에서 깨울 수 있는 적의 첫 만남\n')
-  for (const o of order) {
-    console.log(
-      `    ${String(o.step).padStart(3)}걸음  ${colorsOf(o.kind)} ${nameOf(o.kind)}` +
-        `  (${o.x}, ${o.z}) · 동선에서 ${o.off.toFixed(0)}m`,
-    )
-  }
-  console.log('')
-
-  /**
-   * ---- 1. **피하는 법을 먼저, 파고드는 법을 나중에** ----
-   *
-   * ⚠️ 첫 판에서 이 검사를 **패턴 수**로 썼습니다 — "패턴이 하나뿐인 적이
-   *    쉬운 적"이라고 본 것입니다. 돌려 보니 실패가 났는데, 실패한 쪽은
-   *    게임이 아니라 **제 잣대**였습니다:
-   *
-   *      첫 만남   잡몹        패턴 2개 (🔴🟡)
-   *      가장 적음 달려드는 자  패턴 1개 (🟢)
-   *
-   *    달려드는 자는 패턴이 하나지만 그 하나가 **🟢 반격**입니다 — 물러나던
-   *    몸을 앞으로 밀어야 하는, 이 게임에서 가장 어려운 대응입니다. 패턴
-   *    개수는 **난이도의 대리값이 못 됩니다.** 대리값이 틀리면 검사는 멀쩡한
-   *    배치를 고장이라 부르고, 그 말을 믿고 배치를 고치면 진짜 고장이 납니다.
-   *
-   * 설계가 실제로 말하는 것을 그대로 씁니다. 반격 설계 노트의 문장입니다:
-   *
-   *   > 네 색의 정답을 나란히 놓고 보니 전부 **"피하라"** 였습니다.
-   *   > 로스트아크의 카운터가 이 문제를 정확히 풉니다 — 한 색만
-   *   > **반대 방향**을 요구하기 때문입니다.
-   *
-   * 그러니 물어야 할 것은 개수가 아니라 **순서**입니다: 피하는 색을 먼저
-   * 만나고, 반대 방향을 요구하는 🟢 은 그 뒤에 와야 합니다. 앞뒤가 바뀌면
-   * 플레이어는 "예고를 보면 앞으로"라는 반사를 먼저 배우고, 그 반사는
-   * 나머지 네 색 모두에서 죽는 길입니다.
-   */
-  const COUNTER_EMOJI = '🟢'
-  const firstCounter = order.findIndex((o) => colorsOf(o.kind).includes(COUNTER_EMOJI))
-  const firstEvade = order.findIndex((o) => {
-    const c = colorsOf(o.kind)
-    return c.length > 0 && !c.includes(COUNTER_EMOJI)
+    return { before: n, after: G.seenIntents().length }
   })
   check(
-    firstEvade >= 0 && (firstCounter < 0 || firstEvade < firstCounter),
-    '🟢 반격보다 **피하는 색**을 먼저 만난다 (반대 방향은 나중에)',
-    firstEvade < 0
-      ? '피하는 색을 쓰는 적이 동선에 없습니다'
-      : `${nameOf(order[firstEvade].kind)}(${colorsOf(order[firstEvade].kind)}) ${order[firstEvade].step}걸음` +
-        (firstCounter >= 0
-          ? ` → ${nameOf(order[firstCounter].kind)}(🟢) ${order[firstCounter].step}걸음`
-          : ' · 🟢 은 동선에 없음'),
+    again.after === again.before,
+    '③ **이미 배운 색을 다시 세지 않는다** (색마다 한 번만)',
+    `${again.before}개 → ${again.after}개`,
   )
 
-  /**
-   * ---- 2. **새 적은 혼자 등장한다** ----
-   *
-   * 이 프로브의 핵심입니다. 어떤 종류를 처음 만나는 자리에서, **아직 안
-   * 배운 다른 종류**가 같이 깨어나면 안 됩니다. 이미 배운 종류가 함께
-   * 있는 것은 괜찮습니다 — 오히려 그게 조합을 가르치는 방식입니다.
-   */
-  const learned = new Set()
-  const clashes = []
-  for (const o of order) {
-    for (const other of placed) {
-      if (other.kind === o.kind) continue
-      if (learned.has(other.kind)) continue
-      const d = Math.hypot(other.x - o.x, other.z - o.z)
-      if (d <= t.levelAggroRange) {
-        clashes.push(`${nameOf(o.kind)} 첫 만남에 ${nameOf(other.kind)} 가 ${d.toFixed(0)}m`)
-      }
-    }
-    learned.add(o.kind)
-  }
-  check(
-    clashes.length === 0,
-    '새 적을 처음 만날 때 **아직 안 배운 다른 적**이 같이 깨지 않는다',
-    clashes.length === 0 ? '겹침 없음' : clashes.join(' · '),
+  check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' / '))
+  console.log(
+    '\n  ⚠️ **「배웠는가」는 여기서 못 잽니다.** 이 프로브가 재는 것은 ' +
+      '*"게임이 제때 말했는가"* 까지입니다 — 사람이 그걸 읽고 색을 구분하게 되는지는 ' +
+      '`npm run contrast`(색이 구분되는가)와 `npm run play`(🎨 색별 겪음)가 나눠 봅니다.\n',
   )
-
-  /**
-   * ---- 3. **보스가 쓸 색을 존이 먼저 가르쳤는가** ----
-   *
-   * ── 위 1번이 **비어서 통과할 수 있었습니다** ────────────────────
-   * 1번은 *"🟢 보다 피하는 색을 먼저 만난다"* 를 봅니다. 그런데 🟢 을 쓰는
-   * 적이 동선에 **하나도 없으면** `firstCounter < 0` 이 되어 그대로
-   * 통과합니다. 즉 *가르친 적이 없으면 순서 위반도 없다* 는 이유로 초록불이
-   * 켜집니다 — 이 저장소에서 가장 비싼 고장인 **"아무 말도 안 하는 계측기"**
-   * 의 교과서적인 모양입니다.
-   *
-   * ── 왜 하필 보스 기준인가 ──────────────────────────────────────
-   * 방금 보스에 **1단계 학습 잠금**을 넣었습니다 — 색을 몇 가지 보여주기
-   * 전에는 2단계로 안 넘어갑니다(enemyAI `taughtInPhase1`). 그건 보스가
-   * *자기 문법*을 가르치는 장치이지, **존이 할 일을 대신하는 장치가
-   * 아닙니다.** 보스 앞에서 처음 보는 색이 있으면 그 색은 이 게임에서 가장
-   * 위험한 자리에서 처음 배우게 됩니다. 소울류가 절대 안 하는 일입니다.
-   *
-   * 그래서 묻습니다: **보스가 쓰는 색 전부를, 보스에 닿기 전에 만나는가.**
-   */
-  {
-    const bossDef = roster.find((r) => r.id === 'boss')
-    const bossColors = bossDef ? [...new Set(bossDef.attacks.map((a) => a.color))] : []
-    // 동선에서 만나는 적들이 가르치는 색 (보스 제외 — 위 `foes` 가 이미 뺐습니다).
-    const taught = new Set()
-    for (const o of order) for (const c of colorsOf(o.kind)) taught.add(c)
-    const missing = bossColors.filter((c) => !taught.has(c))
-    console.log(
-      `  [보스가 쓰는 색] ${bossColors.join(' ')} · [존이 가르치는 색] ${[...taught].join(' ')}\n`,
-    )
-    check(
-      bossColors.length > 0,
-      '보스의 색을 실제로 읽어 왔다 (빈 목록으로 통과하지 않게)',
-      `${bossColors.length}색`,
-    )
-    check(
-      missing.length === 0,
-      '보스가 쓰는 색을 **존이 먼저 다 가르친다** (보스 앞에서 처음 보는 색이 없다)',
-      missing.length ? `못 가르친 색 ${missing.join(' ')}` : `${bossColors.length}색 전부`,
-    )
-  }
-
-  console.log('')
-  check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
-} catch (err) {
-  /**
-   * 💥 **도중에 죽으면 반드시 소리를 냅니다.**
-   *
-   * ── 왜 이게 없어서 한 라운드를 통째로 날렸는가 ────────────────────
-   * 이 파일들은 전부 `try { ... } finally { 닫기 }` 뿐이고 **`catch` 가
-   * 없었습니다.** 그래서 본문이 도중에 던지면:
-   *   · 집계 줄(`N개 통과 / N개 실패`)에 **영영 도달하지 않고**
-   *   · 그 아래 `process.exit(fail === 0 ? 0 : 1)` 도 **실행되지 않아**
-   *   · 껍데기는 **성공(exit 0)** 처럼 보입니다.
-   *
-   * 실제로 무기 프로브가 측정 도중 죽었는데 오류 한 줄 없이 exit 0 이었고,
-   * 출력이 중간에서 끊긴 것을 눈치채기 전까지 그 숫자를 믿을 뻔했습니다.
-   * 이 저장소가 가장 비싸게 여기는 실패 — **아무 말도 안 하는 계측기** —
-   * 를 계측기 **전부**가 갖고 있었던 셈입니다(49개 중 49개).
-   *
-   * 통과하는 검사보다 나쁜 것은 아무 말도 안 하는 검사이고,
-   * 그보다 더 나쁜 것은 **죽으면서 성공했다고 말하는 검사**입니다.
-   */
-  console.error(`\n💥 프로브가 도중에 죽었습니다 — 아래 숫자는 **완결되지 않았습니다**\n${err?.stack ?? err}\n`)
-  fail++
+  console.log(`${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
+  process.exitCode = fail === 0 ? 0 : 1
 } finally {
   await browser.close()
   await server.close()
 }
-
-console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
-process.exit(fail === 0 ? 0 : 1)

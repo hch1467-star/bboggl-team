@@ -445,7 +445,16 @@ export class Hud {
    * 문구는 게임 데이터(`INTENT_LABEL`)를 그대로 받습니다 — 여기 베껴 적으면
    * 색의 정답을 바꿨을 때 안내만 옛말을 하게 됩니다.
    */
-  showColorHint(text: string, color: number, seconds = 3.5): void {
+  /**
+   * 색 안내가 화면에 떠 있는 기본 시간(초).
+   *
+   * ⚠️ **밖에서도 읽을 수 있게 상수로 냅니다.** `main.ts` 가 안내를
+   *    **한 줄씩 차례로** 내보내는데(`colorHintQueue`), 그쪽이 3.5 를
+   *    베껴 적으면 여기 값을 바꾸는 날 줄이 앞당겨지거나 겹칩니다.
+   */
+  static readonly COLOR_HINT_SECONDS = 3.5
+
+  showColorHint(text: string, color: number, seconds = Hud.COLOR_HINT_SECONDS): void {
     this.colorHint.textContent = text
     this.colorHint.style.borderColor = `#${color.toString(16).padStart(6, '0')}`
     this.colorHint.style.display = 'block'

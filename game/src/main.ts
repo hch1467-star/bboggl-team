@@ -379,6 +379,22 @@ class Game {
    * 대개 **다시 배우고 싶은** 사람입니다 — 저장해 두면 그 기회를 막습니다.
    */
   private readonly seenIntents = new Set<number>()
+  /**
+   * 🎨 **아직 못 띄운 색 안내들** — 한 줄씩 차례로 나갑니다.
+   *
+   * ── 왜 줄이 필요해졌는가 ──────────────────────────────────────────
+   * `hud.showColorHint` 는 **덮어씁니다.** 지금까지는 안내가 「예고를
+   * 처음 볼 때 한 개」씩만 나가서 문제가 없었는데, 보스 조우에서 **한
+   * 번에 둘**을 알려 줘야 하는 자리가 생겼습니다(아래 `queueColorHint`).
+   * 그대로 두 번 부르면 첫 줄이 **읽히기도 전에 사라집니다.**
+   *
+   * ⚠️ 「본 색」 표시는 **줄에 넣을 때** 합니다(띄울 때가 아니라).
+   *    띄울 때 하면, 줄에서 기다리는 동안 같은 색을 또 만나 **같은
+   *    안내가 두 번 줄에 쌓입니다.**
+   */
+  private readonly colorHintQueue: number[] = []
+  /** 지금 떠 있는 색 안내의 남은 시간(초). 0이면 다음 줄을 띄웁니다. */
+  private colorHintT = 0
   /** 적 종류별 휘두름/적중 — 잡몹이 존에서 실제로 무엇을 하는지. */
   private foeSwingLog: Record<
     string,
@@ -823,6 +839,18 @@ class Game {
     spotEvents.length = 0
     deaggroEvents.length = 0
     this.defeatedBosses = new Set()
+    /**
+     * 🎨 **색 안내를 다시 배울 수 있게 지웁니다.**
+     *
+     * `seenIntents` 선언부에 이렇게 적혀 있습니다 — *"판을 새로 시작하는
+     * 사람은 대개 다시 배우고 싶은 사람입니다."* 그런데 **그 규칙이
+     * 코드에 없었습니다.** 한 번 켠 뒤로는 다시 시작해도 안내가 영영
+     * 안 떴습니다(계측기도 그래서 못 봤습니다 — 프로브는 전부 `reset()`
+     * 으로 시작합니다).
+     */
+    this.seenIntents.clear()
+    this.colorHintQueue.length = 0
+    this.colorHintT = 0
     this.bonfires = []
     this.anvils = []
     this.levelData = null
@@ -1422,12 +1450,16 @@ class Game {
         const e = ids[i]
         if (Actor.state[e] !== ActorState.Attack) continue
         if (Actor.phase[e] !== AttackPhase.Windup) continue
-        const intent = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent
-        if (this.seenIntents.has(intent)) continue
-        this.seenIntents.add(intent)
-        this.hud.showColorHint(INTENT_LABEL[intent], INTENT_COLOR[intent])
-        break
+        if (this.queueColorHint(attackAt(Enemy.kind[e], Enemy.attackIndex[e]).intent)) break
       }
+    }
+    // 🎨 줄에서 하나씩 꺼냅니다 — 규칙(색마다 한 번)은 넣을 때 이미 걸렸습니다.
+    this.colorHintT = Math.max(0, this.colorHintT - time.dt)
+    if (this.colorHintT <= 0 && this.colorHintQueue.length > 0) {
+      const intent = this.colorHintQueue.shift() as AttackIntent
+      this.hud.showColorHint(INTENT_LABEL[intent], INTENT_COLOR[intent])
+      // HUD 의 기본 표시 시간과 **같은 값**이라야 줄이 앞당겨지지 않습니다.
+      this.colorHintT = Hud.COLOR_HINT_SECONDS
     }
 
     /**
@@ -1653,6 +1685,44 @@ class Game {
       this.cam.addTrauma(0.55)
       sfx.bossPhase()
       this.hud.showBanner(ev.name, '물러설 곳이 없다', 2.2)
+      /**
+       * ── 🎨 **이 보스가 쓰는 색 중 아직 못 본 것을 여기서 가르칩니다** ──
+       *
+       * ── 왜 필요한가 (재고 나서) ────────────────────────────────────
+       * `npm run map` 의 🎨 검사가 **다섯 색 전부 피해서 갈 수 있다**고
+       * 답했습니다. 그리고 「못 피하는 자리」는 **스폰 58m 안**과 **보스
+       * 13m 안**에만 있습니다 — 중반 130m 구간에는 하나도 없습니다.
+       * 즉 🔵 속박과 🟣 강제이동을 **보스전에서 처음 보는 판**이 실제로
+       * 있을 수 있습니다.
+       *
+       * 이 게임의 계약은 *"색은 처음 볼 때 한 번 설명한다"* 입니다.
+       * 그 계약이 지금은 **보스가 그 색을 휘두르는 순간** 이행됩니다 —
+       * 가장 나쁜 때입니다. 계약을 바꾸는 게 아니라 **이행 시점을 앞으로**
+       * 옮깁니다: 조우의 준비 구간(1.6초)은 원래 *"여기부터 보스다"* 를
+       * 알리는 자리이므로, 거기서 알려 주는 것이 같은 뜻입니다.
+       *
+       * ⚠️ **못 본 색만** 나갑니다. 잡몹에게 이미 배운 색을 다시 말하면
+       *    안내가 아니라 잔소리가 되고, 그건 이 저장소가 색 안내를 만들 때
+       *    이미 정한 규칙입니다(「색마다 한 번만」).
+       *
+       * ⚠️ 배치를 안 고친 이유: 중반에 「반드시 만나는 자리」를 만들려면
+       *    지형을 좁혀야 하고, 그건 이 존의 성격(와이드 리니어)을 바꿉니다.
+       *    초반(58m 안)에 두면 「새 적은 한 번에 하나씩」이 깨집니다.
+       *    **셋 중 가장 싼 것**을 골랐고, 나머지 둘은 make-zone.mjs 에
+       *    숫자와 함께 적어 두었습니다.
+       */
+      /**
+       * ⚠️ **최악의 경우는 다섯 줄입니다**(`npm run teach` 가 그렇게 찍습니다 —
+       *    이 보스는 다섯 색을 다 씁니다). 한 줄이 3.5초이므로 17.5초가
+       *    되는데, 그건 **아무 적도 안 만나고 온 판**에서만 생깁니다.
+       *    실제 자동 플레이는 판마다 🔴🟡🟢 을 먼저 만나므로 남는 것은
+       *    보통 🔵🟣 둘(7초)입니다.
+       *
+       *    줄 수를 자르지 않은 이유: 자르면 **못 배운 색이 남고**, 그 색은
+       *    다시 보스가 휘두를 때 배우게 됩니다 — 고치려던 바로 그 문제로
+       *    돌아갑니다. 다섯 줄이 필요한 사람은 다섯 줄이 필요한 사람입니다.
+       */
+      for (const a of attacksFor(Enemy.kind[ev.entity])) this.queueColorHint(a.intent)
     }
     encounterEvents.length = 0
 
@@ -3464,6 +3534,21 @@ class Game {
    *    「걸어서 닿는가」가 바뀔 길이 없습니다(사다리는 위로만 여는
    *    장치라 보물을 가두지 않습니다).
    */
+  /**
+   * 🎨 **이 색을 아직 안 배웠으면 줄에 넣습니다.**
+   *
+   * 이 저장소에서 색 안내를 만드는 자리는 **여기 하나뿐**입니다.
+   * 두 곳이 되면 「색마다 한 번」이 한쪽에서만 지켜집니다.
+   *
+   * @returns 이번에 새로 넣었으면 true
+   */
+  private queueColorHint(intent: number): boolean {
+    if (this.seenIntents.has(intent)) return false
+    this.seenIntents.add(intent)
+    this.colorHintQueue.push(intent)
+    return true
+  }
+
   private syncHiddenTreasures(): void {
     if (!this.terrain) return
     const ids = treasureQuery.run()
