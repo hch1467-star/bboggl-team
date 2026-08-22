@@ -759,6 +759,20 @@ try {
     const bounds = G.bossPhaseBounds()
     const out = []
     for (const d of spots) {
+      /**
+       * 🎲 **거리마다 난수 씨앗을 갈아 끼웁니다.**
+       *
+       * `combatRng` 는 씨앗이 고정이라, 이 프로브를 백 번 돌려도 **같은 한
+       * 판**입니다. 그래서 아래 「연달아 같은 것」이 기대치와 3σ 어긋났을 때
+       * *"진짜 어긋남"* 인지 *"그 한 판이 그랬을 뿐"* 인지 가릴 수가
+       * 없었습니다. 세 거리를 **세 개의 다른 스트림**으로 돌리면 적어도
+       * 서로 독립한 세 판이 됩니다.
+       *
+       * ⚠️ 씨앗은 **거리에서 유도**합니다(자리마다 고정). 그래야 이 검사가
+       *    돌릴 때마다 다른 답을 내지 않습니다 — 재현되지 않는 계측기는
+       *    계측기가 아닙니다.
+       */
+      G.setCombatSeed(Math.round(d * 1000))
       G.reset()
       await window.__t.runFor(0.6)
       G.clearEnemies()
@@ -870,6 +884,85 @@ try {
   console.log(
     `    [합쳐서] 굴림 ${nRolls}회 · 광역 자리로 바뀐 것 ${swapped}회 · preferReach ${preferred}회`,
   )
+
+  /**
+   * ── 🔁 **같은 패턴이 연달아 나오는 비율** ────────────────────────────
+   *
+   * ── 왜 재는가 ────────────────────────────────────────────────────
+   * `npm run pace` 가 오래 빨간 채였고, 그 프로브가 스스로 원인을 이렇게
+   * 적어 뒀습니다 — *"폭의 원인이 여정이 아니라 **보스**입니다(패턴 선택)"*
+   * (구간 시간이 판마다 **5.7배** 흔들립니다).
+   *
+   * 코드를 읽어 보니 이 게임의 보스에는 **직전에 낸 것에 대한 벌점이
+   * 없습니다.** 매번 가중치로 새로 굴립니다. 그러면 같은 것이 연달아
+   * 나올 확률이 **Σp²** 인데, 붙어 싸우는 거리의 후보가 셋(대략
+   * 50/37/11%)이면 **약 40%**, 세 번 연속도 16% 입니다.
+   *
+   * 그게 왜 문제인가: 이 게임의 재미는 *"읽고 대응한다"* 인데, 같은 색이
+   * 세 번 연속 나오면 읽을 것이 없고 반대로 셋이 골고루 오면 배운 것이
+   * 전부 쓰입니다. 세키로·몬스터헌터·검은신화 오공의 보스가 **같은 기술을
+   * 연달아 잘 안 내는** 이유가 이것입니다(엘든 링은 내되 사이를 벌립니다).
+   *
+   * ── 판정은 아직 안 겁니다 ────────────────────────────────────────
+   * 여기서는 **실측과 «독립 굴림이라면 나왔을 값»을 나란히** 놓기만
+   * 합니다. 「재기 전의 설명은 결론이 아니다」 — 벌점을 넣기 전에 지금
+   * 값이 얼마인지부터 남깁니다. 기대치는 프로브가 따로 계산하지 않고
+   * **게임이 적어 준 후보표**로 만듭니다(위 문단과 같은 이유).
+   */
+  {
+    let pairs = 0
+    let repeats = 0
+    let expected = 0
+    let longest = 0
+    for (const row of picks.out) {
+      const seq = (row.picked ?? []).filter((q) => q.chosen)
+      let run = seq.length ? 1 : 0
+      for (let i = 1; i < seq.length; i++) {
+        pairs++
+        if (seq[i].chosen === seq[i - 1].chosen) {
+          repeats++
+          run++
+          if (run > longest) longest = run
+        } else run = 1
+        // 이 굴림의 후보표에서 «직전 것»이 다시 뽑힐 확률 = 독립 굴림의 기대치
+        const total = seq[i].candidates.reduce((n, c) => n + c.w, 0)
+        const prev = seq[i].candidates.find((c) => c.id === seq[i - 1].chosen)
+        if (total > 0) expected += (prev?.w ?? 0) / total
+      }
+      if (run > longest) longest = run
+    }
+    const pct = (v) => `${Math.round((v / Math.max(1, pairs)) * 100)}%`
+    console.log(
+      `    [연달아 같은 것] ${repeats}/${pairs}쌍 = **${pct(repeats)}** · ` +
+        `독립 굴림이라면 ${pct(expected)} · 가장 긴 연속 **${longest}회**`,
+    )
+    /**
+     * ⚠️ **실측과 기대가 어긋나면 «줄 자체»를 폅니다.**
+     *
+     * 벌점(`REPEAT_PENALTY`)을 넣은 뒤 기대치는 33%→14% 로 내려갔는데
+     * **실측은 26%→28% 로 안 내려갔습니다.** 이런 어긋남 앞에서 추측을
+     * 시작하면(난수가 나쁜가·연계가 끼는가·다른 적이 섞이는가) 이 저장소가
+     * 늘 헛짚었습니다. 그래서 **고른 순서를 그대로 찍습니다** — 어느 쌍이
+     * 반복이고, 그 순간 표에 벌점이 실제로 들어 있었는지까지.
+     */
+    for (const row of picks.out) {
+      const seq = (row.picked ?? []).filter((q) => q.chosen)
+      if (!seq.length) continue
+      const short = (id) => id.replace(/^boss_/, '')
+      console.log(
+        `      ${String(row.d).padStart(4)}m ${seq.map((q) => short(q.chosen)).join('→')}`,
+      )
+      // 반복한 쌍마다: 그 굴림의 표에서 «직전 것»이 몇이었나(벌점이 들어갔나)
+      const marks = []
+      for (let i = 1; i < seq.length; i++) {
+        if (seq[i].chosen !== seq[i - 1].chosen) continue
+        const c = seq[i].candidates.find((q) => q.id === seq[i - 1].chosen)
+        const tot = seq[i].candidates.reduce((n, q) => n + q.w, 0)
+        marks.push(`${short(seq[i].chosen)} w${c ? c.w.toFixed(2) : '?'}/${tot.toFixed(2)}`)
+      }
+      if (marks.length) console.log(`           반복 자리 — ${marks.join(' · ')}`)
+    }
+  }
   let worstGap = 0
   let worstLine = ''
   const summary = []

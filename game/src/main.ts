@@ -106,7 +106,7 @@ import { AttackPhase } from './core/components'
 import { defineQuery, destroyEntity, hasComponent, isAlive, resetWorld } from './core/ecs'
 import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
-import { vfxRng } from './core/rng'
+import { combatRng, vfxRng } from './core/rng'
 import { requestHitstop, resetTime, tick, time, MAX_FRAME_DT } from './core/time'
 import { buildProps, type PropsInfo } from './render/props'
 import {
@@ -185,6 +185,7 @@ import {
   resetGreenOutcome,
   readPickLog,
   resetPickLog,
+  resetLastPicks,
   type PickRecord,
   readChainsLost,
   readIdleReasons,
@@ -922,6 +923,8 @@ class Game {
     resetGreenOutcome()
     // 🎲 무엇을 골랐는지의 장부도 같은 자리에서 비웁니다(enemyAI `notePick` 설계 노트).
     resetPickLog()
+    // 🔁 «직전에 낸 것» 장부도 판 시작에 비웁니다(enemyAI `REPEAT_PENALTY` 설계 노트).
+    resetLastPicks()
     resetStaminaSpent()
     // 🩸 피격 장부도 **판 시작에만** 지웁니다(연계 장부에서 배운 것 — 화톳불마다
     //    지우면 예약과 발동의 수명이 달라져 서로 비교할 수 없게 됩니다).
@@ -7326,6 +7329,8 @@ declare global {
       bossPhaseWeights: () => Record<string, number>[]
       /** 🎲 무엇을 왜 골랐는가 — 굴림 · 후보 · 대체까지 (enemyAI `notePick`) */
       pickLog: () => PickRecord[]
+      /** 🎲 전투 난수의 씨앗을 갈아 끼웁니다 — **프로브 전용**(core/rng.ts `reseed`). */
+      setCombatSeed: (seed: number) => void
       /** 🔁 정답대로 답한 사람이 한 대 갚을 수 있는가 (config/punish.ts) */
       punishTable: () => PunishRow[]
       /** 예고 동안 옆으로 빠져 부채꼴을 벗어날 수 있는가 */
@@ -8409,6 +8414,12 @@ window.__game = {
    * 적으므로, 프로브가 추측 없이 *"굴려서 고른 것"* 만 골라 볼 수 있습니다.
    */
   pickLog: () => readPickLog(),
+  /**
+   * 🎲 **전투 난수의 씨앗을 갈아 끼웁니다** — 프로브가 «여러 판»을 볼 수 있게.
+   * 왜 필요했는지는 `core/rng.ts` 의 `reseed` 자리에 적어 뒀습니다
+   * (표본이 하나뿐이라 3σ 어긋남을 판정할 수 없었던 일).
+   */
+  setCombatSeed: (seed: number) => combatRng.reseed(seed),
   /**
    * 🔁 **갚을 수 있는가** — 정답대로 답한 사람의 돌아오는 길
    *    (설계와 계산은 config/punish.ts).

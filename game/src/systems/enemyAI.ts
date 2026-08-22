@@ -17,6 +17,7 @@ import {
   MAX_CONCURRENT_WIDE,
   MAX_CONCURRENT_RANGED,
   SNARE_MOVE_SCALE,
+  REPEAT_PENALTY,
   WIDE_ARC_DEG,
   attackAt,
   attacksFor,
@@ -1035,6 +1036,15 @@ export function resetPickLog(): void {
   pickLog.length = 0
 }
 
+/**
+ * 🔁 **적마다 «직전에 낸 패턴»** — 같은 것이 연달아 나오는 것을 줄이는 데 씁니다.
+ * 규칙은 아래 `REPEAT_PENALTY` 자리에 있습니다(왜 필요한지, 숫자까지).
+ */
+const lastPick = new Map<number, string>()
+export function resetLastPicks(): void {
+  lastPick.clear()
+}
+
 const greenOutcome = { swung: 0, died: 0, countered: 0, broken: 0 }
 /** 지금 초록 예고 중인 적들 — 프레임마다 갱신하고, 빠진 것을 결산합니다. */
 const greenWinding = new Set<number>()
@@ -1920,6 +1930,60 @@ export function enemyAiSystem(
         }
       }
       /**
+       * ── 🔁 **직전에 낸 것에는 벌점을 줍니다** ─────────────────────────
+       *
+       * ── 무엇이 문제였나 (재고 나서 넣습니다) ──────────────────────────
+       * `npm run pace` 가 오래 빨간 채였고, 그 프로브가 스스로 원인을
+       * 이렇게 적어 뒀습니다 — *"구간 폭의 원인이 여정이 아니라 **보스**
+       * (패턴 선택)"* (판마다 **5.7배**).
+       *
+       * 그래서 보스의 굴림을 세어 봤습니다(`npm run boss` 의 새 줄):
+       *
+       *     연달아 같은 것 12/46쌍 = **26%** · 독립 굴림이라면 33%
+       *     가장 긴 연속 **4회**
+       *
+       * 실측이 독립 굴림의 기대치와 사실상 같습니다 — **당연합니다.
+       * 여기엔 직전 것에 대한 벌점이 없었습니다.** 매번 새로 굴리니 같은
+       * 것이 연달아 나올 확률이 Σp² 이고, 붙어 싸우는 거리의 후보가 셋이면
+       * 약 3분의 1, 네 번 연속도 실제로 나왔습니다.
+       *
+       * ── 왜 그게 나쁜가 (재미의 문제입니다) ────────────────────────────
+       * 이 게임이 재미있다고 정한 지점은 *"예고를 읽고 대응한다"* 입니다.
+       * 같은 색이 세 번 연속 나오면 **읽을 것이 없습니다** — 첫 번째만
+       * 읽기이고 나머지는 반복입니다. 반대로 셋이 골고루 오면 배운 것이
+       * 전부 쓰입니다. 세키로·몬스터헌터·검은신화 오공의 보스가 같은
+       * 기술을 연달아 잘 안 내는 이유가 이것이고(엘든 링은 내되 사이를
+       * 벌립니다), 이 저장소가 이미 같은 판단을 한 자리도 있습니다 —
+       * 바로 위 **1단계 학습 잠금**이 *"가르칠 것이 남았으면 그것부터"* 라고
+       * 굴림에 손을 댑니다. 같은 생각의 **평생판**입니다.
+       *
+       * ── 왜 «금지»가 아니라 «벌점»인가 ────────────────────────────────
+       * 0 으로 막으면 두 가지가 깨집니다. 후보가 하나뿐인 거리에서는 낼
+       * 것이 없어지고(그 적은 멍하니 섭니다 — 광역 자리에서 배운 것:
+       * **막는 게 아니라 바꾸는 것**), *"절대 두 번 연속은 없다"* 는
+       * 규칙을 플레이어가 금방 외웁니다. 그러면 이번엔 **읽기가 필요
+       * 없어집니다** — 반복이 없다는 것 자체가 정보가 되니까요.
+       * 0.3 배면 셋짜리 후보에서 반복이 33% → **약 17%** 로 줄고,
+       * 여전히 가끔은 두 번 옵니다.
+       *
+       * ── 왜 여기(가중치 덮어쓰기)에 넣는가 ────────────────────────────
+       * 새 경로를 만들지 않습니다. 그러면 거리·광역·오프너 같은 나머지
+       * 규칙이 그대로 살고, 무엇보다 **장부가 저절로 정직해집니다** —
+       * `notePick` 은 후보의 가중치를 *여기서 정한 값 그대로* 적으므로,
+       * 「가중치대로 고른다」 검사의 기대치도 벌점을 포함한 값이 됩니다.
+       * (벌점을 pickAttack 안에 숨겼다면 그 검사가 **거짓으로 빨개졌을**
+       * 것입니다.)
+       */
+      const prev = lastPick.get(e)
+      if (prev) {
+        const scaled: Record<string, number> = {}
+        for (const a of list) {
+          const w = weights?.[a.id] ?? a.weight
+          scaled[a.id] = a.id === prev ? w * REPEAT_PENALTY : w
+        }
+        weights = scaled
+      }
+      /**
        * 🎬 **오프너가 예약돼 있으면 굴리지 않습니다.**
        *
        * 굴림(`pickAttack`)은 거리로 후보를 거릅니다. 그런데 오프너의 존재
@@ -1942,6 +2006,8 @@ export function enemyAiSystem(
         if (attackAt(kind, opener).arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
+        // 🔁 오프너도 **플레이어가 본 것**이므로 다음 굴림의 벌점 대상이 됩니다.
+        lastPick.set(e, attackAt(kind, opener).id)
         commitAttack(e, playerEntity, kind, opener, ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
@@ -1960,6 +2026,15 @@ export function enemyAiSystem(
         if (picked.arcDeg >= WIDE_ARC_DEG) wideSlotsLeft--
         commitGapT = ATTACK_COMMIT_GAP
         tokens.delete(e)
+        /**
+         * 🔁 **낸 것을 적어 둡니다** — 다음 굴림에서 이 id 가 벌점을 받습니다.
+         *
+         * ⚠️ 굴림과 오프너만 적습니다. **연계(chain)는 안 적습니다** —
+         *    연계는 설계자가 «이 순서로 이어진다»고 짜 둔 한 줄이라,
+         *    그 안의 반복은 우연이 아니라 의도입니다. 여기서 재는 것은
+         *    *"주사위가 같은 눈을 연달아 냈는가"* 입니다.
+         */
+        lastPick.set(e, picked.id)
         commitAttack(e, playerEntity, kind, list.indexOf(picked), ph.windupScale)
         decayVelocity(e, dt, 12)
         continue
