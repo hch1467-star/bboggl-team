@@ -60,7 +60,7 @@ import { defineQuery, hasComponent } from '../core/ecs'
  * 다른 식을 쓰면, 어긋난 날 게임은 안 무너뜨리는데 바만 "지금이다"라고
  * 말합니다 — 틀린 예고는 없는 예고보다 나쁩니다.
  */
-import { poiseDamage } from '../systems/combat'
+import { isBehindPoint, poiseDamage } from '../systems/combat'
 import { weaponTier } from '../systems/loadout'
 import { time } from '../core/time'
 
@@ -1701,7 +1701,46 @@ export class Visuals {
         const near =
           e === nearestFoe && d < COMBAT.backIndicatorRange && Actor.state[e] !== ActorState.Dead
         v.backZone.visible = near
-        if (near) v.backZoneMat.opacity = 0.42 * (1 - d / COMBAT.backIndicatorRange)
+        if (near) {
+          /**
+           * ── 🔆 **각도로도 흐려집니다** (거리만으로는 부족했습니다) ─────
+           *
+           * 위 문단이 *"흐리게 만드는 것은 미봉책"* 이라며 **가장 가까운
+           * 하나에게만** 그리도록 고쳤습니다. 그런데 `npm run contrast` 를
+           * 다시 돌려 보니 아직도 빨갛습니다:
+           *
+           *     ❌ 등 뒤 고리가 지면을 덮어 예고의 바탕을 바꾸지 않는다
+           *        ΔE **26.6** (문턱 25) · rgb(29,31,40) → rgb(80,75,58)
+           *
+           * 하나로 줄여도 그 하나가 3.95m 짜리 140° 부채꼴이라 여전히
+           * 바닥을 다시 칠합니다. (직전 회차의 26.2 와 사실상 같은 값 —
+           * **고친 줄 알았던 것이 안 고쳐져 있었습니다.** 그때 재고 나서
+           * 다시 안 재 본 것입니다.)
+           *
+           * ── 왜 «각도» 인가 (문턱을 피하려는 게 아닙니다) ──────────────
+           * 두 신호가 언제 서로를 방해하는지를 보면 답이 나옵니다:
+           *
+           *   · 예고가 **내 발밑을 물들이는 순간** = 적이 나를 **보고
+           *     휘두르는** 순간입니다. 그때 나는 그 적의 **정면**에
+           *     있습니다 — 등 뒤 표시는 그 순간 **아무 말도 할 게 없습니다.**
+           *   · 반대로 내가 정말 등 뒤에 있으면, 그 적의 예고는 나를
+           *     향하지 않습니다. 그때는 고리가 진해도 가릴 것이 없습니다.
+           *
+           * 즉 둘은 **같은 순간에 필요한 적이 없습니다.** 그래서 밝기를
+           * *"내가 지금 등 뒤인가"* 에 묶습니다 — 판정과 **같은 함수**로
+           * 묻습니다(`isBehindPoint`). 규칙과 그림이 갈라지면 "고리는
+           * 켜졌는데 백어택이 안 뜬다"가 됩니다.
+           *
+           * 밖에서도 **끄지는 않습니다.** 이 표시의 절반은 *"저쪽으로
+           * 돌아가면 등 뒤다"* 라는 안내이고, 그건 밖에 있을 때만 쓸모가
+           * 있습니다. 흐리게 두었다가 **들어가면 밝아지는** 것이 오히려
+           * 「들어왔다」를 손끝으로 알려 줍니다(로스트아크의 백어택 표시가
+           * 자리에 들어갈 때 또렷해지는 것과 같은 문법).
+           */
+          const behind = isBehindPoint(playerX, playerZ, Transform.x[e], Transform.z[e], Transform.rotY[e])
+          v.backZoneMat.opacity =
+            (behind ? 0.42 : 0.15) * (1 - d / COMBAT.backIndicatorRange)
+        }
       }
 
       if (v.bleedFill && v.bleedBg && hasComponent(Enemy, e)) {
