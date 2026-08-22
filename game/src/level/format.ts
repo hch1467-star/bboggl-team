@@ -200,6 +200,12 @@ export interface LevelEntity {
   x: number
   z: number
   rotY: number
+  /**
+   * 🕯 **안내가 말하지 않는 보물**(`treasure` 에만 뜻이 있습니다).
+   * 왜 필요한지는 `core/components.ts` 의 `Pickup.secret` 자리에 있습니다.
+   * 없으면 false — 지금까지 만든 레벨 파일은 그대로 읽힙니다.
+   */
+  secret?: boolean
 }
 
 /**
@@ -336,6 +342,15 @@ export function parseLevel(text: string): { level: LevelData } | { error: string
           x: Number(e.x) || 0,
           z: Number(e.z) || 0,
           rotY: Number(e.rotY) || 0,
+          /**
+           * 🕯 **여기서 빠뜨려 한 번 데었습니다.** 이 `map` 은 필드를 하나씩
+           * 옮겨 적으므로 **새 필드는 여기 안 적으면 조용히 사라집니다.**
+           * 실제로 `secret: true` 를 지도에 적어 놓고 게임까지 태웠는데,
+           * 이 줄이 없어서 프로브가 *"비밀 보물이 없다"* 고 답했습니다 —
+           * 빨간불도 안 떴습니다(무리가 비면 검사가 아예 안 돕니다).
+           * ⚠️ 필드를 늘리는 사람은 **이 map 도 같이** 고쳐야 합니다.
+           */
+          secret: e.secret === true,
         }))
     : []
 

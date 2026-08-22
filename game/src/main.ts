@@ -2792,6 +2792,13 @@ class Game {
     for (let i = 0; i < pickups.count; i++) {
       const e = ids[i]
       if (Pickup.taken[e] === 1) continue
+      /**
+       * 🕯 **비밀은 안내가 말하지 않습니다.** 여기 한 줄이 이 게임의
+       * *"역시 나는 게임을 안다"* 를 지킵니다 — 화면이 먼저 *"북서 12m —
+       * 보물"* 이라고 말해 버리면 찾아낸 사람의 몫이 사라집니다.
+       * (같은 이유로 금 간 벽도 안내에 안 뜹니다 — `npm run wall` ④.)
+       */
+      if (Pickup.secret[e] === 1) continue
       const x = Transform.x[e]
       const z = Transform.z[e]
       if (Math.hypot(x - px, z - pz) > NAV.sideHintRange) continue
@@ -5550,6 +5557,12 @@ class Game {
     cameraViewSize: number
     cameraZoom: number
     /**
+     * 🎥 **카메라 각도**(도). 고정 시점이라 «무엇이 지형에 가리는가»가 이 둘로 정해집니다 —
+     * 프로브가 52/45 를 베껴 적지 않게 게임이 답합니다(`npm run secret` 의 🕯 검사).
+     */
+    cameraPitchDeg: number
+    cameraYawDeg: number
+    /**
      * 🎥 커서 쪽으로 카메라가 밀리는 **최대 거리(m)**.
      *
      * `notice` 프로브가 *"알아채는 적이 화면 안인가"* 를 물을 때, 걸을 때의
@@ -5626,6 +5639,8 @@ class Game {
       sprintViewScale: CAMERA.sprintViewScale,
       cameraViewSize: CAMERA.viewSize,
       cameraZoom: this.cam.currentZoom(),
+      cameraPitchDeg: CAMERA.pitchDeg,
+      cameraYawDeg: CAMERA.yawDeg,
       aimLeadMax: CAMERA.aimLeadMax,
       attackTempo: PLAYER_CFG.tempo.attackScale,
       inputBuffer: PLAYER_CFG.tempo.inputBuffer,
@@ -5695,15 +5710,21 @@ class Game {
     this.persistProgress()
   }
 
-  debugTreasurePositions(): { x: number; z: number; taken: boolean }[] {
+  debugTreasurePositions(): { x: number; z: number; taken: boolean; secret: boolean }[] {
     const ids = pickups.run()
-    const out: { x: number; z: number; taken: boolean }[] = []
+    const out: { x: number; z: number; taken: boolean; secret: boolean }[] = []
     for (let i = 0; i < pickups.count; i++) {
       const e = ids[i]
       out.push({
         x: Number(Transform.x[e].toFixed(2)),
         z: Number(Transform.z[e].toFixed(2)),
         taken: Pickup.taken[e] === 1,
+        /**
+         * 🕯 **이 상자가 「비밀」인가** — 프로브가 무리를 가르는 데 씁니다.
+         * 좌표로 짐작하게 두면 지도를 고치는 날 조용히 어긋납니다(이
+         * 저장소가 좌표를 신분증으로 쓰다 세 번 데인 자리 — `Pickup.homeX`).
+         */
+        secret: Pickup.secret[e] === 1,
       })
     }
     return out
@@ -7631,7 +7652,7 @@ declare global {
        */
       swingPose: (entity: number) => { x: number; y: number } | null
       setStones: (n: number) => void
-      treasurePositions: () => { x: number; z: number; taken: boolean }[]
+      treasurePositions: () => { x: number; z: number; taken: boolean; secret: boolean }[]
       forceRespawnEnemies: () => void
       killAllEnemies: () => number
       /** 회복 검증용 — 성수병/화톳불 상태 */
@@ -7974,6 +7995,9 @@ declare global {
         sprintViewScale: number
         cameraViewSize: number
         cameraZoom: number
+        /** 🎥 카메라 각도(도) — 지형 가림을 재는 데 씁니다. */
+        cameraPitchDeg: number
+        cameraYawDeg: number
         aimLeadMax: number
         attackTempo: number
         /** 선입력 창(초) — 템포 프로브가 0.55 를 베껴 적지 않게 */

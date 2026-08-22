@@ -139,7 +139,7 @@ try {
         const t = G.terrainInfo()
         return t.zoneWidth > 0 ? { w: Math.round(t.zoneWidth), h: Math.round(t.zoneDepth) } : null
       })(),
-      treasures: G.treasurePositions().map((v) => ({ x: v.x, z: v.z })),
+      treasures: G.treasurePositions().map((v) => ({ x: v.x, z: v.z, secret: v.secret })),
     }
   })
 
@@ -605,7 +605,25 @@ try {
    *    이름 붙은 것을 세지 않습니다 — 못 가는 이유가 벽이든 아니든
    *    **못 가면 다른 자로 재야 한다**는 것이 요점입니다.
    */
-  const seen = all.filter((v) => v.extra !== null)
+  /**
+   * ── 🕯 **네 번째 무리 — 「그늘 벽감」** ──────────────────────────────
+   *
+   * 앞의 셋은 전부 **걸어서 못 가는** 비밀이었습니다(벽 뒤 · 선반 위).
+   * 이번 것은 **걸어서 갈 수 있는데 카메라에 안 보이는** 비밀입니다 —
+   * 고정 시점(+x·+z 에서 52°)이라 남동쪽에 높은 지형이 있으면 그 뒤는
+   * 화면에 안 나옵니다.
+   *
+   * 그래서 앞 무리의 자로 재면 **정확히 거꾸로** 읽힙니다:
+   *
+   *     길로 가는 보물 — *"보이는가"* (안 보이면 ⚠️)
+   *     그늘 벽감     — *"**안 보여야** 한다"* (보이면 실패)
+   *
+   * 이 저장소가 이번 세션에 열 번 만난 그 실패라, 무리부터 가릅니다.
+   * 가르는 자는 **게임이 답한 「비밀」 표시**입니다(`Pickup.secret`) —
+   * 좌표로 짐작하지 않습니다.
+   */
+  const shaded = all.filter((v) => v.secret && v.extra !== null)
+  const seen = all.filter((v) => v.extra !== null && !v.secret)
   /**
    * ── ⚠️ **「못 가는 보물」이 이제 두 종류입니다** (뒤늦게 갈랐습니다) ────
    *
@@ -744,6 +762,96 @@ try {
    * ⚠️ 예산은 봇에서 **읽어 옵니다.** 여기 40을 적으면 예산을 바꾸는 날
    *    이 검사만 옛 값으로 통과합니다.
    */
+  /**
+   * ── 🕯 **그늘 벽감 — 세 가지를 묻습니다** ────────────────────────────
+   *
+   * 사용자가 바란 것: *"«폭포 뒤에 비밀공간이 있을거야» 하는 기대감…
+   * 게이머들이 스스로 게임을 잘 한다는 느낌이 들게 하는 것."*
+   * 그 느낌이 성립하려면 셋이 동시에 참이어야 합니다:
+   *
+   *   ① **안 보인다** — 지형이 카메라를 막아야 합니다. 안 그러면 그냥
+   *      길가의 보물이고, 찾아낸 몫이 없습니다.
+   *   ② **안내가 말하지 않는다** — 화면이 *"북서 12m — 보물"* 이라고
+   *      먼저 말하면 값이 지불되기 전에 사라집니다.
+   *   ③ **갈 수 있다** — 곁길 예산 안. 못 가면 비밀이 아니라 벽입니다.
+   *
+   * ── ① 을 어떻게 재는가 (그림을 안 찍고) ─────────────────────────────
+   * 카메라는 고정입니다. 그러니 어떤 점이 가려지는지는 **높이맵과 각도**
+   * 만으로 답이 나옵니다: 그 점에서 카메라 쪽(yaw 방향)으로 걸어가며
+   * 지형 높이가 시선(출발 높이 + 수평거리 × tan(pitch))을 넘으면 가려집니다.
+   *
+   * ⚠️ 각도·높이 단위는 **게임에서 받습니다**(`terrainInfo`). 52·45·0.9 를
+   *    여기 적어 두면 카메라를 손보는 날 이 검사만 옛말을 합니다 —
+   *    이 저장소가 상수를 베껴 적어 데인 자리가 넷입니다.
+   * ⚠️ 눈높이 둘을 따로 봅니다. **상자**(0.6m)와 **그 자리에 선 사람**
+   *    (1.7m) 이 다르게 나올 수 있고, 둘 다 가려져야 «뒤»입니다.
+   */
+  if (shaded.length > 0) {
+    console.log('\n  🕯 그늘 벽감 — 걸어갈 수는 있는데 카메라가 못 보는 자리')
+    const cam = await page.evaluate(() => {
+      const t = window.__game.terrainInfo()
+      return { pitch: t.cameraPitchDeg, yaw: t.cameraYawDeg, step: t.heightStep, cell: t.cellSize }
+    })
+    /** 그 점에서 카메라 쪽으로 걸어가며 시선을 넘는 지형이 있는가. */
+    const hiddenFrom = async (x, z, eye) => {
+      const rad = (cam.yaw * Math.PI) / 180
+      const ux = Math.sin(rad)
+      const uz = Math.cos(rad)
+      const tan = Math.tan((cam.pitch * Math.PI) / 180)
+      const pts = []
+      for (let d = 0.6; d <= 40; d += 0.4) pts.push({ x: x + ux * d, z: z + uz * d, d })
+      const lv = await page.evaluate(
+        (qs) => qs.map((q) => window.__game.terrainLevelAt(q.x, q.z)),
+        pts.map((p) => ({ x: p.x, z: p.z })),
+      )
+      const base = (await page.evaluate((q) => window.__game.terrainLevelAt(q.x, q.z), { x, z })) * cam.step + eye
+      for (let i = 0; i < pts.length; i++) {
+        if (lv[i] < 0) continue
+        if (lv[i] * cam.step > base + pts[i].d * tan + 0.05) return { at: pts[i].d, lv: lv[i] }
+      }
+      return null
+    }
+    for (const v of shaded) {
+      const box = await hiddenFrom(v.x, v.z, 0.6)
+      const man = await hiddenFrom(v.x, v.z, 1.7)
+      /**
+       * ② 안내가 말하는지는 **바로 곁에 세워 놓고** 묻습니다. 여기서 안
+       *    가리키면 더 먼 데서도 안 가리킵니다(안내는 가까운 것부터 고릅니다).
+       */
+      const told = await page.evaluate(
+        async ([tx, tz]) => {
+          const G = window.__game
+          G.teleportPlayer(tx + 2, tz + 2)
+          await new Promise((r) => setTimeout(r, 60))
+          const h = G.sideHintHere?.()
+          return h ? { x: h.x, z: h.z } : null
+        },
+        [v.x, v.z],
+      )
+      const spoiled = told !== null && Math.hypot(told.x - v.x, told.z - v.z) < 1
+      console.log(
+        `    (${Math.round(v.x)}, ${Math.round(v.z)}) — 상자 ${box ? `가려짐(${box.at.toFixed(1)}m 앞 ${box.lv}층)` : '**보임**'}` +
+          ` · 선 사람 ${man ? '가려짐' : '**보임**'} · 안내 ${spoiled ? '**가리킴**' : '안 가리킴'}` +
+          ` · 더 걷는 ${v.extra.toFixed(0)}m`,
+      )
+      check(
+        box !== null && man !== null,
+        `🕯 그늘 벽감(${Math.round(v.x)}, ${Math.round(v.z)}) 은 **지형에 가려진다** (안 가려지면 그냥 길가의 보물입니다)`,
+        box && man ? `상자·사람 둘 다 가려짐 (${box.at.toFixed(1)}m 앞 ${box.lv}층)` : '카메라에 그대로 보입니다',
+      )
+      check(
+        !spoiled,
+        `🕯 그늘 벽감(${Math.round(v.x)}, ${Math.round(v.z)}) 을 **안내가 일러바치지 않는다** (찾아낸 몫을 뺏지 않게)`,
+        spoiled ? '곁길 알림이 이 보물을 가리켰습니다' : '2m 곁에서도 안 가리킵니다',
+      )
+      check(
+        v.extra <= DETOUR_BUDGET,
+        `🕯 그늘 벽감(${Math.round(v.x)}, ${Math.round(v.z)}) 은 **갈 수 있다** (곁길 예산 ${DETOUR_BUDGET}m)`,
+        `더 걷는 ${v.extra.toFixed(0)}m`,
+      )
+    }
+  }
+
   const far = seen.filter((v) => v.extra === null || v.extra > DETOUR_BUDGET)
   check(
     seen.length > 0 && far.length === 0,

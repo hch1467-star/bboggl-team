@@ -246,7 +246,7 @@ export function spawnGrunt(x: number, z: number): number {
   return spawnEnemy(EnemyKind.Grunt, x, z)
 }
 
-export function spawnTreasure(x: number, z: number): number {
+export function spawnTreasure(x: number, z: number, secret = false): number {
   const e = createEntity()
   addComponent(Transform, e)
   addComponent(Pickup, e)
@@ -256,6 +256,8 @@ export function spawnTreasure(x: number, z: number): number {
   Transform.z[e] = z
   Transform.rotY[e] = 0
   Pickup.taken[e] = 0
+  // 🕯 안내가 이 보물을 말하지 않습니다(components.ts `secret` 설계 노트).
+  Pickup.secret[e] = secret ? 1 : 0
   // 📍 **신분증**은 처음 자리입니다 — 폭발에 밀려나도 안 바뀝니다(components.ts).
   Pickup.homeX[e] = x
   Pickup.homeZ[e] = z
@@ -547,7 +549,7 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     const enemyKind = kindFromId(item.kind)
     if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z)
     else if (item.kind === 'treasure') {
-      e = spawnTreasure(item.x, item.z)
+      e = spawnTreasure(item.x, item.z, item.secret === true)
       treasureTotal++
     } else if (item.kind === 'barrel') e = spawnBarrel(item.x, item.z)
     // 🏺 겉모습은 같고 **안에 든 것만** 다릅니다(format.ts 참고).
