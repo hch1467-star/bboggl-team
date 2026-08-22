@@ -781,29 +781,18 @@ try {
    * 지나가야** 존재합니다. 그래서 주 동선 칸 중 사거리 안에 들어오는 수를
    * 셉니다 — 최소 8칸(16m)은 덮어야 "지나가는 동안 압박한다"가 됩니다.
    */
-  for (const a of RANGED) {
-    const ac = cellOf(a)
-    const covered = routeCells.filter(
-      (c) => Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * 2 <= 12,
-    ).length
-    check(
-      covered >= 8,
-      `쏘는 자(${ac.cx},${ac.cz})의 사거리가 주 동선을 덮는다 (배치만 하고 안 쏘지 않게)`,
-      `동선 ${covered}칸(${covered * 2}m) · 최소 8칸` +
-        ` · 가장 가까운 동선 칸 ${(() => {
-          let best = Infinity
-          let at = ''
-          for (const c of routeCells) {
-            const d = Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * 2
-            if (d < best) {
-              best = d
-              at = `(${c.cx},${c.cz})`
-            }
-          }
-          return `${at} ${best.toFixed(0)}m`
-        })()}`,
-    )
-  }
+  /**
+   * ⚠️ **이 검사는 아래 🔴 절로 옮겼습니다.** 두 가지 때문입니다:
+   *
+   *   ① 여기 있던 사거리 `12` 는 **손으로 베낀 상수**였습니다. 아래
+   *      절은 같은 값을 로스터에서 읽습니다 — 밸런스를 바꾸는 날
+   *      검사만 옛말을 하는 것이 이 저장소의 단골 사고입니다.
+   *   ② 이제 길이 **둘**이라(🛣 절) 이 물음은 *"어느 길을 덮는가"* 로
+   *      바뀌어야 하는데, 그 두 번째 길은 이 줄보다 아래에서 그려집니다.
+   *
+   * 「한 물음은 한 자리에」 — 쏘는 자에 대한 물음은 전부 아래 🔴 절에
+   * 모여 있습니다.
+   */
   /**
    * ---- 9. 주 동선에 **아무것도 없는 구간**이 얼마나 긴가 ----
    *
@@ -1038,12 +1027,15 @@ try {
       `\n  🛣 곁길을 챙기고 보스로 간 길이 **주 동선을 덮는 비율** (어그로 ${aggro}m 안) — ` +
         (roads.length ? roads.map((r) => `${r.at} ${r.cov}%`).join(' · ') : '**표본 없음**'),
     )
+    /** 🛣 두 번째 길 — 아래 🔴 검사도 같은 길을 봐야 하므로 블록 밖에 둡니다. */
+    let secondRoad = null
     if (roads.length) {
       const worst = roads[0]
       const roadCells = worst.road.map((p) => ({
         cx: Math.floor(p.x / CELL + level.w / 2),
         cz: Math.floor(p.z / CELL + level.h / 2),
       }))
+      secondRoad = { at: worst.at, cells: roadCells }
       const distToB = walkField(roadCells, maxClimb, CELL)
       console.log(
         `     └ 그중 가장 적게 덮는 **두 번째 길**: ${worst.at} 경유 ${worst.road.length}칸 · 주 동선의 ${worst.cov}%`,
@@ -1136,25 +1128,132 @@ try {
         }
       }
       const bestShots = ((ceiling * CELL) / walkSpeed) / archerDef.attackCycle
-      for (const a of level.entities.filter((e) => e.kind === 'archer')) {
-        const ac = cellOf(a)
-        const inside = routeCells.filter(
+      /**
+       * 「지나가는 동안 몇 발」을 **한 곳에서만** 계산합니다 — 아래 🛣 검사가
+       * 같은 셈을 두 번째 길에 대고 다시 합니다. 같은 식을 두 벌 적으면
+       * 언젠가 둘이 어긋납니다(이 저장소가 세 번 낸 사고).
+       */
+      const shotsAgainst = (roadCells, ac) => {
+        const inside = roadCells.filter(
           (c) => Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * CELL <= wakeRange,
         ).length
         const metres = inside * CELL
         const seconds = metres / walkSpeed
-        const shots = seconds / archerDef.attackCycle
+        return { metres, seconds, shots: seconds / archerDef.attackCycle }
+      }
+      /**
+       * ── ⚠️ **"동선"이 하나가 아니게 됐습니다** ────────────────────────
+       *
+       * 이 두 검사는 원래 **주 동선 하나**만 봤습니다. 그런데 🛣 절이
+       * 두 번째 길을 드러냈고(같은 존, 가운데 100m 를 45m 떨어져 나란히
+       * 가는 길), 그러면 *"이 궁수가 아무도 안 쏜다"* 는 판정이 **길을
+       * 잘못 골라서** 나올 수 있습니다.
+       *
+       * 그래서 묻는 것을 바꿉니다 — *"주 동선을 덮는가"* 가 아니라
+       * **"사람이 걷는 길 하나라도 덮는가"**. 남쪽 성벽에서 남쪽 길만
+       * 쏘는 궁수는 배치 실수가 아니라 **그 길의 콘텐츠**입니다.
+       *
+       * ⚠️ 두 길을 **다 적습니다.** 어느 길에서 나온 값인지 안 보이면
+       *    빨간불이 떴을 때 어디를 고쳐야 하는지 알 수 없습니다.
+       */
+      const walked = [
+        { name: '주 동선', cells: routeCells },
+        ...(secondRoad ? [{ name: `두 번째 길(${secondRoad.at})`, cells: secondRoad.cells }] : []),
+      ]
+      for (const a of level.entities.filter((e) => e.kind === 'archer')) {
+        const ac = cellOf(a)
+        const per = walked.map((r) => ({
+          name: r.name,
+          ...shotsAgainst(r.cells, ac),
+          // 🎯 사거리(깨는 거리가 아니라 **실제로 화살이 닿는 거리**)로 덮는 칸.
+          inRange: r.cells.filter(
+            (c) => Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * CELL <= archerDef.attackRange,
+          ).length,
+        }))
+        const best = per.reduce((m, x) => (x.shots > m.shots ? x : m))
+        const bestRange = per.reduce((m, x) => (x.inRange > m.inRange ? x : m))
+        const table = per.map((x) => `${x.name} ${x.metres}m→${x.shots.toFixed(1)}발`).join(' · ')
         check(
-          shots >= 2,
-          `🔴 쏘는 자(${ac.cx},${ac.cz}) — 지나가는 동안 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
-          `깨는 거리 ${wakeRange}m 안의 동선 ${metres}m ÷ 이동 ${walkSpeed}m/s = ${seconds.toFixed(1)}초` +
-            ` ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초 = ${shots.toFixed(1)}발` +
-            (shots < 2
-              ? ` · ⛰️ **이 판의 천장 ${bestShots.toFixed(2)}발**` +
+          best.shots >= 2,
+          `🔴 쏘는 자(${ac.cx},${ac.cz}) — 걷는 길 하나에서 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
+          `${table} · 깨는 거리 ${wakeRange}m ÷ 이동 ${walkSpeed}m/s ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초` +
+            (best.shots < 2
+              ? ` · ⛰️ **주 동선의 천장 ${bestShots.toFixed(2)}발**` +
                 (bestShots < 2
                   ? ' — 어느 칸으로 옮겨도 2발이 안 됩니다. 자리가 아니라 사거리/한 바퀴를 보세요'
                   : '')
               : ''),
+        )
+        /**
+         * 같은 궁수에게 **다른 것**을 한 번 더 묻습니다. 위는 *"깨어 있는
+         * 동안 몇 발을 낼 시간이 되는가"* 이고, 이것은 *"화살이 실제로
+         * 닿는 구간이 있는가"* 입니다 — 깨는 거리(19m)가 사거리(12m)보다
+         * 넓어서 둘은 같은 값이 아닙니다. 예전에 34m 밖에 세운 궁수가
+         * 3판 내내 한 발도 안 쐈던 사고가 이 물음의 출처입니다.
+         */
+        check(
+          bestRange.inRange >= 8,
+          `쏘는 자(${ac.cx},${ac.cz})의 사거리가 걷는 길을 덮는다 (배치만 하고 안 쏘지 않게)`,
+          per.map((x) => `${x.name} ${x.inRange}칸(${x.inRange * CELL}m)`).join(' · ') +
+            ` · 사거리 ${archerDef.attackRange}m · 최소 8칸`,
+        )
+      }
+
+      /**
+       * ── 🛣🔴 **두 번째 길에도 «멀리서 오는 것»이 있는가** ──────────────
+       *
+       * 지난 자리에서 🔵 를 두 번째 길에 붙이고 이렇게 적어 뒀습니다:
+       * *"🏹 쏘는 자와 🧱 두꺼운 벽은 아직 북쪽 길에만 있습니다 — 다음
+       * 자리의 질문입니다."* 그 질문을 여기서 답합니다.
+       *
+       * ── 왜 벽은 빼고 궁수만 검사로 만드나 ────────────────────────────
+       * 둘은 **성질이 다릅니다.**
+       *   · 🧱 비밀은 **고르는 것**입니다. 못 보고 지나가는 것이 설계의
+       *     일부입니다(그래야 찾았을 때 값이 납니다). 그리고 실제로
+       *     남쪽으로 가도 금 간 벽(10m)과 선반 위 보물(8m)은 만납니다 —
+       *     비밀 어휘 셋 중 둘은 이미 두 길 공통입니다.
+       *   · 🏹 원거리는 **배우는 것**입니다. "멀리서 날아오는 것에는
+       *     엄폐하거나 붙는다" 는 이 게임의 어휘 중 하나이고, 그걸 한 번도
+       *     안 겪고 보스에 닿으면 보스의 원거리 페이즈가 **처음 보는 것**이
+       *     됩니다. 색과 같은 종류의 구멍입니다.
+       *
+       * ── 문턱을 2발이 아니라 **1발**로 두는 이유 ──────────────────────
+       * 주 동선에는 *"한 발은 사고"* 라며 2발을 겁니다. 두 번째 길에는
+       * **1발**만 요구합니다 — 여기서 묻는 것은 *"연습이 되는가"* 가 아니라
+       * *"그런 것이 있다는 걸 아는가"* 이기 때문입니다. 색 검사에서 주
+       * 동선에 2마리(처음+복습), 두 번째 길에 1마리(첫 만남)를 요구한 것과
+       * 같은 눈금입니다.
+       *
+       * ⚠️ 천장을 **같이 찍습니다.** 이 검사가 빨갛다고 곧장 궁수를
+       *    옮기거나 늘리면 안 됩니다 — 두 번째 길에서 아무 칸도 1발을
+       *    못 내면 그건 배치가 아니라 **길의 기하** 이야기입니다
+       *    (「아무도 못 넘는 문턱은 눈금이 아니라 벽이다」).
+       */
+      if (secondRoad) {
+        let ceilB = 0
+        for (let cz = 0; cz < level.h; cz++) {
+          for (let cx = 0; cx < level.w; cx++) {
+            if (heightAt(cx, cz) === VOID) continue
+            const n = secondRoad.cells.filter(
+              (c) => Math.hypot(c.cx - cx, c.cz - cz) * CELL <= wakeRange,
+            ).length
+            if (n > ceilB) ceilB = n
+          }
+        }
+        const ceilShots = (ceilB * CELL) / walkSpeed / archerDef.attackCycle
+        const perArcher = level.entities
+          .filter((e) => e.kind === 'archer')
+          .map((a) => {
+            const ac = cellOf(a)
+            return { ac, ...shotsAgainst(secondRoad.cells, ac) }
+          })
+        const best = perArcher.reduce((m, x) => (x.shots > m.shots ? x : m), { shots: 0 })
+        check(
+          best.shots >= 1,
+          `🛣🔴 **두 번째 길**(${secondRoad.at} 경유)에서도 화살이 한 발은 날아온다 (원거리를 한 번도 안 겪고 보스에 닿지 않게)`,
+          perArcher
+            .map((x) => `(${x.ac.cx},${x.ac.cz}) ${x.metres}m→${x.shots.toFixed(1)}발`)
+            .join(' · ') + ` · ⛰️ 그 길의 천장 ${ceilShots.toFixed(1)}발`,
         )
       }
     }
