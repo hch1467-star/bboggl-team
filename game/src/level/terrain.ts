@@ -365,7 +365,15 @@ export class Terrain {
    */
   private buildWalls(): void {
     const { w, h } = this.level
-    const walls = this.level.entities.filter((e) => e.kind === 'crackedWall')
+    /**
+     * 🧱 **두 벽이 여기서는 같은 것입니다.** 지형이 아는 것은 *"이 칸
+     *    경계가 막혀 있다"* 뿐이고, **어떻게 열리는가**(칼이냐 폭발이냐)는
+     *    몸통 쪽 이야기입니다(`CrackedWall.tough`). 지형에 여는 방법을
+     *    들여놓으면 새 방법이 생길 때마다 여기도 고쳐야 합니다.
+     */
+    const walls = this.level.entities.filter(
+      (e) => e.kind === 'crackedWall' || e.kind === 'thickWall',
+    )
     if (walls.length === 0) return
     const spawn = this.level.entities.find((e) => e.kind === 'spawn')
     if (!spawn) {

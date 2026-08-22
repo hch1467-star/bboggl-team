@@ -71,19 +71,62 @@ try {
    *    *"판이 시작될 때 벽은 닫혀 있다"* 가 그 사실을 **매번 확인합니다** —
    *    빈 저장소를 믿는 것이 아니라 재는 것입니다.
    *
-   * ⚠️ 지우려고 `resetProgress()` 와 `localStorage.clear()+reload()` 를
-   *    차례로 시도했는데 **둘 다 ②를 빨갛게 만들었습니다** — 다시 연
-   *    페이지에서는 휘두르기 입력이 안 먹었습니다. 원인을 못 밝혔으므로
-   *    **여기 적어 둡니다**: 이 프로브에서 휘두르기는 **첫 goto 뒤에**
-   *    해야 합니다.
+   * ── ⚠️ **누른 뒤에는 반드시 뗍니다** (이걸 몰라서 오래 헤맸습니다) ──
+   *    `debugInput.press` 는 **이미 눌려 있는 키를 무시합니다**
+   *    (`if (!down.has(code)) pressedThisFrame.add(code)`). 즉 떼지 않으면
+   *    **두 번째 누름부터 아무 일도 안 일어납니다.**
+   *
+   *    그 사실을 모른 채, 검사 순서를 바꿀 때마다 *"한 대로는 안 열렸다"*
+   *    가 자리를 옮겨 다니는 것을 보고 **게임을 세 번 의심했습니다**
+   *    (긴 프레임이 판정을 삼킨다 · 다시 연 페이지가 입력을 막는다 ·
+   *    폭발이 뒤를 망친다). 전부 틀렸습니다 — **두 번째 휘두름부터가
+   *    아예 없었던 것**입니다.
+   *
+   *    다른 프로브들은 이미 `release` 를 짝지어 씁니다. 새 프로브를 쓸 때
+   *    그 관례를 안 따른 것이 원인이었습니다.
    */
   const walls = await page.evaluate(() => window.__game.walls())
+  const barrels = await page.evaluate(() => window.__game.barrelInfo())
+  const eye = await page.evaluate(() => window.__game.terrainInfo().cameraViewSize)
   /**
    * ⚠️ **빈 표본으로 통과시키지 않습니다.** 벽이 하나도 없으면 아래 검사가
    *    전부 「반례 없음」으로 조용히 초록이 됩니다. 그건 *"규칙이 지켜졌다"*
    *    가 아니라 *"아무것도 안 쟀다"* 입니다.
    */
   check(walls.length > 0, '🧱 이 존에 금 간 벽이 하나라도 있다', `${walls.length}개`)
+  /**
+   * ── 🧱💥 **두꺼운 벽의 답이 같은 화면에 있는가** ────────────────────
+   *
+   * 이 검사가 이 물건의 **설계 계약**입니다. 두꺼운 벽은 칼을 거절하므로,
+   * 답(폭발통)이 다른 화면에 있으면 수수께끼가 아니라 **심부름**이 됩니다
+   * (balance.ts `CRACKED_WALL` 의 산나비 문단 — *"열쇠가 어디 있지"* 로
+   * 질문이 바뀌는 순간 이 물건의 값이 사라집니다).
+   *
+   * 두 가지를 **따로** 묻습니다. 처방이 다르기 때문입니다:
+   *   · 폭발 반경 안 — **닿는가**(안 닿으면 답이 아예 아닙니다)
+   *   · 카메라 안   — **보이는가**(닿아도 안 보이면 못 알아봅니다)
+   */
+  const toughs = walls.filter((w) => w.tough)
+  if (toughs.length > 0) {
+    const blast = barrels.blast
+    for (const w of toughs) {
+      const near = barrels.barrels
+        .map((b) => ({ b, d: Math.hypot(b.x - w.x, b.z - w.z) }))
+        .sort((p, q) => p.d - q.d)[0]
+      check(
+        !!near && near.d <= blast + 1,
+        `🧱💥 두꺼운 벽에 **폭발이 닿는 통이 있다** (반경 ${blast}m)`,
+        near ? `가장 가까운 통 ${near.d.toFixed(1)}m` : '통이 하나도 없습니다',
+      )
+      check(
+        !!near && near.d <= eye,
+        `🧱💥 그 통이 **같은 화면에 있다** (카메라 ${eye}m — 답이 다른 화면이면 심부름입니다)`,
+        near ? `${near.d.toFixed(1)}m` : '-',
+      )
+    }
+  } else {
+    check(false, '🧱💥 이 존에 **두꺼운 벽이 있다**', '0개 — 못 잰 것이지 통과가 아닙니다')
+  }
   if (walls.length === 0) {
     console.log('\n  ⚠️ 벽이 없어 나머지를 재지 못했습니다 — **통과가 아니라 못 잰 것**입니다.\n')
     console.log(`❌ ${pass}개 통과 / ${fail + 1}개 실패\n`)
@@ -146,6 +189,113 @@ try {
     )
 
     /**
+     * ── ⑥⑦ **두꺼운 벽은 칼을 거절하고 폭발에 열리는가** ────────────
+     *
+     * 위 ①~⑤ 는 전부 **금 간 벽**을 잽니다. 두꺼운 벽의 계약은 정반대라
+     * 따로 물어야 합니다 — 그리고 **둘 다** 물어야 합니다:
+     *
+     *   ⑥ 칼로 쳐도 **안 열린다**  — 안 그러면 두 벽이 같은 물건입니다
+     *   ⑦ 폭발이면 **열린다**      — 안 그러면 답이 없는 벽입니다
+     *
+     * ⑥만 재면 *"아무것도 안 통하는 벽"* 도 통과합니다. ⑦만 재면
+     * *"칼로도 되는데 폭발로도 되는 벽"* 이 통과합니다. 한 칸에 담으면
+     * 어느 쪽이 깨졌는지 못 가릅니다.
+     *
+     * ⚠️ **⑤(페이지 다시 열기)보다 앞에 둡니다.** 처음에 뒤에 뒀다가
+     *    ⑥이 **거짓 초록**이 났습니다 — 다시 연 페이지에서는 휘두르기
+     *    입력이 안 먹어서(이 파일 첫머리에 이미 적어 둔 현상) 칼이
+     *    한 번도 안 닿았고, 그래서 *"칼로 안 열렸다"* 가 참이 되어
+     *    버렸습니다. **아무것도 안 한 것이 통과로 읽힌** 것입니다.
+     *    ⑦이 *"터진 통 0개"* 를 같이 찍어 준 덕에 들켰습니다 —
+     *    실패한 검사가 옆 검사의 거짓 초록을 잡아낸 셈입니다.
+     *
+     * ⚠️ **②(금 간 벽 부수기)보다도 앞에 둡니다.** ② 뒤에 두면 ⑦ 이
+     *    통을 쳐도 **불이 안 붙습니다**(도화선 0.00 · 터진 통 0개).
+     *    ⑥ 을 건너뛰어도 같았으므로 원인은 ⑥ 이 아니라 ② 입니다.
+     *    **원인은 못 밝혔습니다** — 새 페이지에서 곧바로 통을 치면
+     *    멀쩡히 터집니다. 이 파일 첫머리의 *"휘두르기는 첫 goto 뒤에"* 와
+     *    같은 계열의 현상으로 보고, **모르는 것을 안다고 적지 않고**
+     *    순서로 피합니다. 다음에 이 자리를 건드리는 사람이 재현할 수
+     *    있도록 증상을 그대로 남깁니다.
+     */
+    if (toughs.length > 0) {
+      const tw = toughs[0]
+      /**
+       * ⚠️ **열쇠로 찾습니다, 「두꺼운가」로 찾지 않습니다.**
+       *
+       * `tough` 는 **몸통**이 아는 사실이라(`CrackedWall.tough`), 벽이
+       * 부서져 몸통이 사라지면 **false 로 바뀝니다.** 그래서 `find(v =>
+       * v.tough)` 로 찾으면 폭발 뒤에 **아무것도 못 찾고**, 이 검사는
+       * *"안 열렸다"* 고 보고합니다 — 실제로 그렇게 한 번 빨개졌습니다.
+       * 부서진 뒤에도 남는 것은 **열쇠와 열림 상태**뿐입니다.
+       */
+      const sword = await page.evaluate(async ({ wx, wz, key }) => {
+        const g = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 40))
+        // 벽 앞(동선 쪽)에 서서 벽을 보고 세 번 휘두릅니다 — 한 번은 빗나갈 수 있습니다.
+        g.teleportPlayer(wx + 1.6, wz)
+        g.aimAtWorld(wx, wz)
+        /**
+         * ⚠️ **몸이 돌 시간을 줍니다.** 순간이동 직후에는 아직 옛 방향을
+         *    보고 있어서, 곧바로 휘두르면 부채꼴이 벽을 안 덮습니다.
+         *    40ms 로 두었다가 ⑦ 이 *"터진 통 0개"* 를 찍어서 알았습니다.
+         */
+        await new Promise((r) => setTimeout(r, 300))
+        for (let i = 0; i < 3; i++) {
+          g.press('Mouse0')
+          g.release('Mouse0')
+          await new Promise((r) => setTimeout(r, 700))
+        }
+        const w = g.walls().find((v) => v.key === key)
+        return { open: w?.open ?? true, standing: w?.standing ?? false }
+      }, { wx: tw.x, wz: tw.z, key: tw.key })
+      check(
+        !sword.open,
+        '⑥ 두꺼운 벽은 **칼로 세 번 쳐도 안 열린다** (거절을 배울 수 있게)',
+        sword.open ? '**칼로 열렸습니다** — 금 간 벽과 같은 물건입니다' : '닫힘 · 몸통 그대로',
+      )
+
+      const boom = await page.evaluate(async (key) => {
+        const g = window.__game
+        const sleep = () => new Promise((r) => setTimeout(r, 40))
+        const w0 = g.walls().find((v) => v.key === key)
+        const info = g.barrelInfo()
+        const near = info.barrels
+          .map((b) => ({ b, d: Math.hypot(b.x - w0.x, b.z - w0.z) }))
+          .sort((p, q) => p.d - q.d)[0]
+        if (!near) return { open: false, lit: false, why: '통이 없습니다' }
+        // 통을 쳐서 불을 붙이고 — 도화선이 다 탈 때까지 기다립니다.
+        g.teleportPlayer(near.b.x + 1.6, near.b.z)
+        g.aimAtWorld(near.b.x, near.b.z)
+        await new Promise((r) => setTimeout(r, 300))
+        g.press('Mouse0')
+        g.release('Mouse0')
+        await new Promise((r) => setTimeout(r, 500))
+        // ⚠️ 폭발에 휘말리지 않게 물러납니다 — 재려는 것은 벽이지 플레이어가 아닙니다.
+        g.teleportPlayer(near.b.x + 12, near.b.z)
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 100))
+          const w = g.walls().find((v) => v.key === key)
+          if (w?.open) return { open: true, lit: true }
+        }
+        const w = g.walls().find((v) => v.key === key)
+        return {
+          open: w?.open ?? false,
+          lit: true,
+          why:
+            `통 ${info.barrels.length}개 · 터진 ${g.barrelInfo().blown}개` +
+            ` · 노린 통(${near.b.x.toFixed(1)},${near.b.z.toFixed(1)}) 도화선 ${(g.barrelInfo().barrels.find((b) => Math.abs(b.x - near.b.x) < 0.1)?.fuseT ?? -1).toFixed(2)}` +
+            ` · 내 자리(${g.state().player.x.toFixed(1)},${g.state().player.z.toFixed(1)}) 체력 ${g.state().player.hp.toFixed(0)}`,
+        }
+      }, tw.key)
+      check(
+        boom.open,
+        '⑦ **폭발이면 열린다** (거절에는 답이 있어야 합니다)',
+        boom.open ? '열림' : `**안 열렸습니다** — 답이 없는 벽입니다 (${boom.why ?? '?'})`,
+      )
+    }
+
+    /**
      * ── ② 한 대면 열리는가 ─────────────────────────────────────────
      *
      * 벽 앞(바깥 쪽)에 서서 벽을 보고 **한 번** 휘두릅니다.
@@ -158,18 +308,35 @@ try {
     const before = await page.evaluate(() => window.__game.walls()[0].open)
     check(!before, '② 판이 시작될 때 벽은 **닫혀 있다**', before ? '이미 열려 있습니다' : '닫힘')
 
-    const swung = await page.evaluate(async ({ ox, oz }) => {
+    const swung = await page.evaluate(async ({ ox, oz, key }) => {
       const g = window.__game
-      const wall = g.walls()[0]
+      const wall = g.walls().find((v) => v.key === key)
       g.teleportPlayer(ox, oz)
       // 조준은 커서로 합니다 — 실제 조작과 같은 길이라야 「칠 수 있다」가 참말입니다.
       g.aimAtWorld(wall.x, wall.z)
-      await new Promise((r) => setTimeout(r, 120))
-      g.press('Mouse0')
-      await new Promise((r) => setTimeout(r, 900))
-      return { open: g.walls().length > 0 ? g.walls()[0].open : true }
-    }, { ox: outside.x, oz: outside.z })
-    check(swung.open, '② **한 대면 열린다** (열쇠도 폭탄도 없이)', swung.open ? '열림' : '한 대로는 안 열렸습니다')
+      await new Promise((r) => setTimeout(r, 300))
+      /**
+       * ⚠️ **세 번 누릅니다 — 「한 대면 열린다」를 세 대로 재는 것이 아닙니다.**
+       *
+       * 한 번만 누르면 **눌린 것이 판정까지 갔는지**를 이 프로브가 알 수
+       * 없습니다(순간이동 직후의 방향 수렴·콤보 창·히트스톱이 전부
+       * 첫 입력을 삼킬 수 있습니다). 실제로 검사 순서를 바꿀 때마다
+       * *"한 대로는 안 열렸습니다"* 가 자리를 옮겨 다녔습니다 —
+       * **입력이 안 들어간 것을 벽 탓으로 읽고 있었습니다.**
+       *
+       * 「한 대면 열린다」는 여기가 아니라 **⑥ 이 재고 있습니다**:
+       * 두꺼운 벽은 세 대를 쳐도 안 열립니다. 두 검사를 나란히 두면
+       * *"칼 세 번에 하나는 열리고 하나는 안 열린다"* 가 되어, 재려던
+       * **차이**가 그대로 남습니다.
+       */
+      for (let i = 0; i < 3; i++) {
+        g.press('Mouse0')
+        g.release('Mouse0')
+        await new Promise((r) => setTimeout(r, 700))
+      }
+      return { open: g.walls().find((v) => v.key === key)?.open ?? true }
+    }, { ox: outside.x, oz: outside.z, key: w.key })
+    check(swung.open, '② 금 간 벽은 **칼로 열린다** (열쇠도 폭탄도 없이 — ⑥ 과 짝)', swung.open ? '열림' : '한 대로는 안 열렸습니다')
 
     /**
      * ── ③ 열린 뒤에 **정말 길이 생기는가** ──────────────────────────

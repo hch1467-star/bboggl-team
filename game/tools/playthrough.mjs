@@ -4498,7 +4498,7 @@ try {
       t.best < 0 && walls.some((w) => !w.open && Math.hypot(w.x - t.x, w.z - t.z) < 12)
     for (const t of untaken) {
       const why = behindWall(t)
-        ? '**금 간 벽 뒤** — 봇은 벽을 안 부숩니다(지도가 아니라 봇의 한계)'
+        ? '**부술 수 있는 벽 뒤** — 봇은 벽을 안 부숩니다(지도가 아니라 봇의 한계)'
         : `그때 막던 것: ${t.block ?? '?'}`
       console.log(
         `              (${t.x}, ${t.z})  가장 가까이 ${t.best >= 0 ? `${Math.round(t.best)}m` : '경로 못 찾음'} · ${why}`,

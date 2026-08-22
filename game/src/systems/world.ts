@@ -23,11 +23,12 @@ import {
 } from '../core/components'
 import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
-import type { LevelData } from '../level/format'
+import { cellToWorld, type LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
 import {
   KIND_BARREL,
   KIND_CRACKED_WALL,
+  KIND_THICK_WALL,
   KIND_PLAYER,
   KIND_TREASURE,
   KIND_URN,
@@ -313,7 +314,7 @@ export function spawnUrn(x: number, z: number, holds = false): number {
  *
  * @param cx,cz 벽이 속한 **칸** 좌표 — 지형의 `Shortcut.key` 와 짝입니다.
  */
-export function spawnCrackedWall(x: number, z: number, cx: number, cz: number): number {
+export function spawnCrackedWall(x: number, z: number, cx: number, cz: number, tough = false): number {
   const e = createEntity()
   addComponent(Transform, e)
   addComponent(Body, e)
@@ -340,7 +341,8 @@ export function spawnCrackedWall(x: number, z: number, cx: number, cz: number): 
   CrackedWall.cz[e] = cz
   // ⚠️ 항아리 `broken` 과 같은 이유로 **반드시** 지웁니다.
   CrackedWall.broken[e] = 0
-  Renderable.kind[e] = KIND_CRACKED_WALL
+  CrackedWall.tough[e] = tough ? 1 : 0
+  Renderable.kind[e] = tough ? KIND_THICK_WALL : KIND_CRACKED_WALL
   return e
 }
 
@@ -578,7 +580,17 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
    */
   for (const s of terrain.shortcuts) {
     if (s.kind !== 'wall') continue
-    const e = spawnCrackedWall(s.x, s.z, s.loX, s.loZ)
+    /**
+     * 🧱💥 **여는 방법은 레벨이 정합니다.** 지형은 *"막혀 있다"* 까지만
+     *    알므로(terrain.ts `buildWalls`), 칼이냐 폭발이냐는 그 칸에 적힌
+     *    엔티티 종류에서 읽습니다. 지형에 그 구분을 넣지 않은 값이
+     *    여기 한 줄입니다.
+     */
+    const at = cellToWorld(s.loX, s.loZ, terrain.level.w, terrain.level.h)
+    const tough = level.entities.some(
+      (it) => it.kind === 'thickWall' && Math.hypot(it.x - at.x, it.z - at.z) < 0.01,
+    )
+    const e = spawnCrackedWall(s.x, s.z, s.loX, s.loZ, tough)
     Transform.y[e] = terrain.groundYAt(s.x, s.z)
     entities.push(e)
   }

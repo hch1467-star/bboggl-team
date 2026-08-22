@@ -380,7 +380,18 @@ for (const t of ent('treasure')) {
      *    빼면 **재던 것이 조용히 바뀝니다.**
      */
     (e) =>
-      !['spawn', 'treasure', 'bonfire', 'anvil', 'ladder', 'boss', 'urn', 'urnFull', 'crackedWall'].includes(e.kind),
+      ![
+        'spawn',
+        'treasure',
+        'bonfire',
+        'anvil',
+        'ladder',
+        'boss',
+        'urn',
+        'urnFull',
+        'crackedWall',
+        'thickWall',
+      ].includes(e.kind),
   )
   const reachableWithout = (ex, ez, r) => {
     const g = h.slice()
@@ -549,9 +560,11 @@ for (const t of ent('treasure')) {
  *    (`npm run hide`). 못 재는 것을 잰 척하지 않습니다.
  */
 {
-  const walls = level.entities.filter((e) => e.kind === 'crackedWall')
+  // 🧱💥 두꺼운 벽도 같이 봅니다 — 여는 방법은 달라도 **보여야 한다**는
+  //      요구는 똑같습니다(안 보이면 어느 쪽이든 없는 것과 같습니다).
+  const walls = level.entities.filter((e) => e.kind === 'crackedWall' || e.kind === 'thickWall')
   if (walls.length > 0) {
-    console.log(`\n  🧱 금 간 벽 ${walls.length}개 — **동선에서 보이는가**`)
+    console.log(`\n  🧱 부술 수 있는 벽 ${walls.length}개 — **동선에서 보이는가**`)
     for (const e of walls) {
       const [cx, cz] = cellOf(e.x, e.z)
       let near = Infinity
@@ -561,7 +574,7 @@ for (const t of ent('treasure')) {
       }
       const ok = near <= EYE
       console.log(
-        `     (${wx(cx).toFixed(0)},${wz(cz).toFixed(0)})  동선에서 ${near.toFixed(1)}m` +
+        `     ${e.kind === 'thickWall' ? '💥' : '🧱'} (${wx(cx).toFixed(0)},${wz(cz).toFixed(0)})  동선에서 ${near.toFixed(1)}m` +
           (ok ? '  ✅ 화면에 들어옵니다' : `  ❌ 카메라(${EYE}m) 밖 — 알아볼 수가 없습니다`),
       )
     }

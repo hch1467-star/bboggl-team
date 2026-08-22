@@ -102,6 +102,14 @@ export const KIND_URN = 4
 export const KIND_CRACKED_WALL = 5
 
 /**
+ * 🧱💥 **두꺼운 벽** — 칼로는 안 열리고 폭발이라야 무너집니다.
+ *
+ * 번호를 나누는 이유는 **생김새가 달라야 하기 때문**입니다. 금 간 벽과
+ * 똑같이 생겼는데 한쪽만 칼이 안 통하면, 그건 규칙이 아니라 **배신**입니다.
+ */
+export const KIND_THICK_WALL = 6
+
+/**
  * 적의 렌더 종류는 **EnemyKind 에 상수를 더한 값**입니다.
  *
  * ── 왜 switch 를 지웠는가 ──────────────────────────────────────────
@@ -605,8 +613,8 @@ export class Visuals {
       return
     }
 
-    if (kind === KIND_CRACKED_WALL) {
-      this.attachCrackedWall(entity, group)
+    if (kind === KIND_CRACKED_WALL || kind === KIND_THICK_WALL) {
+      this.attachCrackedWall(entity, group, kind === KIND_THICK_WALL)
       return
     }
 
@@ -1104,16 +1112,33 @@ export class Visuals {
    *    빛은 「사물이다」까지만 말하고 「여기 보물이 있다」는 말하지
    *    않아야 합니다. 그 경계가 이 0.1 입니다.
    */
-  private attachCrackedWall(entity: number, group: THREE.Group): void {
+  private attachCrackedWall(entity: number, group: THREE.Group, tough = false): void {
+    /**
+     * 🧱💥 **두꺼운 벽은 한눈에 달라야 합니다.**
+     *
+     * 셋을 바꿉니다 — 어느 하나만으로는 *"조금 다른 돌"* 로 읽힙니다:
+     *   ① **더 두껍습니다**(2배) — 실루엣이 먼저 말합니다
+     *   ② **더 어둡고 푸른 돌** — 금 간 벽의 누런 돌과 계열이 다릅니다
+     *   ③ **금이 굵고 적습니다**(셋 → 하나) — 잔금은 *"치면 될 것 같다"*
+     *      이고, 굵은 금 하나는 *"금이 갔지만 이 정도로는 안 된다"* 입니다
+     *
+     * ⚠️ **빛나지 않습니다**(emissive 0). 금 간 벽의 0.1 은 *"이건 지형이
+     *    아니라 사물이다"* 를 말하는 값인데, 두꺼운 벽은 **두께로** 그걸
+     *    말합니다. 둘 다 빛나면 *"둘은 같은 것"* 이라고 말하게 됩니다.
+     */
     const material = new THREE.MeshStandardMaterial({
-      color: 0xa89272,
-      emissive: new THREE.Color(0x6b5a3c),
-      emissiveIntensity: 0.1,
+      color: tough ? 0x6d7482 : 0xa89272,
+      emissive: new THREE.Color(tough ? 0x000000 : 0x6b5a3c),
+      emissiveIntensity: tough ? 0 : 0.1,
       roughness: 0.9,
       metalness: 0.05,
     })
     const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(CRACKED_WALL.width, CRACKED_WALL.height, CRACKED_WALL.thickness),
+      new THREE.BoxGeometry(
+        CRACKED_WALL.width,
+        CRACKED_WALL.height,
+        CRACKED_WALL.thickness * (tough ? 2 : 1),
+      ),
       material,
     )
     slab.position.y = CRACKED_WALL.height * 0.5
@@ -1126,15 +1151,21 @@ export class Visuals {
      * 이것 하나 때문에 깨지 않습니다.
      */
     const crackMat = new THREE.MeshBasicMaterial({ color: 0x2b2118 })
-    const cracks: [number, number, number][] = [
-      [-0.35, 0.62, 0.5],
-      [0.18, 0.34, -0.7],
-      [0.42, 0.74, 0.35],
-    ]
+    const cracks: [number, number, number][] = tough
+      ? [[0.05, 0.55, 0.22]]
+      : [
+          [-0.35, 0.62, 0.5],
+          [0.18, 0.34, -0.7],
+          [0.42, 0.74, 0.35],
+        ]
+    const face = (CRACKED_WALL.thickness * (tough ? 2 : 1)) / 2
     for (const [ox, oy, rot] of cracks) {
       for (const side of [-1, 1]) {
-        const crack = new THREE.Mesh(new THREE.PlaneGeometry(0.06, CRACKED_WALL.height * 0.45), crackMat)
-        crack.position.set(ox, CRACKED_WALL.height * oy, (side * CRACKED_WALL.thickness) / 2 + side * 0.01)
+        const crack = new THREE.Mesh(
+          new THREE.PlaneGeometry(tough ? 0.14 : 0.06, CRACKED_WALL.height * (tough ? 0.6 : 0.45)),
+          crackMat,
+        )
+        crack.position.set(ox, CRACKED_WALL.height * oy, side * face + side * 0.01)
         crack.rotation.z = rot
         if (side < 0) crack.rotation.y = Math.PI
         group.add(crack)

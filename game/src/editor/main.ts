@@ -152,6 +152,9 @@ class Editor {
        * terrain.ts `buildWalls`. 후보가 둘 이상이면 세우지 않고 경고합니다.)
        */
       crackedWall: new THREE.BoxGeometry(1.7, 1.2, 0.3),
+      // 🧱💥 같은 판인데 **두 배 두껍습니다** — 게임 안에서 둘을 가르는
+      //      첫 신호가 두께라, 지도 위에서도 같은 신호여야 합니다.
+      thickWall: new THREE.BoxGeometry(1.7, 1.2, 0.6),
       boss: new THREE.CapsuleGeometry(0.7, 1.5, 4, 10),
       // 게임 안과 같은 실루엣 규칙 — 얽는 자는 가늘고 크게, 끄는 자는 낮고 넓게.
       binder: new THREE.CapsuleGeometry(0.34, 1.3, 4, 8),

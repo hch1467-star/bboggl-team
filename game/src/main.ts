@@ -848,6 +848,7 @@ class Game {
      * 안 떴습니다(계측기도 그래서 못 봤습니다 — 프로브는 전부 `reset()`
      * 으로 시작합니다).
      */
+    this.hiddenTreasures.clear()
     this.seenIntents.clear()
     this.colorHintQueue.length = 0
     this.colorHintT = 0
@@ -2052,7 +2053,8 @@ class Game {
          */
         this.terrain?.buildPlayerField(Transform.x[this.playerEntity], Transform.z[this.playerEntity])
         // 🎁 방금 열린 방의 보물은 이제 **숨은 것이 아닙니다** — 빛기둥을 켭니다.
-        this.syncHiddenTreasures()
+        //    숨어 있던 것만 다시 봅니다(위 `onlyHidden` 문단 — 긴 프레임이 판정을 삼킵니다).
+        this.syncHiddenTreasures(true)
       }
       this.visuals.detach(ev.entity)
       destroyEntity(ev.entity)
@@ -3549,14 +3551,46 @@ class Game {
     return true
   }
 
-  private syncHiddenTreasures(): void {
+  /**
+   * 🎁 지금 **벽 뒤에 있는** 보물들. `syncHiddenTreasures` 가 채웁니다.
+   *
+   * 이 집합이 있는 이유는 아래 `onlyHidden` 문단입니다 — 요약하면
+   * **벽을 부순 프레임에 여덟 번 흘리지 않기 위해서**입니다.
+   */
+  private readonly hiddenTreasures = new Set<number>()
+
+  /**
+   * @param onlyHidden true 면 **이미 숨어 있던 보물만** 다시 봅니다.
+   *
+   * 벽이 열려서 **새로 보이게 될 수 있는 보물은 원래 숨어 있던 것뿐**
+   * 입니다. 그래서 다시 볼 것도 그것뿐입니다 — 흘리기가 여덟 번에서
+   * 보통 **한 번**으로 줄어듭니다(하나에 격자 전체 6336칸입니다).
+   *
+   * ── ⚠️ **이 변경은 버그를 고치려다 나왔는데, 그 버그가 아니었습니다** ──
+   * `npm run wall` 에서 *"벽을 부순 다음 휘두름이 판정을 건너뛴다"* 가
+   * 났고, 저는 **긴 프레임이 판정을 삼킨 것**이라고 읽었습니다(이 저장소에
+   * 실제로 그런 기록이 있습니다 — 매 프레임 흐름장을 만들었다가 출혈
+   * 검사를 깨뜨린 적). 그래서 이 최적화를 넣었는데 **빨간불이 그대로**
+   * 였습니다.
+   *
+   * 진짜 원인은 프로브였습니다: `debugInput.press` 는 이미 눌린 키를
+   * 무시하는데 뗀 적이 없어서 **두 번째 휘두름부터 아예 없었습니다.**
+   *
+   * 그래도 이 줄은 **남깁니다** — 고친 것이 아니라 **덜 하는 것**이고,
+   * 한 프레임에 격자를 여덟 번 훑을 이유는 원래 없었습니다.
+   * ⚠️ 다만 *"이게 그 버그를 고쳤다"* 고 읽지 마십시오. 안 고쳤습니다.
+   */
+  private syncHiddenTreasures(onlyHidden = false): void {
     if (!this.terrain) return
     const ids = treasureQuery.run()
     for (let i = 0; i < treasureQuery.count; i++) {
       const e = ids[i]
+      if (onlyHidden && !this.hiddenTreasures.has(e)) continue
       this.terrain.buildFlowField(Transform.x[e], Transform.z[e])
       const reach = this.terrain.pathDistance(Transform.x[this.playerEntity], Transform.z[this.playerEntity])
       this.visuals.setPillarVisible(e, reach !== null)
+      if (reach === null) this.hiddenTreasures.add(e)
+      else this.hiddenTreasures.delete(e)
     }
   }
 
@@ -4898,7 +4932,14 @@ class Game {
    * 베껴 다시 계산하면 규칙이 두 벌이 되고, 벽 규칙은 이제 막 생겨서
    * 두 벌이 갈라질 여지가 가장 큽니다.
    */
-  debugWalls(): { key: string; x: number; z: number; open: boolean; standing: boolean }[] {
+  debugWalls(): {
+    key: string
+    x: number
+    z: number
+    open: boolean
+    standing: boolean
+    tough: boolean
+  }[] {
     if (!this.terrain) return []
     /**
      * `open` 과 `standing` 은 **다른 것**입니다:
@@ -4910,13 +4951,24 @@ class Game {
      * 생길 수 있는 자리가 있어서(`removeBrokenWalls`), 여기서 갈라 답합니다.
      */
     const standing = new Set<string>()
+    const tough = new Set<string>()
     for (let e = 0; e < 4096; e++) {
       if (!isAlive(e) || !hasComponent(CrackedWall, e)) continue
-      standing.add(`${CrackedWall.cx[e]},${CrackedWall.cz[e]}`)
+      const key = `${CrackedWall.cx[e]},${CrackedWall.cz[e]}`
+      standing.add(key)
+      if (CrackedWall.tough[e] === 1) tough.add(key)
     }
     return this.terrain.shortcuts
       .filter((s) => s.kind === 'wall')
-      .map((s) => ({ key: s.key, x: s.x, z: s.z, open: s.open, standing: standing.has(s.key) }))
+      .map((s) => ({
+        key: s.key,
+        x: s.x,
+        z: s.z,
+        open: s.open,
+        standing: standing.has(s.key),
+        /** 🧱💥 칼로는 안 열리는가 — **몸통**이 아는 사실이라 몸통에서 읽습니다. */
+        tough: tough.has(s.key),
+      }))
   }
 
   /**
@@ -7494,7 +7546,14 @@ declare global {
       /** 🧪 실험대 전용 — 등급/시드를 직접 끼웁니다. */
       setGear: (weaponIndex: number, tier: number, seed: number) => void
       /** 🧱 금 간 벽 — 길이 뚫렸는가(`open`)와 몸통이 서 있는가(`standing`)는 다릅니다. */
-      walls: () => { key: string; x: number; z: number; open: boolean; standing: boolean }[]
+      walls: () => {
+        key: string
+        x: number
+        z: number
+        open: boolean
+        standing: boolean
+        tough: boolean
+      }[]
       /** 지금 **걸어서** 그 자리에 닿는가 — 벽 뒤인지를 게임에게 묻는 창. */
       walkableFromPlayer: (x: number, z: number) => boolean
       /** 💥 폭발통의 규칙과 지금 상태 — 프로브가 반경·도화선을 베끼지 않게. */

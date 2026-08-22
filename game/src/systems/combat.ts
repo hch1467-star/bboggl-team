@@ -1369,6 +1369,22 @@ function explodeBarrel(b: number): void {
       continue
     }
 
+    /**
+     * 🧱💥 **벽은 폭발로 열립니다** — 두꺼운 벽의 유일한 답입니다.
+     *
+     * 금 간 벽도 같이 열립니다. 「칼로 되는 것이 폭발로는 안 된다」가
+     * 더 이상한 규칙이고, 어차피 플레이어만 불을 붙일 수 있어서
+     * (`applyHit` 의 점화 가지) **비밀이 저절로 열리는 일은 없습니다.**
+     *
+     * ⚠️ 항아리는 **일부러 안 넣습니다.** 통이 항아리를 깨야 하는가는
+     *    아직 아무도 정하지 않았고, 여기서 조용히 정하지 않습니다
+     *    (화살이 항아리에 막히는가와 같은 자리 — 위 `blocker` 주석).
+     */
+    if (hasComponent(CrackedWall, t)) {
+      if (Health.hp[t] > 0) Health.hp[t] = 0
+      continue
+    }
+
     // ⚠️ `Actor` 를 **있는지 묻고** 읽습니다 — 없는 컴포넌트를 읽으면
     //    앞서 그 번호를 쓰던 것이 남긴 값이 나옵니다(위 ☠️ 주석).
     if (hasComponent(Actor, t) && Actor.state[t] === ActorState.Dead) continue
@@ -1885,6 +1901,20 @@ function applyHit(a: number, spec: AttackSpec): boolean {
      *    아직 알아보지도 못한 비밀이 저절로 열립니다.**
      */
     if (hasComponent(CrackedWall, t)) {
+      /**
+       * 🧱💥 **두꺼운 벽은 칼로 안 열립니다.**
+       *
+       * ⚠️ 그래도 `landed = true` 입니다 — 친 것은 **맞은 것**이라
+       *    히트스톱과 소리가 나야 *"쨍, 안 되는구나"* 가 몸으로 옵니다.
+       *    아무 반응이 없으면 플레이어는 **조준이 빗나갔다고** 읽고,
+       *    같은 자리에서 스무 번을 더 휘두릅니다. 이 게임에서 「안 되는
+       *    것」을 가르치는 유일한 자리가 이 한 줄입니다.
+       */
+      if (CrackedWall.tough[t] === 1) {
+        Health.flashT[t] = hurtFlash(URN.trauma)
+        landed = true
+        continue
+      }
       if (Health.hp[t] > 0) Health.hp[t] = 0
       landed = true
       continue

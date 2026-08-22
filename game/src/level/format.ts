@@ -104,6 +104,18 @@ export type EntityKind =
    * 근거는 terrain.ts `Shortcut.kind` 주석에 있습니다.
    */
   | 'crackedWall'
+  /**
+   * 🧱💥 **두꺼운 벽** — 칼로는 안 열리고 **폭발**이라야 무너집니다.
+   *
+   * 금 간 벽과 같은 부품을 쓰되 **여는 방법이 다릅니다.** 그래서 이 게임의
+   * 첫 「이건 칼로 안 된다」 문장이 됩니다 — 젤다가 폭탄 벽을, 오공이
+   * 특정 수단을 요구하는 문을 가르치는 자리와 같습니다.
+   *
+   * ⚠️ **답을 같은 화면에 둡니다.** 열쇠가 다른 곳에 있으면 수수께끼가
+   *    아니라 심부름이 됩니다(balance.ts `CRACKED_WALL` 의 산나비 문단).
+   *    `npm run wall` 이 *"통이 카메라 안에 있는가"* 를 검사합니다.
+   */
+  | 'thickWall'
 
 export const ENTITY_KINDS: EntityKind[] = [
   'spawn',
@@ -122,6 +134,7 @@ export const ENTITY_KINDS: EntityKind[] = [
   'urnFull',
   'elite',
   'crackedWall',
+  'thickWall',
 ]
 
 export const ENTITY_LABEL: Record<EntityKind, string> = {
@@ -141,6 +154,7 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   urnFull: '항아리 🏺(보물 있음)',
   elite: '정예 🛡️(잡몹과 같은 색)',
   crackedWall: '금 간 벽 🧱(치면 열림)',
+  thickWall: '두꺼운 벽 🧱💥(폭발이라야 열림)',
 }
 
 /**
@@ -175,6 +189,9 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   // 🧱 사다리(0x9ee37d)와 **같은 계열의 초록**입니다 — 에디터에서 이 둘은
   //    「지나갈 수 없던 곳을 여는 것」이라는 한 무리로 보여야 합니다.
   crackedWall: 0x6fbf7d,
+  // 🧱💥 통(0xffd23f)의 노랑을 섞은 초록 — 「여는 것」이면서 「폭발이 답」
+  //      이라는 두 사실이 색 하나에 담기게.
+  thickWall: 0xb8c04a,
 }
 
 export interface LevelEntity {
