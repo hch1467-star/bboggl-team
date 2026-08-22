@@ -79,6 +79,26 @@ const RECOVERY_ONLY = process.env.PLAY_RECOVERY_ONLY === '1'
  */
 const USE_BARREL = process.env.PLAY_NO_BARREL !== '1'
 
+/**
+ * 🪜 **봇이 「들를 만하다」고 보는 지름길의 값**(m).
+ *
+ * ── 왜 상수로 빼는가 ────────────────────────────────────────────
+ * 이 값은 **봇의 정책**이지 게임의 규칙이 아닙니다. 그런데 아래 장부가
+ * 이 문턱에 걸린 사다리를 *"곁에 간 적이 없다"* 라고만 찍고 있었습니다 —
+ * 읽는 사람에게는 **지도가 나쁜 것**으로 읽힙니다. 실제로 그렇게 읽고
+ * 사다리 자리를 옮길 궁리를 했습니다.
+ *
+ * 값을 여기 두고 장부가 **같은 값을 읽어** 이유를 대게 하면, 그 오독이
+ * 구조적으로 불가능해집니다. 「계측기의 정책을 게임의 결론으로 만들지
+ * 않는다」가 이 한 줄의 뜻입니다.
+ *
+ * 20m 의 근거: format.ts `ONE_WAY_COST` 가 *"화면 한 장(22m) 넘게
+ * 아끼는 게 아니면 되돌아올 수 없는 길은 안 권한다"* 고 정해 두었습니다.
+ * 봇의 문턱도 같은 자릿수여야 **게임이 권하는 것과 봇이 가는 것**이
+ * 어긋나지 않습니다.
+ */
+const SHORTCUT_WORTH = 20
+
 const TIME_LIMIT = Number(process.env.PLAY_LIMIT ?? 420)
 /**
  * ── 벽시계 안전줄(초) ──────────────────────────────────────────────
@@ -139,7 +159,8 @@ try {
 
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
-  const log = await page.evaluate(async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND, BARREL_ON]) => {
+  const log = await page.evaluate(
+    async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND, BARREL_ON, WORTH]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -917,6 +938,10 @@ try {
        * 판이 끝나고 *"통 2개 남음"* 만 보면 처방이 안 나옵니다. 남은 이유가
        * 둘이나 되기 때문입니다:
        *   · **곁에 간 적이 없다** → 배치가 동선에서 멀다 (지도 문제)
+       *   · **봇이 안 갑니다** → 아끼는 값이 봇 문턱(`SHORTCUT_WORTH`) 이하
+       *     — 이건 **지도가 아니라 계측기의 정책**입니다. 실제로 이 갈래가
+       *     없어서 *"8m 앞의 사다리를 봇이 무시한다"* 를 지도 탓으로
+       *     읽었습니다(사다리(56,22) 아끼는 값 14m).
        *   · **곁에 갔는데 조건이 안 맞았다** → 둘 이상이 안 담겼다 (조건 문제)
        * 둘은 고치는 곳이 다릅니다. 그러니 **가장 가까이 간 거리**와
        * *"사거리 안에 있었던 프레임 수 / 그중 둘 이상 담긴 프레임 수"* 를
@@ -2724,7 +2749,7 @@ try {
        * 아끼는 값은 **게임이 지형에서 잰 값**(shortcutInfo().saving)입니다 —
        * 봇에 미터를 베껴 적으면 지도를 바꾼 순간 거짓이 됩니다.
        */
-      const closedShortcut = G.shortcutInfo().find((s) => !s.open && (s.saving ?? 0) > 20)
+      const closedShortcut = G.shortcutInfo().find((s) => !s.open && (s.saving ?? 0) > WORTH)
       if (closedShortcut && now() >= shortcutCooldownUntil) {
         const toTop = G.pathStep(closedShortcut.hiWorldX, closedShortcut.hiWorldZ)
         // 🧭 눈앞의 보물이 더 가까우면 사다리는 다음에 — 위 `treasureClaims` 주석.
@@ -4167,7 +4192,24 @@ try {
       notes,
       lastHp,
     }
-  }, [TIME_LIMIT, process.env.PLAY_WEAPON ?? '', WALL_LIMIT, RECOVERY_ONLY, DETOUR_BUDGET, SPEND_BUDGET, USE_BARREL])
+    },
+    /**
+     * ⚠️ **문턱은 인자로 넘깁니다.** 페이지 안의 코드는 노드 쪽 상수를
+     *    못 봅니다 — `SHORTCUT_WORTH` 를 그냥 쓰다가 판이 통째로
+     *    죽었습니다(`ReferenceError`). 다른 예산들이 전부 이 배열에
+     *    실려 있는 이유가 그것입니다.
+     */
+    [
+      TIME_LIMIT,
+      process.env.PLAY_WEAPON ?? '',
+      WALL_LIMIT,
+      RECOVERY_ONLY,
+      DETOUR_BUDGET,
+      SPEND_BUDGET,
+      USE_BARREL,
+      SHORTCUT_WORTH,
+    ],
+  )
 
   /**
    * ── 👣 **「주 동선」을 정말로 걷는가** ──────────────────────────────
@@ -4383,9 +4425,12 @@ try {
             ? `아래에서 **잠긴 것을 봤다**(${r.sawLocked}프레임) — 설계대로입니다(나중에 위에서 여는 것)`
             : r.near <= 4
               ? `옆을 지났습니다(위 지점 ${r.near.toFixed(1)}m · 아래 ${(r.nearLo ?? Infinity).toFixed(1)}m) — **위 칸에는 안 섰습니다**`
-              : r.nearWalk > 40
-            ? '**곁에 간 적이 없다**(예산 밖)'
-            : '**곁에 간 적이 없다**'
+              : (r.saving ?? 0) <= SHORTCUT_WORTH
+                ? `**봇이 안 갑니다** — 아끼는 값 ${Math.round(r.saving)}m ≤ 봇 문턱 ${SHORTCUT_WORTH}m` +
+                  ' (지도 문제가 아니라 **계측기의 정책**입니다)'
+                : r.nearWalk > 40
+                  ? '**곁에 간 적이 없다**(예산 밖)'
+                  : '**곁에 간 적이 없다**'
     console.log(
       `             사다리(${key}) — 가장 가까이 ${r.near === Infinity ? '?' : `${r.near.toFixed(1)}m`}` +
         ` (걸어서 ${r.nearWalk === Infinity ? '?' : `${r.nearWalk.toFixed(0)}m`})` +
