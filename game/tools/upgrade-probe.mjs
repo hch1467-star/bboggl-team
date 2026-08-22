@@ -292,20 +292,51 @@ try {
     `${byFarming.killed}마리 처치 · 정련석 ${byFarming.before} → ${byFarming.after}`,
   )
 
-  // ---- 7. 보스는 정확히 정해진 만큼만, 그리고 한 번만 줍니다 ----
+  /**
+   * ---- 7. 보스는 정확히 정해진 만큼만, 그리고 한 번만 줍니다 ----
+   *
+   * ── ⚠️ **이 검사와 아래 8번이 오래 빨간 채로 있었습니다** ─────────
+   * 「보스 처치 정련석 0개」와 「보스가 부활함」 — 두 줄이 빨갛길래
+   * 보상이 안 붙거나 격파 기록이 또 깨진 줄 알았습니다. **둘 다
+   * 아니었습니다.** 재 보니 이렇게 나왔습니다:
+   *
+   *     체력 620 → damageEntity(99999) → 0.6초 뒤 **465.5**
+   *
+   * 465.5 = 620 × 0.75 + 0.5 입니다. `BOSS_PHASES[1].enterBelow` 가
+   * 0.75 이고, enemyAI 의 **1단계 학습 잠금**이 딱 그 위로 체력을 되돌려
+   * 놓습니다 — *"색을 3가지 보여주기 전에는 2페이즈로 안 넘어간다"* 는
+   * 규칙(`PHASE1_TEACH_COLORS`)입니다. 즉 **게임은 설계대로** 굴러가고
+   * 있었고, 이 프로브가 색을 하나도 안 보여준 채 즉사를 시도한 것이
+   * 문제였습니다. 보스가 안 죽었으니 격파 기록도 안 남고, 그래서
+   * 8번의 "부활했다"까지 같이 빨개진 **한 원인의 두 증상**이었습니다.
+   *
+   * 이 세션이 여러 번 겪은 그 모양입니다 — **계측기의 정책을 게임의
+   * 결론으로 만들지 않습니다.** 다만 이번엔 방향이 반대였습니다:
+   * 계측기의 지름길이 멀쩡한 게임을 고장난 것처럼 보이게 했습니다.
+   *
+   * `npm run boss` · `npm run arena` 는 이미 같은 이유로 잠금을 끄고
+   * 잽니다. 여기만 안 껐습니다.
+   *
+   * ⚠️ 끈 스위치는 **반드시 되돌립니다**(기본값 켜짐). 안 되돌리면 다음
+   *    검사가 다른 게임을 재게 됩니다 — `npm run guard` 가 이걸 봅니다.
+   */
   const byBoss = await page.evaluate(async () => {
     const G = window.__game
     G.setStones(0)
     const b = G.bossEncounter()
     if (!b) return null
+    const held = b.teachHold
+    G.setPhaseTeaching(false)
     G.damageEntity(b.entity, 99999)
     await window.__t.runFor(0.6)
-    return G.weaponUpgradeInfo().stones
+    const stones = G.weaponUpgradeInfo().stones
+    G.setPhaseTeaching(true)
+    return { stones, held }
   })
   check(
-    byBoss === 2,
+    byBoss?.stones === 2,
     '보스 처치는 정련석을 정해진 만큼 준다',
-    `정련석 ${byBoss}개`,
+    `정련석 ${byBoss?.stones}개 (학습 잠금 끄고 — 켠 채로는 색 ${byBoss?.held?.need}가지를 보기 전엔 안 죽습니다)`,
   )
 
   /**
