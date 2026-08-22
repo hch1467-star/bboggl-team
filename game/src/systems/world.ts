@@ -256,6 +256,9 @@ export function spawnTreasure(x: number, z: number): number {
   Transform.z[e] = z
   Transform.rotY[e] = 0
   Pickup.taken[e] = 0
+  // 📍 **신분증**은 처음 자리입니다 — 폭발에 밀려나도 안 바뀝니다(components.ts).
+  Pickup.homeX[e] = x
+  Pickup.homeZ[e] = z
   // 위상차를 줘서 여러 보물이 동시에 똑같이 출렁이지 않게 합니다.
   Pickup.phase[e] = spawnRng.range(0, Math.PI * 2)
   Renderable.kind[e] = KIND_TREASURE

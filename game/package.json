@@ -47,6 +47,7 @@
     "retry": "node tools/retry-probe.mjs",
     "teach": "node tools/teach-probe.mjs",
     "economy": "node tools/economy-probe.mjs",
+    "drop": "node tools/drop-probe.mjs",
     "charge": "node tools/charge-probe.mjs",
     "tempo": "node tools/tempo-probe.mjs",
     "rules": "node tools/rules-probe.mjs",

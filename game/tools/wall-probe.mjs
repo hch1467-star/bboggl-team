@@ -232,7 +232,32 @@ try {
       const sword = await page.evaluate(async ({ wx, wz, key }) => {
         const g = window.__game
         const sleep = () => new Promise((r) => setTimeout(r, 40))
-        // 벽 앞(동선 쪽)에 서서 벽을 보고 세 번 휘두릅니다 — 한 번은 빗나갈 수 있습니다.
+        /**
+         * ── ⚠️ **「칼로 열렸습니다」의 정체를 찾았습니다** ─────────────────
+         *
+         * 이 파일 위쪽에 *"원인은 못 밝혔습니다"* 라고 적어 둔 흔들림입니다.
+         * 프레임마다 찍어 보니 이랬습니다:
+         *
+         *     세워 놓고 한 번 휘두름 → **통(-11,-23)의 도화선이 0.7초**
+         *     그리고 플레이어가 **동쪽으로** 0.9m 씩 밀려납니다(파고들기)
+         *
+         * 벽은 **칼로 안 열렸습니다.** 등 뒤의 통이 켜졌고, 그 폭발이
+         * 연 것입니다. 왜 통 쪽을 쳤나 — **조준이 유지되지 않습니다.**
+         * `aimAtWorld` 를 한 번 부르고 300ms 를 기다리면, 그 사이에
+         * 몸 방향이 **다른 값으로 돌아가 있습니다**(측정: 벽 쪽 −1.57 이
+         * 아니라 2.06 — 동북동). 그 방향으로 파고들다 통을 칩니다.
+         *
+         * ⚠️ **처음엔 소프트 락온이 통을 문 줄 알았습니다.** 서는 자리를
+         *    0.9m 로 당겨 벽이 더 가깝게 만들었는데 **그대로 빨갰습니다.**
+         *    코드를 보니 `assistAim` 은 `livingEnemies` 만 봅니다 — 통은
+         *    후보에도 안 듭니다. 틀린 진단이었고, 고쳐 적습니다.
+         *
+         * 고침: **휘두르기 직전마다 다시 겨눕니다.** 그러면 1.6m 그대로
+         * 통은 세 번 다 안 켜지고(도화선 0), 벽도 안 열립니다.
+         *
+         * ⚠️ 통을 치우는 것으로 피하지 않았습니다. 그 통은 ⑦ 이 **답**으로
+         *    쓰는 물건이고, 치우면 이 파일이 재는 것이 게임이 아니게 됩니다.
+         */
         g.teleportPlayer(wx + 1.6, wz)
         g.aimAtWorld(wx, wz)
         /**
@@ -242,6 +267,9 @@ try {
          */
         await new Promise((r) => setTimeout(r, 300))
         for (let i = 0; i < 3; i++) {
+          // 🎯 **매번 다시 겨눕니다** — 한 번 겨눈 방향은 유지되지 않습니다(위 노트).
+          g.aimAtWorld(wx, wz)
+          await new Promise((r) => setTimeout(r, 120))
           g.press('Mouse0')
           g.release('Mouse0')
           await new Promise((r) => setTimeout(r, 700))
@@ -266,11 +294,21 @@ try {
         if (!near) return { open: false, lit: false, why: '통이 없습니다' }
         // 통을 쳐서 불을 붙이고 — 도화선이 다 탈 때까지 기다립니다.
         g.teleportPlayer(near.b.x + 1.6, near.b.z)
-        g.aimAtWorld(near.b.x, near.b.z)
         await new Promise((r) => setTimeout(r, 300))
-        g.press('Mouse0')
-        g.release('Mouse0')
-        await new Promise((r) => setTimeout(r, 500))
+        /**
+         * 🎯 ⑥ 과 **같은 이유로** 휘두르기 직전에 다시 겨눕니다 — 한 번
+         * 겨눈 방향은 유지되지 않습니다. 여기도 같은 병을 앓고 있었고,
+         * ⑥ 을 고치자마자 이쪽이 빨개져서 드러났습니다(예전에는 ⑥ 이
+         * **벽을 미리 열어 놓아서** 이 검사가 공짜로 통과했습니다).
+         * 두 번 휘두르는 것은 한 번이 빗나가도 되게 하려는 것입니다.
+         */
+        for (let i = 0; i < 2; i++) {
+          g.aimAtWorld(near.b.x, near.b.z)
+          await new Promise((r) => setTimeout(r, 120))
+          g.press('Mouse0')
+          g.release('Mouse0')
+          await new Promise((r) => setTimeout(r, 400))
+        }
         // ⚠️ 폭발에 휘말리지 않게 물러납니다 — 재려는 것은 벽이지 플레이어가 아닙니다.
         g.teleportPlayer(near.b.x + 12, near.b.z)
         for (let i = 0; i < 40; i++) {

@@ -163,6 +163,7 @@ import {
   flushSwingRecords,
   poiseDamage,
   countInBlast,
+  pickupBlownEvents,
 } from './systems/combat'
 import {
   chainIndexFor,
@@ -336,6 +337,13 @@ class Game {
   private terrain: Terrain | null = null
   /** 💥 이번 판에 터진 통 수 · 그 폭발에 휘말린 몸 수 — 벤치·프로브가 읽습니다. */
   private barrelsBlown = 0
+  /**
+   * 🎁💥 폭발에 밀려나 **주울 수 있는 자리로 내려온** 보물의 수.
+   * 세는 이유: 이 동사를 넣고도 판에서 한 번도 안 일어나면 *"안 쓸 만하다"* 가
+   * 아니라 **"배치가 없다"** 입니다. 봇 정책이 만든 0 을 게임의 성질로
+   * 읽지 않으려면 게임이 직접 세야 합니다.
+   */
+  private treasuresBlown = 0
   private barrelsCaught = 0
   /** 💥 **불붙일 때** 반경 안에 있던 적의 합계 — 터질 때와의 차이가 「걸어 나간 수」. */
   private barrelsLitCaught = 0
@@ -885,6 +893,7 @@ class Game {
     this.treasuresFound = 0
     this.treasureTotal = 0
     this.barrelsBlown = 0
+    this.treasuresBlown = 0
     this.barrelsCaught = 0
     this.barrelsLitCaught = 0
     this.hitsDealt = 0
@@ -1988,6 +1997,63 @@ class Game {
     barrelBlastEvents.length = 0
 
     /**
+     * ── 🎁💥 **밀려난 보물이 어디에 떨어지는가** ────────────────────────
+     *
+     * 무엇을 노리는지는 combat.ts `explodeBarrel` 의 설계 노트에 있습니다
+     * (요약: *"보이는데 못 간다"* 에 답을 만드는 것 — 젤다가 손 안 닿는
+     * 단 위의 것을 떨어뜨려 줍게 하는 그것).
+     *
+     * ── 규칙은 한 문장입니다 ─────────────────────────────────────────
+     * **폭발은 보물을 「주울 수 있는 가장 가까운 자리」로 보냅니다.**
+     *
+     * 튀어나가는 물리를 흉내 내지 않습니다. 항아리가 깨질 때 내용물을
+     * *"그 자리에 그대로 세우는"* 이유와 정확히 같습니다 — 지형에 따라
+     * 못 줍는 자리에 떨어지면 *"분명 나왔는데 없어졌다"* 가 되니까요.
+     * 여기서는 그 규칙을 **반대 방향으로** 씁니다: 못 줍는 자리에 있던
+     * 것을 주울 수 있는 자리로 옮깁니다. 산나비의 원칙 그대로 —
+     * **어려운 부분(어디로 튈까)은 기계가 가져가고**, 플레이어 몫으로
+     * 남는 것은 *"저걸 떨어뜨릴 수 있겠다"* 를 알아보는 것 하나입니다.
+     *
+     * ── 「주울 수 있는가」는 **걸어갈 수 있는가**입니다 ─────────────────
+     * `canWalk` 만으로는 부족합니다 — 단상 위 칸도 땅은 있으니까요.
+     * 플레이어 흐름장(`distanceToPlayer`)이 **닿을 수 없는 칸에 null** 을
+     * 내므로 그걸 씁니다. 즉 판단을 여기서 새로 만들지 않고 **길찾기에게
+     * 물어봅니다.** 이 저장소가 `?? 0` 으로 「못 간다」를 「다 왔다」로
+     * 바꿔 놓고 한참 헤맨 자리라(`debugPathStep` 주석), null 을 그대로
+     * null 로 다룹니다.
+     *
+     * ⚠️ 못 찾으면 **안 옮깁니다.** 억지로 옮기면 벽 속에 박힙니다.
+     */
+    if (pickupBlownEvents.length > 0 && this.terrain) {
+      const p = this.playerEntity
+      /**
+       * ⚠️ **거리장이 아니라 `reachableFrom` 입니다.** 거리장은 *"거기서
+       *    플레이어까지"* 를 답하고, 내려가는 것은 공짜라 **성벽 위도
+       *    「닿는다」** 고 말합니다. 실제로 그렇게 물었다가 보물이 성벽
+       *    위에 그대로 놓였습니다(`terrain.reachableFrom` 주석의 기록).
+       *    여기서 필요한 것은 **플레이어가 거기로 갈 수 있는가**입니다.
+       */
+      const cell = this.terrain.cellOf(Transform.x[p], Transform.z[p])
+      const canGo = this.terrain.reachableFrom(cell.cx, cell.cz)
+      for (const ev of pickupBlownEvents) {
+        if (!isAlive(ev.entity) || Pickup.taken[ev.entity] === 1) continue
+        const spot = this.landingSpotFor(canGo, ev.x, ev.z, ev.dirX, ev.dirZ)
+        if (!spot) continue
+        Transform.x[ev.entity] = spot.x
+        Transform.z[ev.entity] = spot.z
+        Transform.y[ev.entity] = this.terrain.groundYAt(spot.x, spot.z)
+        // 떨어진 자리에서 한 번 튀깁니다 — 눈이 **어디로 갔는지**를 따라가야
+        // 합니다. 소리도 같이 냅니다(화면 밖으로 떨어질 수 있으므로).
+        this.vfx.spawnHitSpark(spot.x, Transform.y[ev.entity] + 0.4, spot.z, 1.6)
+        sfx.pickup()
+        this.treasuresBlown++
+        // 빛기둥이 **새 자리**에서 서게 다시 셈합니다(숨은 보물 목록도 좌표를 씁니다).
+        this.syncHiddenTreasures(true)
+      }
+    }
+    pickupBlownEvents.length = 0
+
+    /**
      * ── 🏺 **항아리가 깨졌습니다** ────────────────────────────────
      *
      * 통과 **다른 그림**을 씁니다. 통은 🟡 장판을 깔아 *"여기서 나가라"*
@@ -2911,7 +2977,8 @@ class Game {
       // 정련석 — 무기 강화에만 쓰는 탐험 전용 재료. 파밍으로는 얻을 수 없습니다.
       Player.stones[p] += WEAPON_UPGRADE.stonePerTreasure
       this.stonesEarned += WEAPON_UPGRADE.stonePerTreasure
-      this.takenTreasures.add(treasureKey(Transform.x[e], Transform.z[e]))
+      // 📍 **처음 자리**로 기록합니다 — 폭발에 밀려난 보물도 같은 상자입니다.
+      this.takenTreasures.add(treasureKey(Pickup.homeX[e], Pickup.homeZ[e]))
       this.vfx.spawnHitSpark(Transform.x[e], Transform.y[e] + 1.05, Transform.z[e], 1.8)
       this.cam.addTrauma(0.18)
       sfx.pickup()
@@ -2961,7 +3028,8 @@ class Game {
        * ⚠️ 등급이 지금 것보다 낮으면 **안 바꿉니다**(loadout.ts `equipGear`).
        */
       {
-        const { seed, tier } = this.gearRollAt(Transform.x[e], Transform.z[e])
+        // 📍 굴림의 씨앗도 **처음 자리**입니다 — 밀려난 거리로 등급이 바뀌면 안 됩니다.
+        const { seed, tier } = this.gearRollAt(Pickup.homeX[e], Pickup.homeZ[e])
         const weaponIndex = Loadout.weapon[p]
         const got = equipGear(p, weaponIndex, tier, seed)
         const td = tierDef(tier)
@@ -3201,13 +3269,69 @@ class Game {
     }
   }
 
+  /**
+   * ── 🎁💥 **밀려난 보물이 내려앉을 자리** ─────────────────────────────
+   *
+   * 폭발 중심에서 바깥으로(`dirX,dirZ`) 밀되, **주울 수 있는 자리**를
+   * 찾습니다. 「주울 수 있는가」 = 플레이어가 **걸어서 닿는가** 이고,
+   * 그 판단은 흐름장(`distanceToPlayer`)에게 물어봅니다 — 여기서 지형
+   * 규칙을 다시 쓰면 규칙이 두 벌이 됩니다.
+   *
+   * ── 왜 부채꼴로 훑는가 ───────────────────────────────────────────
+   * 곧장 밀린 방향으로만 보면, 그 방향이 벼랑이거나 벽이면 **아무 자리도
+   * 못 찾습니다.** 단상은 대개 한쪽만 트여 있어서 실제로 자주 그렇습니다.
+   * 그래서 밀린 방향을 **가운데로** 두고 좌우로 벌려 가며 봅니다 —
+   * 물리적으로 정확한 궤적은 아니지만, 이 게임이 약속한 것은 궤적이
+   * 아니라 *"떨어뜨리면 주울 수 있다"* 입니다.
+   *
+   * ⚠️ 가까운 것부터 찾습니다(반지름을 안쪽에서 바깥으로). 멀리 던지는
+   *    것이 시원해 보여도, **어디로 갔는지 못 찾는 보물**이 제일 나쁩니다.
+   *
+   * ── 두 반경이 하는 일이 다릅니다 ─────────────────────────────────
+   *   · **휘말리는가** = `BARREL.blast`(4m). 물리적으로 폭발에 닿는 거리라
+   *     적·플레이어와 같은 자를 씁니다.
+   *   · **얼마나 멀리 밀리는가** = 「주울 수 있는 자리가 어디 있는가」가
+   *     정하고, **상한만** `BARREL.chain`(8m)으로 둡니다.
+   *
+   * 상한에 새 숫자를 안 만든 것이 요점입니다. `chain` 은 이미 *"폭발이
+   * 관여하는 가장 먼 거리"* 라는 뜻이라(불이 거기까지 번집니다), 그 밖으로
+   * 나가면 **폭발과 무관한 순간이동**이 됩니다. 여기에 `12` 같은 값을
+   * 새로 적으면 나중에 아무도 그 12가 무엇이었는지 모릅니다.
+   *
+   * ⚠️ 못 찾으면 그냥 **안 옮깁니다.** 억지로 옮기면 벽 속에 박힙니다.
+   */
+  private landingSpotFor(
+    canGo: Uint8Array,
+    x: number,
+    z: number,
+    dirX: number,
+    dirZ: number,
+  ): { x: number; z: number } | null {
+    const t = this.terrain
+    if (!t) return null
+    // 방향이 없으면(정확히 통 위) 정면을 +x 로 두고 한 바퀴 다 봅니다.
+    const base = dirX === 0 && dirZ === 0 ? 0 : Math.atan2(dirX, dirZ)
+    for (let r = 1.0; r <= BARREL.chain; r += 0.5) {
+      for (let spread = 0; spread <= Math.PI; spread += Math.PI / 12) {
+        for (const side of spread === 0 ? [0] : [-1, 1]) {
+          const a = base + spread * side
+          const nx = x + Math.sin(a) * r
+          const nz = z + Math.cos(a) * r
+          if (!t.canReach(canGo, nx, nz)) continue
+          return { x: nx, z: nz }
+        }
+      }
+    }
+    return null
+  }
+
   private removeTakenTreasures(): void {
     const ids = pickups.run()
     // 순회 중에 엔티티를 지우므로 먼저 모아 둡니다.
     const doomed: number[] = []
     for (let i = 0; i < pickups.count; i++) {
       const e = ids[i]
-      if (this.takenTreasures.has(treasureKey(Transform.x[e], Transform.z[e]))) doomed.push(e)
+      if (this.takenTreasures.has(treasureKey(Pickup.homeX[e], Pickup.homeZ[e]))) doomed.push(e)
     }
     for (const e of doomed) {
       this.visuals.detach(e)
@@ -5705,6 +5829,8 @@ class Game {
      * 데인 자리라 벤치가 볼 수 있게 내보냅니다.
      */
     barrelsBlown: number
+    /** 🎁💥 폭발에 밀려나 주울 수 있는 자리로 내려온 보물 수. */
+    treasuresBlown: number
     barrelsCaught: number
     /** 💥 불붙일 때 담겼던 적의 합계 — 터질 때와의 차이가 「걸어 나간 수」. */
     barrelsLitCaught: number
@@ -5787,6 +5913,7 @@ class Game {
       rollAttacks: readRhythm().rollAttacks,
       plungeAttacks: readRhythm().plungeAttacks,
       barrelsBlown: this.barrelsBlown,
+      treasuresBlown: this.treasuresBlown,
       barrelsCaught: this.barrelsCaught,
       barrelsLitCaught: this.barrelsLitCaught,
       inputUsed: readInputFlow().used,

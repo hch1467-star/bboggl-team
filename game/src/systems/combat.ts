@@ -39,6 +39,7 @@ import {
   Status,
   Transform,
   Velocity,
+  Pickup,
 } from '../core/components'
 import { BOSS_PHASES } from '../config/bossPhases'
 import { bleedMaxOf, enemyDef } from '../config/enemies'
@@ -1189,6 +1190,24 @@ export const barrelBlastEvents: (BreakEvent & {
 })[] = []
 
 const barrels = defineQuery(Barrel, Transform, Health)
+/**
+ * 🎁 보물 — **`Body` 가 없어서** 위 `targets` 질의에 안 잡힙니다(줍는 것이지
+ * 부딪는 것이 아니라서). 폭발이 보물을 밀어내려면 따로 물어야 합니다.
+ */
+const pickups = defineQuery(Pickup, Transform)
+
+/**
+ * 🎁💥 **폭발에 밀려난 보물** — 어디로 떨어질지는 지형을 아는 쪽(main.ts)이
+ * 정합니다. 근거는 아래 `explodeBarrel` 의 설계 노트에 있습니다.
+ */
+export const pickupBlownEvents: {
+  entity: number
+  x: number
+  y: number
+  z: number
+  dirX: number
+  dirZ: number
+}[] = []
 /** 🛡 예고를 끊은 자리에서 플레이어의 가드 창을 봐야 합니다(`breakPoise`). */
 const players = defineQuery(Player, Stamina)
 
@@ -1444,6 +1463,58 @@ function explodeBarrel(b: number): void {
       Health.flashT[t] = hurtFlash(BARREL.hitstop)
       caught++
     }
+  }
+
+  /**
+   * ── 🎁💥 **폭발은 보물을 밀어냅니다** ────────────────────────────────
+   *
+   * ── 왜 이게 필요했는가 ────────────────────────────────────────────
+   * 「불이 번지는 거리」를 무기 사거리보다 넓히고 나서(BARREL.chain),
+   * *"연쇄로만 닿는 자리"* 가 지도에 **57칸** 생겼습니다. 그런데 재 보니
+   * **거기 놓을 것이 하나도 없었습니다.** 폭발이 할 수 있는 일이 셋뿐이라
+   * 서입니다 — 적의 자세를 무너뜨리고 · 벽을 열고 · 옆 통에 불을 옮기고.
+   * 셋 다 **멀리 있는 플레이어에게 아무것도 건네지 못합니다**:
+   *   · 적 — 폭발은 피해가 0 이라 닿지 않는 적은 못 잡습니다(설계대로).
+   *   · 벽 — 벽을 여는 통은 **언제나 칼도 닿습니다**(balance.ts 의 증명).
+   *   · 보물 — 단상 위에 놔 봐야 **주우러 갈 수가 없습니다.**
+   *
+   * 즉 창은 열었는데 그 창으로 줄 것이 없었습니다. 여기서 막힌 것이
+   * **폭발이 물건을 움직이지 못한다**는 한 가지였습니다. 그런데 폭발은
+   * 이미 **사람은 밀어냅니다**(위 `BARREL.knockback`). 물건만 안 밀리는
+   * 쪽이 오히려 예외였던 셈입니다.
+   *
+   * ── 어떤 감각인가 (참고) ──────────────────────────────────────────
+   * 젤다가 손 안 닿는 단 위의 것을 **떨어뜨려서** 줍게 하는 그것입니다.
+   * 오공·붉은 사막의 부술 수 있는 지형도 같은 약속을 합니다 —
+   * *"보이는데 못 간다"* 에는 반드시 **답이 있다.**
+   * 그래서 이 동사가 여는 문장은 이겁니다:
+   * **저기 있는 걸 여기로 가져올 수 있다.**
+   *
+   * ── ⚠️ 여기서는 **사건만** 냅니다 ─────────────────────────────────
+   * 어디로 떨어질지는 **지형을 아는 쪽**이 정해야 합니다(main.ts).
+   * 전투 시스템은 지형을 모르고, 알게 만들면 이 파일이 지도까지 아는
+   * 물건이 됩니다. 통·항아리·벽이 전부 같은 방식입니다.
+   */
+  const pids = pickups.run()
+  for (let j = 0; j < pickups.count; j++) {
+    const t = pids[j]
+    if (Pickup.taken[t] === 1) continue
+    const dx = Transform.x[t] - bx
+    const dz = Transform.z[t] - bz
+    // 굵기를 안 더합니다 — 보물에는 `Body` 가 없습니다(줍는 것이지 부딪는 것이 아니라서).
+    const d = Math.hypot(dx, dz)
+    if (d > BARREL.blast) continue
+    const len = d || 1
+    pickupBlownEvents.push({
+      entity: t,
+      x: Transform.x[t],
+      y: Transform.y[t],
+      z: Transform.z[t],
+      // 폭발의 **바깥쪽**. 정확히 위에 놓인 보물(d=0)은 방향이 없으므로
+      // 부르는 쪽이 알아서 가장 가까운 자리를 고르게 0,0 을 그대로 넘깁니다.
+      dirX: d === 0 ? 0 : dx / len,
+      dirZ: d === 0 ? 0 : dz / len,
+    })
   }
 
   barrelBlastEvents.push({

@@ -494,24 +494,54 @@ try {
    * ⚠️ **통을 「쓰는가」는 여기서 안 묻습니다.** 그건 봇 정책이고
    *    `playthrough` 의 통 장부가 이미 프레임 단위로 셉니다.
    */
+  /**
+   * ── ⚠️ **통의 할 일이 하나가 아닙니다** (뒤늦게 안 것) ───────────────
+   * 위 문장은 *"통은 플레이어가 걸어가서 치는 것"* 을 전제합니다. 그런데
+   * 「손 안 닿는 선반 위의 보물」장치가 들어오면서 **일부러 못 가게 놓은
+   * 통**이 생겼습니다 — 그 통은 칼이 아니라 **옆 통의 불**로만 터집니다.
+   * 그게 퍼즐의 전부입니다.
+   *
+   * 그대로 두면 이 검사는 *"닿는 곳에 옮겨 놔라"* 라고 말하게 되고,
+   * 그건 **계측기가 퍼즐을 없애라고 하는 것**입니다. 그래서 갈래를
+   * 나눕니다 — 이번 세션에 이미 세 번 한 그 일입니다:
+   *
+   *   · 걸어갈 수 있는 통 → **곁길 예산 안**이어야 합니다.
+   *   · 걸어갈 수 없는 통 → 불 반경 안에 **「걸어갈 수 있고 예산 안인
+   *     통」이 있어야** 합니다. 즉 **답이 있어야** 합니다.
+   *
+   * ⚠️ 넓히는 것이지 **무르게 하는 것이 아닙니다.** 답이 없는 통은
+   *    여전히 빨갛습니다 — 그게 진짜 *"놓아 두고 아무도 안 만나는 통"* 입니다.
+   */
   {
     const barrels = await page.evaluate(() => window.__game.barrelInfo().barrels ?? [])
+    const chain = await page.evaluate(() => window.__game.barrelInfo().chain)
     if (barrels.length > 0) {
       console.log('\n  💥 폭발통 — 동선에서 얼마나 떨어져 있는가')
       const barrelFar = []
+      // 먼저 「걸어갈 수 있고 예산 안인 통」을 추립니다 — 연쇄의 **시작점**들.
+      const starters = []
+      for (const b of barrels) {
+        const ex = await detour(b.x, b.z)
+        if (ex !== null && ex <= DETOUR_BUDGET) starters.push(b)
+      }
       for (const b of barrels) {
         const d = nearest(b.x, b.z)
         const ex = await detour(b.x, b.z)
-        if (ex === null || ex > DETOUR_BUDGET) barrelFar.push(`(${Math.round(b.x)},${Math.round(b.z)}) ${ex === null ? '못 감' : `${ex}m`}`)
+        const lit = starters.some(
+          (o) => o.entity !== b.entity && Math.hypot(o.x - b.x, o.z - b.z) <= chain,
+        )
+        if ((ex === null || ex > DETOUR_BUDGET) && !lit)
+          barrelFar.push(`(${Math.round(b.x)},${Math.round(b.z)}) ${ex === null ? '못 감' : `${ex}m`}`)
         console.log(
           `    ${d <= t.cameraViewSize ? '·' : '⚠️'} (${Math.round(b.x)}, ${Math.round(b.z)})` +
             `  눈으로 ${d.toFixed(1)}m · **더 걷는 ${ex === null ? '못 감' : `${ex.toFixed(0)}m`}**` +
+            `${lit ? ' — 🔥 옆 통의 불로 터집니다(일부러 못 가게 둔 통)' : ''}` +
             `${d <= t.cameraViewSize ? '' : ` — 시야 ${t.cameraViewSize}m 밖`}`,
         )
       }
       check(
         barrelFar.length === 0,
-        `💥 **폭발통이 전부 곁길 예산(${DETOUR_BUDGET}m) 안에 있다** (놓아 두고 아무도 안 만나면 없는 것과 같습니다)`,
+        `💥 **폭발통마다 터뜨릴 방법이 있다** (곁길 예산 ${DETOUR_BUDGET}m 안이거나 · 옆 통의 불이 닿거나)`,
         barrelFar.length ? `예산 밖 ${barrelFar.join(' · ')}` : `${barrels.length}개 전부`,
       )
     }
@@ -921,6 +951,17 @@ try {
      *    가는 게 보인다"* 가 성립할 수 있기 때문입니다. 그건 자로 못
      *    가릅니다. 여기 빨강은 **빛기둥과 안내라는 두 장치**에 대해서만
      *    참말입니다.
+     *
+     * ⚠️ **이 줄은 불안정합니다 — 같은 코드로 4/6 과 5/6 이 번갈아 나옵니다.**
+     *    안내는 걷는 동안 **한 번에 하나씩** 뜨고(main.ts `findSideHint`),
+     *    어느 것이 뜨는지는 봇이 그 순간 어디에 서 있었는가에 달렸습니다.
+     *    그래서 (13,47)이 안내를 받는 판과 못 받는 판이 갈립니다.
+     *
+     *    고치려면 **재는 법**을 바꿔야 합니다 — *"이 판에서 떴는가"* 가
+     *    아니라 *"떠야 하는 자리를 지날 때 떴는가"*. 지금은 그럴 자가
+     *    없어서 **기록만 해 둡니다.** 이 줄이 빨갛다고 지도를 고치기
+     *    전에, 먼저 **두 번 돌려 보십시오.** 이 저장소는 흔들리는 초록을
+     *    보고 멀쩡한 배치를 고칠 뻔한 적이 있습니다.
      */
     '🔦 **보물마다 알 방법이 하나는 있다** (빛기둥이 보이거나 · 안내가 가리키거나)',
     dark.length === 0

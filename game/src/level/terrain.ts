@@ -595,6 +595,73 @@ export class Terrain {
   private playerSteps: Int32Array | null = null
   private playerFieldKey = ''
 
+  /**
+   * ── 🚶 **여기서 걸어갈 수 있는 칸 전부** ─────────────────────────────
+   *
+   * ── ⚠️ 이 함수는 `distanceToPlayer` 와 **방향이 반대**입니다 ─────────
+   * 이 파일에는 이미 거리장이 있고 그건 *"그 자리에서 **플레이어까지**
+   * 걸어야 하는 거리"* 를 답합니다(`floodFrom` 이 `canStepCell(이웃→나)`
+   * 로 퍼지는 이유). **내려가는 것은 언제나 공짜**이므로, 3단 위 성벽에
+   * 선 적도 *"플레이어까지 8m"* 가 나옵니다 — **맞는 답입니다.**
+   * 뛰어내리면 되니까요.
+   *
+   * 그런데 *"플레이어가 저 성벽 위로 갈 수 있는가"* 는 **완전히 다른
+   * 질문**이고 답은 **아니오**입니다(3단은 못 올라갑니다).
+   *
+   * 이 저장소는 이 함정을 이미 한 번 밟았습니다 — 궁수 자리를 고를 때
+   * *"맞는 자리까지 28m"* 라고 계산했다가, 검사가 재는 것은 반대 방향이라
+   * **64m** 였습니다(make-zone.mjs 기록). 그리고 폭발에 밀려난 보물이
+   * 내려앉을 자리를 고를 때 **또 밟았습니다** — 거리장이 성벽 위를
+   * *"닿는다"* 고 해서, 보물이 성벽 위에 그대로 놓였습니다.
+   *
+   * **두 방향은 이름부터 달라야 합니다.** 그래서 새로 만듭니다.
+   *
+   * ⚠️ `canStepCell` 을 그대로 씁니다(사다리·부순 벽까지 포함). 규칙을
+   *    여기서 다시 쓰면 지름길이 열려도 이 함수만 모르게 됩니다.
+   */
+  reachableFrom(cx: number, cz: number): Uint8Array {
+    const { w, h } = this.level
+    const seen = new Uint8Array(w * h)
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return seen
+    if (this.levelAtCell(cx, cz) === VOID) return seen
+    seen[cz * w + cx] = 1
+    const stack: number[] = [cz * w + cx]
+    while (stack.length > 0) {
+      const i = stack.pop() as number
+      const x = i % w
+      const z = (i - x) / w
+      for (const [nx, nz] of [
+        [x - 1, z],
+        [x + 1, z],
+        [x, z - 1],
+        [x, z + 1],
+      ]) {
+        if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue
+        const j = nz * w + nx
+        if (seen[j]) continue
+        // **나에게서 이웃으로** 갈 수 있는가 — 위 거리장과 반대 방향입니다.
+        if (!this.canStepCell(x, z, nx, nz)) continue
+        seen[j] = 1
+        stack.push(j)
+      }
+    }
+    return seen
+  }
+
+  /** 세계 좌표 → 칸. 부르는 쪽이 격자 식을 베껴 쓰지 않게 합니다. */
+  cellOf(x: number, z: number): { cx: number; cz: number } {
+    const { w, h } = this.level
+    return worldToCell(x, z, w, h)
+  }
+
+  /** 세계 좌표로 묻는 같은 질문 — 위 `reachableFrom` 의 결과를 그대로 읽습니다. */
+  canReach(field: Uint8Array, x: number, z: number): boolean {
+    const { w, h } = this.level
+    const { cx, cz } = worldToCell(x, z, w, h)
+    if (cx < 0 || cz < 0 || cx >= w || cz >= h) return false
+    return field[cz * w + cx] === 1
+  }
+
   buildPlayerField(x: number, z: number): void {
     const { w, h } = this.level
     const t = worldToCell(x, z, w, h)
