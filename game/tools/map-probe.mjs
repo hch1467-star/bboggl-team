@@ -1814,6 +1814,121 @@ try {
         tops.some(inside)
       dead.push({ name: g.name, cost: lo, has, opensShortcut: tops.some(inside), at: loAt })
     }
+
+    /**
+     * ── 👁 **보상을 준 곳은 보여야 합니다** ────────────────────────────
+     *
+     * ── 왜 이 자가 필요해졌는가 ──────────────────────────────────────
+     * `npm run secret` 이 보물 (13,47) 을 두고 *"빛기둥도 안 보이고 안내도
+     * 안 뜬다"* 며 오래 빨간 채였습니다. 저는 그걸 **보물 하나의 문제**로
+     * 읽고 자리를 옮길 곳을 찾다가, 구역 단위로 재 보고 나서야 알았습니다:
+     *
+     *     남쪽 함몰지   — 구역 전체가 동선에서 **41m**
+     *     함몰지 가장자리 — 구역 전체가 동선에서 **34m**
+     *     (나머지 열한 구역은 0~18m)
+     *
+     * **보물이 안 보이는 게 아니라 구역이 안 보입니다.** 그 안에서 자리를
+     * 아무리 옮겨도 22m 안으로는 못 들어옵니다(실제로 24m 안 후보 0칸).
+     *
+     * ⚠️ 한 번 **엉뚱한 결론을 냈다가 되돌렸습니다.** 남쪽 갈래에서 재면
+     *    4m 라고 나와서 *"계측기가 동선을 하나로 봤을 뿐"* 이라고 적었는데,
+     *    그 수는 **버그 있는 흘리기**가 낸 것이었습니다. 방향을 지키는
+     *    다익스트라로 다시 재니 여유 12m 를 줘도 30~40m 였습니다.
+     *    **재는 코드가 틀리면 결론이 정확히 거꾸로 나옵니다.**
+     *
+     * ── 무엇을 거는가 ────────────────────────────────────────────────
+     * *"보상이 있는 구역은 그 입구가 카메라(22m) 안에 있어야 한다."*
+     * 위 「막다른 곁길에는 보상이 있다」의 짝입니다 — 그쪽은 *"값을
+     * 치르게 했으면 갚는가"*, 이쪽은 *"갚을 곳이 있는 줄 아는가"* 입니다.
+     * 아무도 못 보는 곳에 놓은 보상은 보상이 아니라 **없는 것**입니다.
+     *
+     * ⚠️ 「동선」은 **이 파일의 자로** 정합니다(걸음 수 최단). `route` 는
+     *    되돌아올 수 없는 걸음에 값을 얹은 자를 쓰므로 수가 조금 다릅니다.
+     *    같은 이름의 두 자가 있다는 것을 여기 적어 둡니다 — 숫자를 맞대려면
+     *    어느 자로 잰 것인지부터 봐야 합니다.
+     */
+    {
+      const onRoute = []
+      const regionCells = new Map()
+      for (const g of await page.evaluate(() => window.__game.regionList())) {
+        const mine = []
+        for (let cx = g.x0; cx <= g.x1; cx++) {
+          for (let cz = g.z0; cz <= g.z1; cz++) {
+            if (heightAt(cx, cz) === VOID) continue
+            const a2 = bfs(spawnC, { cx, cz }, maxClimb, false)
+            const b2 = bfs({ cx, cz }, bossC, maxClimb, false)
+            if (!Number.isFinite(a2) || !Number.isFinite(b2)) continue
+            mine.push({ cx, cz })
+            if (a2 + b2 <= straight) onRoute.push({ cx, cz })
+          }
+        }
+        regionCells.set(g.name, mine)
+      }
+      const eye = await page.evaluate(() => window.__game.terrainInfo().cameraViewSize)
+      const rows = []
+      for (const [name, cells] of regionCells) {
+        if (cells.length === 0) continue
+        let best = Infinity
+        for (const c of cells) {
+          for (const r of onRoute) {
+            const d = Math.hypot(c.cx - r.cx, c.cz - r.cz) * CELL
+            if (d < best) best = d
+          }
+        }
+        const info = dead.find((r) => r.name === name)
+        rows.push({ name, d: best, reward: info ? info.has : false, side: !!info })
+      }
+      rows.sort((p2, q2) => q2.d - p2.d)
+      console.log(`\n  👁 **구역이 동선에서 얼마나 떨어져 있는가** (카메라 ${eye}m · 동선 ${onRoute.length}칸)`)
+      for (const r of rows.slice(0, 6))
+        console.log(
+          `     ${r.name} — ${r.d.toFixed(0)}m${r.side ? ' (곁길)' : ''}${r.reward ? ' · 보상 있음' : ''}` +
+            `${r.d > eye ? '  ❌ 카메라 밖' : ''}`,
+        )
+      const blind = rows.filter((r) => r.reward && r.d > eye)
+      const rewarded = rows.filter((r) => r.reward)
+      /**
+       * ── ⚠️ **여기서 판정하지 않습니다** (걸었다가 걷었습니다) ──────────
+       *
+       * 처음에는 *"보상이 있는 구역은 카메라(22m) 안에 있어야 한다"* 를
+       * 실패로 걸었습니다. 남쪽 함몰지(32m)와 함몰지 가장자리(28m)가
+       * 빨개졌고, 숫자는 맞습니다. 그런데 **어디가 가장 가까운지**를
+       * 찍어 보고 물음이 틀렸다는 걸 알았습니다:
+       *
+       *     함몰지 가장자리 (57,53) ↔ 동선 (57,39)   — 둘 다 **같은 좁은 길** 위
+       *
+       * 즉 그 구역은 **동선이 지나는 통로가 남쪽으로 그대로 이어진 끝**
+       * 입니다. 통로가 이어지는 것은 22m 밖에서도 보입니다 — 「저 길이
+       * 계속 가네」가 곧 초대장입니다. 오공·엘든 링이 곁길을 여는 가장
+       * 흔한 방식이 정확히 그것입니다.
+       *
+       * 그렇다고 물음을 *"길로 이어져 있는가"* 로 바꾸면 **거의 모든 구역이
+       * 통과합니다**(다 걸어서 닿으니까요) — 아무도 못 넘는 문턱이 아니라
+       * **아무나 넘는 문턱**이 되고, 그건 눈금이 아니라 장식입니다.
+       *
+       * 그래서 **재기만 하고 사람에게 넘깁니다.** 재는 것 자체는 값이
+       * 있습니다 — 이 표가 없었으면 「보물 하나가 안 보인다」로 계속
+       * 읽었을 것이고, 실제로 저는 그 보물의 자리를 옮길 곳을 찾느라
+       * 시간을 썼습니다. **구역이 멀다**는 것을 알아야 옮길 것이
+       * 보물이 아니라 **길이나 구역**임을 압니다.
+       */
+      console.log(
+        `     ⚠️ **판정은 안 겁니다** — 카메라 밖 ${blind.length}곳(${blind
+          .map((r) => `${r.name} ${r.d.toFixed(0)}m`)
+          .join(' · ') || '없음'})은 「이어진 통로의 끝」일 수 있습니다.` +
+          ' 그건 이 자로 못 가릅니다',
+      )
+      /**
+       * ⚠️ 대신 **잰 것 자체는 검사합니다.** 표가 비면 위 문단이 아무
+       *    말도 안 하게 되고, 그러면 「판정을 안 건다」가 「아무것도 안
+       *    잰다」와 구별이 안 됩니다.
+       */
+      check(
+        rewarded.length > 0 && onRoute.length > 0,
+        '👁 **구역과 동선의 거리를 실제로 쟀다** (판정은 사람 몫 — 위 ⚠️)',
+        `동선 ${onRoute.length}칸 · 보상 있는 구역 ${rewarded.length}곳 · 가장 먼 곳 ${rows[0]?.name} ${rows[0]?.d.toFixed(0)}m`,
+      )
+    }
     console.log(
       `\n  🎁 막다른 곁길 (직선 경로 ${straight * CELL}m) — ` +
         dead
