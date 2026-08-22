@@ -149,6 +149,48 @@ try {
     )
   }
 
+  /**
+   * ── 🧱💥 **두꺼운 벽도 같이 찍습니다** ────────────────────────────
+   *
+   * 이 벽은 오래 **동선에서 24m** 에 서 있었습니다(카메라 22m). 즉 길을
+   * 걷는 사람은 한 번도 못 봤고, 「칼로는 안 된다」는 어휘를 아무도 안
+   * 배우고 있었습니다. 자리를 옮겼으니(동선 14m) **정말 화면에 잡히는지**
+   * 는 숫자가 아니라 그림이 답해야 합니다.
+   *
+   * ⚠️ 자리를 여기 안 박습니다. `walls()` 로 **게임에게 물어서** 찾습니다 —
+   *    이 저장소가 자리 옮길 때마다 주석이 옛말로 남아 온 그 드리프트를
+   *    도구 쪽에서도 막습니다.
+   */
+  const tough = await page.evaluate(() => window.__game.walls().find((v) => v.tough) ?? null)
+  if (tough) {
+    // 벽에서 길 쪽으로 물러난 세 자리 — 1.5m(코앞) · 5m · 14m(동선 거리).
+    for (const back of [1.5, 5, 14]) {
+      await page.evaluate(([x, z]) => window.__game.teleportPlayer(x, z), [tough.x + back, tough.z])
+      await page.evaluate(
+        () =>
+          new Promise((r) => {
+            let n = 0
+            const step = () => (++n < 12 ? requestAnimationFrame(step) : r())
+            requestAnimationFrame(step)
+          }),
+      )
+      await page.evaluate(() => window.__game.setPaused(true))
+      const file = `19-thick-${String(back).replace('.', '_')}m.png`
+      await page.screenshot({ path: path.join(OUT, file) })
+      await page.evaluate(() => window.__game.setPaused(false))
+      const now = await page.evaluate(() => {
+        const p = window.__game.state().player
+        return { x: Math.round(p.x), z: Math.round(p.z) }
+      })
+      console.log(
+        `  두꺼운 벽(${Math.round(tough.x)},${Math.round(tough.z)}) 에서 ${back}m 물러남 → 실제(${now.x},${now.z})  ${file}`,
+      )
+    }
+    console.log('  ⚠️ 세 장 중 **한 장이라도 벽이 안 잡히면** 이 어휘는 여전히 아무도 못 배웁니다.')
+  } else {
+    console.log('  ⚠️ 두꺼운 벽을 못 찾았습니다 — 지도에서 빠졌는지 확인하십시오.')
+  }
+
   console.log('\n  네 장을 나란히 보십시오. **b-path 에서 벽면의 구멍이 안 보이면 이 비밀은 실패입니다** — 지난번이 정확히 그랬습니다.')
   console.log('  ⚠️ 여기서는 판정하지 않습니다 — 사람이 보는 것이 이 도구의 전부입니다.\n')
 } catch (err) {
