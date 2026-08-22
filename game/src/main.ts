@@ -6646,6 +6646,11 @@ class Game {
     x: number
     z: number
     dist: number
+    /**
+     * 🚪 이 적이 나에게 오는 **걸어야 하는 거리**(m). 지형 규칙이 없으면 null.
+     * 깨는 판정이 쓰는 값입니다 — 직선(`dist`)과 견주면 안 됩니다(구현부 주석).
+     */
+    walk: number | null
     /** AttackIntent. -1 = 공격 중이 아님 */
     intent: number
     aggro: boolean
@@ -6718,6 +6723,32 @@ class Game {
       const attacking = Actor.state[e] === ActorState.Attack
       out.push({
         entity: e,
+        /**
+         * 🚪 **이 적이 나에게 오는 «걸어야 하는» 거리**(m). 규칙이 없으면 null.
+         *
+         * ── 왜 이 줄을 더하는가 (틀린 라벨 하나 때문에) ────────────────
+         * 자동 플레이의 쏘는 자 장부가 이렇게 찍었습니다:
+         *
+         *     (61,27) 가장 가까이 **17.4m**(걸어서 24.0m) · 깨는거리 안
+         *     134프레임 · 깨어 있던 0프레임 — *"깨는 거리 안에 들어갔는데
+         *     **안 깼다**"*
+         *
+         * 게임은 안 틀렸습니다. 깨는 판정은 **걸어야 하는 거리**로 하고
+         * (바로 위 `wakeRangeOf` 자리의 설계 노트 — 벽 건너 적이 깨어나
+         * 영원히 벽을 향해 걷던 사고), 걸어서는 24m 라 19m 밖입니다.
+         * **틀린 것은 장부의 라벨**이었습니다 — 직선 17.4m 를 깨는 거리와
+         * 견주고 있었습니다.
+         *
+         * 이 저장소가 직선/경로를 혼동해 낸 **네 번째** 사고입니다. 앞의
+         * 셋에서 배운 처방을 그대로 씁니다: 프로브가 자기 자로 다시 재게
+         * 두지 말고, **게임이 판정에 쓴 바로 그 값을 내보냅니다.**
+         *
+         * ⚠️ 값싼 줄입니다 — 흐름장은 AI 때문에 매 프레임 이미 서 있고,
+         *    여기서는 **한 칸 읽기**만 합니다(BFS 를 새로 돌리지 않습니다).
+         *    프로브가 대신 쓰던 `pathStep` 은 흐름장을 **다시 세워서**
+         *    안내까지 흔들었습니다.
+         */
+        walk: reachDistanceOf(Transform.x[e], Transform.z[e]),
         /**
          * 🏷 **이 적의 종류**(`grunt`·`archer`…).
          *
@@ -7490,6 +7521,8 @@ declare global {
         x: number
         z: number
         dist: number
+        /** 🚪 나에게 오는 **걸어야 하는 거리**(m) — 깨는 판정이 쓰는 값. 규칙 없으면 null. */
+        walk: number | null
         intent: number
         aggro: boolean
         winding: boolean

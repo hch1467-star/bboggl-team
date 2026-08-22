@@ -122,6 +122,44 @@ try {
   )
 
   // ---- 2. 무리 앞에 서면 둘 이상이 함께 깨어난다 ----
+  /**
+   * ── ⚠️ **이 검사는 «앞에 선다»고 해 놓고 «한가운데에 서» 있었습니다** ──
+   *
+   * 빨간불이 이렇게 떴습니다:
+   *
+   *     ❌ 4/6개 무리 · 깨어난 수 [3, 0, 2, 2, 0, 2]
+   *
+   * 0 이 둘인데 어느 무리인지도, 왜인지도 안 나왔습니다. 그래서 먼저
+   * **이유를 같이 받게** 고쳤더니(아래 `seen`) 답이 바로 나왔습니다:
+   *
+   *     3(grunt+charger+grunt)@(29,-7) 0마리
+   *        [grunt 직선2m/**걸어서2m** · charger 직선2m/**걸어서70m** · grunt 4m]
+   *     2(grunt+charger)@(40,26) 0마리
+   *        [grunt 직선1.4m/**걸어서2m** · charger 직선1.4m/걸어서10m]
+   *
+   * **게임이 맞고 검사가 틀렸습니다.** 이 게임의 인지 규칙(balance.ts
+   * `AWARE`)은 이렇습니다 — 앞쪽 150° 부채꼴이면 **본다**(존 14m),
+   * 등 뒤면 **내가 낸 소리만큼만 듣는다**(가만히 서 있으면 1.8m).
+   * 그리고 그 거리는 **걸어야 하는 거리**입니다.
+   *
+   * 이 검사는 무리의 **무게중심으로 순간이동해 가만히 서** 있었습니다.
+   * 무게중심은 무리의 «앞»이 아니라 대개 **등 뒤이거나 사이**입니다.
+   * 걸어서 2m 는 1.8m 밖이므로 아무도 못 듣습니다 — 이건 이 게임이
+   * 일부러 만든 **기습**(메탈기어·쓰시마·세키로의 규칙)이지 배치 실패가
+   * 아닙니다. 나머지 넷이 초록이었던 것도 실력이 아니라 **그 무리가
+   * 마침 이쪽을 보고 있었기 때문**입니다 — 방향 운입니다.
+   *
+   * 「한 칸 차이의 초록은 운이다」의 사촌입니다: **방향 운의 초록**.
+   *
+   * ── 그래서 이름대로 잽니다 ───────────────────────────────────────
+   * 무게중심에서 안 깨면, 그 무리를 **여덟 방향에서 5m 앞에 서서** 다시
+   * 봅니다. 한 방향이라도 둘이 함께 깨면 *"앞에 서면 함께 깨어난다"* 는
+   * 참입니다. 어느 방향에서도 안 되면 그때는 **정말** 배치 실패입니다.
+   *
+   * ⚠️ 실패한 무리만 여덟 번을 돕니다 — 초록인 무리까지 돌면 판이
+   *    여덟 배로 길어지는데, 얻는 것은 이미 아는 사실뿐입니다.
+   */
+  const RING = 5
   const woken = []
   for (const g of multi) {
     const r = await page.evaluate(
@@ -131,17 +169,83 @@ try {
         G.teleportPlayer(x, z)
         await window.__t.runFor(1.2)
         // 무리 반경 10m 안에서 깨어난 수 — 옆 무리를 세지 않도록 좁게 봅니다.
-        return G.threats(10).filter((t) => t.aggro).length
+        const near = G.threats(10)
+        return {
+          n: near.filter((t) => t.aggro).length,
+          /**
+           * ⚠️ **0 마리일 때 이유를 같이 받습니다.**
+           *
+           * 예전에는 `[3, 0, 2, 2, 0, 2]` 만 찍혔습니다. 0 이 둘인데
+           * **어느 무리인지도, 왜인지도** 안 나옵니다. 그러면 남는 건
+           * 추측뿐이고, 이 저장소에서 추측으로 판 자리는 늘 헛짚었습니다.
+           *
+           * 깨는 판정은 **걸어야 하는 거리**로 합니다(enemyAI). 그래서
+           * 무리 한가운데에 서 있어도 그 사이가 낭떠러지면 아무도 안
+           * 깨어납니다 — 그건 **배치 실패가 아니라 지형 이야기**이고,
+           * 처방이 정반대입니다(적을 모으는 게 아니라 자리를 옮깁니다).
+           * 게임이 판정에 쓴 값(`threats().walk`)을 그대로 받아 적습니다.
+           */
+          seen: near.map((t) => ({
+            kind: t.kind,
+            d: Number(t.dist.toFixed(1)),
+            w: t.walk === null || t.walk === undefined ? null : Number(t.walk.toFixed(1)),
+            up: t.aggro,
+          })),
+        }
       },
       [g.x, g.z],
     )
-    woken.push(r)
+    if (r.n >= 2) {
+      woken.push({ g, ...r, from: '한가운데' })
+      continue
+    }
+    // 무게중심에서 안 깼으면 **여덟 방향의 «앞»**을 차례로 서 봅니다.
+    let best = { ...r, from: '한가운데' }
+    for (let k = 0; k < 8 && best.n < 2; k++) {
+      const ang = (k * Math.PI) / 4
+      const rx = g.x + Math.cos(ang) * RING
+      const rz = g.z + Math.sin(ang) * RING
+      const rr = await page.evaluate(
+        async ([x, z]) => {
+          const G = window.__game
+          G.resetProgress?.()
+          G.teleportPlayer(x, z)
+          await window.__t.runFor(1.2)
+          // 무리까지의 거리가 5m 늘었으니 반경도 같이 늘립니다(같은 무리를 봐야 합니다).
+          const near = G.threats(15)
+          return {
+            n: near.filter((t) => t.aggro).length,
+            seen: near.map((t) => ({
+              kind: t.kind,
+              d: Number(t.dist.toFixed(1)),
+              w: t.walk === null || t.walk === undefined ? null : Number(t.walk.toFixed(1)),
+              up: t.aggro,
+            })),
+          }
+        },
+        [rx, rz],
+      )
+      if (rr.n > best.n) best = { ...rr, from: `${Math.round((ang * 180) / Math.PI)}°에서 ${RING}m` }
+    }
+    woken.push({ g, ...best })
   }
-  const groupsThatWake = woken.filter((n) => n >= 2).length
+  const groupsThatWake = woken.filter((r) => r.n >= 2).length
   check(
     groupsThatWake >= multi.length - 1,
     '무리 앞에 서면 둘 이상이 함께 깨어난다',
-    `${groupsThatWake}/${multi.length}개 무리 · 깨어난 수 [${woken.join(', ')}]`,
+    `${groupsThatWake}/${multi.length}개 무리 · ` +
+      woken
+        .map(
+          (r) =>
+            `${r.g.size}(${r.g.kinds.join('+')})@(${r.g.x.toFixed(0)},${r.g.z.toFixed(0)}) **${r.n}마리**` +
+            // 어디에 서서 얻은 값인지 — 「한가운데」가 아니면 방향을 적습니다.
+            (r.from === '한가운데' ? '' : `(${r.from})`) +
+            // 안 깬 무리만 이유를 폅니다 — 초록인 줄까지 길어지면 안 읽힙니다.
+            (r.n >= 2
+              ? ''
+              : ` [${r.seen.length ? r.seen.map((s) => `${s.kind} 직선${s.d}m/걸어서${s.w ?? '길없음'}m${s.up ? '·깸' : ''}`).join(' · ') : '10m 안에 아무도 없음'}]`),
+        )
+        .join(' · '),
   )
 
   // ---- 3. 옆 무리는 자고 있다 ----
