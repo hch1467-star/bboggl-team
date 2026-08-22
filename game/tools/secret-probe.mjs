@@ -463,7 +463,31 @@ try {
    *    **못 가면 다른 자로 재야 한다**는 것이 요점입니다.
    */
   const seen = all.filter((v) => v.extra !== null)
-  const walled = all.filter((v) => v.extra === null)
+  /**
+   * ── ⚠️ **「못 가는 보물」이 이제 두 종류입니다** (뒤늦게 갈랐습니다) ────
+   *
+   * 위 글을 쓸 때는 못 가는 보물이 **벽 뒤 하나뿐**이었습니다. 그 뒤에
+   * 「선반 위 보물」이 생겼습니다 — 걸어서 못 가는 것은 같은데 **답이
+   * 다릅니다**:
+   *
+   *     벽 뒤 보물   — 벽을 **부숴서** 들어갑니다 → 벽이 보여야 합니다
+   *     선반 위 보물 — 폭발로 **떨어뜨려서** 줍습니다 → 불을 붙일
+   *                    **아래 통**이 보여야 합니다
+   *
+   * 안 가르면 선반 보물이 「벽 뒤」무리에 섞여서, *"벽이 있는가"* 라는
+   * **자기와 무관한 물음**을 받고 조용히 통과합니다. 실제로 한 판 동안
+   * 그랬습니다 — 벽 2개 · 못 가는 보물 3개인데 검사는 초록이었습니다.
+   * 이 파일이 바로 위에서 경계한 그 실패를 **자기가 저질렀습니다.**
+   *
+   * 가르는 자는 「곁에 통이 있는가」입니다(`npm run drop` 과 같은 규칙).
+   */
+  const blastR = await page.evaluate(() => window.__game.barrelInfo().blast)
+  const barrelsNow = await page.evaluate(() => window.__game.barrelInfo().barrels)
+  const unreachable = all.filter((v) => v.extra === null)
+  const dropped = unreachable.filter((v) =>
+    barrelsNow.some((b) => Math.hypot(b.x - v.x, b.z - v.z) <= blastR),
+  )
+  const walled = unreachable.filter((v) => !dropped.includes(v))
   /**
    * ── 💥 **놓아 둔 것을 아무도 안 만나면 없는 것과 같습니다** ────────────
    *
@@ -613,7 +637,7 @@ try {
       const d = nearest(w.x, w.z)
       check(
         d <= t.cameraViewSize,
-        `🧱 **금 간 벽이 동선에서 보인다** (알아볼 수 없는 비밀은 비밀이 아닙니다)`,
+        `🧱 **부술 수 있는 벽이 동선에서 보인다** (알아볼 수 없는 비밀은 비밀이 아닙니다)`,
         `(${Math.round(w.x)}, ${Math.round(w.z)}) 동선에서 ${d.toFixed(1)}m ` +
           `${d <= t.cameraViewSize ? `≤ 카메라 ${t.cameraViewSize}m` : `> 카메라 ${t.cameraViewSize}m`}`,
       )
@@ -621,6 +645,47 @@ try {
     console.log(
       `       ⚠️ 거리만 잰 것입니다 — 실제로 화면에 잡히는지는 \`npm run hide\` 의 그림이 봅니다`,
     )
+  }
+
+  /**
+   * ── 🎁💥 **선반 위 보물 — 「답이 보이는가」** ────────────────────────
+   *
+   * 벽 뒤 보물이 *"벽이 보여야 한다"* 로 판정받듯이, 떨어뜨려야 하는
+   * 보물은 **불을 붙일 통이 보여야** 합니다. 물음의 모양은 같고
+   * **가리키는 물건만** 다릅니다.
+   *
+   * ⚠️ 보는 것은 **선반 위 통(A)이 아니라 길 위 통(B)** 입니다. A 는
+   *    일부러 손이 안 닿는 자리에 있고, 플레이어가 할 수 있는 일은
+   *    **B 를 치는 것**뿐입니다. A 만 보이고 B 가 안 보이면 그건
+   *    *"보이는데 방법이 없다"* — 이 장치가 피하려던 바로 그 상태입니다.
+   *
+   * ⚠️ 벽과 마찬가지로 **거리만** 봅니다. 그림은 `npm run hide` 가 봅니다.
+   */
+  if (dropped.length > 0) {
+    const chainR = await page.evaluate(() => window.__game.barrelInfo().chain)
+    for (const v of dropped) {
+      // 선반 위 통(A) = 보물 곁의 통. 길 위 통(B) = A 에 불을 옮길 수 있고
+      // **걸어갈 수 있는** 통. 이름을 좌표로 안 박고 거리로 찾습니다.
+      const A = barrelsNow
+        .map((b) => ({ b, d: Math.hypot(b.x - v.x, b.z - v.z) }))
+        .sort((p, q) => p.d - q.d)[0]
+      const starters = []
+      for (const b of barrelsNow) {
+        if (b.entity === A.b.entity) continue
+        if (Math.hypot(b.x - A.b.x, b.z - A.b.z) > chainR) continue
+        const ex = await detour(b.x, b.z)
+        if (ex !== null && ex <= DETOUR_BUDGET) starters.push({ b, d: nearest(b.x, b.z), ex })
+      }
+      const best = starters.sort((p, q) => p.d - q.d)[0]
+      check(
+        !!best && best.d <= t.cameraViewSize,
+        `🎁💥 **떨어뜨릴 보물에는 불붙일 통이 동선에서 보인다** (보이는데 방법이 없으면 안 됩니다)`,
+        best
+          ? `보물(${Math.round(v.x)},${Math.round(v.z)}) → 길 위 통(${Math.round(best.b.x)},${Math.round(best.b.z)}) ` +
+            `동선에서 ${best.d.toFixed(1)}m ${best.d <= t.cameraViewSize ? `≤ 카메라 ${t.cameraViewSize}m` : `> 카메라 ${t.cameraViewSize}m`} · 더 걷는 ${best.ex}m`
+          : `보물(${Math.round(v.x)},${Math.round(v.z)}) — **불붙일 통이 없습니다**`,
+      )
+    }
   }
 
   console.log('')
