@@ -346,6 +346,149 @@ try {
    *   · **걸어야 하는 거리** → "갈 만한가"를 묻는 유일한 자입니다.
    *     길찾기는 게임이 합니다(`distancesToward`).
    */
+  /**
+   * ── 👀 **「보인다」를 거리가 아니라 «화면» 으로 묻습니다** ──────────────
+   *
+   * ── 그림이 자를 반박했습니다 ────────────────────────────────────
+   * 이 파일은 오래 *"동선에서 카메라 거리(22m) 안이면 보인다"* 로 판정해
+   * 왔습니다. 두꺼운 벽을 **동선에서 14m** 자리로 옮기고 초록을 받은 뒤,
+   * `npm run hide` 로 **동선 위에서** 찍어 봤더니 —
+   *
+   *     가장 가까운 걸음(14m)에서 **벽이 화면에 아예 없습니다.**
+   *
+   * 같은 판에서 금 간 벽(9m)은 또렷하게 보입니다. 즉 22m 라는 **반지름**
+   * 자체가 거짓이었습니다. 이유는 둘입니다:
+   *   · 카메라가 **기울어져** 있습니다(yaw 45° · pitch 52°). 북쪽으로 14m
+   *     떨어진 것은 화면에서 **오른쪽 위 구석**으로 갑니다.
+   *   · 그 구석에 **HUD 판**이 덮여 있습니다.
+   * 두 가지 다 「거리」로는 표현되지 않습니다.
+   *
+   * ── 그래서 게임과 화면에게 직접 묻습니다 ─────────────────────────
+   *   · 자리는 `G.screenPos()` — **게임의 카메라**가 투영합니다(베끼지 않음)
+   *   · 가림은 **HUD 요소의 실제 사각형**(`getBoundingClientRect`)
+   * 둘 다 「지금 이 게임의 화면」에서 읽은 값이라, 카메라를 손보거나 HUD 를
+   * 옮기는 날 이 검사가 저절로 따라옵니다.
+   *
+   * ⚠️ **거리 재기를 지우지 않습니다.** 아래 `nearest` 는 그대로 남습니다 —
+   *    *"얼마나 가까이 지나가는가"* 는 여전히 배치를 고를 때 쓰는 값이고,
+   *    화면 검사가 빨개졌을 때 **왜인지**(멀어서인가 · 가려서인가)를
+   *    가르는 것도 그 값입니다. 처방이 다른 둘을 한 칸에 담지 않습니다.
+   */
+  /**
+   * ── 📺 **가장 좁은 창에서 잽니다** ─────────────────────────────────
+   *
+   * 카메라는 **세로를 22m 로 고정**하고 가로는 `viewSize × aspect` 입니다
+   * (render/camera.ts). 즉 **창이 좁을수록 좌우로 덜 보입니다.**
+   *
+   * 처음엔 프로브의 기본 창(16:9)에서 쟀고 두꺼운 벽이 *"간신히 통과"*
+   * 였습니다. 같은 자리를 4:3 에 가까운 창(900×760)으로 찍으니 **화면에
+   * 아예 없었습니다.** 즉 그 초록은 **창이 넓어서** 나온 것이었습니다 —
+   * 사람의 창 크기에 따라 비밀이 있었다 없었다 하는 셈입니다.
+   *
+   * 그래서 **4:3 에서 잽니다.** 세로 범위는 어차피 고정이고 가로만
+   * 좁아지므로, 4:3 에서 보이면 그보다 넓은 창에서는 **반드시** 보입니다.
+   * 최악에서 재는 것이 「보인다」의 유일한 정직한 뜻입니다.
+   */
+  const SAFE_VIEWPORT = { width: 960, height: 720 }
+  const seenOnScreen = async (tx, tz) => {
+    const before = page.viewportSize()
+    await page.setViewportSize(SAFE_VIEWPORT)
+    const out = await page.evaluate(
+      async ([x, z, pts]) => {
+        const G = window.__game
+        const nap = () => new Promise((r) => requestAnimationFrame(() => r()))
+        const home = G.state().player
+        const W = window.innerWidth
+        const H = window.innerHeight
+        /**
+         * HUD 가 **실제로 덮고 있는** 사각형들.
+         *
+         * ⚠️ `opacity` 로 거릅니다. 처음엔 안 걸렀다가 `lowHp`(체력 낮을 때
+         *    깔리는 붉은 비네트)가 **화면 전체 1280×720** 로 잡혀서, 모든
+         *    비밀이 *"가려져 있다"* 로 나왔습니다. 체력이 가득이라 실제로는
+         *    투명(opacity 0)인데 사각형만 남아 있었습니다 —
+         *    **자리를 차지하는 것과 가리는 것은 다릅니다.**
+         */
+        const hud = [...document.querySelectorAll('#hud .panel, #hud > div > div')]
+          .filter((n) => {
+            const st = getComputedStyle(n)
+            return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.05
+          })
+          .map((n) => n.getBoundingClientRect())
+          .filter((r) => r.width > 40 && r.height > 20)
+
+        let best = null
+        for (const p of pts) {
+          G.teleportPlayer(p.x, p.z)
+          /**
+           * ⚠️ **카메라가 따라올 때까지 기다립니다.** 순간이동 직후에 바로
+           *    투영하면 **옛 카메라**로 계산됩니다 — 처음에 그렇게 재서
+           *    *"플레이어 자신이 화면 밖(1149,761)"* 이라는 값이 나왔고,
+           *    그 상태로 비밀 셋이 전부 빨갛게 찍혔습니다. 그림은 보인다고
+           *    하는데 자만 아니라고 하던 이유가 이것이었습니다.
+           *
+           *    다 왔는지는 **플레이어 자신이 화면 한가운데에 왔는가**로
+           *    압니다 — 카메라의 내부 값을 안 읽어도 되는 자기 확인입니다.
+           */
+          let settled = false
+          for (let k = 0; k < 40 && !settled; k++) {
+            await nap()
+            const me = G.screenPos(p.x, 1.0, p.z)
+            if (me && Math.hypot(me.sx - W / 2, me.sy - H / 2) < 90) settled = true
+          }
+          if (!settled) continue
+          const sp = G.screenPos(x, 1.0, z)
+          if (!sp) continue
+          /**
+           * ── 📐 **가장자리는 「보이는 것」이 아닙니다** ─────────────────
+           *
+           * 화면 안이기만 하면 통과시켰더니, 두꺼운 벽이 **y=48/720**
+           * (위 끝에서 6.7%)로 초록을 받았습니다. 같은 자리를 그림으로
+           * 찍으면 **아무것도 안 보입니다.** 화면 맨 끝에 1픽셀 걸친 것을
+           * *"보인다"* 고 말하면 이 검사는 아무것도 안 막습니다.
+           *
+           * 그래서 **안전 영역**(가장자리 10%)을 씁니다. 방송·게임 UI 가
+           * 오래 써 온 title-safe 관습 그대로라 여기서 지어낸 값이 아닙니다.
+           * 실제로 이 판의 둘을 정확히 가릅니다:
+           *     금 간 벽  y=157/720 (21.8%) — 그림에서 또렷함  → 통과
+           *     두꺼운 벽 y=48/720  (6.7%)  — 그림에서 안 보임 → 실패
+           */
+          const M = 0.1
+          const onScreen =
+            sp.sx >= W * M && sp.sx <= W * (1 - M) && sp.sy >= H * M && sp.sy <= H * (1 - M)
+          const covered = hud.some(
+            (r) => sp.sx >= r.left && sp.sx <= r.right && sp.sy >= r.top && sp.sy <= r.bottom,
+          )
+          // 화면 한가운데에 가까울수록 좋은 순간입니다.
+          const score = Math.hypot(sp.sx - W / 2, sp.sy - H / 2)
+          if (onScreen && !covered && (!best || score < best.score)) {
+            /**
+             * 📏 **가장자리까지 얼마나 남았는가**(화면 짧은 변의 비율).
+             * 「안전 영역 안」이라는 초록이 **간신히**인지 **넉넉히**인지를
+             * 가릅니다 — 「한 칸 차이의 초록은 운이다」를 눈에 보이게.
+             */
+            const edge = Math.min(sp.sx / W, 1 - sp.sx / W, sp.sy / H, 1 - sp.sy / H)
+            best = {
+              score,
+              sx: sp.sx,
+              sy: sp.sy,
+              edge: Math.round(edge * 100),
+              from: { x: Math.round(p.x), z: Math.round(p.z) },
+            }
+          }
+        }
+        G.teleportPlayer(home.x, home.z)
+        await nap()
+        return best
+      },
+      // 🚶 **가까이 지나가는 걸음만** 봅니다 — 30m 밖에서는 어차피 화면에
+      //    안 들어오고, 걸음마다 카메라를 기다리므로 전부 도는 것은 비쌉니다.
+      [tx, tz, trail.filter((p) => Math.hypot(p.x - tx, p.z - tz) <= 30)],
+    )
+    if (before) await page.setViewportSize(before)
+    return out
+  }
+
   const nearest = (tx, tz) => {
     let best = Infinity
     for (const p of trail) {
@@ -635,11 +778,13 @@ try {
     )
     for (const w of wallsAt) {
       const d = nearest(w.x, w.z)
+      const seen = await seenOnScreen(w.x, w.z)
       check(
-        d <= t.cameraViewSize,
-        `🧱 **부술 수 있는 벽이 동선에서 보인다** (알아볼 수 없는 비밀은 비밀이 아닙니다)`,
-        `(${Math.round(w.x)}, ${Math.round(w.z)}) 동선에서 ${d.toFixed(1)}m ` +
-          `${d <= t.cameraViewSize ? `≤ 카메라 ${t.cameraViewSize}m` : `> 카메라 ${t.cameraViewSize}m`}`,
+        !!seen,
+        `🧱 **부술 수 있는 벽이 동선에서 화면에 잡힌다** (알아볼 수 없는 비밀은 비밀이 아닙니다)`,
+        seen
+          ? `(${Math.round(w.x)}, ${Math.round(w.z)}) — 동선(${seen.from.x},${seen.from.z})에서 화면 (${seen.sx},${seen.sy}) · 가장자리까지 ${seen.edge}%${seen.edge < 20 ? ' ⚠️ **간신히**' : ''} · 그때 거리 ${d.toFixed(1)}m`
+          : `(${Math.round(w.x)}, ${Math.round(w.z)}) — **동선 어디에서도 화면에 안 잡힙니다** (가장 가까운 걸음 ${d.toFixed(1)}m)`,
       )
     }
     console.log(
@@ -677,12 +822,15 @@ try {
         if (ex !== null && ex <= DETOUR_BUDGET) starters.push({ b, d: nearest(b.x, b.z), ex })
       }
       const best = starters.sort((p, q) => p.d - q.d)[0]
+      const seen = best ? await seenOnScreen(best.b.x, best.b.z) : null
       check(
-        !!best && best.d <= t.cameraViewSize,
-        `🎁💥 **떨어뜨릴 보물에는 불붙일 통이 동선에서 보인다** (보이는데 방법이 없으면 안 됩니다)`,
+        !!seen,
+        `🎁💥 **떨어뜨릴 보물의 불붙일 통이 동선에서 화면에 잡힌다** (보이는데 방법이 없으면 안 됩니다)`,
         best
           ? `보물(${Math.round(v.x)},${Math.round(v.z)}) → 길 위 통(${Math.round(best.b.x)},${Math.round(best.b.z)}) ` +
-            `동선에서 ${best.d.toFixed(1)}m ${best.d <= t.cameraViewSize ? `≤ 카메라 ${t.cameraViewSize}m` : `> 카메라 ${t.cameraViewSize}m`} · 더 걷는 ${best.ex}m`
+            (seen
+              ? `— 동선(${seen.from.x},${seen.from.z})에서 화면 (${seen.sx},${seen.sy}) · 가장자리까지 ${seen.edge}%${seen.edge < 20 ? ' ⚠️ **간신히**' : ''} · 그때 거리 ${best.d.toFixed(1)}m`
+              : `— **동선 어디에서도 화면에 안 잡힙니다** (가장 가까운 걸음 ${best.d.toFixed(1)}m)`)
           : `보물(${Math.round(v.x)},${Math.round(v.z)}) — **불붙일 통이 없습니다**`,
       )
     }

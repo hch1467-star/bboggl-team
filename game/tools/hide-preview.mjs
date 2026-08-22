@@ -150,22 +150,144 @@ try {
   }
 
   /**
-   * ── 🧱💥 **두꺼운 벽도 같이 찍습니다** ────────────────────────────
+   * ── 🚶 **동선 위에서 찍습니다 — 「걸어가면서 보이는가」** ─────────────
    *
-   * 이 벽은 오래 **동선에서 24m** 에 서 있었습니다(카메라 22m). 즉 길을
-   * 걷는 사람은 한 번도 못 봤고, 「칼로는 안 된다」는 어휘를 아무도 안
-   * 배우고 있었습니다. 자리를 옮겼으니(동선 14m) **정말 화면에 잡히는지**
-   * 는 숫자가 아니라 그림이 답해야 합니다.
+   * ── 왜 자리를 바꿨는가 (지난 회차의 실수) ────────────────────────
+   * 처음에는 벽에서 **+x 로 3·8·14m 물러난** 자리에서 찍었습니다. 그
+   * 그림으로 *"14m 에서는 화면 가장자리"* 라는 결론을 낼 뻔했는데,
+   * 그건 **제가 고른 한 방향**일 뿐입니다. 카메라는 yaw 45° 로 고정이라
+   * 무엇이 화면 어디에 오는지는 **플레이어가 어느 쪽에 서 있는가**로
+   * 정해집니다 — 서쪽에 두면 좌상단 구석, 북쪽에 두면 화면 한가운데.
    *
-   * ⚠️ 자리를 여기 안 박습니다. `walls()` 로 **게임에게 물어서** 찾습니다 —
-   *    이 저장소가 자리 옮길 때마다 주석이 옛말로 남아 온 그 드리프트를
-   *    도구 쪽에서도 막습니다.
+   * 물어야 하는 것은 *"어느 방향에서 보이는가"* 가 아니라
+   * **"게임이 안내하는 길을 걸을 때 보이는가"** 입니다. 그래서 자리를
+   * 짓지 않고 **동선에서 가져옵니다.**
+   *
+   * ── 세 자리를 찍습니다 ───────────────────────────────────────────
+   *   · 다가가며 — 가장 가까운 걸음보다 **16m 앞**
+   *   · 다가가며 — **8m 앞**
+   *   · 가장 가까운 걸음 — 이 판이 주는 **최선의 순간**
+   * 최선의 순간에도 안 보이면 그 비밀은 없는 것과 같습니다.
+   *
+   * ⚠️ 자리를 여기 안 박습니다. 벽은 `walls()` 로, 「떨어뜨릴 보물」의
+   *    길 위 통은 통 목록에서 **게임에게 물어서** 찾습니다.
    */
-  const tough = await page.evaluate(() => window.__game.walls().find((v) => v.tough) ?? null)
-  if (tough) {
-    // 벽에서 길 쪽으로 물러난 세 자리 — 1.5m(코앞) · 5m · 14m(동선 거리).
-    for (const back of [1.5, 5, 14]) {
-      await page.evaluate(([x, z]) => window.__game.teleportPlayer(x, z), [tough.x + back, tough.z])
+  const trail = await page.evaluate(async () => {
+    const G = window.__game
+    const nap = () => new Promise((r) => setTimeout(r, 8))
+    G.reset()
+    await nap()
+    G.freezeEnemies(true)
+    await nap()
+    const out = []
+    let guard = 0
+    while (guard++ < 4000) {
+      const obj = G.objective()
+      if (!obj) break
+      const p = G.state().player
+      out.push({ x: p.x, z: p.z })
+      if (obj.walkDist <= 1.5) {
+        G.teleportPlayer(obj.x, obj.z)
+        await nap()
+        const next = G.objective()
+        if (!next || (Math.abs(next.x - obj.x) < 0.01 && Math.abs(next.z - obj.z) < 0.01)) break
+        continue
+      }
+      const step = G.pathStep(obj.x, obj.z)
+      if (!step) break
+      G.teleportPlayer(step.x, step.z)
+      await nap()
+    }
+    return out
+  })
+  await page.evaluate(() => window.__game.freezeEnemies(true))
+
+  const secrets = await page.evaluate(() => {
+    const G = window.__game
+    const info = G.barrelInfo()
+    const out = G.walls().map((w) => ({
+      name: w.tough ? 'thick' : 'cracked',
+      label: w.tough ? '두꺼운 벽 (칼로는 안 됨)' : '금 간 벽 (치면 열림)',
+      x: w.x,
+      z: w.z,
+    }))
+    // 🎁💥 떨어뜨릴 보물의 **길 위 통** — 플레이어가 실제로 쳐야 하는 것.
+    const stranded = G.treasurePositions().filter(
+      (t) =>
+        !t.taken &&
+        !G.walkableFromPlayer(t.x, t.z) &&
+        info.barrels.some((b) => Math.hypot(b.x - t.x, b.z - t.z) <= info.blast),
+    )
+    for (const t of stranded) {
+      const A = info.barrels
+        .map((b) => ({ b, d: Math.hypot(b.x - t.x, b.z - t.z) }))
+        .sort((p, q) => p.d - q.d)[0]
+      const B = info.barrels
+        .filter((b) => b.entity !== A.b.entity && G.walkableFromPlayer(b.x, b.z))
+        .map((b) => ({ b, d: Math.hypot(b.x - A.b.x, b.z - A.b.z) }))
+        .sort((p, q) => p.d - q.d)[0]
+      if (B) out.push({ name: 'drop', label: '선반 위 보물의 길 위 통', x: B.b.x, z: B.b.z })
+    }
+    return out
+  })
+
+  console.log('\n🚶 동선 위에서 — 걸어가면서 세 비밀이 보이는가\n')
+  for (const sec of secrets) {
+    /**
+     * ── 🎯 **「가장 가까운 걸음」이 아니라 「화면에 가장 잘 담기는 걸음」** ──
+     *
+     * 처음에는 거리로 골랐습니다. 그런데 `npm run secret` 은 **화면 중심에
+     * 가장 가까운 순간**으로 판정합니다(카메라가 기울어져 있어 거리와
+     * 화면 자리가 따로 놉니다). 둘이 다른 순간을 보면 **그림과 판정이
+     * 서로 다른 이야기를 하게 됩니다** — 실제로 2m 어긋난 걸음을 찍고
+     * *"자는 초록인데 그림은 아무것도 없다"* 로 헤맸습니다.
+     *
+     * 그래서 여기서도 **같은 규칙**으로 고릅니다. 자리는 게임의 카메라가
+     * 정합니다(`screenPos`).
+     */
+    let bestI = 0
+    let best = Infinity
+    {
+      let bestScore = Infinity
+      for (let i = 0; i < trail.length; i++) {
+        const p = trail[i]
+        const d = Math.hypot(p.x - sec.x, p.z - sec.z)
+        if (d < best) best = d
+        if (d > 30) continue
+        const sc = await page.evaluate(
+          async ([px, pz, sx, sz]) => {
+            const G = window.__game
+            const nap = () => new Promise((r) => requestAnimationFrame(() => r()))
+            G.teleportPlayer(px, pz)
+            const W = window.innerWidth
+            const H = window.innerHeight
+            for (let k = 0; k < 40; k++) {
+              await nap()
+              const me = G.screenPos(px, 1.0, pz)
+              if (me && Math.hypot(me.sx - W / 2, me.sy - H / 2) < 90) break
+            }
+            const sp = G.screenPos(sx, 1.0, sz)
+            if (!sp) return null
+            return Math.hypot(sp.sx - W / 2, sp.sy - H / 2)
+          },
+          [p.x, p.z, sec.x, sec.z],
+        )
+        if (sc !== null && sc < bestScore) {
+          bestScore = sc
+          bestI = i
+        }
+      }
+    }
+    const stepM = 2 // 동선 한 걸음이 대략 한 칸입니다
+    for (const [tag, backSteps] of [
+      ['approach16', Math.round(16 / stepM)],
+      ['approach8', Math.round(8 / stepM)],
+      ['closest', 0],
+    ]) {
+      const i = Math.max(0, bestI - backSteps)
+      const p = trail[i]
+      if (!p) continue
+      await page.evaluate(([x, z]) => window.__game.teleportPlayer(x, z), [p.x, p.z])
       await page.evaluate(
         () =>
           new Promise((r) => {
@@ -175,20 +297,19 @@ try {
           }),
       )
       await page.evaluate(() => window.__game.setPaused(true))
-      const file = `19-thick-${String(back).replace('.', '_')}m.png`
+      const file = `20-${sec.name}-${tag}.png`
       await page.screenshot({ path: path.join(OUT, file) })
       await page.evaluate(() => window.__game.setPaused(false))
       const now = await page.evaluate(() => {
-        const p = window.__game.state().player
-        return { x: Math.round(p.x), z: Math.round(p.z) }
+        const q = window.__game.state().player
+        return { x: Math.round(q.x), z: Math.round(q.z) }
       })
+      const d = Math.hypot(now.x - sec.x, now.z - sec.z)
       console.log(
-        `  두꺼운 벽(${Math.round(tough.x)},${Math.round(tough.z)}) 에서 ${back}m 물러남 → 실제(${now.x},${now.z})  ${file}`,
+        `  ${sec.label.padEnd(24)} ${tag.padEnd(11)} 동선(${now.x},${now.z}) → 대상까지 ${d.toFixed(1)}m   ${file}`,
       )
     }
-    console.log('  ⚠️ 세 장 중 **한 장이라도 벽이 안 잡히면** 이 어휘는 여전히 아무도 못 배웁니다.')
-  } else {
-    console.log('  ⚠️ 두꺼운 벽을 못 찾았습니다 — 지도에서 빠졌는지 확인하십시오.')
+    console.log(`     ↑ **closest 에서도 안 보이면** 이 비밀은 없는 것과 같습니다 (가장 가까운 순간 ${best.toFixed(1)}m)\n`)
   }
 
   console.log('\n  네 장을 나란히 보십시오. **b-path 에서 벽면의 구멍이 안 보이면 이 비밀은 실패입니다** — 지난번이 정확히 그랬습니다.')
