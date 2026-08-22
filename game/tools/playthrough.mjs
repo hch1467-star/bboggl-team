@@ -952,17 +952,49 @@ try {
       if (BARREL_ON) {
         const bi0 = G.barrelInfo()
         const chanceReach = G.moveInfo().hitReach
+        const wallsLedger = G.walls()
         for (const b of bi0.barrels) {
           const key = `${b.x},${b.z}`
-          const rec = (barrelChance[key] ??= { near: Infinity, inReach: 0, ready: 0 })
-          const d = Math.hypot(b.x - p.x, b.z - p.z)
-          if (d < rec.near) rec.near = d
-          if (d <= chanceReach && b.fuseT <= 0) {
-            rec.inReach++
+          const rec = (barrelChance[key] ??= { near: Infinity, inReach: 0, ready: 0, job: '' })
+          /**
+           * ⚠️ **장부의 「조건」은 위 결정 가지와 같은 물음이어야 합니다.**
+           *    예전엔 장부가 `caught >= 2` 만 세었는데, 결정 가지가 벽·연쇄까지
+           *    보게 넓어졌습니다. 둘이 갈라지면 *"조건까지 맞은 0 프레임"*
+           *    인데 실제로는 터뜨리는 판이 나옵니다 — 장부가 게임을
+           *    설명하지 못하게 됩니다.
+           */
+          const jobOf = () => {
             const caught = G.threats(bi0.blast + 2).filter(
               (t) => Math.hypot(t.x - b.x, t.z - b.z) <= bi0.blast,
             ).length
-            if (caught >= 2) rec.ready++
+            if (caught >= 2) return `적${caught}`
+            if (wallsLedger.some((w) => !w.open && Math.hypot(w.x - b.x, w.z - b.z) <= bi0.blast + 1))
+              return '벽'
+            if (
+              bi0.barrels.some(
+                (o) => o.entity !== b.entity && Math.hypot(o.x - b.x, o.z - b.z) <= bi0.chain,
+              )
+            )
+              return '연쇄'
+            return ''
+          }
+          const d = Math.hypot(b.x - p.x, b.z - p.z)
+          if (d < rec.near) rec.near = d
+          const job = jobOf()
+          /**
+           * ⚠️ **할 일은 「한 번이라도 있었는가」로 적습니다.**
+           *    처음엔 첫 프레임에 한 번만 정했는데(`if (!rec.job)`),
+           *    적은 **움직입니다** — 튜토리얼 통이 431프레임이나 사거리
+           *    안이었는데 장부에는 *"할 일 없음"* 으로 찍혔습니다.
+           *    한 순간의 사진을 그 물건의 성질로 적으면 안 됩니다.
+           *    (적 > 벽 > 연쇄 순으로 더 센 것을 남깁니다 — 결정 가지의
+           *     우선순위와 같은 순서여야 장부가 결정을 설명합니다.)
+           */
+          const weight = (j) => (j.startsWith('적') ? 3 : j === '벽' ? 2 : j === '연쇄' ? 1 : 0)
+          if (weight(job) > weight(rec.job)) rec.job = job
+          if (d <= chanceReach && b.fuseT <= 0) {
+            rec.inReach++
+            if (job) rec.ready++
           }
         }
       }
@@ -2402,10 +2434,35 @@ try {
          *    봇이 자기 계산으로 "담긴다"를 정하면, 폭발 판정을 손보는 날
          *    봇만 옛 규칙으로 통을 칩니다.
          */
+        /**
+         * ── ⚠️ **「둘 이상 담기면」이 통의 일 중 «하나»뿐이었습니다** ──────
+         *
+         * 위 글은 통을 **전투 도구**로만 보고 씁니다. 그 뒤에 이 존에
+         * 통의 다른 일이 둘 더 생겼습니다:
+         *   · 🧱 **두꺼운 벽을 여는 통** — 폭발이 유일한 답입니다
+         *   · 🔥 **연쇄를 시작하는 통** — 손이 안 닿는 선반 위 통에 불을
+         *        옮겨, 그 폭발이 보물을 길로 밀어 떨어뜨립니다
+         * 둘 다 **담기는 적이 0** 이라 `caught < 2` 에서 **영영 걸러집니다.**
+         * 즉 봇은 이 존의 새 어휘 둘을 **한 번도 못 만납니다** — 그러면
+         * `play` 의 「통 0회 · 벽 0회」는 *"안 쓸 만하다"* 가 아니라
+         * **"물어본 적이 없다"** 입니다.
+         *
+         * ⚠️ 저는 이 회차를 *"봇이 통을 모른다"* 는 전제로 시작했는데
+         *    **틀렸습니다.** 봇은 통을 압니다 — **통의 할 일을 하나만**
+         *    알았습니다. `npm run barrel` 이 같은 실수를 먼저 했고
+         *    (「반경 안에 적이 있다」로 물어 벽 통을 빨갛게 찍었습니다)
+         *    거기서 갈래를 나눈 것과 **같은 갈래**를 여기에도 씁니다.
+         *
+         * 문턱의 원래 근거는 그대로입니다 — *"한 마리는 그냥 때리는 편이
+         * 싸다"*. 그건 **적을 담는 일**에만 해당하는 말이고, 벽과 연쇄에는
+         * 대신할 수단이 아예 없습니다. 넓히는 것이지 무르게 하는 것이
+         * 아닙니다.
+         */
         if (BARREL_ON) {
           const bi = G.barrelInfo()
           // 🗡 문턱은 **게임이 답합니다**(평타 사거리 + 파고들기).
           const reach = G.moveInfo().hitReach
+          const wallsNow = G.walls()
           let best = null
           for (const b of bi.barrels) {
             if (b.fuseT > 0) continue
@@ -2414,11 +2471,22 @@ try {
             const caught = threats.filter(
               (t) => Math.hypot(t.x - b.x, t.z - b.z) <= bi.blast,
             ).length
-            if (caught < 2) continue
-            if (!best || caught > best.caught) best = { b, caught }
+            // 🧱 아직 안 열린 벽이 폭발 반경 안에 있는가.
+            const wall = wallsNow.some(
+              (w) => !w.open && Math.hypot(w.x - b.x, w.z - b.z) <= bi.blast + 1,
+            )
+            // 🔥 불이 옮겨 갈 다른 통이 있는가(연쇄의 시작점).
+            const kin = bi.barrels.some(
+              (o) => o.entity !== b.entity && Math.hypot(o.x - b.x, o.z - b.z) <= bi.chain,
+            )
+            const job = caught >= 2 ? `적${caught}` : wall ? '벽' : kin ? '연쇄' : ''
+            if (!job) continue
+            // 적을 담는 쪽을 먼저 — 벽·연쇄는 언제든 되지만 적은 지금뿐입니다.
+            const rank = caught >= 2 ? 100 + caught : wall ? 10 : 1
+            if (!best || rank > best.rank) best = { b, job, rank }
           }
           if (best) {
-            markAct('통점화')
+            markAct(`통점화(${best.job})`)
             release('ShiftLeft')
             releaseAll()
             G.aimAtWorld(best.b.x, best.b.z)
@@ -4867,14 +4935,20 @@ try {
       ` (걸어 나간 수 ${Math.max(0, (log.barrelsLitCaught ?? 0) - (log.barrelsCaught ?? 0))})`,
   )
   for (const c of log.barrelChance ?? []) {
+    /**
+     * ⚠️ **「조건이 안 맞았다」와 「곁에 간 적이 없다」는 고치는 곳이
+     *    다릅니다.** 앞은 조건(또는 배치의 성격), 뒤는 **동선**입니다.
+     *    그리고 통의 할 일(적·벽·연쇄)을 같이 적습니다 — 벽 통이
+     *    *"둘 이상이 안 담겼다"* 로 적히면 영영 거꾸로 읽힙니다.
+     */
     const why =
       c.ready > 0
         ? '조건까지 맞았다'
         : c.inReach > 0
-          ? '곁엔 갔지만 **둘 이상이 안 담겼다**'
+          ? '곁엔 갔지만 **할 일이 없었다**'
           : '**곁에 간 적이 없다**'
     console.log(
-      `                통(${c.at}) — 가장 가까이 ${Number.isFinite(c.near) ? c.near.toFixed(1) : '?'}m` +
+      `                통(${c.at}) [${c.job || '할 일 없음'}] — 가장 가까이 ${Number.isFinite(c.near) ? c.near.toFixed(1) : '?'}m` +
         ` · 사거리 안 ${c.inReach}프레임(그중 조건 ${c.ready}) — ${why}`,
     )
   }
