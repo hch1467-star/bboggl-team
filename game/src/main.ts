@@ -6055,6 +6055,87 @@ class Game {
     Player.embers[this.playerEntity] = Math.max(0, n)
   }
 
+  /**
+   * ── 💰 **경제 원장** — `npm run economy` 가 읽습니다 ────────────────
+   *
+   * ── 왜 게임이 내보내는가 ──────────────────────────────────────────
+   * 이 값들을 프로브에 베껴 적으면, 밸런스를 손보는 날 검사가 **조용히
+   * 거짓**이 됩니다. 이 저장소가 가장 여러 번 데인 모양이라
+   * (`npm run vial` 의 `heal` 도 같은 이유로 여기서 나갑니다) 규칙은
+   * 한 곳에만 두고 프로브는 **읽기만** 합니다.
+   *
+   * ── 왜 지도의 census 까지 같이 내보내는가 ─────────────────────────
+   * 경제의 질문은 **표 하나로 답이 안 나옵니다.** *"만렙 비용이 1750"*
+   * 은 그 자체로는 비싼지 싼지를 말하지 않습니다. *"이 존을 한 바퀴 돌면
+   * 얼마가 들어오는가"* 와 나란히 놓여야 비로소 문장이 됩니다.
+   * 그래서 **공급(지도)과 가격(표)을 같은 호출에서** 냅니다 — 둘을 따로
+   * 읽으면 서로 다른 판의 숫자를 비교하게 될 수 있습니다.
+   *
+   * ⚠️ 적 수는 `levelData` 의 **원본 배치**를 셉니다. 지금 살아 있는 적을
+   *    세면 되살아난 적까지 들어가서 *"한 바퀴"* 가 아니게 됩니다.
+   */
+  debugEconomy(): {
+    weapon: { maxLevel: number; costs: number[]; stoneCosts: number[] }
+    vial: { costs: number[]; max: number; start: number }
+    stone: { perTreasure: number; perBoss: number }
+    respawn: { decay: number; floor: number }
+    zone: {
+      name: string
+      foes: { id: string; count: number; ember: number }[]
+      chests: number
+      urnChests: number
+      anvils: number
+      bonfires: number
+    }
+  } {
+    const items = this.levelData?.entities ?? []
+    // 적 종류별로 모읍니다 — 종류가 아니라 마릿수만 세면 "정예 하나가
+    // 잡몹 일곱 몫"이라는 사실이 합계 안에서 사라집니다.
+    const foes = new Map<string, { id: string; count: number; ember: number }>()
+    let chests = 0
+    let urnChests = 0
+    let anvils = 0
+    let bonfires = 0
+    for (const it of items) {
+      const kind = kindFromId(it.kind)
+      if (kind !== null) {
+        const def = enemyDef(kind)
+        const row = foes.get(def.id) ?? { id: def.id, count: 0, ember: def.ember }
+        row.count++
+        foes.set(def.id, row)
+        continue
+      }
+      if (it.kind === 'treasure') chests++
+      // 🏺 항아리 속 상자는 **깨면 같은 상자가 그대로 나옵니다**(world.ts).
+      //    보상이 같으니 공급으로도 같이 세야 합니다. 따로 내보내는 이유는
+      //    "숨어 있다"와 "놓여 있다"를 프로브가 나눠 말할 수 있게 하려고.
+      else if (it.kind === 'urnFull') urnChests++
+      else if (it.kind === 'anvil') anvils++
+      else if (it.kind === 'bonfire') bonfires++
+    }
+    return {
+      weapon: {
+        maxLevel: WEAPON_UPGRADE.maxLevel,
+        costs: [...WEAPON_UPGRADE.costs],
+        stoneCosts: [...WEAPON_UPGRADE.stoneCosts],
+      },
+      vial: { costs: [...EMBER.vialUpgradeCosts], max: EMBER.vialMax, start: VIAL.charges },
+      stone: {
+        perTreasure: WEAPON_UPGRADE.stonePerTreasure,
+        perBoss: WEAPON_UPGRADE.stonePerBoss,
+      },
+      respawn: { decay: EMBER.respawnDecay, floor: EMBER.respawnFloor },
+      zone: {
+        name: this.levelName,
+        foes: [...foes.values()].sort((a, b) => b.count * b.ember - a.count * a.ember),
+        chests,
+        urnChests,
+        anvils,
+        bonfires,
+      },
+    }
+  }
+
   /** 살아 있는 적을 전부 죽입니다 — 처치 보상이 실제로 붙는지 보려고. */
   debugKillAll(): number {
     const ids = enemyQuery.run()
@@ -7277,6 +7358,21 @@ declare global {
         upgradeCost: number
       }
       setEmbers: (n: number) => void
+      /** 💰 경제 원장 — 가격표(설정)와 공급(지도)을 **같은 호출에서** 냅니다. */
+      economy: () => {
+        weapon: { maxLevel: number; costs: number[]; stoneCosts: number[] }
+        vial: { costs: number[]; max: number; start: number }
+        stone: { perTreasure: number; perBoss: number }
+        respawn: { decay: number; floor: number }
+        zone: {
+          name: string
+          foes: { id: string; count: number; ember: number }[]
+          chests: number
+          urnChests: number
+          anvils: number
+          bonfires: number
+        }
+      }
       /** 무기 강화 검증용 */
       setWeaponLevel: (weapon: number, level: number) => void
       saveNow: () => void
@@ -8361,6 +8457,7 @@ window.__game = {
   bossEncounter: () => game.debugBossEncounter(),
   emberInfo: () => game.debugEmberInfo(),
   setEmbers: (n) => game.debugSetEmbers(n),
+  economy: () => game.debugEconomy(),
   weaponUpgradeInfo: () => game.debugWeaponUpgradeInfo(),
   /**
    * 🌀 **지금 무기 축이 놓인 각도**(라디안). `y` 가 좌우, `x` 가 위아래입니다.

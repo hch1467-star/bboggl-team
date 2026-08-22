@@ -15,7 +15,7 @@
  *
  * ⚠️ 수치를 베껴 적지 않습니다. WEAPON_UPGRADE 설정을 게임에서 읽습니다.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -24,7 +24,6 @@ import { createServer } from 'vite'
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const PORT = 5199
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
-const level = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
 
 let pass = 0
 let fail = 0
@@ -218,15 +217,47 @@ try {
     G.setWeaponLevel(w, 0)
     return sum
   })
-  const treasures = level.entities.filter((e) => e.kind === 'treasure').length
-  const bosses = level.entities.filter((e) => e.kind === 'boss').length
-  const perTreasure = 1
-  const perBoss = 2
-  const zoneTotal = treasures * perTreasure + bosses * perBoss
+  /**
+   * ── ⚠️ **이 몇 줄이 두 가지를 동시에 틀리고 있었습니다** ──────────
+   *
+   * 원래 이렇게 세고 있었습니다:
+   *
+   *     const treasures = level.entities.filter((e) => e.kind === 'treasure').length
+   *     const perTreasure = 1   // ← 베껴 적은 값
+   *     const perBoss = 2       // ← 베껴 적은 값
+   *
+   * ① **베껴 적었습니다.** `stonePerTreasure` 를 바꾸는 날 이 검사는
+   *    아무 말 없이 옛날 값으로 통과합니다 — 이 저장소가 가장 싫어하는
+   *    「규칙이 두 곳에」입니다.
+   * ② **항아리 속 상자를 안 셌습니다.** `urnFull` 은 깨면 상자가 그대로
+   *    나오고 정련석도 그대로 줍니다(world.ts). 지금 이 존에 3개 있으니
+   *    실제 공급은 10이 아니라 **13**입니다. *"숨겼다"* 는 **찾기 어렵다**
+   *    는 뜻이지 **없다**는 뜻이 아닙니다.
+   *
+   * 둘 다 검사를 **헐겁게** 만드는 방향이었습니다(공급을 적게 셈).
+   *
+   * ── 그리고 이 줄은 **이미 빨간불이었습니다** ─────────────────────
+   * 헐겁게 세고도 10 ≥ 9 라 조건이 깨져 있었습니다. 고치기 전에 한 번
+   * 돌려 본 기록:
+   *
+   *     ❌ 존을 다 털어도 … 못 올린다 — 존 전체 정련석 10개 vs 만렙 9개
+   *
+   * 즉 계측기는 **제대로 말하고 있었는데 아무도 안 들었습니다.** 이 저장소의
+   * 프로브 80여 개 중 실제로 도는 것은 몇 개뿐이라는 오래된 문제가, 처음으로
+   * **실제 밸런스 구멍**으로 나타난 자리입니다. 「못 잰 것은 통과가 아니다」
+   * 옆에 한 줄 더 붙습니다 — **안 읽은 빨강도 통과가 아닙니다.**
+   *
+   * (그래서 `npm run economy` 는 이 계산을 자기 몫으로 다시 합니다.
+   *  같은 것을 두 곳에서 재는 게 아니라, 저쪽은 공급·가격·소비처를
+   *  통째로 보는 자리이고 여기는 강화 시스템의 한 줄입니다.)
+   */
+  const eco = await page.evaluate(() => window.__game.economy())
+  const chests = eco.zone.chests + eco.zone.urnChests
+  const zoneTotal = chests * eco.stone.perTreasure + eco.stone.perBoss
   check(
     zoneTotal < stoneMath,
     '존을 다 털어도 무기 하나를 만렙까지 못 올린다 (다음 존이 줄 것이 남아야)',
-    `존 전체 정련석 ${zoneTotal}개 (보물 ${treasures} + 보스 ${bosses}×${perBoss}) vs 만렙 ${stoneMath}개`,
+    `존 전체 정련석 ${zoneTotal}개 (상자 ${chests} = 놓인 것 ${eco.zone.chests} + 항아리 속 ${eco.zone.urnChests}, 보스 +${eco.stone.perBoss}) vs 만렙 ${stoneMath}개`,
   )
 
   /**
