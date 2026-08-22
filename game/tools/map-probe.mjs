@@ -145,6 +145,51 @@ function bfs(from, to, maxClimb, openLadders, blocked) {
   return Infinity
 }
 
+/**
+ * **여러 칸에서 한꺼번에 퍼지는 걸음 거리 장(場)** — *"이 칸이 그 길에서
+ * 걸어서 몇 m 인가"* 를 지도 전체에 대해 한 번에 답합니다.
+ *
+ * 원래 이 스무 줄은 「색을 가르치는 적」 검사 안에만 있었습니다. 그런데
+ * 아래에서 **두 번째 길**에도 같은 것을 묻게 되면서 한 벌 더 쓸 뻔했습니다.
+ * 「규칙은 한 곳에만」 — 같은 자를 두 곳에서 따로 만들면 언젠가 둘이
+ * 어긋납니다. 이 저장소는 그 사고를 이미 세 번 냈습니다(동선을 세 곳에서
+ * 따로 그리던 시절).
+ *
+ * ⚠️ **직선거리가 아니라 걸어야 하는 거리**입니다. 게임이 적을 깨우는
+ *    자와 같습니다(enemyAI.ts `reachDistance`).
+ */
+function walkField(cells, maxClimb, CELL) {
+  const key = (x, z) => z * level.w + x
+  const dist = new Map()
+  let frontier = []
+  for (const c of cells) {
+    dist.set(key(c.cx, c.cz), 0)
+    frontier.push(c)
+  }
+  while (frontier.length) {
+    const next = []
+    for (const cur of frontier) {
+      const h = heightAt(cur.cx, cur.cz)
+      const d = dist.get(key(cur.cx, cur.cz))
+      for (const [nx, nz] of [
+        [cur.cx - 1, cur.cz],
+        [cur.cx + 1, cur.cz],
+        [cur.cx, cur.cz - 1],
+        [cur.cx, cur.cz + 1],
+      ]) {
+        const nh = heightAt(nx, nz)
+        if (nh === VOID || nh - h > maxClimb) continue
+        const k = key(nx, nz)
+        if (dist.has(k)) continue
+        dist.set(k, d + CELL)
+        next.push({ cx: nx, cz: nz })
+      }
+    }
+    frontier = next
+  }
+  return dist
+}
+
 const server = await createServer({ root: ROOT, server: { port: PORT }, logLevel: 'error' })
 await server.listen()
 const browser = await chromium.launch({
@@ -862,33 +907,7 @@ try {
    */
   {
     const key = (x, z) => z * level.w + x
-    const distToRoute = new Map()
-    let frontier = []
-    for (const c of routeCells) {
-      distToRoute.set(key(c.cx, c.cz), 0)
-      frontier.push(c)
-    }
-    while (frontier.length) {
-      const next = []
-      for (const cur of frontier) {
-        const h = heightAt(cur.cx, cur.cz)
-        const d = distToRoute.get(key(cur.cx, cur.cz))
-        for (const [nx, nz] of [
-          [cur.cx - 1, cur.cz],
-          [cur.cx + 1, cur.cz],
-          [cur.cx, cur.cz - 1],
-          [cur.cx, cur.cz + 1],
-        ]) {
-          const nh = heightAt(nx, nz)
-          if (nh === VOID || nh - h > maxClimb) continue
-          const k = key(nx, nz)
-          if (distToRoute.has(k)) continue
-          distToRoute.set(k, d + CELL)
-          next.push({ cx: nx, cz: nz })
-        }
-      }
-      frontier = next
-    }
+    const distToRoute = walkField(routeCells, maxClimb, CELL)
 
     /**
      * 색을 가르치는 **근접** 적만 마릿수로 봅니다.
@@ -921,6 +940,133 @@ try {
             .join(' · ') +
           ` · 어그로 ${wake}m`,
       )
+    }
+
+    /**
+     * ── 8.6 🛣 **두 번째 길에서도 그 색을 만나는가** ────────────────────
+     *
+     * ── 이 검사가 어디서 왔는가 (숫자부터) ───────────────────────────
+     * 바로 위 검사는 **주 동선 하나** 위에서 색을 셉니다. 지난 회차에
+     * 그 선이 게임의 안내와 같은 선이라는 것까지 확인했으니(🧭 검사),
+     * 이제 안심해도 될 것 같았습니다. 그런데 자동 플레이 세 판이 계속
+     * 같은 말을 했습니다:
+     *
+     *     주 동선 100칸 중 봇이 지난 칸 **38% · 52% · 52%**
+     *     ↳ 셋 다 **못 간 앞길 0칸** (보스까지 갔고, 다 잡았습니다)
+     *
+     * 즉 시간이 모자란 게 아니라 **다른 길로 갔습니다.** 발자국을 주 동선
+     * 위에 겹쳐 그려 보니 이유가 한눈에 보였습니다:
+     *
+     *     주 동선 — 서쪽에서 z=2 를 따라 동쪽으로 → x=32 에서 **북쪽
+     *               성벽마루로 올라가** 동쪽 끝까지 → 내려와 보스
+     *     봇     — 같은 z=2 를 가다 x=-24 에서 **남쪽 벌판으로 내려가**
+     *               보물·모루를 훑고 동쪽 끝에서 올라와 보스
+     *
+     * 둘은 **양끝에서만 만나고 가운데 100m 를 45~51m 떨어져** 나란히
+     * 갑니다. 곁길이 아니라 **두 번째 길**입니다.
+     *
+     * ── 그래서 무엇이 깨지는가 ───────────────────────────────────────
+     * 곁길 11개마다 *"그걸 챙기고 보스로 간 길"* 을 그려서 주 동선을 얼마나
+     * 덮는지 쟀습니다(같은 자, 같은 `routeTrail`):
+     *
+     *     북쪽 보물 넷 — **100%** (챙겨도 주 동선을 그대로 걷습니다)
+     *     남쪽 보물·모루 넷 — **53% · 55% · 55% · 75%**
+     *
+     * 남쪽을 챙긴 플레이어는 주 동선의 **절반을 안 봅니다.** 그 절반에
+     * 무엇이 있었는지 세어 보면:
+     *
+     *     🔵 얽는 자 3마리 — 남쪽 길에서 **0마리** (33m · 51m · 16m)
+     *     🏹 쏘는 자 1마리 — 남쪽 길에서 40m
+     *     🧱 두꺼운 벽과 그 답(통) — 남쪽 길에서 35~39m
+     *
+     * **한 색을 통째로 못 배우고 보스에 도착하는 길이 있습니다.** 위
+     * 검사는 이걸 못 잡습니다 — 한 길만 보기 때문입니다. 「빈 표본으로
+     * 통과하지 않게」의 형제입니다: *"안 본 길에서 못 만나는 것은
+     * 통과가 아닙니다."*
+     *
+     * ── 다른 게임은 어떻게 하는가 ────────────────────────────────────
+     * 엘든 링은 길이 여러 갈래여도 **가르치는 것은 갈림 이전이나 합류점**에
+     * 둡니다(리엥의 첫 병사, 관문 앞 기마병). 로스트아크는 아예 갈래를
+     * 안 만들고, NRFTW 는 갈래가 **눈에 보이는 거리 안에서 다시 합칩니다.**
+     * 공통점은 하나입니다 — **어느 길로 가도 배울 것은 배웁니다.**
+     *
+     * ── 무엇을 문턱으로 삼는가 ───────────────────────────────────────
+     * 두 번째 길에는 **1마리**만 요구합니다(주 동선은 2마리 — 처음+복습).
+     * 두 번째 길은 *"고를 수 있는 길"* 이지 *"설계된 순서"* 가 아니므로,
+     * 여기서 요구할 것은 복습이 아니라 **첫 만남이 있느냐**입니다.
+     *
+     * ⚠️ 「두 번째 길」을 **좌표로 적지 않습니다.** 곁길마다 길을 다 그려
+     *    보고 **주 동선을 가장 적게 덮는 것**을 고릅니다. 지도를 고치면
+     *    고른 길도 따라 바뀝니다. 좌표를 적어 두면 그 자리를 옮기는 날
+     *    검사가 조용히 딴 길을 재게 됩니다(이 저장소가 세 번 낸 사고).
+     */
+    const worldOf = (c) => ({ x: (c.cx - level.w / 2 + 0.5) * CELL, z: (c.cz - level.h / 2 + 0.5) * CELL })
+    const fireW = worldOf(startFire)
+    const bossW = worldOf(boss)
+    const trailBetween = (a, b) =>
+      page.evaluate(
+        ([ax, az, bx, bz]) => window.__game.routeTrail(ax, az, bx, bz),
+        [a.x, a.z, b.x, b.z],
+      )
+    const routeW = routeCells.map(worldOf)
+    const nearestOf = (pts, q) => {
+      let best = Infinity
+      for (const p of pts) best = Math.min(best, Math.hypot(p.x - q.x, p.z - q.z))
+      return best
+    }
+    const roads = []
+    for (const r of level.entities.filter((e) => e.kind === 'treasure' || e.kind === 'anvil')) {
+      const q = { x: r.x, z: r.z }
+      const p1 = await trailBetween(fireW, q)
+      const p2 = await trailBetween(q, bossW)
+      /**
+       * ⚠️ 길이 **없는** 보상은 뺍니다. 없어서가 아니라 **일부러 못 가게
+       *    둔 것**이기 때문입니다(선반 위 보물 — 통으로 떨궈야 닿습니다).
+       *    이걸 0% 로 세면 "두 번째 길이 주 동선을 하나도 안 덮는다"는
+       *    거짓 빨강이 납니다.
+       */
+      if (!p1.length || !p2.length) continue
+      const road = [...p1, ...p2]
+      roads.push({
+        at: `${r.kind === 'anvil' ? '모루' : '보물'}(${Math.round(r.x)},${Math.round(r.z)})`,
+        road,
+        cov: Math.round((routeW.filter((c) => nearestOf(road, c) <= aggro).length / Math.max(1, routeW.length)) * 100),
+      })
+    }
+    roads.sort((a, b) => a.cov - b.cov)
+    console.log(
+      `\n  🛣 곁길을 챙기고 보스로 간 길이 **주 동선을 덮는 비율** (어그로 ${aggro}m 안) — ` +
+        (roads.length ? roads.map((r) => `${r.at} ${r.cov}%`).join(' · ') : '**표본 없음**'),
+    )
+    if (roads.length) {
+      const worst = roads[0]
+      const roadCells = worst.road.map((p) => ({
+        cx: Math.floor(p.x / CELL + level.w / 2),
+        cz: Math.floor(p.z / CELL + level.h / 2),
+      }))
+      const distToB = walkField(roadCells, maxClimb, CELL)
+      console.log(
+        `     └ 그중 가장 적게 덮는 **두 번째 길**: ${worst.at} 경유 ${worst.road.length}칸 · 주 동선의 ${worst.cov}%`,
+      )
+      for (const [kind, label] of Object.entries(TEACHERS)) {
+        const placed = level.entities.filter((e) => e.kind === kind)
+        const dists = placed.map((e) => {
+          const c = cellOf(e)
+          return { c, d: distToB.get(key(c.cx, c.cz)) ?? Infinity }
+        })
+        const wake = wakeOf(kind)
+        const onB = dists.filter((x) => x.d <= wake)
+        check(
+          onB.length >= 1,
+          `${label} — **두 번째 길**(${worst.at} 경유)에서도 깨울 수 있는 개체가 있다 (한 색을 통째로 안 배우고 보스에 닿지 않게)`,
+          `${placed.length}마리 중 ${onB.length}마리 · 그 길까지 ` +
+            dists
+              .sort((a, b) => a.d - b.d)
+              .map((x) => `(${x.c.cx},${x.c.cz}) ${Number.isFinite(x.d) ? `${x.d}m` : '길없음'}`)
+              .join(' · ') +
+            ` · 어그로 ${wake}m`,
+        )
+      }
     }
 
     /**

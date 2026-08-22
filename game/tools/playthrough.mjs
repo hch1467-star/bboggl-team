@@ -883,6 +883,9 @@ try {
      * 그래서 판이 끝난 뒤 **발자국과 주 동선을 맞대 봅니다.**
      */
     const footCells = new Set()
+    /** 👣⏱ 0.25초마다 한 점: {시각, 자리, 그때 하던 가지}. 아래 기록 자리에 설계 노트가 있습니다. */
+    const footTrail = []
+    let footTrailT = -1
     /** 최근 90 프레임의 가지 — 막혔을 때 되감아 봅니다. */
     const recentActs = []
     const actTotals = new Map()
@@ -1016,6 +1019,47 @@ try {
        */
       // 👣 발자국. 2m 로 접어 두면 한 판이 수백 칸이라 가볍습니다.
       footCells.add(`${Math.round(p.x / 2)},${Math.round(p.z / 2)}`)
+      /**
+       * ── 👣⏱ **발자국에 «언제»와 «무엇을 하던 중»을 붙입니다** ────────
+       *
+       * 지난 회차에 「주 동선이 아무도 안 걷는 길일 수 있다」는 의심을 재서
+       * 풀었습니다 — 주 동선과 게임 안내는 **같은 선**이었습니다(100칸 대
+       * 102걸음 · 서로 14m 안 100%/100%). 그런데 그 판에서 봇이 실제로
+       * 지난 칸은 **49칸(49%)** 이고, 안 지난 최장 토막이 **102m** 였습니다.
+       *
+       * 여기서 바로 *"봇이 곁길로 샌다"* 고 적을 뻔했습니다. 그건 처방이
+       * 붙는 문장인데(곁길 예산을 줄인다 / 배치를 옮긴다), 아직 **재지
+       * 않은** 문장입니다. 안 지난 칸에는 처방이 **정반대인 두 가지**가
+       * 섞여 있습니다:
+       *
+       *   · **샌 길**   — 그 앞과 뒤를 다 지났는데 가운데만 비었다
+       *                   → 봇이 옆으로 벗어난 것 (곁길·전투)
+       *   · **못 간 앞길** — 그 뒤로는 아무 데도 못 갔다
+       *                   → 판이 그 전에 끝난 것 (시간·죽음)
+       *
+       * 이 프로젝트에서 가장 자주 낸 사고가 이것입니다 —
+       * **「처방이 다른 둘이 한 칸에 담기면 정확히 거꾸로 읽힙니다」.**
+       * 둘을 가르려면 발자국에 **시각**이 있어야 하는데, `footCells` 는
+       * 집합이라 순서가 없습니다. 그래서 0.25초마다 한 점씩 따로 남깁니다.
+       *
+       * ⚠️ 여기 적히는 `act` 는 **직전 프레임의 가지**입니다. 이 판단
+       *    루프는 `continue` 가 스무 곳이 넘어서 "프레임 끝" 이라 부를 수
+       *    있는 한 지점이 없습니다. 0.25초 눈금에서 한 프레임(≈16ms)
+       *    밀리는 것은 무해하지만, **모르고 밀리는 것**은 무해하지 않으니
+       *    적어 둡니다.
+       * ⚠️ 주 동선과의 대조는 **판이 끝난 뒤에** 합니다. `routeTrail` 은
+       *    모두가 함께 쓰는 흐름장을 다시 세우기 때문입니다(아래 👣 절).
+       *    여기서는 좌표만 모읍니다.
+       */
+      if (now() - footTrailT >= 0.25) {
+        footTrailT = now()
+        footTrail.push({
+          t: Number(now().toFixed(1)),
+          x: Number(p.x.toFixed(1)),
+          z: Number(p.z.toFixed(1)),
+          a: act,
+        })
+      }
 
       {
         // 판 전체를 덮는 반지름 — 잠든 적도 돌려주므로 「한 번도 안 깼다」가 잡힙니다.
@@ -3779,6 +3823,7 @@ try {
       archerChance: Object.values(archerChance),
       archerRule: { wake: archerWake, min: archerMin, max: archerMax },
       footCells: [...footCells],
+      footTrail,
       /** 배치 검사가 쓰는 반지름 — 여기 14 를 베끼지 않게 게임에서 받습니다. */
       aggroRange: G.terrainInfo().levelAggroRange,
       runAttacks: G.runStats().runAttacks ?? 0,
@@ -4346,6 +4391,78 @@ try {
         }
       } else run = 0
     }
+    /**
+     * ── 👣 **안 지난 칸을 «샌 길»과 «못 간 앞길»로 가릅니다** ──────────
+     *
+     * 지난 판의 숫자는 *"주 동선 100칸 중 49칸 · 최장 빈 토막 102m"* 였고,
+     * 저는 그 자리에 *"봇의 발 문제(곁길·전투로 샌다)"* 라고 적었습니다.
+     * 그런데 그 문장은 **재지 않고 쓴 처방**입니다. 안 지난 칸에는 고치는
+     * 곳이 정반대인 두 가지가 섞여 있기 때문입니다:
+     *
+     *   · **샌 길**     — 뒤쪽 칸을 나중에 지났다 → 옆으로 벗어난 것
+     *   · **못 간 앞길** — 그 뒤로 아무 칸도 못 지났다 → 판이 먼저 끝난 것
+     *
+     * 후자라면 처방은 봇의 곁길이 아니라 **판 길이(또는 죽음)** 입니다.
+     * 「처방이 다른 둘이 한 칸에 담기면 정확히 거꾸로 읽힙니다」 —
+     * 이 저장소에서 가장 자주 낸 사고라 이름까지 붙여 뒀습니다.
+     *
+     * 가르는 기준은 **가장 멀리 간 칸**(`reachIdx`)입니다. 주 동선은
+     * 화톳불→보스 순서로 정렬돼 있으므로, 그보다 앞 번호의 빈 칸은
+     * *지나쳐 놓고 안 밟은* 것이고, 뒤 번호는 *아직 못 간* 것입니다.
+     */
+    const reachIdx = near.reduce((mx, d, i) => (d <= aggro ? i : mx), -1)
+    const missedBehind = near.filter((d, i) => d > aggro && i < reachIdx).length
+    const missedAhead = near.filter((d, i) => d > aggro && i > reachIdx).length
+    /**
+     * 그리고 **샌 길이라면 그동안 무엇을 하고 있었는지**를 셉니다.
+     *
+     * 창은 «빈 토막 직전 칸을 마지막으로 밟은 시각» → «빈 토막 직후 칸을
+     * 처음 밟은 시각». 그 사이가 곧 *"이 구간을 걸었어야 할 시간"* 이고,
+     * 거기서 제일 많이 나온 가지가 **샌 이유**입니다. 추측 없이 이름이
+     * 나옵니다(전투인지 · 보물이동인지 · 강화이동인지).
+     *
+     * ⚠️ 시각은 0.25초 발자국(`footTrail`)에서 얻습니다. 덮임 여부 자체는
+     *    매 프레임 기록인 `footCells` 로 판정합니다 — 헤드라인 숫자를
+     *    표본이 성긴 쪽으로 바꾸지 않기 위해서입니다.
+     */
+    const trail = log.footTrail ?? []
+    const timeNear = (r) => {
+      let firstT = null
+      let lastT = null
+      for (const s of trail) {
+        if (Math.hypot(s.x - r.x, s.z - r.z) > aggro) continue
+        if (firstT === null) firstT = s.t
+        lastT = s.t
+      }
+      return { firstT, lastT }
+    }
+    let gapWhy = null
+    if (bestAt && bestRun > 0) {
+      const i0 = near.findIndex((d, i) => d > aggro && route[i] === bestAt.from)
+      const before = i0 > 0 ? timeNear(route[i0 - 1]).lastT : null
+      const after = i0 + bestRun < route.length ? timeNear(route[i0 + bestRun]).firstT : null
+      const kind = i0 > reachIdx ? '못 간 앞길' : '샌 길'
+      const tally = new Map()
+      if (before !== null) {
+        const end = after !== null && after > before ? after : Infinity
+        for (const s of trail) {
+          if (s.t < before || s.t > end) continue
+          tally.set(s.a, (tally.get(s.a) ?? 0) + 1)
+        }
+      }
+      const n = [...tally.values()].reduce((a, v) => a + v, 0)
+      gapWhy = {
+        kind,
+        from: before,
+        to: after,
+        // 창이 안 닫혔으면(뒤쪽을 영영 못 밟았으면) 판 끝까지가 창입니다.
+        open: after === null || (before !== null && after <= before),
+        acts: [...tally.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([name, c]) => ({ name, pct: Math.round((c / Math.max(1, n)) * 100) })),
+      }
+    }
     routeWalk = {
       cells: route.length,
       covered,
@@ -4354,6 +4471,12 @@ try {
       gapM: bestRun * CELL,
       gapAt: bestAt,
       worst: Math.max(...near.map((d) => (Number.isFinite(d) ? d : 0))),
+      reachIdx,
+      reachPct: route.length ? Math.round(((reachIdx + 1) / route.length) * 100) : 0,
+      missedBehind,
+      missedAhead,
+      gapWhy,
+      samples: trail.length,
     }
   } catch (e) {
     routeWalk = { error: String(e && e.message ? e.message : e) }
@@ -5008,6 +5131,26 @@ try {
               ` · 가장 멀리 벗어난 칸 ${routeWalk.worst.toFixed(0)}m`
             : ''),
       )
+      /**
+       * 그리고 **안 지난 칸을 두 갈래로 갈라서** 적습니다. 한 줄로 적으면
+       * "봇이 곁길로 샌다"로 읽히는데, 실제로는 "판이 먼저 끝났다"일 수
+       * 있고 그때 고칠 곳은 정반대입니다(위 `reachIdx` 주석).
+       */
+      console.log(
+        `                └ 가장 멀리 간 칸 ${routeWalk.reachIdx + 1}/${routeWalk.cells}(${routeWalk.reachPct}%) · ` +
+          `**샌 길 ${routeWalk.missedBehind}칸** · **못 간 앞길 ${routeWalk.missedAhead}칸**`,
+      )
+      if (routeWalk.gapWhy) {
+        const g = routeWalk.gapWhy
+        const when =
+          g.from === null
+            ? '창을 못 잡음'
+            : `${g.from.toFixed(0)}초~${g.open ? '판 끝' : `${g.to.toFixed(0)}초`}`
+        console.log(
+          `                └ 최장 토막은 **${g.kind}** · 그 사이(${when})에 한 일 ` +
+            (g.acts.length ? g.acts.map((a) => `${a.name} ${a.pct}%`).join(' · ') : '표본 없음'),
+        )
+      }
     }
   }
   /**
