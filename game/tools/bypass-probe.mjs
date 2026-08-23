@@ -102,8 +102,31 @@ try {
    * 봇이 잘 싸우는지가 아니라 **안 싸우고도 갈 수 있는지**를 재는 것이므로,
    * 여기서 공격을 섞으면 재려던 것이 사라집니다.
    */
+  /**
+   * 🧭 **지도가 «일부러 등을 돌려 놓은» 적** — 그 자리가 실제로 봇의 길
+   * 옆인지 확인하려면 누구인지 알아야 합니다.
+   *
+   * ── 왜 필요했나 (계기 둘이 서로 다른 길을 그리고 있었습니다) ──────
+   * `npm run map` 이 「동선에서 8.0m」이라며 🔇 검사를 초록으로 줬는데,
+   * 여기서 깬 적들의 최소 접근 거리를 찍어 보니 **가장 먼 것이 8.5m**
+   * 이고 그 파수꾼은 목록에 아예 없었습니다 — 봇이 9m 안에 들어간 적이
+   * 없다는 뜻입니다.
+   *
+   * `map` 의 길은 `routeTrail`(칸을 잇는 최단 경로)이고, 봇의 길은
+   * `G.objective()` 가 이끄는 실제 걸음입니다. **둘은 같은 길이
+   * 아닙니다.** 그 차이를 모르면 지도에서 초록인 배치가 게임에서는
+   * 아무 데도 아닌 자리가 됩니다.
+   */
+  const faced = JSON.parse(
+    await page.evaluate(() =>
+      fetch('/src/levels/broken-gate.json')
+        .then((r) => r.text())
+        .then((t) => t),
+    ),
+  ).entities.filter((e) => e.face !== undefined)
+
   const traverse = async (sprint) =>
-    page.evaluate(async (useSprint) => {
+    page.evaluate(async ({ useSprint, faced }) => {
       const G = window.__game
       G.resetProgress()
       await new Promise((r) => setTimeout(r, 400))
@@ -157,6 +180,7 @@ try {
       let awakeHalfWho = []
       let awakeHalfHow = []
       const closest = new Map()
+      const facedNear = faced.map(() => 999)
       let stuckSince = t0
       let stuckPos = { x: start.x, z: start.z }
       let stuckTime = 0
@@ -189,6 +213,11 @@ try {
         for (const t of G.threats(300)) {
           const prev = closest.get(t.entity)
           if (prev === undefined || t.dist < prev) closest.set(t.entity, t.dist)
+        }
+        // 🧭 지도가 등을 돌려 놓은 적에게 **실제로** 몇 미터까지 갔는가.
+        for (let i = 0; i < faced.length; i++) {
+          const d = Math.hypot(p.x - faced[i].x, p.z - faced[i].z)
+          if (d < facedNear[i]) facedNear[i] = d
         }
 
         /**
@@ -488,6 +517,8 @@ try {
         awakeHalfWho,
         /** 깬 적마다 «가장 가까이 갔던 거리» — 시야로 설명되는지 보려고 */
         awakeHalfHow,
+        /** 지도가 등을 돌려 놓은 적에게 실제로 다가간 최소 거리(m) */
+        facedNear: facedNear.map((d) => Number(d.toFixed(1))),
         chasing,
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
@@ -514,7 +545,7 @@ try {
         stuck: Number(stuckTime.toFixed(1)),
         enemiesLeft: end.enemiesLeft,
       }
-    }, sprint)
+    }, { useSprint: sprint, faced })
 
   /**
    * **세 판씩 돌립니다.**
@@ -576,6 +607,7 @@ try {
     awakeHalf: med(runs.map((r) => r.awakeHalf)),
     awakeHalfWho: runs[0].awakeHalfWho,
     awakeHalfHow: runs[0].awakeHalfHow,
+    facedNear: runs[0].facedNear,
     awakeHalfSpan: span(runs.map((r) => r.awakeHalf)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
@@ -743,6 +775,21 @@ try {
      * 그러니 «가장 가까이 갔던 거리»가 9m 보다 크면 그 적은 **시야로**
      * 깬 것이고, 소리는 나설 자리조차 없었던 것입니다.
      */
+    /**
+     * 🧭 **지도가 등을 돌려 놓은 적에게 실제로 몇 미터까지 갔는가.**
+     * `map` 이 「동선에서 8.0m」라며 초록을 줘도, 봇이 그 옆을 그 거리로
+     * 지나가지 않으면 그 초록은 **다른 길에 대한 초록**입니다.
+     */
+    if (faced.length)
+      console.log(
+        `  🧭 지도가 등을 돌려 놓은 적 — ${faced
+          .map(
+            (f, i) =>
+              `(${f.x},${f.z}) 걸어서 ${walk.facedNear[i]}m · 달려서 ${run.facedNear[i]}m 까지` +
+              ` (걷기 문턱 ${(terrain.hearWalk ?? 0).toFixed(1)}m · 달리기 ${hearRunM.toFixed(1)}m)`,
+          )
+          .join(' · ')}`,
+      )
     const sightOnly = walk.awakeHalfHow.filter((h) => h.near <= hearRunM)
     console.log(
       `  📐 걸어서 깬 적이 «가장 가까이 갔던 거리» — ${walk.awakeHalfHow
