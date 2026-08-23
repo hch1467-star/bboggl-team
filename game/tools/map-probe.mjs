@@ -2051,6 +2051,84 @@ try {
   )
 
   /**
+   * ── 🪂 **밀어서 떨어뜨릴 자리가 있는가** ─────────────────────────────
+   *
+   * 위 검사는 높이를 **적이 쓰는** 쪽(내려다보며 쏜다)만 봅니다. 반대쪽,
+   * **플레이어가 높이를 무기로 쓰는** 쪽은 아무도 안 보고 있었습니다.
+   *
+   * ── 코드에는 이미 있습니다 ────────────────────────────────────────
+   * 떨어지면 피해가 들어가고(`FALL.damagePerStep`) 적은 **무너집니다**
+   * (`FALL.breaksPoise`). 그리고 낙하 공격 창은 **플레이어에게만** 엽니다 —
+   * main.ts 에 그 이유가 적혀 있습니다: *"양쪽 다 주면 절벽이 서로에게
+   * 같은 도구가 되어 «절벽으로 유인하기»의 값어치가 사라집니다."*
+   * 즉 **절벽은 설계상 플레이어의 도구**입니다(세키로의 발차기, 오공의
+   * 밀치기, 젤다의 굴리는 바위가 파는 그 재미).
+   *
+   * ── 그런데 판에서 일어나는지는 안 봤습니다 ────────────────────────
+   * 자동 플레이가 `fallLog` 를 판마다 모으고 있었는데 **화면에 한 번도
+   * 안 찍혔습니다.** 찍게 하고 돌렸더니:
+   *
+   *     🪂 절벽 — 내가 떨어진 것 0회 · **적이 떨어진 것 2회** (평균 3.0단)
+   *
+   * 일어나긴 합니다. 그런데 지도를 세어 보면 그 2회가 어디서 왔는지가
+   * 드러납니다 — **적 31마리 중 곁(3m)에 «아픈 낙차»가 있는 것은 3마리**
+   * 뿐이고, 나머지는 대부분 낙차 0의 평지입니다. 즉 이 어휘는 설계된
+   * 것이 아니라 **성문 잔해 옆에서 우연히** 성립하고 있었습니다.
+   *
+   * ⚠️ 「아픈 낙차」는 `FALL.freeSteps` **초과**입니다. 2단은 공짜라
+   *    남쪽 함몰지(h2→h0)로 밀어 넣어도 피해가 0입니다 — 그건 벌이 아니라
+   *    **선택**으로 만든 값입니다(「내려가면 못 올라온다」).
+   *    문턱을 여기 적지 않고 게임에서 읽는 이유는 늘 같습니다.
+   *
+   * 검사는 **동선 위에 하나라도 있는가**로 겁니다. 마릿수를 요구하면
+   * 지도를 절벽투성이로 만들라는 말이 되고, 그건 이 존의 설계가 아닙니다.
+   * 지키려는 것은 하나입니다 — 이 어휘가 **걷는 길에서 사라지지 않는 것**.
+   */
+  {
+    const fall = await page.evaluate(() => {
+      const t = window.__game.terrainInfo()
+      return { free: t.fallFreeSteps, aggro: t.levelAggroRange }
+    })
+    const PUSH = 3.5 // 강타 넉백이 밀어낼 만한 거리(m) — 아래 ⚠️ 참고
+    const foes = level.entities.filter((e) => FOE_KINDS.has(e.kind) || e.kind === 'archer')
+    const rad = Math.ceil(PUSH / CELL)
+    const rows = foes.map((e) => {
+      const c = cellOf(e)
+      const h0 = heightAt(c.cx, c.cz)
+      let drop = 0
+      for (let dx = -rad; dx <= rad; dx++) {
+        for (let dz = -rad; dz <= rad; dz++) {
+          if (Math.hypot(dx * CELL, dz * CELL) > PUSH) continue
+          const hn = heightAt(c.cx + dx, c.cz + dz)
+          if (hn === VOID) continue
+          drop = Math.max(drop, h0 - hn)
+        }
+      }
+      // 이 적이 **동선에서 깨어나는가** — 안 깨면 있어도 없는 것입니다.
+      const onRoute = routeCells.some(
+        (r) => Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL) <= wakeOf(e.kind),
+      )
+      return { kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), drop, onRoute }
+    })
+    const hurty = rows.filter((r) => r.drop > fall.free)
+    const onRoad = hurty.filter((r) => r.onRoute)
+    console.log(
+      `\n  🪂 밀어서 떨어뜨릴 수 있는 자리 (${PUSH}m 안에 ${fall.free}단 초과 낙차) — ` +
+        `적 ${rows.length}마리 중 **${hurty.length}마리** · 그중 동선에서 깨는 것 ${onRoad.length}마리` +
+        (hurty.length
+          ? `\n     ${hurty.map((r) => `${r.kind}(${r.x},${r.z}) ${r.drop}단${r.onRoute ? '' : ' ·동선 밖'}`).join(' · ')}`
+          : ''),
+    )
+    check(
+      onRoad.length >= 1,
+      '🪂 **밀어서 떨어뜨릴 자리가 걷는 길 위에 있다** (절벽을 무기로 쓰는 어휘가 지도에서 사라지지 않게)',
+      onRoad.length
+        ? `${onRoad.map((r) => `${r.kind}(${r.x},${r.z}) ${r.drop}단`).join(' · ')}`
+        : `${fall.free}단 초과 낙차 곁에서 깨는 적이 하나도 없습니다 — 낙하 피해·무너짐 규칙이 코드에만 있게 됩니다`,
+    )
+  }
+
+  /**
    * ── 🔁 **되돌아오는 고리가 있는가** ───────────────────────────────
    *
    * 다크 소울 1 의 정체성은 지도가 **접힌다**는 것입니다 — 늦은 구역이 이른
