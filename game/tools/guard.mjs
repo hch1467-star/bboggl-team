@@ -851,5 +851,76 @@ check(
   )
 }
 
+/**
+ * ── 🟢 **«고르는 거리»가 «닿는 거리»보다 넓으면 돌진이 있어야 합니다** ──
+ *
+ * ── 이 검사가 없어서 무엇을 놓쳤나 ──────────────────────────────────
+ * 달려드는 자가 **한 번도 달려들지 않고 있었습니다.** `lungeSpeed` 가
+ * 타입에만 선언돼 있고 **어느 공격에도 값이 없었습니다** — 설계 주석
+ * 스무 줄과 `enemyAI` 의 돌진 분기가 다 있는데 숫자만 비어서, 그 분기가
+ * 한 번도 안 돌았습니다.
+ *
+ * 드러난 유일한 흔적은 **데이터의 모순**이었습니다:
+ *
+ *     charger_rush  reach 5.5 · maxRange 7.5  (+2.0m)
+ *     charger_ram   reach 4.0 · maxRange 5.5  (+1.5m)
+ *     boss_charge   reach 6.5 · maxRange 10   (+3.5m)
+ *     나머지 전부   maxRange <= reach
+ *
+ * `maxRange`(고를 수 있는 거리)가 `reach`(닿는 거리)보다 넓다는 것은
+ * **예고 중에 거리를 좁힌다**는 뜻입니다. 좁히지 않으면 그 차이만큼은
+ * **닿지 않는 데서 휘두르는 것**이고, 실제로 `npm run charge` 가
+ * *"거리 4.50 / 사거리 4.45 — 빗나감"* 을 세 판 내내 찍었습니다.
+ * 가만히 선 표적을 **5cm 차이로 매번** 빗나갑니다.
+ *
+ * ── 그래서 두 데이터가 서로를 전제합니다 ────────────────────────────
+ * 「maxRange > reach」와 「lungeSpeed 있음」은 **짝**입니다. 한쪽만
+ * 있으면 반드시 버그입니다:
+ *   · 넓은데 안 좁히면 → **못 닿는 공격**(이번에 겪은 것)
+ *   · 좁히는데 안 넓으면 → 돌진할 일이 없어 그 코드가 죽습니다
+ *
+ * 사람이 볼 때 안 보이는 이유: `lungeSpeed?: number` 는 **문법적으로
+ * 완전**하고 주석까지 붙어 있어 «있는 기능»처럼 읽힙니다. 값이 비어
+ * 있다는 것은 **정의를 전부 세어 봐야** 알 수 있습니다. 그래서 검사가
+ * 셉니다.
+ */
+{
+  // ⚠️ `SRC` 는 위쪽 블록 안에서만 사는 이름입니다 — 여기서 따로 잡습니다.
+  const src = readFileSync(path.join(HERE, '..', 'src', 'config', 'enemyAttacks.ts'), 'utf8')
+  /**
+   * 공격 정의 하나하나를 `id:` 로 잘라 봅니다. 파서를 쓰지 않는 이유는
+   * 이 저장소의 다른 정적 검사와 같습니다 — 이 파일의 모양이 아주
+   * 규칙적이라 `id:` 로 자르는 것으로 충분하고, 파서를 들이면 검사보다
+   * 검사의 도구가 더 복잡해집니다.
+   */
+  const chunks = src.split(/\n\s*\{\s*\n(?=\s*(?:\/\*\*[\s\S]*?\*\/\s*\n)?\s*id:)/)
+  const bad = []
+  let seen = 0
+  for (const c of chunks) {
+    const id = c.match(/\n\s*id:\s*'([a-z_]+)'/)
+    if (!id) continue
+    const num = (k) => {
+      const m = c.match(new RegExp('\\n\\s*' + k + ':\\s*([0-9.]+)'))
+      return m ? Number(m[1]) : null
+    }
+    const reach = num('reach')
+    const maxRange = num('maxRange')
+    if (reach === null || maxRange === null) continue
+    seen++
+    if (maxRange > reach && num('lungeSpeed') === null)
+      bad.push(`${id[1]} reach ${reach} < maxRange ${maxRange}`)
+  }
+  check(
+    seen > 0,
+    '🟢 사거리를 읽을 공격 정의를 실제로 찾았다 (비교의 게이트)',
+    `${seen}개`,
+  )
+  check(
+    bad.length === 0,
+    '🟢 **«고르는 거리»가 «닿는 거리»보다 넓은 공격에는 돌진이 있다** (닿지 않는 데서 휘두르지 않게)',
+    bad.length ? `${bad.length}개 — ${bad.join(' | ')}` : `공격 ${seen}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)
