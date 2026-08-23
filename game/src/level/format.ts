@@ -137,6 +137,30 @@ export const ENTITY_KINDS: EntityKind[] = [
   'thickWall',
 ]
 
+/**
+ * 🎁 **깨거나 열면 「보물 상자」가 나오는 종류.**
+ *
+ * 겉모습은 다르지만 **보상이 같습니다** — 항아리(`urnFull`)를 깨면
+ * `treasure` 와 똑같은 상자가 그대로 나오고 정련석도 그대로 줍니다
+ * (`systems/world.ts`). *"숨겼다"* 는 **찾기 어렵다**는 뜻이지
+ * **없다**는 뜻이 아닙니다.
+ *
+ * ── 왜 목록으로 따로 빼 두는가 ──────────────────────────────
+ * 이 규칙(**무엇이 보물로 세이는가**)을 그동안 **세 곳이 각자** 알고
+ * 있었고, 그중 둘이 틀렸습니다:
+ *
+ *   · `world.ts`  — treasure + urnFull  → 13  ✅
+ *   · `upgrade-probe.mjs` — treasure 만  → 10  ❌(고침, 그 자리에 기록)
+ *   · `verify.mjs`        — treasure 만  → 10  ❌ (같은 실수를 **또**)
+ *
+ * verify 는 「게임 13개 · 레벨 데이터 10개」로 빨간불이 났는데,
+ * **게임이 맞고 검사가 틀린** 경우였습니다. 같은 실수가 두 번 나왔다는
+ * 것은 주의력 문제가 아니라 **규칙이 한 곳에 없다는 뜻**입니다.
+ * 그래서 여기 한 줄만 남기고, 세는 쪽은 전부 이걸 읽습니다
+ * (프로브는 `window.__game.treasureKinds()` 로 같은 값을 받습니다).
+ */
+export const TREASURE_KINDS: EntityKind[] = ['treasure', 'urnFull']
+
 export const ENTITY_LABEL: Record<EntityKind, string> = {
   spawn: '시작 지점',
   grunt: '잡몹',

@@ -117,6 +117,7 @@ import {
   CELL_SIZE,
   HEIGHT_STEP,
   MAX_CLIMB,
+  TREASURE_KINDS,
   VOID,
   cellToWorld,
   loadLevelFromStorage,
@@ -6366,7 +6367,12 @@ class Game {
       // 🏺 항아리 속 상자는 **깨면 같은 상자가 그대로 나옵니다**(world.ts).
       //    보상이 같으니 공급으로도 같이 세야 합니다. 따로 내보내는 이유는
       //    "숨어 있다"와 "놓여 있다"를 프로브가 나눠 말할 수 있게 하려고.
-      else if (it.kind === 'urnFull') urnChests++
+      //
+      //    ⚠️ 여기 `'urnFull'` 이라고 **적지 않습니다.** 종류가 하나 더
+      //    늘면 이 줄만 조용히 빠뜨려서 공급을 적게 세게 됩니다 —
+      //    verify 와 upgrade-probe 가 실제로 그렇게 틀렸었습니다.
+      //    「놓인 것」이 아닌 보물은 전부 «숨은 것» 쪽으로 셉니다.
+      else if (TREASURE_KINDS.includes(it.kind)) urnChests++
       else if (it.kind === 'anvil') {
         anvils++
         anvilAt.push({ x: it.x, z: it.z })
@@ -7367,6 +7373,14 @@ declare global {
       }
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
+      /**
+       * 🎁 **보물로 세는 배치 종류**(`format.ts` 의 `TREASURE_KINDS`).
+       *
+       * 프로브가 «treasure 만» 이라고 스스로 정해서 분모를 잘못 센 적이
+       * 두 번 있었습니다. 규칙을 베끼지 말고 **게임에게 물어보라**고
+       * 이 창구를 냅니다.
+       */
+      treasureKinds: () => string[]
       /** 종류를 id 문자열로 지정해 소환합니다. */
       /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
       spawnEnemyKind: (id: string, x: number, z: number, asleep?: boolean) => number
@@ -8400,6 +8414,7 @@ window.__game = {
     commitGap: ATTACK_COMMIT_GAP,
   }),
   levelRoster: () => game.debugLevelRoster(),
+  treasureKinds: () => [...TREASURE_KINDS],
   spawnEnemyKind: (id, x, z, asleep) => game.debugSpawnKind(id, x, z, asleep),
   bossTuning: () =>
     BOSS_PHASES.map((ph) => ({

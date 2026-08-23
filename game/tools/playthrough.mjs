@@ -689,6 +689,32 @@ try {
     const bossPhaseDamage = [0, 0, 0]
     const bossPhaseFinishers = [0, 0, 0]
     const bossPhaseBreaks = [0, 0, 0]
+    /**
+     * ── 🕳 **구간마다 보스가 「누워 있던」 초** ────────────────────────
+     *
+     * 바로 위 주석이 *"상승분이 어디서 오는지 갈라야 처방이 정해진다 —
+     * 처형인가, 무방비 창인가, 그냥 익숙해진 것인가"* 라고 적어 두고,
+     * 정작 **무방비 창은 안 쟀습니다.** 셋 중 둘만 세면 남은 하나는
+     * 늘 «설명되지 않은 나머지»로 남습니다.
+     *
+     * 왜 지금 필요한가 — 벤치가 이렇게 말합니다:
+     *
+     *     1단계 10.3초 · 실효 화력 15.0/초 · 처형 1.0 · 붕괴 1.0
+     *     2단계  8.5초 · 실효 화력 25.5/초 · 처형 1.0 · 붕괴 1.0
+     *     3단계  4.4초 · 실효 화력 56.4/초 · 처형 1.0 · 붕괴 1.0
+     *
+     * 처형도 붕괴도 **구간마다 똑같이 한 번씩**입니다 — 뒤로 몰린 게
+     * 아닙니다. 그러면 위 주석의 갈래 중 「처형이 뒤로 몰린다」는 **탈락**
+     * 이고, 남은 것은 «무방비 창의 **비중**» 과 «그냥 세진 것» 둘입니다.
+     * 붕괴 횟수가 같아도 무방비 1.9초(`POISE.brokenTimeBoss`)가 10.3초
+     * 짜리 구간에서는 18%, 4.4초짜리 구간에서는 **43%** 입니다.
+     * 횟수는 같은데 **비중이 2.4배**인 것 — 이건 횟수만 세면 안 보입니다.
+     *
+     * 그래서 **초**를 셉니다. 갈래가 갈립니다:
+     *   · 무방비 비중이 구간마다 크게 다르다 → 강인도(붕괴 저항·무방비 길이)
+     *   · 비중은 비슷한데 화력만 오른다     → 플레이어 쪽(집중·강화·숙련)
+     */
+    const bossPhaseBroken = [0, 0, 0]
     let lastBossFin = 0
     let lastBossPhase = -1
     /** 보스전 동안 보스가 각 상태에 머문 **초**. 합계 ≒ 보스전 시간. */
@@ -1790,6 +1816,9 @@ try {
           bossPhaseBreaks[0] = 0
           bossPhaseBreaks[1] = 0
           bossPhaseBreaks[2] = 0
+          bossPhaseBroken[0] = 0
+          bossPhaseBroken[1] = 0
+          bossPhaseBroken[2] = 0
           lastBossPhase = -1
           for (const k of Object.keys(bossBudget)) bossBudget[k] = 0
         }
@@ -1815,7 +1844,13 @@ try {
         const bi = G.enemyInfo(be.entity)
         if (engaged && bi) {
           if (bi.transitionT > 0) bossBudget.transition += dtB
-          else if (bi.staggered) bossBudget.broken += dtB
+          else if (bi.staggered) {
+            bossBudget.broken += dtB
+            // 🕳 구간별로도 같이 담습니다 — 같은 프레임, 같은 조건.
+            //    따로 재면 합계가 안 맞는 날이 오고, 그때 어느 쪽을
+            //    믿어야 할지 알 수 없게 됩니다.
+            bossPhaseBroken[Math.min(2, be.phase)] += dtB
+          }
           else if (bi.attacking) {
             bossBudget[bi.attackPhase === 0 ? 'windup' : bi.attackPhase === 1 ? 'active' : 'recovery'] += dtB
           } else if (bi.cooldownT > 0) bossBudget.cooldown += dtB
@@ -3999,6 +4034,7 @@ try {
         })(),
         phaseFinishers: bossPhaseFinishers,
         phaseBreaks: bossPhaseBreaks,
+        phaseBroken: bossPhaseBroken.map((v) => Number(v.toFixed(1))),
         engaged: Number(bossEngaged.toFixed(1)),
         disengaged: Number(bossDisengaged.toFixed(1)),
         resets: bossResets,

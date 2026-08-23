@@ -23,7 +23,7 @@ import {
 } from '../core/components'
 import { addComponent, createEntity } from '../core/ecs'
 import { Rng } from '../core/rng'
-import { cellToWorld, type LevelData } from '../level/format'
+import { TREASURE_KINDS, cellToWorld, type LevelData } from '../level/format'
 import type { Terrain } from '../level/terrain'
 import {
   KIND_BARREL,
@@ -575,24 +575,28 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     const enemyKind = kindFromId(item.kind)
     // 🧭 바라보는 쪽 — 위 `spawnLevelEnemies` 와 같은 이유로 그대로 넘깁니다.
     if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z, item.face)
-    else if (item.kind === 'treasure') {
-      e = spawnTreasure(item.x, item.z, item.secret === true)
-      treasureTotal++
-    } else if (item.kind === 'barrel') e = spawnBarrel(item.x, item.z)
+    else if (item.kind === 'treasure') e = spawnTreasure(item.x, item.z, item.secret === true)
+    else if (item.kind === 'barrel') e = spawnBarrel(item.x, item.z)
     // 🏺 겉모습은 같고 **안에 든 것만** 다릅니다(format.ts 참고).
     else if (item.kind === 'urn') e = spawnUrn(item.x, item.z, false)
-    else if (item.kind === 'urnFull') {
-      e = spawnUrn(item.x, item.z, true)
-      /**
-       * 🎁 **항아리 속 보물도 총 개수에 셉니다.**
-       *
-       * 안 세면 *"보물 3/5 를 먹었다"* 의 분모가 틀리고, 그러면 진행도
-       * 표시와 `npm run play` 의 수거율이 **다른 것을 세게** 됩니다.
-       * 숨겼다는 것은 찾기 어렵다는 뜻이지 없다는 뜻이 아닙니다.
-       */
-      treasureTotal++
-    }
+    else if (item.kind === 'urnFull') e = spawnUrn(item.x, item.z, true)
     if (e < 0) continue
+    /**
+     * 🎁 **항아리 속 보물도 총 개수에 셉니다.**
+     *
+     * 안 세면 *"보물 3/5 를 먹었다"* 의 분모가 틀리고, 그러면 진행도
+     * 표시와 `npm run play` 의 수거율이 **다른 것을 세게** 됩니다.
+     * 숨겼다는 것은 찾기 어렵다는 뜻이지 없다는 뜻이 아닙니다.
+     *
+     * 무엇이 보물인지는 **여기서 정하지 않습니다** — `format.ts` 의
+     * `TREASURE_KINDS` 한 곳에만 적혀 있고, 프로브도 같은 목록을
+     * 받아 갑니다. 그렇게 하기 전에는 검사 두 개가 각자 «treasure 만»
+     * 이라고 알고 있어서 분모를 10으로 세고 있었습니다.
+     *
+     * `e < 0`(안 생긴 것) **뒤에서** 셉니다 — 화면에 없는 상자를
+     * 분모에 넣으면 *"다 먹었는데 12/13"* 이 되어 영영 안 채워집니다.
+     */
+    if (TREASURE_KINDS.includes(item.kind)) treasureTotal++
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     entities.push(e)
   }

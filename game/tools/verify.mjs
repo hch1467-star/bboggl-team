@@ -33,7 +33,6 @@ const VIEWPORT = { width: 1100, height: 690 }
  * verify 는 항상 빌드부터 합니다(package.json).
  */
 const LEVEL = JSON.parse(readFileSync(path.join(ROOT, 'src', 'levels', 'broken-gate.json'), 'utf8'))
-const LEVEL_TREASURES = LEVEL.entities.filter((e) => e.kind === 'treasure').length
 const LEVEL_REGIONS = (LEVEL.regions ?? []).length
 
 // 컨테이너/CI에는 Playwright가 내려받은 브라우저가 없을 수 있어, 미리 설치된
@@ -1571,17 +1570,34 @@ async function main() {
     const zs = await zone.evaluate(() => window.__game.state())
     check('아무 옵션 없이 열면 번들 존이 실행됨', zs.source === 'bundled' && zs.levelMode, `source=${zs.source}`)
     check('존 이름이 표시됨', zs.levelName === '무너진 성문', `"${zs.levelName}"`)
-    check(
-      '존의 보물이 레벨 데이터와 같은 수로 배치됨',
-      zs.treasureTotal === LEVEL_TREASURES,
-      `게임 ${zs.treasureTotal}개 · 레벨 데이터 ${LEVEL_TREASURES}개`,
-    )
     /**
      * **개수를 베끼지 않습니다.** 예전엔 `=== 12` 로 박아 뒀는데, 적 종류를
      * 두 가지 추가하자마자 이 검사만 빨갛게 됐습니다 — 게임은 멀쩡한데
      * 테스트가 낡은 것이었죠. 이런 실패가 쌓이면 결국 아무도 안 봅니다.
      * 레벨 파일에 적힌 대로 나왔는지를 **데이터끼리** 비교합니다.
+     *
+     * ── 그런데 개수만 안 베끼고 **규칙은 베꼈습니다** ────────────────
+     * 여긴 오래 «`kind === 'treasure'` 인 것》만 셌고, 그래서
+     *
+     *     ✗ FAIL  존의 보물이 … — 게임 13개 · 레벨 데이터 10개
+     *
+     * 로 빨간불이었습니다. 확인해 보니 **게임이 맞고 검사가 틀렸습니다** —
+     * 항아리(`urnFull`) 3개도 깨면 같은 상자가 나오고 정련석도 줍니다.
+     * 같은 실수를 `upgrade-probe.mjs` 가 이미 한 번 했었습니다(그 자리에
+     * 기록이 남아 있습니다). **두 번 나온 실수는 부주의가 아니라 규칙이
+     * 흩어져 있다는 신호**라서, 목록을 `format.ts` 한 곳으로 옮기고
+     * 여기서는 **게임에게 물어봅니다**. 이제 종류가 늘어도 이 줄은
+     * 고칠 것이 없습니다.
      */
+    const treasureKinds = await zone.evaluate(() => window.__game.treasureKinds())
+    const levelTreasures = LEVEL.entities.filter((e) => treasureKinds.includes(e.kind)).length
+    check(
+      '존의 보물이 레벨 데이터와 같은 수로 배치됨',
+      // 0 === 0 은 통과가 아닙니다 — 창구가 빈 목록을 주면 양쪽 다 0이 되어
+      // **아무것도 안 세고** 초록이 됩니다(「빈 표본으로 통과하지 않게」).
+      levelTreasures > 0 && zs.treasureTotal === levelTreasures,
+      `게임 ${zs.treasureTotal}개 · 레벨 데이터 ${levelTreasures}개 (${treasureKinds.join('+') || '종류 없음❗'})`,
+    )
     const roster = await zone.evaluate(() => window.__game.levelRoster())
     const rosterTotal = Object.values(roster).reduce((a, b) => a + b, 0)
     check(
