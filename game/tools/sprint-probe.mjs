@@ -98,6 +98,22 @@ try {
     }
     window.__spd = async (opts) => {
       const G = window.__game
+      /**
+       * ── ⚠️ **같은 자리에서 시작하지 않으면 벽을 재게 됩니다** ────────────
+       *
+       * 이 함수는 앞 측정이 끝난 **그 자리에서** 다시 걷기 시작했습니다.
+       * 측정을 대여섯 번 하면 플레이어는 20m 넘게 북쪽으로 가 있고,
+       * 결국 **벽에 붙습니다.** 그러면 «걷기 0.00m/s» 가 나오는데, 그건
+       * 게임이 아니라 **재는 자리**의 이야기입니다.
+       *
+       * 실제로 그렇게 빨간불이 떴습니다:
+       *     ❌ 붙는 중에도 걷기보다는 빠르다 — 달리기 0.00 vs 걷기 0.00m/s
+       * (그 뒤 창을 넓히자 달리기 0.98 · 걷기 0.00 — 한쪽만 벽 앞에서
+       *  한 프레임 더 움직인 것이었습니다.)
+       *
+       * 그래서 **매번 판을 처음으로 되돌립니다.** 같은 땅, 같은 방향.
+       */
+      G.reset()
       G.clearEnemies?.()
       await window.__idle()
       // 매번 같은 조건에서 시작합니다 — 앞 측정의 가속이 남으면 거짓이 됩니다.
@@ -166,8 +182,31 @@ try {
    * 가속**도 들어 있어서, 애초에 견줄 수 없는 두 값이었습니다.
    * 그래서 걷기도 같은 정지 출발로 재서 나란히 놓습니다.
    */
-  const rampRun = await page.evaluate(() => window.__spd({ sprint: true, settle: 0, window: 0.25, attackAt: -1 }))
-  const rampWalk = await page.evaluate(() => window.__spd({ sprint: false, settle: 0, window: 0.25, attackAt: -1 }))
+  /**
+   * ── ⚠️ **0.25초 창은 이 기계에서 «아무것도 안 담기는» 창이었습니다** ──
+   *
+   * 이 두 줄은 정지 출발 **0.25초**를 쟀는데, 오래 안 돌리다 다시 돌려 보니
+   * 이렇게 나왔습니다:
+   *
+   *     ❌ 붙는 중에도 걷기보다는 빠르다 — 달리기 **0.00** vs 걷기 **0.00m/s**
+   *
+   * 둘 다 0 입니다. 게임이 안 움직인 게 아니라 **창 안에 움직임이 안
+   * 담긴** 것입니다 — 소프트웨어 렌더링에서 이 게임은 한 프레임이 50ms
+   * 안팎이고, 정지 출발 직후 한두 프레임은 가속이 거의 0 입니다.
+   * 그 상태에서 `>` 하나로 갈리니 **0 대 0 으로 빨강**이 납니다.
+   *
+   * 「빈 표본으로 통과하지 않게」의 쌍둥이입니다 — **빈 표본으로 실패해도
+   * 안 됩니다.** 창을 0.5초로 넓히고(여전히 정착 0.6초보다 짧아 «붙는
+   * 중»을 봅니다), 그 창에 움직임이 있었는지를 **먼저 게이트로** 묻습니다.
+   */
+  const RAMP = 0.5
+  const rampRun = await page.evaluate(([w]) => window.__spd({ sprint: true, settle: 0, window: w, attackAt: -1 }), [RAMP])
+  const rampWalk = await page.evaluate(([w]) => window.__spd({ sprint: false, settle: 0, window: w, attackAt: -1 }), [RAMP])
+  check(
+    rampRun.speed > 0 && rampWalk.speed > 0,
+    '🚧 정지 출발 창에 **움직임이 담겼다** (0 대 0 으로 갈리지 않게)',
+    `달리기 ${rampRun.speed.toFixed(2)} · 걷기 ${rampWalk.speed.toFixed(2)}m/s · 창 ${RAMP}초(잰 ${rampRun.dt.toFixed(2)}초)`,
+  )
   check(
     rampRun.speed < run.speed * 0.97,
     '최고 속도까지 붙는 시간이 있다 (즉시면 걷기와 구분이 없습니다)',
