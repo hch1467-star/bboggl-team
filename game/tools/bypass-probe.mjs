@@ -144,6 +144,14 @@ try {
       let travelled = 0
       let last = { x: start.x, z: start.z }
       let arrived = false
+      /**
+       * 🔔 종주의 **절반 지점**(m). 스폰→보스가 약 185m 라 그 절반입니다.
+       * 여기에 미터를 적어 두는 대신 게임에게 물을 수도 있지만, 이 값은
+       * *"어디서 견줄까"* 라는 **재는 쪽의 선택**이지 게임의 규칙이
+       * 아닙니다 — 그런 값은 프로브에 두는 것이 맞습니다.
+       */
+      const HALF_WAY = 90
+      let awakeHalf = -1
       let stuckSince = t0
       let stuckPos = { x: start.x, z: start.z }
       let stuckTime = 0
@@ -158,6 +166,32 @@ try {
 
         travelled += Math.hypot(p.x - last.x, p.z - last.z)
         last = { x: p.x, z: p.z }
+
+        /**
+         * 🔔 **깨운 수는 «같은 지점»에서 견줍니다** — 끝에서 세면 포화합니다.
+         *
+         * ── 이 검사는 죽음이 만든 초록으로 통과하고 있었습니다 ────────
+         * 「달리면 더 많이 깨운다」를 종주가 **끝난 뒤**의 수로 걸고
+         * 있었습니다. 사진 방식으로 고쳐 살아 있는 값을 재니:
+         *     달려서 15마리(15~15) vs 걸어서 **15마리(15~15)** — 차이 0
+         * 그전에 통과하던 15 vs 0 의 그 0은 **화톳불에서 잰 수**였습니다.
+         *
+         * 그런데 0이 아니라고 해서 소리 규칙이 죽은 것도 아닙니다.
+         * 184m 를 다 지나온 **끝**에서 세면 걷든 달리든 길 옆을 전부
+         * 깨워서 **포화**합니다 — 두 수가 같은 것이 당연합니다.
+         * 소리가 만드는 차이는 *가는 도중*에 있습니다.
+         *
+         * 그래서 **같은 거리를 지났을 때**의 수를 따로 찍습니다. 그러면
+         * 걷기와 달리기가 «본 세계의 양»이 같고 **속도만** 다릅니다 —
+         * 비교가 성립하는 유일한 자리입니다.
+         *
+         * ⚠️ 시간이 아니라 **거리**로 자릅니다. 같은 시간에 자르면 달리는
+         *    쪽이 더 멀리 가 있어서, 재는 것이 *"소리가 큰가"* 가 아니라
+         *    **"더 갔는가"** 가 됩니다 — 이번 회차에 창을 두고 정확히 같은
+         *    실수를 한 번 고쳤습니다.
+         */
+        if (awakeHalf < 0 && travelled >= HALF_WAY)
+          awakeHalf = G.threats(300).filter((t) => t.aggro).length
 
         // 받은 피해 — 회복이 없으므로 줄어든 만큼이 곧 피해입니다.
         if (p.hp < lastHp - 0.01) {
@@ -331,11 +365,29 @@ try {
       let snap = { awake: 0, chasing: 0, inArena: 0 }
       let billed = 0
       let settleDeaths = 0
+      let settleHeal = 0
+      let settleMinHp = arriveHp2
       let prevHp = arriveHp2
       while (now() - arenaSettle < 8 && Date.now() < wallDeadline) {
         const hp = G.state().player.hp
         if (hp < prevHp - 0.01) billed += prevHp - hp
-        if (hp > prevHp + 0.01) settleDeaths++ // 회복이 없으므로 = 부활
+        /**
+         * ⚠️ **체력이 올라간 것을 「부활」이라고 단정하면 안 됩니다.**
+         *
+         * 처음엔 `hp > prevHp` 를 그냥 죽음으로 셌습니다. 그런데 로그가
+         * 앞뒤가 안 맞았습니다 — 죽은 판이 있다면 그 판의 청구서는
+         * **도착 체력 전부**(58~96)여야 하는데 폭의 최댓값이 45.2 였습니다.
+         * 즉 올라간 이유가 부활이 아닐 수 있습니다(성수병·구간 회복 등).
+         *
+         * 그래서 **올라간 양과 창 안 최저 체력을 같이 찍습니다.**
+         * 최저가 0 근처면 진짜 죽음이고, 아니면 회복입니다. 이름을 붙이기
+         * 전에 재는 것 — 이 회차에 네 번 물린 그 순서입니다.
+         */
+        if (hp > prevHp + 0.01) {
+          settleDeaths++
+          settleHeal += hp - prevHp
+        }
+        if (hp < settleMinHp) settleMinHp = hp
         prevHp = hp
         const th = G.threats(300)
         let near = 0
@@ -376,6 +428,8 @@ try {
         travelled: Number(travelled.toFixed(0)),
         kills: end.kills,
         awake,
+        /** 같은 거리(절반 지점)를 지났을 때 깨어 있던 수 — 소리 규칙의 자리 */
+        awakeHalf: awakeHalf < 0 ? 0 : awakeHalf,
         chasing,
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
@@ -385,8 +439,12 @@ try {
          * ⚠️ 「끝-시작」이 아닙니다(부활이 값을 0으로 뒤집던 자리 — 위 주석).
          */
         trainBill: Number(billed.toFixed(1)),
-        /** 그 창 안에서 죽은 횟수 — 0이 아니면 청구서는 **아래끝**입니다. */
+        /** 그 창 안에서 체력이 올라간 횟수 — 죽음일 수도, 회복일 수도. */
         settleDeaths,
+        /** 그때 올라간 총량 — 가득 차면 부활, 성수병 한 병이면 회복입니다. */
+        settleHeal: Number(settleHeal.toFixed(1)),
+        /** 창 안 최저 체력 — 0 근처면 진짜 죽음입니다. */
+        settleMinHp: Number(settleMinHp.toFixed(1)),
         /** 무리가 오기까지 기다린 시간(초) — 20초는 "안 왔다"는 뜻입니다. */
         trainWait: Number(trainWait.toFixed(1)),
         /** 8초 창 중 **내 사거리 안에 적이 하나라도 있던** 시간(초) */
@@ -455,6 +513,10 @@ try {
     nearest: med(runs.map((r) => r.nearest)),
     nearestSpan: span(runs.map((r) => r.nearest)),
     settleDeaths: runs.reduce((n, r) => n + r.settleDeaths, 0),
+    settleHeal: span(runs.map((r) => r.settleHeal)),
+    settleMinHp: span(runs.map((r) => r.settleMinHp)),
+    awakeHalf: med(runs.map((r) => r.awakeHalf)),
+    awakeHalfSpan: span(runs.map((r) => r.awakeHalf)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
     awakeMin: Math.min(...runs.map((r) => r.awake)),
@@ -481,7 +543,8 @@ try {
     `           └ 그 8초 중 **때릴 수 있는 자리**에 적이 있던 시간 ${r.reachTime}초(${r.reachTimeSpan}) · ` +
     `평균 ${r.reachAvg}마리 · 가장 가까웠던 거리 ${r.nearest}m(${r.nearestSpan})` +
     (r.settleDeaths
-      ? `\n           └ ⚰️ 그 창에서 죽은 판 ${r.settleDeaths}회 — 그 판의 청구서는 «죽을 만큼»이라 **아래끝**입니다`
+      ? `\n           └ ⚰️ 그 창에서 체력이 올라간 판 ${r.settleDeaths}회 · 올라간 양 ${r.settleHeal} · 창 안 최저 체력 ${r.settleMinHp}` +
+        ` — 최저가 0 근처면 **부활**(청구서는 아래끝), 아니면 회복입니다`
       : '')
   console.log(line('걸어서', walk))
   console.log(line('달려서', run) + '\n')
@@ -595,10 +658,16 @@ try {
    * **중앙값과 폭을 같이 보되, 판정은 중앙값으로.** 폭은 사람이 읽으라고
    * 옆에 찍습니다.
    */
+  /**
+   * ⚠️ **끝이 아니라 절반 지점에서 견줍니다** (바로 위 `HALF_WAY` 주석).
+   * 끝에서 세면 걷든 달리든 길 옆을 다 깨워 **포화**해서, 규칙이 살아
+   * 있어도 두 수가 같습니다. 끝의 수는 사람이 읽으라고 옆에 찍습니다.
+   */
   check(
-    run.awake > walk.awake,
-    '달리면 더 많이 깨운다 (발소리가 속도를 탄다)',
-    `달려서 ${run.awake}마리(${run.awakeSpan}) vs 걸어서 ${walk.awake}마리(${walk.awakeSpan})`,
+    run.awakeHalf > walk.awakeHalf,
+    '달리면 더 많이 깨운다 (발소리가 속도를 탄다 — **같은 거리를 지났을 때**)',
+    `절반(90m)에서 달려서 ${run.awakeHalf}마리(${run.awakeHalfSpan}) vs 걸어서 ${walk.awakeHalf}마리(${walk.awakeHalfSpan})` +
+      ` · 끝에서는 ${run.awake} vs ${walk.awake} (여기선 둘 다 포화합니다)`,
   )
   /**
    * ── ⚠️ **이 줄은 지금 «벽»일 수 있습니다 — 천장을 안 재 봤습니다** ────
