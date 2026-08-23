@@ -770,6 +770,48 @@ try {
   )
 
   /**
+   * 🚶 **적 → 나** 의 걸음 거리 장. 깨는 판정이 쓰는 바로 그 방향입니다.
+   *
+   * ── 왜 직선을 쓰면 안 되는가 ─────────────────────────────────────
+   * `enemyAI` 의 깨는 식은 `reachDistance(적의 x, z)` — **그 적이
+   * 나에게 오려면 걸어야 하는 거리**입니다. 직선은 그 값을 **과소평가**
+   * 하므로, 직선으로 재면 **실제로는 안 깨는 적을 «깬다»고 셉니다.**
+   *
+   * 실측(같은 파일 📏 줄): 직선 16마리 · 걸어서 15마리 · 최대 어긋남
+   * **+46.0m**. 직선 10m 인 달려드는 자가 실제로는 **36m 를 걸어와야**
+   * 하고 깨는 거리는 14m 이라 **영원히 안 깹니다.** 그 한 마리를 세는
+   * 검사는 없는 것을 세고 있었습니다.
+   *
+   * ⚠️ **방향이 있습니다.** 장을 «동선»에서 띄우면 «나 → 적» 이 되어
+   *    다른 값이 나옵니다(오르막은 `MAX_CLIMB` 로 막히는데 내리막은
+   *    안 막히므로 두 방향이 대칭이 아닙니다). 그래서 **적마다** 띄웁니다.
+   *
+   * ⚠️ 천장(ceiling)을 셀 때는 직선이라도 괜찮습니다 — 직선은 걸음보다
+   *    **작거나 같으므로** 직선으로 센 값은 여전히 **상한**입니다.
+   *    «후한 자»는 천장에는 맞고 **판정에는 틀립니다.**
+   */
+  const foeFieldCache = new Map()
+  const foeField = (cx, cz) => {
+    const k = cz * level.w + cx
+    let f = foeFieldCache.get(k)
+    if (!f) {
+      f = walkField([{ cx, cz }], maxClimb, CELL)
+      foeFieldCache.set(k, f)
+    }
+    return f
+  }
+  /** 이 적이 **동선 어딘가에서** 깨는가 — 걸음 거리로. */
+  const wakesOnRoute = (cx, cz, kind, cells = routeCells) => {
+    const f = foeField(cx, cz)
+    const wake = wakeOf(kind)
+    for (const r of cells) {
+      const d = f.get(r.cz * level.w + r.cx)
+      if (d !== undefined && d <= wake) return true
+    }
+    return false
+  }
+
+  /**
    * ---- 6.4 **쏘는 적의 사거리가 주 동선을 덮는가** ----
    *
    * 앞의 검사(닿을 수 있는가)만 만들고 궁수를 세웠더니, 3판 내내
@@ -1121,6 +1163,11 @@ try {
       for (let cz = 0; cz < level.h; cz++) {
         for (let cx = 0; cx < level.w; cx++) {
           if (heightAt(cx, cz) === VOID) continue
+          // guard-allow: 직선 — **천장**이라 후한 자가 맞습니다. 직선은 걸음보다
+          //   작거나 같으므로 직선으로 센 값은 여전히 **상한**입니다(그리고
+          //   여기서 재는 것은 «어떤 자리에 서면 최대 몇 칸을 덮는가»라,
+          //   실제 적이 아니라 **가상의 자리** 전부를 훑습니다 — 칸마다
+          //   걸음 장을 띄우면 6336번의 BFS 가 됩니다).
           const n = routeCells.filter(
             (c) => Math.hypot(c.cx - cx, c.cz - cz) * CELL <= wakeRange,
           ).length
@@ -1134,9 +1181,16 @@ try {
        * 언젠가 둘이 어긋납니다(이 저장소가 세 번 낸 사고).
        */
       const shotsAgainst = (roadCells, ac) => {
-        const inside = roadCells.filter(
-          (c) => Math.hypot(c.cx - ac.cx, c.cz - ac.cz) * CELL <= wakeRange,
-        ).length
+        /**
+         * 🚶 **걸음 거리로 셉니다** — 이건 천장이 아니라 **이 궁수 하나에
+         * 대한 판정**입니다(몇 발 쏘는가). 깨는 판정이 걸음 거리를 쓰므로
+         * 직선으로 세면 실제로는 못 깨는 칸까지 «사거리 안»으로 셉니다.
+         */
+        const acField = foeField(ac.cx, ac.cz)
+        const inside = roadCells.filter((c) => {
+          const d = acField.get(c.cz * level.w + c.cx)
+          return d !== undefined && d <= wakeRange
+        }).length
         const metres = inside * CELL
         const seconds = metres / walkSpeed
         return { metres, seconds, shots: seconds / archerDef.attackCycle }
@@ -1234,6 +1288,7 @@ try {
         for (let cz = 0; cz < level.h; cz++) {
           for (let cx = 0; cx < level.w; cx++) {
             if (heightAt(cx, cz) === VOID) continue
+            // guard-allow: 직선 — 위 천장과 같은 이유(상한 · 가상의 자리 전부).
             const n = secondRoad.cells.filter(
               (c) => Math.hypot(c.cx - cx, c.cz - cz) * CELL <= wakeRange,
             ).length
@@ -1543,9 +1598,8 @@ try {
   let runStart = null
   let runLen = 0
   for (const c of routeCells) {
-    const near = foes.some(
-      (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
-    )
+    // 🚶 걸음 거리로 — 직선이면 못 오는 적이 이 칸을 «지킨다»고 셉니다.
+    const near = foes.some((f) => wakesOnRoute(f.cx, f.cz, f.kind, [c]))
     if (near) {
       if (runStart && runLen * CELL >= 16) {
         quiet.push({ from: runStart, to: c, metres: runLen * CELL })
@@ -1591,9 +1645,8 @@ try {
     let len = 0
     let gap = 0
     for (const c of routeCells) {
-      const near = foes.some(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
-      )
+      // 🚶 걸음 거리로 — 위 「빈 구간」과 같은 이유입니다.
+      const near = foes.some((g) => wakesOnRoute(g.cx, g.cz, g.kind, [c]))
       if (near) {
         if (start === null) {
           start = c
@@ -1796,6 +1849,11 @@ try {
             const cx = c.cx + dx
             const cz = c.cz + dz
             if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) continue
+            // guard-allow: 직선 — 여기서는 후한 자가 **안전한 쪽**입니다.
+            //   이 집합은 «피해서 지나갈 칸»을 고르는 데 쓰이므로, 직선으로
+            //   넓게 막으면 실제보다 **조심스러운** 길이 나옵니다.
+            //   ⚠️ 다만 너무 넓게 막으면 «길이 없다»는 거짓 결론이 날 수
+            //      있습니다 — 그 날이 오면 여기도 걸음 거리로 바꿉니다.
             if (Math.hypot(dx, dz) * cell > aggroM) continue
             blocked.add(cz * level.w + cx)
           }
@@ -1862,12 +1920,19 @@ try {
      */
     let slack = Infinity
     for (const c of routeCells) {
+      /**
+       * 🚶 **걸음 거리로** — 두 속박이 한 자리에서 겹치는지는 «올 수 있는가»의
+       * 문제입니다. 직선으로 재면 벽 뒤의 적까지 «겹친다»고 세어, 실제로는
+       * 없는 겹침 때문에 배치를 옮기게 됩니다.
+       */
       const surplus = ccFoes
-        .map((f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) - wakeOf(f.kind))
+        .map((f) => {
+          const d = foeField(f.cx, f.cz).get(c.cz * level.w + c.cx)
+          return (d === undefined ? Infinity : d) - wakeOf(f.kind)
+        })
         .sort((a, b) => a - b)
-      const near = ccFoes.filter(
-        (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
-      )
+      // 🚶 위 `surplus` 와 같은 자를 씁니다 — 한 검사 안에서 자가 갈리면 안 됩니다.
+      const near = ccFoes.filter((f) => wakesOnRoute(f.cx, f.cz, f.kind, [c]))
       if (surplus.length >= 2 && surplus[1] < slack) slack = surplus[1]
       if (near.length >= 2) {
         overlap++
@@ -2187,10 +2252,12 @@ try {
         drop: 0,
         behindDrop: 0,
       }
-      // 이 적이 **동선에서 깨어나는가** — 안 깨면 있어도 없는 것입니다.
-      const onRoute = routeCells.some(
-        (r) => Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL) <= wakeOf(e.kind),
-      )
+      /**
+       * 이 적이 **동선에서 깨어나는가** — 안 깨면 있어도 없는 것입니다.
+       * 🚶 **걸음 거리**로 묻습니다(`wakesOnRoute` 주석) — 직선으로 물으면
+       *    36m 를 걸어와야 하는 적을 «10m 곁에 있다»고 세게 됩니다.
+       */
+      const onRoute = wakesOnRoute(c.cx, c.cz, e.kind)
       /**
        * 📍 **동선 몇 미터 지점에서 만나는가.** `routeCells` 는 스폰→보스
        * 순서대로 이어진 발자국이라 **번호 자체가 거리**입니다.
@@ -2368,6 +2435,85 @@ try {
             .join(' · ')}`
         : `동선에서 깨는 ${onRoad.length}마리 모두 낙차가 옆이나 앞입니다 — 밀면 벽에 붙고, 그 절벽은 **내가** 떨어지는 쪽입니다`,
     )
+  }
+
+  /**
+   * ── 📏 **직선으로 재는 것과 걸어서 재는 것이 얼마나 다른가** ────────
+   *
+   * 이 파일은 「이 적이 동선에서 깨는가」를 **열 군데 가까이**에서
+   * `Math.hypot(...) <= wakeOf(kind)` 로 재고 있습니다. 그런데 게임의
+   * 깨는 식은 직선이 아닙니다(`enemyAI`):
+   *
+   *     const effectiveDist = reachDistance(적의 x, z) ?? Infinity
+   *     if (effectiveDist <= (inFront ? range : hearDistance(speed)))
+   *
+   * **걸어야 하는 거리**입니다. 직선은 거리를 **과소평가**하므로,
+   * 직선으로 재면 실제로는 안 깨는 적을 «깬다»고 셉니다 — 즉 이 지도의
+   * 동선 위험도·색 배분·순서 검사가 전부 **실제보다 후하게** 나옵니다.
+   *
+   * 열 군데를 고치기 전에 **틀린 정도부터 잽니다.** 0마리면 지형이
+   * 열려 있어 둘이 같았던 것이고(고쳐도 값이 안 바뀝니다), 몇 마리라도
+   * 갈리면 그동안의 초록 중 일부가 **직선이 만든 초록**이었습니다.
+   */
+  {
+    /**
+     * ⚠️ **방향이 있습니다 — 걸음 장을 «적»에서 띄웁니다.**
+     *
+     * 처음엔 `walkField(routeCells, …)` 로 재려 했습니다. 그건
+     * **«나 → 적»** 의 거리입니다. 그런데 깨는 규칙이 보는 것은
+     * `reachDistance(적의 x, z)` — **«적 → 나»** 입니다. 오르막은
+     * `MAX_CLIMB` 로 막히는데 내리막은 안 막히므로 **두 방향이 다릅니다**
+     * (이 저장소가 이미 한 번 기록해 둔 구분입니다).
+     *
+     * 그래서 적마다 장을 하나씩 띄웁니다. 31마리 × 6336칸이라 값쌉니다.
+     */
+    const rows = []
+    for (const m of mobs) {
+      // guard-allow: 직선 — 이 블록은 **직선과 걸음의 차이를 재는 것**이
+      //   목적이라, 직선 쪽을 일부러 계산합니다. 판정이 아니라 기록입니다.
+      let straight = Infinity
+      for (const r of routeCells) {
+        const d = Math.hypot((r.cx - m.cx) * CELL, (r.cz - m.cz) * CELL)
+        if (d < straight) straight = d
+      }
+      const field = walkField([{ cx: m.cx, cz: m.cz }], maxClimb, CELL)
+      let walked = Infinity
+      for (const r of routeCells) {
+        const d = field.get(r.cz * level.w + r.cx)
+        if (d !== undefined && d < walked) walked = d
+      }
+      const wake = wakeOf(m.kind)
+      rows.push({ kind: m.kind, straight, walked, wake })
+    }
+    const byStraight = rows.filter((r) => r.straight <= r.wake).length
+    const byWalk = rows.filter((r) => r.walked <= r.wake).length
+    const flipped = rows.filter((r) => r.straight <= r.wake && r.walked > r.wake)
+    const worst = rows.reduce((m2, r) => Math.max(m2, r.walked - r.straight), 0)
+    console.log(
+      `\n  📏 깨는 거리를 **직선**으로 재면 ${byStraight}마리 · **걸어서** 재면 ${byWalk}마리` +
+        ` · 가장 크게 어긋난 적 +${worst.toFixed(1)}m` +
+        (flipped.length
+          ? `\n     ⚠️ 직선으로만 깨는 것 ${flipped.length}마리 — ${flipped
+              .map((r) => `${r.kind} 직선 ${r.straight.toFixed(1)}m vs 걸어서 ${r.walked.toFixed(1)}m (깨는 거리 ${r.wake}m)`)
+              .join(' · ')}`
+          : ''),
+    )
+    /**
+     * ⚠️ **이 줄은 판정이 아니라 기록입니다.**
+     *
+     * 처음엔 `flipped.length === 0` 으로 걸었습니다. 그런데 그건
+     * **지형의 사실**이지 결함이 아닙니다 — 벽 뒤에 선 적은 직선으로
+     * 가깝고 걸어서 멉니다. 그걸 빨갛게 만들면 *"지도를 평평하게
+     * 만들어라"* 고 요구하는 셈이고, 그건 이 존의 설계가 아닙니다.
+     *
+     * 진짜 결함은 **«판정»에 직선 자를 쓰는 것**이고, 그건 판마다
+     * 달라지는 값이 아니라 **코드에 적혀 있는 것**이라 `npm run guard`
+     * 가 정적으로 잡습니다. 이 줄은 사람이 «얼마나 어긋나는가»를 볼 수
+     * 있게 남깁니다.
+     *
+     * 이 저장소가 `pace` 의 구간 폭에서 쓴 것과 같은 처방입니다 —
+     * **못 재는 것을 문턱으로 만들지 말고 기록으로 두기.**
+     */
   }
 
   /**

@@ -761,5 +761,86 @@ check(
   )
 }
 
+/**
+ * ── 🚶 **깨는 거리를 «직선»으로 재지 않는다** ─────────────────────────
+ *
+ * ── 왜 이 검사가 생겼나 (같은 실수를 두 번 했습니다) ──────────────────
+ * 게임의 깨는 식은 직선거리가 아닙니다(`enemyAI`):
+ *
+ *     const effectiveDist = reachDistance(적의 x, z) ?? Infinity
+ *     if (effectiveDist <= (inFront ? range : hearDistance(speed)))
+ *
+ * **그 적이 나에게 오려면 걸어야 하는 거리**입니다. 직선은 그 값을
+ * **과소평가**하므로, 직선으로 재면 **실제로는 안 깨는 적을 «깬다»고**
+ * 셉니다 — 검사가 실제보다 후해집니다.
+ *
+ * 이 저장소는 이걸 궁수 검사에서 한 번 배웠는데, 그 뒤에 만든 🔇 검사가
+ * **같은 실수를 그대로 되풀이했습니다.** 실측: 직선 16마리 · 걸어서
+ * 15마리 · 최대 어긋남 **+46.0m**(직선 10m 인 달려드는 자가 실제로는
+ * 36m 를 걸어와야 하고, 깨는 거리는 14m 이라 영원히 안 깹니다).
+ *
+ * 배운 것을 **주석에만** 적어 두면 다음 검사가 또 틀립니다 — 이번 회차에
+ * 「주석이 약속한 것을 코드가 안 지킨다」를 세 번 겪었습니다. 그래서
+ * 규칙을 **검사로** 굳힙니다.
+ *
+ * ── 무엇을 잡는가 ────────────────────────────────────────────────
+ * 프로브에서 `Math.hypot(...)` 의 결과를 **깨는 거리**(`wakeOf` ·
+ * `wakeRange` · `aggro…` · `hearWalk/hearRun`)와 비교하는 줄.
+ *
+ * ⚠️ **직선이 맞는 자리도 있습니다:**
+ *   · **고함**(`alertRadius`) — 들리는 것이지 걸어오는 것이 아닙니다.
+ *   · **천장**(ceiling) — 직선은 걸음보다 작거나 같으므로, 직선으로 센
+ *     값은 여전히 **상한**입니다. 후한 자는 천장에는 맞고 **판정에는**
+ *     틀립니다.
+ *   그런 줄에는 `guard-allow: 직선` 을 같은 줄이나 윗줄에 답니다.
+ *   면제에는 **이유를 같이** 적으십시오 — 이유 없는 면제는 다음 사람이
+ *   복사해 씁니다.
+ */
+{
+  const bad = []
+  for (const f of files) {
+    const src = readFileSync(path.join(HERE, f), 'utf8')
+    const lines = src.split('\n')
+    let inBlock = false
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i]
+      /**
+       * ⚠️ **주석 안의 인용문을 코드로 세면 안 됩니다.** 이 검사를 처음
+       *    돌렸을 때, 바로 이 규칙을 **설명하는 주석**이 `Math.hypot(...)`
+       *    를 인용했다는 이유로 빨갛게 잡혔습니다. 규칙을 적어 둔 글이
+       *    규칙 위반으로 잡히는 자리라, 웃기기 전에 **검사가 무엇을
+       *    읽는지**를 말해 줍니다 — 위 `Math.random` 검사가 같은 처리를
+       *    이미 하고 있었는데 여기에 안 옮겨 적었습니다.
+       */
+      if (inBlock) {
+        if (raw.includes('*/')) inBlock = false
+        continue
+      }
+      if (/^\s*\/\*/.test(raw) && !raw.includes('*/')) {
+        inBlock = true
+        continue
+      }
+      const code = raw.replace(/\/\/.*$/, '')
+      if (!/Math\s*\.\s*hypot\s*\(/.test(code)) continue
+      // 깨는 거리와 견주는 줄만 — 다른 거리 계산은 상관없습니다.
+      if (!/wakeOf|wakeRange|aggroM|levelAggroRange|hearWalk|hearRun|hear\.walk|hear\.run/.test(code))
+        continue
+      /**
+       * 면제 표시는 **위 여덟 줄까지** 봅니다. 이유를 적으려면 한 줄로는
+       * 모자라서 대개 여러 줄 주석이 되는데, 바로 윗줄만 보면 그 주석이
+       * 안 보입니다(실제로 처음에 그렇게 만들어 놓고 네 곳을 놓쳤습니다).
+       */
+      const near = lines.slice(Math.max(0, i - 8), i + 1).join('\n')
+      if (near.includes('guard-allow: 직선')) continue
+      bad.push(`${f}:${i + 1}`)
+    }
+  }
+  check(
+    bad.length === 0,
+    '🚶 프로브가 **깨는 거리를 직선으로 재지 않는다** (게임은 걸음 거리를 씁니다 · 면제는 `guard-allow: 직선`)',
+    bad.length ? `${bad.length}곳 — ${bad.slice(0, 4).join(' | ')}` : `프로브 ${files.length}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)
