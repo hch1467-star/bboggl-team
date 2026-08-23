@@ -282,7 +282,37 @@ try {
       let windowFrames = 0
       let reachSum = 0
       let nearest = 999
+      /**
+       * 💸 **청구서는 «끝-시작»이 아니라 «맞은 것을 더해서» 셉니다.**
+       *
+       * ── 왜 고쳤나 (계기가 계기를 잡았습니다) ──────────────────────
+       * 원래는 `도착 체력 - 8초 뒤 체력` 이었습니다. 그러면 창 안에서
+       * 체력이 **올라가는** 일이 생길 때 값이 거짓말을 합니다:
+       *   · 죽어서 화톳불에서 되살아나면 체력이 가득 찹니다 → 뺄셈이
+       *     음수 → `Math.max(0, …)` 가 **0** 으로 깎습니다.
+       *   · 즉 **가장 아팠던 판이 «청구서 0»** 으로 적힙니다. 정확히
+       *     거꾸로입니다.
+       * 새로 넣은 「때릴 수 있는 자리에 적이 있던 시간」이 이걸 드러냈습니다 —
+       * 걷기 판이 *"6.6초 동안 사거리 안에 평균 1.5마리, 청구서 **0**"*
+       * 이라고 찍혔습니다. 둘이 같이 성립할 수 없는 수라서 잡혔습니다.
+       * 계기를 하나 더 달면 **먼저 있던 계기의 거짓말**이 드러납니다.
+       *
+       * 그래서 종주 구간이 이미 쓰던 방식(프레임마다 줄어든 만큼 더하기)을
+       * 그대로 씁니다 — 「규칙은 한 곳에만」의 형제인 **같은 것은 같은 식으로**.
+       *
+       * ⚠️ 죽으면 **거기서 창을 닫습니다.** 되살아난 뒤의 자리는 화톳불이라
+       *    더 재 봐야 다른 이야기입니다. 그때의 청구서는 「죽을 만큼」이므로
+       *    실제 아픔의 **아래끝**이지 정확한 값이 아닙니다 — 로그에 죽음
+       *    횟수를 같이 찍어 사람이 그렇게 읽을 수 있게 합니다.
+       */
+      let billed = 0
+      let settleDeaths = 0
+      let prevHp = arriveHp2
       while (now() - arenaSettle < 8 && Date.now() < wallDeadline) {
+        const hp = G.state().player.hp
+        if (hp < prevHp - 0.01) billed += prevHp - hp
+        if (hp > prevHp + 0.01) settleDeaths++ // 회복이 없으므로 = 부활
+        prevHp = hp
         const near = G.threats(300).filter(
           (t) => t.aggro && t.dist <= (reachOf.get(t.kind) ?? 2),
         ).length
@@ -290,6 +320,7 @@ try {
         if (near > 0) reachFrames++
         reachSum += near
         for (const t of G.threats(300)) if (t.aggro && t.dist < nearest) nearest = t.dist
+        if (settleDeaths > 0) break
         await sleep()
       }
       const be2 = G.bossEncounter()
@@ -315,9 +346,14 @@ try {
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
         hpAfterSettle: Number(hpAfterSettle.toFixed(1)),
-        /** 무리가 도착한 뒤 가만히 선 8초 동안 잃은 체력 — 끌고 온 무리의 청구서 */
-        trainBill: Number(Math.max(0, arriveHp2 - hpAfterSettle).toFixed(1)),
-        /** 무리가 오기까지 기다린 시간(초) — 12초는 "안 왔다"는 뜻입니다. */
+        /**
+         * 무리가 도착한 뒤 가만히 선 8초 동안 **맞은 것을 더한 값** — 청구서.
+         * ⚠️ 「끝-시작」이 아닙니다(부활이 값을 0으로 뒤집던 자리 — 위 주석).
+         */
+        trainBill: Number(billed.toFixed(1)),
+        /** 그 창 안에서 죽은 횟수 — 0이 아니면 청구서는 **아래끝**입니다. */
+        settleDeaths,
+        /** 무리가 오기까지 기다린 시간(초) — 20초는 "안 왔다"는 뜻입니다. */
         trainWait: Number(trainWait.toFixed(1)),
         /** 8초 창 중 **내 사거리 안에 적이 하나라도 있던** 시간(초) */
         reachTime: Number(((reachFrames / Math.max(1, windowFrames)) * 8).toFixed(1)),
@@ -384,6 +420,7 @@ try {
     reachAvg: med(runs.map((r) => r.reachAvg)),
     nearest: med(runs.map((r) => r.nearest)),
     nearestSpan: span(runs.map((r) => r.nearest)),
+    settleDeaths: runs.reduce((n, r) => n + r.settleDeaths, 0),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
     awakeMin: Math.min(...runs.map((r) => r.awake)),
@@ -408,7 +445,10 @@ try {
     `보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}) · ` +
     `무리 도착까지 ${r.trainWait}초(${r.trainWaitSpan}) · 그 뒤 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})\n` +
     `           └ 그 8초 중 **때릴 수 있는 자리**에 적이 있던 시간 ${r.reachTime}초(${r.reachTimeSpan}) · ` +
-    `평균 ${r.reachAvg}마리 · 가장 가까웠던 거리 ${r.nearest}m(${r.nearestSpan})`
+    `평균 ${r.reachAvg}마리 · 가장 가까웠던 거리 ${r.nearest}m(${r.nearestSpan})` +
+    (r.settleDeaths
+      ? `\n           └ ⚰️ 그 창에서 죽은 판 ${r.settleDeaths}회 — 그 판의 청구서는 «죽을 만큼»이라 **아래끝**입니다`
+      : '')
   console.log(line('걸어서', walk))
   console.log(line('달려서', run) + '\n')
 
@@ -576,7 +616,18 @@ try {
    * 천장의 분모는 쿨다운이 아니라 **붙잡는 시간**입니다.
    */
   {
-    const grunts = roster.filter((r) => r.attacks.length > 0 && !r.attacks.some((a) => a.projectile))
+    /**
+     * ⚠️ **보스는 뺍니다.** 처음 돌렸을 때 천장이 「수문장 boss_cleave —
+     * 8초에 241」로 찍혔습니다. 수가 크니 결론(*"벽이 아니다"*)은 같지만,
+     * 이 검사의 이름은 **「끌고 온 무리」**입니다 — 보스는 끌고 온 것이
+     * 아니라 원래 거기 있던 것이라, 그 손으로 천장을 세우면 *"무리가
+     * 아픈가"* 를 묻는 자리에 **다른 것의 힘**이 답하게 됩니다.
+     * (보스의 손이 청구서 자체에는 들어갑니다. 그건 검사가 재는 대상이
+     *  «그 자리에 서 있는 값»이라 맞습니다. 천장만 무리로 좁힙니다.)
+     */
+    const grunts = roster.filter(
+      (r) => r.id !== 'boss' && r.attacks.length > 0 && !r.attacks.some((a) => a.projectile),
+    )
     // 가장 «싼» 패턴 — 짧게 붙잡고 아프게 때리는 것이 천장을 만듭니다.
     let best = null
     for (const r of grunts)
