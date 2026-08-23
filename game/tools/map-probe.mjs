@@ -2371,6 +2371,111 @@ try {
   }
 
   /**
+   * ── 🔇 **조용히 지나갈 수 있는 자리가 있는가** ─────────────────────
+   *
+   * 절벽과 **똑같은 병**을 하나 더 찾아서 같은 처방을 씁니다 —
+   * *규칙은 코드에 있는데 일어날 자리가 지도에 없다.*
+   *
+   * 깨는 식: `보고 있으면 시야거리(14m) · 등 돌렸으면 듣는 거리`.
+   * 듣는 거리는 속도를 탑니다 — 걸어서 6.4m · 달려서 9m.
+   * 그러니 **두 값 사이의 띠**에 **등을 돌린 적**이 있어야만
+   * 「걸으면 안 깨우고, 달리면 깨운다」가 실제로 일어납니다.
+   *
+   * `npm run bypass` 가 그게 한 번도 안 일어난다고 찍었습니다 —
+   * 절반 지점에서 걸어서 9마리 vs 달려서 **9마리**(9판씩 · 폭도 9~9).
+   *
+   * ⚠️ 「등을 돌렸는가」는 **적의 부채꼴**로 봅니다(내 시야가 아닙니다).
+   *    동선에서 그 적을 향하는 방향이 적의 정면 부채꼴 밖이어야 합니다.
+   */
+  {
+    const hear = await page.evaluate(() => {
+      const t = window.__game.terrainInfo()
+      return { walk: t.hearWalk, run: t.hearRun, arc: t.frontArcDeg }
+    })
+    const arcCos = Math.cos(((hear.arc / 2) * Math.PI) / 180)
+    /** 동선에서 이 칸까지의 가장 짧은 거리(m) */
+    const routeDist = (cx, cz) => {
+      let best = Infinity
+      let at = null
+      let idx = -1
+      for (let i = 0; i < routeCells.length; i++) {
+        const r = routeCells[i]
+        const d = Math.hypot((r.cx - cx) * CELL, (r.cz - cz) * CELL)
+        if (d < best) {
+          best = d
+          at = r
+          idx = i
+        }
+      }
+      return { d: best, r: at, at: Math.round(idx * CELL) }
+    }
+    const quiet = []
+    for (const e of foes) {
+      const c = cellOf(e)
+      const { d, r } = routeDist(c.cx, c.cz)
+      if (!r) continue
+      // 적이 보는 쪽(레벨의 rotY) — 게임의 축과 같은 규약입니다.
+      const fx = Math.sin(e.rotY ?? 0)
+      const fz = Math.cos(e.rotY ?? 0)
+      const tox = (r.cx - c.cx) * CELL
+      const toz = (r.cz - c.cz) * CELL
+      const len = Math.hypot(tox, toz) || 1
+      const facing = (tox / len) * fx + (toz / len) * fz >= arcCos
+      if (!facing && d > hear.walk && d <= hear.run)
+        quiet.push({ kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), d: d.toFixed(1) })
+    }
+    console.log(
+      `\n  🔇 조용히 지나갈 수 있는 적 (동선에서 ${hear.walk.toFixed(1)}m 밖 · ${hear.run.toFixed(
+        1,
+      )}m 안 · 등을 돌리고 있음) — **${quiet.length}마리**` +
+        (quiet.length ? `\n     ${quiet.map((q) => `${q.kind}(${q.x},${q.z}) ${q.d}m`).join(' · ')}` : ''),
+    )
+    /**
+     * 💡 하나도 없으면 **놓을 자리를 이름으로** 냅니다 — 절벽에서 쓴 그
+     *    방식 그대로. 조건: 걸을 수 있고 · 띠 안이고 · 동선에서 보이는 곳.
+     */
+    if (!quiet.length) {
+      /**
+       * ⚠️ **후보는 동선을 따라 흩어서 냅니다.**
+       * 처음엔 격자를 순서대로 훑으며 여섯 개를 모았더니 **한 줄에서만**
+       * 나왔습니다(전부 cz15 · 전부 동선 8.0m). 그러면 *"어디가 이른
+       * 지점인가"* 를 못 고르고, 결국 사람이 좌표를 눈으로 읽게 됩니다 —
+       * 이 계기를 만든 이유가 바로 그걸 안 하려는 것이었습니다.
+       *
+       * 그래서 **동선 20m 칸마다 가장 좋은 후보 하나**만 남깁니다.
+       * 「좋다」는 두 문턱의 **한가운데에 가까움** — 양쪽에서 가장 멀리
+       * 떨어진 자리가 값이 조금 바뀌어도 안 뒤집힙니다.
+       */
+      const mid = (hear.walk + hear.run) / 2
+      const best = new Map()
+      for (let cz = 0; cz < level.h; cz++)
+        for (let cx = 0; cx < level.w; cx++) {
+          if (heightAt(cx, cz) === VOID) continue
+          const { d, at } = routeDist(cx, cz)
+          if (d <= hear.walk + 0.8 || d >= hear.run - 0.8) continue
+          const bucket = Math.floor(at / 20)
+          const score = Math.abs(d - mid)
+          const prev = best.get(bucket)
+          if (!prev || score < prev.score) best.set(bucket, { cx, cz, d, at, score })
+        }
+      const cands = [...best.values()].sort((a, b) => a.at - b.at)
+      if (cands.length)
+        console.log(
+          `     💡 등 돌린 적을 놓을 만한 칸 (동선 20m 칸마다 하나) — ${cands
+            .map((c) => `(${c.cx},${c.cz}) 동선 ${c.at}m 지점·${c.d.toFixed(1)}m 옆`)
+            .join(' · ')}`,
+        )
+    }
+    check(
+      quiet.length >= 1,
+      '🔇 **걸으면 안 깨우고 달리면 깨우는 적이 하나는 있다** (발소리 규칙이 일어날 자리)',
+      quiet.length
+        ? quiet.map((q) => `${q.kind}(${q.x},${q.z}) ${q.d}m`).join(' · ')
+        : `띠(${hear.walk.toFixed(1)}~${hear.run.toFixed(1)}m)에 등 돌린 적이 없습니다 — 소리가 속도를 타는 규칙이 코드에만 있게 됩니다`,
+    )
+  }
+
+  /**
    * ── 🔁 **되돌아오는 고리가 있는가** ───────────────────────────────
    *
    * 다크 소울 1 의 정체성은 지도가 **접힌다**는 것입니다 — 늦은 구역이 이른

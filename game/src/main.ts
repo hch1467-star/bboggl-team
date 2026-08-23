@@ -5554,6 +5554,20 @@ class Game {
     fallDamagePerStep: number
     /** 존에서 적이 깨어나는 거리(m) — 프로브가 상수를 베끼지 않게. */
     levelAggroRange: number
+    /**
+     * 🔇 **등 돌린 적이 «듣는» 거리**(m) — 걸을 때와 달릴 때.
+     *
+     * 깨는 식이 이렇습니다: `보고 있으면 시야거리 · 등 돌렸으면 이 거리`.
+     * 즉 소리 규칙은 **등 돌린 적에게만** 뜻이 있고, 두 값 **사이의 띠**
+     * 에서만 «걸어서 지나가기»와 «달려서 지나가기»의 답이 갈립니다.
+     *
+     * 프로브가 `1.8 + 7.2 × 속도비` 를 베껴 적으면, 값을 고치는 날
+     * 프로브만 옛 게임을 잽니다 — 게임의 `hearDistance` 로 계산해 냅니다.
+     */
+    hearWalk: number
+    hearRun: number
+    /** 「보고 있다」로 치는 부채꼴(도). 이 밖이면 소리만 듣습니다. */
+    frontArcDeg: number
     /** 달리기 배율 · 공격 템포 배율 — 프로브가 상수를 베끼지 않게. */
     sprintScale: number
     /** 달릴 때 시야가 넓어지는 배율 · 기본 시야(m) · 지금 카메라 줌. */
@@ -5639,6 +5653,10 @@ class Game {
       fallFreeSteps: FALL.freeSteps,
       fallDamagePerStep: FALL.damagePerStep,
       levelAggroRange: LEVEL_AGGRO_RANGE,
+      // 🔇 게임의 식으로 냅니다(선언부 주석) — 프로브가 상수를 안 베끼게.
+      hearWalk: hearDistance(PLAYER_CFG.moveSpeed),
+      hearRun: hearDistance(PLAYER_CFG.moveSpeed * PLAYER_CFG.sprint.speedScale),
+      frontArcDeg: AWARE.frontArcDeg,
       sprintScale: PLAYER_CFG.sprint.speedScale,
       sprintViewScale: CAMERA.sprintViewScale,
       cameraViewSize: CAMERA.viewSize,

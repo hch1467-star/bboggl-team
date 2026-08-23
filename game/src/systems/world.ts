@@ -135,7 +135,7 @@ export function spawnPlayer(x = 0, z = 0): number {
 }
 
 /** 잡몹과 보스는 같은 상태 기계를 공유합니다 — 수치와 외형만 다릅니다. */
-export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
+export function spawnEnemy(kind: EnemyKind, x: number, z: number, rotY?: number): number {
   const cfg = enemyDef(kind)
   const e = createEntity()
   addComponent(Transform, e)
@@ -150,8 +150,31 @@ export function spawnEnemy(kind: EnemyKind, x: number, z: number): number {
   Transform.x[e] = x
   Transform.y[e] = 0
   Transform.z[e] = z
-  // 스폰 즉시 원점(대체로 플레이어 쪽)을 바라보게 — 등 돌린 채 나타나면 어색합니다.
-  Transform.rotY[e] = Math.atan2(-x, -z)
+  /**
+   * 🧭 **바라보는 쪽** — 지도가 정했으면 그것을 씁니다.
+   *
+   * ── 왜 고쳤는가 (프로브가 잡았습니다) ────────────────────────────
+   * 원래는 무조건 `Math.atan2(-x, -z)` — **세계 원점 쪽**이었습니다.
+   * 실험대에서는 맞는 말입니다(적이 원점 둘레에 서고 플레이어가
+   * 가운데 있으니 «대체로 플레이어 쪽»). 그런데 **레벨에서는 원점이
+   * 아무 뜻도 없는 방향**입니다. 즉 이 존의 모든 적이 「지도가 정한
+   * 쪽」이 아니라 **「세계 원점 쪽」**을 보고 서 있었습니다.
+   *
+   * 이게 조용한 문제가 아닙니다. 깨는 규칙이 바라보는 쪽을 봅니다:
+   *     effectiveDist <= (inFront ? range : hearDistance(playerSpeed))
+   * 적이 나를 보고 있으면 14m, **등을 돌리고 있으면** 걸어서 6.4m ·
+   * 달려서 9m. 즉 **소리 규칙은 등 돌린 적에게만 뜻이 있는데**,
+   * 등을 돌릴지가 지도가 아니라 원점과의 각도로 정해지고 있었습니다.
+   *
+   * `npm run bypass` 가 그 결과를 이렇게 찍었습니다 — 절반 지점에서
+   * **걸어서 9마리 vs 달려서 9마리**(9판씩, 폭도 9~9). 발소리가 속도를
+   * 탄다는 약속이 **한 마리도** 만들어 내지 못하고 있었습니다.
+   *
+   * ⚠️ 기본값은 그대로 둡니다(`rotY` 를 안 주면 원점 쪽). 실험대가 그
+   *    성질에 기대고 있고, 그건 그 자리에서 옳습니다. 바꾼 것은
+   *    **지도가 말할 수 있게 한 것**뿐입니다.
+   */
+  Transform.rotY[e] = rotY === undefined ? Math.atan2(-x, -z) : rotY
   Velocity.x[e] = 0
   Velocity.z[e] = 0
   Velocity.kx[e] = 0
@@ -509,7 +532,9 @@ export function respawnLevelEnemies(
     const kind = kindFromId(item.kind)
     if (kind === null) continue
     if (kind === EnemyKind.Boss && defeatedBosses?.has(bossKey(item.x, item.z))) continue
-    const e = spawnEnemy(kind, item.x, item.z)
+    // 🧭 지도가 적어 둔 **바라보는 쪽**을 그대로 넘깁니다(spawnEnemy 주석).
+    //    안 넘기면 이 적은 세계 원점을 보고 서고, 소리 규칙이 죽습니다.
+    const e = spawnEnemy(kind, item.x, item.z, item.rotY)
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     out.push(e)
   }
@@ -547,7 +572,8 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     // 적 종류는 표에서 찾습니다. if 사슬로 두면 새 적을 넣을 때마다
     // 여기를 고쳐야 하고, 빠뜨리면 **레벨에 배치했는데 안 나오는** 버그가 됩니다.
     const enemyKind = kindFromId(item.kind)
-    if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z)
+    // 🧭 바라보는 쪽 — 위 `spawnLevelEnemies` 와 같은 이유로 그대로 넘깁니다.
+    if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z, item.rotY)
     else if (item.kind === 'treasure') {
       e = spawnTreasure(item.x, item.z, item.secret === true)
       treasureTotal++
