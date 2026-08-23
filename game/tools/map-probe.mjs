@@ -2123,11 +2123,12 @@ try {
       const h0 = heightAt(c.cx, c.cz)
       // 🧭 동선에서 이 적을 향하는 쪽 — 넉백이 나가는 방향입니다.
       let near = null
-      for (const r of routeCells) {
+      for (let i = 0; i < routeCells.length; i++) {
+        const r = routeCells[i]
         const d = Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL)
         // 같은 칸이면 방향이 안 나옵니다(0 벡터). 한 칸 밖부터 봅니다.
         if (d < CELL) continue
-        if (!near || d < near.d) near = { r, d }
+        if (!near || d < near.d) near = { r, d, i }
       }
       const pux = near ? (c.cx - near.r.cx) / (near.d / CELL) : 0
       const puz = near ? (c.cz - near.r.cz) / (near.d / CELL) : 0
@@ -2150,7 +2151,24 @@ try {
       const onRoute = routeCells.some(
         (r) => Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL) <= wakeOf(e.kind),
       )
-      return { kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), drop, behindDrop, onRoute }
+      /**
+       * 📍 **동선 몇 미터 지점에서 만나는가.** `routeCells` 는 스폰→보스
+       * 순서대로 이어진 발자국이라 **번호 자체가 거리**입니다.
+       *
+       * 이게 없으면 «어디서 배우는가»를 좌표를 눈으로 읽어 정하게 됩니다.
+       * 이 저장소가 그 방식으로 여러 번 틀렸습니다 — 「재기 전의 설명은
+       * 결론이 아니다」. 가르치는 자리를 고르는 것도 재고 나서 합니다.
+       */
+      const routeAt = near ? Math.round(near.i * CELL) : -1
+      return {
+        kind: e.kind,
+        x: Math.round(e.x),
+        z: Math.round(e.z),
+        drop,
+        behindDrop,
+        onRoute,
+        routeAt,
+      }
     })
     const hurty = rows.filter((r) => r.drop > fall.free)
     const onRoad = hurty.filter((r) => r.onRoute)
@@ -2166,7 +2184,7 @@ try {
                 (r) =>
                   `${r.kind}(${r.x},${r.z}) ${r.drop}단${
                     r.behindDrop > fall.free ? '·등 뒤' : '·옆/앞'
-                  }${r.onRoute ? '' : ' ·동선 밖'}`,
+                  }·동선 ${r.routeAt}m${r.onRoute ? '' : ' ·동선 밖'}`,
               )
               .join(' · ')}`
           : ''),
@@ -2190,7 +2208,9 @@ try {
       pushable.length >= 1,
       '🧭 **낙차가 적의 «등 뒤»인 자리가 하나는 있다** (넉백이 나가는 쪽에 절벽이 있어야 밀어 넣습니다)',
       pushable.length
-        ? `${pushable.map((r) => `${r.kind}(${r.x},${r.z}) 등 뒤 ${r.behindDrop}단`).join(' · ')}`
+        ? `${pushable
+            .map((r) => `${r.kind}(${r.x},${r.z}) 등 뒤 ${r.behindDrop}단 · 동선 ${r.routeAt}m`)
+            .join(' · ')}`
         : `동선에서 깨는 ${onRoad.length}마리 모두 낙차가 옆이나 앞입니다 — 밀면 벽에 붙고, 그 절벽은 **내가** 떨어지는 쪽입니다`,
     )
   }
