@@ -121,12 +121,38 @@ try {
   )
 
   // ---- 4. F1 로 전부 돌아온다 ----
-  await page.evaluate(async () => {
-    const G = window.__game
-    G.press('F1')
-    G.release('F1')
-    await new Promise((r) => setTimeout(r, 60))
-  })
+  /**
+   * ── ⚠️ **60ms 는 한 프레임이 아닐 수 있습니다** ─────────────────────
+   *
+   * 이 줄은 F1 을 누르고 **벽시계 60ms** 를 기다렸습니다. SwiftShader 에서
+   * 이 게임은 20fps 언저리(한 프레임 50ms)로 돕니다 — 즉 60ms 는 «한
+   * 프레임 조금 넘게»이고, 프레임 경계에 걸리면 **토글이 아직 안 일어난
+   * 채로** 세게 됩니다.
+   *
+   * 실제로 그 일이 났습니다: 같은 코드로 네 번 돌려 **6/0 · 4/2 · 6/0 ·
+   * 6/0**. 그리고 하필 빨간 판이 제가 HTML 을 고친 직후에 나와서, 저는
+   * **제 변경이 깨뜨린 줄 알고 되돌릴 뻔했습니다.** 되돌리기 전에 두 번
+   * 더 돌려 본 것이 이 판을 살렸습니다 — 「한 판은 표본이 아니다」.
+   *
+   * 그래서 시간을 기다리지 않고 **결과를 기다립니다.** 토글은 클래스
+   * 하나로 드러나므로, 그것이 바뀔 때까지 봅니다(최대 30프레임).
+   */
+  const toggleF1 = async () => {
+    const before = await page.evaluate(
+      () => !!document.getElementById('controls')?.classList.contains('showAll'),
+    )
+    await page.evaluate(async ([want]) => {
+      const G = window.__game
+      const box = document.getElementById('controls')
+      for (let i = 0; i < 30; i++) {
+        G.press('F1')
+        G.release('F1')
+        await new Promise((r) => setTimeout(r, 50))
+        if (!!box?.classList.contains('showAll') !== want) return
+      }
+    }, [before])
+  }
+  await toggleF1()
   const opened = await shown(page)
   check(
     opened.length > first.length && opened.includes('dodge'),
@@ -142,12 +168,7 @@ try {
   const boxAll = await page.evaluate(() =>
     Math.round(document.getElementById('controls').getBoundingClientRect().height),
   )
-  await page.evaluate(async () => {
-    const G = window.__game
-    G.press('F1')
-    G.release('F1')
-    await new Promise((r) => setTimeout(r, 60))
-  })
+  await toggleF1()
 
   // ---- 5. 조작표에 적힌 것을 **다 해내면** 조작표가 사라진다 ----
   //

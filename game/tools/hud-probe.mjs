@@ -393,6 +393,162 @@ try {
     `최악 ${(worst * 100).toFixed(0)}% (문턱 ${(BURY * 100).toFixed(0)}%)${worst > 0 ? ` · ${worstAt}` : ''}`,
   )
 
+  /**
+   * ── 🩹 **HUD 가 «싸우는 바닥»을 덮지 않는가** ────────────────────────
+   *
+   * 이 파일은 지금까지 **HUD 끼리** 안 가리는지만 봤습니다. 그런데 이
+   * 게임에서 바닥은 장식이 아닙니다 — **4색 예고가 바닥에 그려집니다**
+   * (terrain.ts `AO_SHADE` 주석: *"이 게임에서 바닥은 장식이 아니라
+   * 정보입니다"*). 그러면 물어야 할 것이 하나 더 있습니다:
+   * **내 발밑의 바닥이 HUD 뒤에 숨지 않는가.**
+   *
+   * ── 왜 지금 묻는가 (그림에서 봤습니다) ─────────────────────────────
+   * 그늘 벽감을 그림으로 확인하다가, 동선 **남쪽**에 놓은 잔해와 보물이
+   * 스킬바와 겹치는 자리에 오는 것을 봤습니다. 카메라가 고정(남동쪽에서
+   * 내려다봄)이라 **남쪽 = 화면 아래쪽**이고, 화면 아래쪽에는 스킬바가
+   * 있습니다. 즉 이 게임은 **한쪽 방향이 구조적으로 덜 보입니다.**
+   *
+   * 배치를 옮기는 것으로 때울 문제가 아닙니다 — 전투는 어느 방향에서나
+   * 벌어지고, 남쪽에서 오는 적의 예고는 **매번** 그 자리에 그려집니다.
+   *
+   * ── 재는 법 ───────────────────────────────────────────────────────
+   * 플레이어를 가운데 두고 **바닥에 원을 그려** 각 점을 화면으로 투영한
+   * 뒤, 그 점이 **실제로 보이는 HUD 사각형** 안에 드는지 셉니다.
+   * 반지름은 **게임에서 읽습니다** — 적의 가장 긴 근접 예고 사거리.
+   * 거기까지가 «싸우는 바닥»입니다.
+   *
+   * ⚠️ 사각형은 `getComputedStyle` 로 **투명한 것을 걸러서** 씁니다.
+   *    안 그러면 체력 낮을 때 깔리는 전체화면 비네트가 «전부 가려짐»으로
+   *    잡힙니다(secret 프로브가 그 사고를 먼저 겪었습니다).
+   * ⚠️ 창은 **좁은 쪽**으로 잽니다. 세로 22m 고정에 가로가 aspect 라,
+   *    넓은 창에서 재면 "잘 보인다"가 창 덕이 됩니다.
+   */
+  {
+    const rings = await page.evaluate(async () => {
+      const G = window.__game
+      G.reset()
+      /**
+       * ⚠️ **카메라가 따라올 때까지 기다립니다.** 안 기다리면 **옛 카메라**로
+       *    투영되어 원이 화면에서 통째로 밀립니다 — 실제로 그래서 같은
+       *    코드가 한 번은 «남 4점», 다음엔 «동 4·남동 3점» 을 냈습니다.
+       *    방향이 뒤바뀌는 것을 보고 게임을 의심할 뻔했습니다.
+       *    (secret 프로브가 먼저 겪고 적어 둔 사고 — 그 처방을 그대로 씁니다:
+       *    **플레이어 자신이 화면 한가운데에 왔는가**로 압니다.)
+       */
+      for (let k = 0; k < 60; k++) {
+        await new Promise((r) => setTimeout(r, 16))
+        const me = G.state().player
+        const q0 = G.screenPos(me.x, 0.9, me.z)
+        if (q0 && Math.hypot(q0.sx - window.innerWidth / 2, q0.sy - window.innerHeight / 2) < 60) break
+      }
+      const p = G.state().player
+      const hud = [...document.querySelectorAll('#hud .panel, #hud > div > div')]
+        .filter((n) => {
+          const st = getComputedStyle(n)
+          return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.05
+        })
+        .map((n) => ({ id: n.id || n.className || n.tagName, r: n.getBoundingClientRect() }))
+        .filter((h) => h.r.width > 40 && h.r.height > 20)
+      const out = []
+      for (const R of [3, 6, 9]) {
+        const pts = []
+        for (let i = 0; i < 36; i++) {
+          const a = (i / 36) * Math.PI * 2
+          const q = G.screenPos(p.x + Math.cos(a) * R, 0.05, p.z + Math.sin(a) * R)
+          if (!q) continue
+          const hit = hud.find(
+            (h) => q.sx >= h.r.left && q.sx <= h.r.right && q.sy >= h.r.top && q.sy <= h.r.bottom,
+          )
+          const covered = !!hit
+          const dir = ['동', '남동', '남', '남서', '서', '북서', '북', '북동'][
+            Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 4)) % 8
+          ]
+          pts.push({ dir, covered, by: hit ? String(hit.id) : '' })
+        }
+        out.push({ R, pts })
+      }
+      return out
+    })
+    for (const r of rings) {
+      const hidden = r.pts.filter((q) => q.covered)
+      const byDir = {}
+      for (const q of hidden) byDir[q.dir] = (byDir[q.dir] ?? 0) + 1
+      const who = [...new Set(hidden.map((q) => q.by))].join(' · ')
+      console.log(
+        `  🩹 발밑 ${r.R}m 원 ${r.pts.length}점 중 HUD 에 덮인 점 **${hidden.length}개**` +
+          (hidden.length
+            ? ` — ${Object.entries(byDir).map(([d, n]) => `${d} ${n}`).join(' · ')} · 가린 것 **${who}**`
+            : ''),
+      )
+    }
+    /**
+     * ── 판정은 **가장 안쪽 원**에만 겁니다 ─────────────────────────────
+     *
+     * 처음엔 «적의 가장 긴 예고 사거리»(12.4m)로 원을 그렸다가 15/36 이
+     * 덮였습니다. 그런데 그 반지름은 **화면 가장자리**라, 거기엔 체력바도
+     * 목표 패널도 있습니다 — 그건 «싸우는 바닥이 가렸다»가 아니라
+     * **«화면 구석에 HUD 가 있다»** 를 잰 것입니다. 원래 재려던 것이
+     * 아닙니다(이 저장소가 반복해서 낸 실패 — 재는 대상을 잘못 고르기).
+     *
+     * 예고는 **적에게서 나에게로** 그려집니다. 그러니 내가 서 있는 자리
+     * 둘레 3m — 예고의 **끝이 닿는 곳**이자 내 무기의 부채꼴이 그려지는
+     * 곳 — 이 가려지면 그건 곧 «읽을 것이 안 보인다»입니다. 6m·9m 는
+     * 참고로만 찍습니다(멀리 있는 것은 다가오는 동안 볼 시간이 있습니다).
+     */
+    /**
+     * ── ⚠️ **두 상태를 따로 봅니다 — 처음 화면 · 다 배운 화면** ──────────
+     *
+     * 조작표는 **해낼 때까지만** 떠 있습니다(hud.ts `markLearned` — 셀레스트·
+     * 하데스의 방식). 즉 위 숫자는 **판을 막 켠 사람**의 화면입니다.
+     * 다 배우면 표가 줄어드니 가림도 줄어야 하는데, 그게 사실인지 안 재면
+     * *"스킬바가 문제다"* 와 *"조작표가 문제다"* 를 못 가릅니다 —
+     * 고칠 곳이 완전히 다릅니다.
+     *
+     * ⚠️ 배운 상태는 **프로브가 DOM 에 표시해서** 만듭니다. 게임에 없는
+     *    상태를 지어내는 것이 아니라, 게임이 실제로 도달하는 상태를
+     *    앞당기는 것입니다(그 상태는 세이브에도 남습니다 — `applyLearned`).
+     */
+    const learned = await page.evaluate(async () => {
+      const G = window.__game
+      for (const n of document.querySelectorAll('#controls .key[data-learn]')) n.classList.add('learned')
+      await new Promise((r) => setTimeout(r, 120))
+      const p = G.state().player
+      const hud = [...document.querySelectorAll('#hud .panel, #hud > div > div')]
+        .filter((n) => {
+          const st = getComputedStyle(n)
+          return st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.05
+        })
+        .map((n) => n.getBoundingClientRect())
+        .filter((r) => r.width > 40 && r.height > 20)
+      let covered = 0
+      let total = 0
+      for (let i = 0; i < 36; i++) {
+        const a = (i / 36) * Math.PI * 2
+        const q = G.screenPos(p.x + Math.cos(a) * 3, 0.05, p.z + Math.sin(a) * 3)
+        if (!q) continue
+        total++
+        if (hud.some((r) => q.sx >= r.left && q.sx <= r.right && q.sy >= r.top && q.sy <= r.bottom)) covered++
+      }
+      return { covered, total }
+    })
+    console.log(
+      `     └ 조작을 다 배운 뒤(표가 걷힌 뒤) 발밑 3m — 덮인 점 **${learned.covered}/${learned.total}개**`,
+    )
+
+    const inner = rings[0]
+    const innerHidden = inner.pts.filter((q) => q.covered)
+    const byDir = {}
+    for (const q of innerHidden) byDir[q.dir] = (byDir[q.dir] ?? 0) + 1
+    check(
+      inner.pts.length >= 30 && innerHidden.length === 0,
+      '🩹 **HUD 가 발밑 3m 를 덮지 않는다** (바닥에 그려지는 예고가 스킬바 뒤에 숨지 않게)',
+      (innerHidden.length === 0
+        ? `${inner.pts.length}점 전부 열려 있음`
+        : `${Object.entries(byDir).map(([d, n]) => `${d} ${n}점`).join(' · ')} — 그 방향에서 오는 예고는 매번 가려집니다`) +
+        ` · 다 배운 뒤 ${learned.covered}점 · (참고 6m ${rings[1].pts.filter((q) => q.covered).length}점 · 9m ${rings[2].pts.filter((q) => q.covered).length}점)`,
+    )
+  }
+
   console.log('')
   check(errors.length === 0, '콘솔 오류 없음', errors.slice(0, 2).join(' | '))
   console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
