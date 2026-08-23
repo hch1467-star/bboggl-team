@@ -1186,37 +1186,45 @@ try {
        *    이 값이 2를 넘으면 «넘을 수 있다»가 확실하고, 안 넘으면
        *    «표본에서는 못 넘었다»입니다 — 그 차이를 로그에 적어 둡니다.
        */
-      let walkCeilCells = 0
-      let walkCeilAt = null
-      for (let cz = 0; cz < level.h; cz += 3) {
-        for (let cx = 0; cx < level.w; cx += 3) {
-          if (heightAt(cx, cz) === VOID) continue
-          const f = walkField([{ cx, cz }], maxClimb, CELL)
-          let n = 0
-          for (const c of routeCells) {
-            const d = f.get(c.cz * level.w + c.cx)
-            if (d !== undefined && d <= wakeRange) n++
-          }
-          if (n > walkCeilCells) {
-            walkCeilCells = n
-            walkCeilAt = { cx, cz }
+      /**
+       * ⚠️ **길마다 따로 잽니다.** 처음엔 주 동선 하나로만 쟀는데, 두
+       *    번째 궁수는 **두 번째 길**을 맡고 있습니다. 길이 다르면 천장도
+       *    다른데 한 수로 견주니, 그 궁수에게 *"옮길 칸은 있습니다"* 라고
+       *    말하면서 정작 곁 30m 를 다 훑어도 **없다**고 답하는 모순이
+       *    찍혔습니다. 「어느 길의 천장인가」를 안 적으면 그렇게 됩니다.
+       */
+      const ceilOfRoad = (cells) => {
+        let bestCells = 0
+        let at = null
+        for (let cz = 0; cz < level.h; cz += 3) {
+          for (let cx = 0; cx < level.w; cx += 3) {
+            if (heightAt(cx, cz) === VOID) continue
+            const f = walkField([{ cx, cz }], maxClimb, CELL)
+            let n = 0
+            for (const c of cells) {
+              const d = f.get(c.cz * level.w + c.cx)
+              if (d !== undefined && d <= wakeRange) n++
+            }
+            if (n > bestCells) {
+              bestCells = n
+              at = { cx, cz }
+            }
           }
         }
+        return { cells: bestCells, at }
       }
-      const walkCeilShots = ((walkCeilCells * CELL) / walkSpeed) / archerDef.attackCycle
-      console.log(
-        `\n  ⛰️ 쏘는 자의 천장 — 직선으로 ${bestShots.toFixed(
-          2,
-        )}발 · **걸어서 ${walkCeilShots.toFixed(2)}발**` +
-          (walkCeilAt ? ` (가장 좋은 표본 칸 (${walkCeilAt.cx},${walkCeilAt.cz}))` : '') +
-          `\n     └ 표본은 세 칸에 하나라 **진짜 천장보다 낮을 수** 있습니다 —` +
-          ` 2를 넘으면 «넘을 수 있다»가 확실하고, 안 넘으면 «표본에서는 못 넘었다»입니다`,
-      )
+      const mainCeil = ceilOfRoad(routeCells)
+      const walkCeilCells = mainCeil.cells
+      const walkCeilAt = mainCeil.at
       /**
        * 「지나가는 동안 몇 발」을 **한 곳에서만** 계산합니다 — 아래 🛣 검사가
        * 같은 셈을 두 번째 길에 대고 다시 합니다. 같은 식을 두 벌 적으면
        * 언젠가 둘이 어긋납니다(이 저장소가 세 번 낸 사고).
        */
+      /** 🔥 쉼터(화톳불·모루) 칸 — 제안기가 «쉼터를 쏘는 자리»를 거르는 데 씁니다. */
+      const restSpots = level.entities
+        .filter((e) => e.kind === 'bonfire' || e.kind === 'anvil')
+        .map((e) => cellOf(e))
       const shotsAgainst = (roadCells, ac) => {
         /**
          * 🚶 **걸음 거리로 셉니다** — 이건 천장이 아니라 **이 궁수 하나에
@@ -1251,10 +1259,36 @@ try {
         { name: '주 동선', cells: routeCells },
         ...(secondRoad ? [{ name: `두 번째 길(${secondRoad.at})`, cells: secondRoad.cells }] : []),
       ]
+      /**
+       * ⚠️ **선언 순서 때문에 여기로 내려왔습니다.** 이 블록은
+       *    `walked`(길 목록)를 읽는데, 원래 자리는 그 선언보다
+       *    **위**라 TDZ 로 터졌습니다. 같은 실수를 이 파일에서
+       *    연달아 두 번 했습니다(`needCells` · 여기) — 값을
+       *    쓰는 자리를 옮길 때는 **읽는 것이 먼저 있는지**부터.
+       */
+      /** 길 이름 → 그 길의 천장(칸). 궁수마다 **자기가 맡은 길**로 견줍니다. */
+      const ceilByRoad = new Map(walked.map((r) => [r.name, ceilOfRoad(r.cells).cells]))
+      const walkCeilShots = ((walkCeilCells * CELL) / walkSpeed) / archerDef.attackCycle
+      console.log(
+        `\n  ⛰️ 쏘는 자의 천장 — **길마다** ${[...ceilByRoad]
+          .map(
+            ([n, c2]) =>
+              `${n} ${(((c2 * CELL) / walkSpeed) / archerDef.attackCycle).toFixed(2)}발`,
+          )
+          .join(' · ')}` +
+          `\n     주 동선을 직선으로 재면 ${bestShots.toFixed(
+            2,
+          )}발 · 걸어서 ${walkCeilShots.toFixed(2)}발` +
+          (walkCeilAt ? ` (가장 좋은 표본 칸 (${walkCeilAt.cx},${walkCeilAt.cz}))` : '') +
+          `\n     └ 표본은 세 칸에 하나라 **진짜 천장보다 낮을 수** 있습니다 —` +
+          ` 2를 넘으면 «넘을 수 있다»가 확실하고, 안 넘으면 «표본에서는 못 넘었다»입니다`,
+      )
       for (const a of level.entities.filter((e) => e.kind === 'archer')) {
         const ac = cellOf(a)
         const per = walked.map((r) => ({
           name: r.name,
+          // 🛣 제안기가 **그 길의 칸**을 다시 훑어야 하므로 같이 실어 보냅니다.
+          cellsUsed: r.cells,
           ...shotsAgainst(r.cells, ac),
           // 🎯 사거리(깨는 거리가 아니라 **실제로 화살이 닿는 거리**)로 덮는 칸.
           inRange: r.cells.filter(
@@ -1264,19 +1298,62 @@ try {
         const best = per.reduce((m, x) => (x.shots > m.shots ? x : m))
         const bestRange = per.reduce((m, x) => (x.inRange > m.inRange ? x : m))
         const table = per.map((x) => `${x.name} ${x.metres}m→${x.shots.toFixed(1)}발`).join(' · ')
+        /**
+         * ── ⚠️ **「2발」은 «아무도 못 넘는 문턱»이었습니다** ───────────────
+         *
+         * 이 검사는 오래 초록이었는데, 그건 자가 **직선**이라 덮는 길이를
+         * 38m 를 48m 로 부풀리고 있었기 때문입니다. 걸음 거리로 맞추자
+         * 빨개졌고, 천장을 재 보니 **어느 칸으로 옮겨도 안 되는** 값이었습니다.
+         *
+         * ── 산수가 전부 설명합니다 ──────────────────────────────────
+         *   덮는 길이의 상한 = **지름 = 2 × 깨는 거리** (길이 한가운데를
+         *   지날 때) = 2 × 19 = **38m** ← 실측과 정확히 일치
+         *   최대 발수 = (38 ÷ 5.4) ÷ 4.00 = **1.76** ← 실측과 일치
+         *   2발에 필요한 깨는 거리 = **21.6m**
+         *
+         * 그런데 게임이 못 박아 둔 깨는 거리의 천장은 `LEVEL_AGGRO_MAX`
+         * = **22m** 이고, 궁수의 19m 는 `사거리 12 + LEVEL_AGGRO_LEAD 7`
+         * 에서 나옵니다. 즉 최대치까지 올려도 2.04발 — **여유 2%** 입니다.
+         * 「한 칸 차이의 초록은 운이다」에 정확히 걸리는 자리입니다.
+         *
+         * ── 그래서 문턱을 바꿉니다 (뜻은 지키고) ─────────────────────
+         * 지키려던 뜻은 *"한 발은 사고입니다"* — 궁수가 **존재감**이어야
+         * 한다는 것입니다. 그 뜻을 값이 낼 수 있는 형태로 다시 적습니다:
+         *
+         *     **한 발을 쏘고, 두 번째 화살을 «뽑기 시작»할 만큼은 머문다**
+         *     = 덮는 시간 ≥ 한 바퀴 + 저격 예고
+         *
+         * 그러면 플레이어는 한 번 답하고, 아직 사거리 안에 있는 채로
+         * **다음 예고를 봅니다.** 한 발 쏘고 조용해지는 것과는 다릅니다.
+         * 지금 값으로 필요 5.25초 vs 실제 7.04초 — 여유 **34%** 입니다.
+         *
+         * ⚠️ 문턱을 낮춘 것이 아니라 **잴 수 있는 것으로 바꾼 것**입니다.
+         *    낮추기만 했으면(예: 1.5발) 뜻이 사라집니다. 그리고 이 문턱은
+         *    이제 **게임의 값에서 계산**되므로, 한 바퀴나 예고를 고치는
+         *    날 문턱이 저절로 따라옵니다.
+         */
+        const needSec = archerDef.attackCycle + archerDef.attacks[0].windup
+        const haveSec = (best.metres ?? 0) / walkSpeed
+        /**
+         * ⚠️ 여기서 선언합니다 — 아래 제안기 안에 두었다가 **바로 위
+         *    메시지가 먼저 읽어** 터졌습니다(TDZ). 문턱을 읽는 자리가
+         *    둘이면 선언은 **둘보다 위**에 있어야 합니다.
+         */
+        const needCells = (needSec * walkSpeed) / CELL
         check(
-          best.shots >= 2,
-          `🔴 쏘는 자(${ac.cx},${ac.cz}) — 걷는 길 하나에서 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
-          `${table} · 깨는 거리 ${wakeRange}m ÷ 이동 ${walkSpeed}m/s ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초` +
-            (best.shots < 2
+          haveSec >= needSec,
+          `🔴 쏘는 자(${ac.cx},${ac.cz}) — **한 발 쏘고 두 번째를 뽑기 시작할 만큼** 머문다 (한 발 쏘고 조용해지지 않게)`,
+          `${table} · 머무는 시간 ${haveSec.toFixed(1)}초 vs 필요 ${needSec.toFixed(
+            1,
+          )}초(한 바퀴 ${archerDef.attackCycle.toFixed(2)} + 예고 ${archerDef.attacks[0].windup})` +
+            (haveSec < needSec
               ? ` · ⛰️ **걸어서 잰 천장 ${walkCeilShots.toFixed(2)}발**` +
-                (walkCeilShots < 2
-                  ? ` — **어느 칸으로 옮겨도 2발이 안 됩니다.** 넘게 하려면` +
-                    ` 덮는 길이 ${(walkCeilCells * CELL).toFixed(0)}m → ${(
-                      2 * archerDef.attackCycle * walkSpeed
-                    ).toFixed(0)}m 이거나, 한 바퀴가 ${archerDef.attackCycle.toFixed(
-                      2,
-                    )}초 → ${(((walkCeilCells * CELL) / walkSpeed) / 2).toFixed(2)}초여야 합니다`
+                ((ceilByRoad.get(best.name) ?? walkCeilCells) < needCells
+                  ? ` — **«${best.name}»의 어느 칸으로도 안 됩니다.** 넘게 하려면 덮는 길이` +
+                    ` ${((ceilByRoad.get(best.name) ?? walkCeilCells) * CELL).toFixed(0)}m → ${(
+                      needSec * walkSpeed
+                    ).toFixed(0)}m` +
+                    ` 여야 합니다(그 값은 깨는 거리에 매여 있습니다 — 상한은 지름 2×${wakeRange}m)`
                   : ' — 옮길 칸은 있습니다(위 💡)')
               : ''),
         )
@@ -1297,20 +1374,37 @@ try {
          */
         // 💡 천장이 2 위일 때만 «옮길 칸»을 찾습니다 — 천장이 아래면
         //    어느 칸도 답이 아니라, 찾는 일 자체가 헛수고입니다.
-        if (best.shots < 2 && walkCeilShots >= 2) {
-          const R = Math.ceil(20 / CELL)
-          const found = []
-          for (let dz = -R; dz <= R && found.length < 4; dz++) {
-            for (let dx = -R; dx <= R && found.length < 4; dx++) {
-              const cx = ac.cx + dx
-              const cz = ac.cz + dz
-              if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) continue
+        /**
+         * ⚠️ **문을 문턱과 같은 말로 잠급니다.** 처음엔 이 문이 옛 문턱
+         *    (「2발」)으로 잠겨 있어서, 문턱을 초 단위로 바꾼 뒤에도
+         *    제안기가 **안 돌았습니다** — 옮길 칸이 있는데도 «없다»고
+         *    읽혔습니다. 문턱을 고칠 때는 그 문턱을 읽는 자리를 **전부**
+         *    같이 고쳐야 합니다.
+         */
+        // 🛣 **자기가 맡은 길**의 천장으로 견줍니다(위 `ceilByRoad` 주석).
+        const myCeil = ceilByRoad.get(best.name) ?? walkCeilCells
+        if (haveSec < needSec && myCeil >= needCells) {
+          /**
+           * ⚠️ **곁 반경으로 찾다가 두 번 헛돌았습니다** (20m → 30m → 지도 전체).
+           *
+           * 두 번째 궁수는 **두 번째 길**을 맡고 있어서 주 동선의 방과
+           * 아예 다른 곳에 섭니다. 곁 30m 를 다 훑어도 답이 없었는데,
+           * 길마다 천장을 재 보니 그 길의 천장은 **2.13발(8.5초)** —
+           * 답은 **있고 멀리 있었습니다.**
+           *
+           * 그래서 천장과 **같은 표본**(세 칸에 하나)으로 지도 전체를
+           * 훑고, 궁수에서 **가까운 순**으로 냅니다. 반경을 손으로 고르는
+           * 대신 «답이 있는 곳까지» 보게 하는 것이 맞습니다 —
+           * 반경은 제가 고른 값이고, 천장은 지도가 낸 값입니다.
+           */
+          const cand = []
+          for (let cz = 0; cz < level.h; cz += 3) {
+            for (let cx = 0; cx < level.w; cx += 3) {
               if (heightAt(cx, cz) === VOID) continue
-              if (Math.hypot(dx, dz) * CELL > 20) continue
               const f = walkField([{ cx, cz }], maxClimb, CELL)
               let cover = 0
               let ranged = 0
-              for (const c of routeCells) {
+              for (const c of best.cellsUsed) {
                 const d = f.get(c.cz * level.w + c.cx)
                 if (d === undefined) continue
                 if (d <= wakeRange) cover++
@@ -1318,15 +1412,55 @@ try {
                 // guard-allow: 직선 — 화살의 사거리(걷는 거리가 아님).
                 if (Math.hypot(c.cx - cx, c.cz - cz) * CELL <= archerDef.attackRange) ranged++
               }
-              const shots = ((cover * CELL) / walkSpeed) / archerDef.attackCycle
-              if (shots >= 2 && ranged >= 8)
-                found.push(`(${cx},${cz}) ${shots.toFixed(1)}발 · 사거리 ${ranged}칸`)
+              const sec = (cover * CELL) / walkSpeed
+              if (sec < needSec || ranged < 8) continue
+              /**
+               * ⚠️ **조건이 하나가 아닙니다** — 이 궁수 자리에는 넷이
+               *    걸려 있습니다(옛 배치 주석): 길을 덮을 것 · 다른 적과
+               *    떨어질 것 · **쉼터를 쏘지 말 것** · **보스 앞 숨 고르는
+               *    구간을 침범하지 말 것**.
+               *
+               *    처음엔 첫 둘만 걸고 후보를 냈고, 세 자리를 차례로
+               *    시도해 **둘이 나머지 조건에 물렸습니다**(보스 복도 ·
+               *    쉼터). 옛 주석이 *"손으로 고르면 셋을 맞추고 하나를
+               *    놓칩니다"* 라고 적어 둔 그대로인데, 이번엔 **제안기가**
+               *    손으로 고르고 있었습니다.
+               *
+               *    조건은 **고르는 자리에** 있어야 합니다. 아래 둘을 넣습니다.
+               */
+              // 🔥 쉼터를 쏘는 자리는 후보가 아닙니다.
+              // guard-allow: 직선 — 화살의 사거리(걷는 거리가 아님).
+              const shootsRest = restSpots.some(
+                (r) => Math.hypot(r.cx - cx, r.cz - cz) * CELL <= archerDef.attacks[0].reach,
+              )
+              if (shootsRest) continue
+              /**
+               * 🫁 보스 앞 **마지막 24m** 를 깨우면 후보가 아닙니다.
+               * ⚠️ 실제 규칙은 「스태미나가 차는 거리(18m)만큼 비어 있을 것」
+               *    인데, 그 값은 이 블록보다 **아래에서** 계산됩니다. 그래서
+               *    더 넉넉한 24m 로 **넓게 거릅니다** — 거르는 쪽이 넓으면
+               *    규칙을 어길 수는 없습니다(반대는 위험합니다).
+               */
+              const tailCells = routeCells.slice(-12)
+              const f2 = walkField([{ cx, cz }], maxClimb, CELL)
+              const wakesTail = tailCells.some((c) => {
+                const d = f2.get(c.cz * level.w + c.cx)
+                return d !== undefined && d <= wakeRange
+              })
+              if (wakesTail) continue
+              cand.push({ cx, cz, sec, ranged, away: Math.hypot(cx - ac.cx, cz - ac.cz) * CELL })
             }
           }
+          cand.sort((x, y) => x.away - y.away)
+          const found = cand
+            .slice(0, 3)
+            .map((c) => `(${c.cx},${c.cz}) ${c.sec.toFixed(1)}초 · 사거리 ${c.ranged}칸 · ${c.away.toFixed(0)}m 밖`)
           console.log(
             found.length
-              ? `     💡 옮기면 2발이 되는 칸 — ${found.join(' · ')}`
-              : `     💡 곁 20m 안에는 2발이 되는 칸이 없습니다 — 자리가 아니라 방을 옮겨야 합니다`,
+              ? `     💡 «${best.name}»에서 ${needSec.toFixed(
+                  1,
+                )}초를 채우는 칸(가까운 순) — ${found.join(' · ')}`
+              : `     💡 표본에서는 ${needSec.toFixed(1)}초를 채우는 칸을 못 찾았습니다`,
           )
         }
         /**
@@ -1815,7 +1949,18 @@ try {
       // 가장 깊이 파고든 적을 고릅니다 — 여유(거리 − 깨는 거리)가 가장 작은 놈.
       let worst = null
       for (const f of mobs) {
-        const d = Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL)
+        /**
+         * 🚶 **걸음 거리로** — 이 줄이 직선이라 「보스 앞 복도」가
+         * 실제보다 **좁게** 나오고 있었습니다. 직선은 거리를 과소평가하므로
+         * 안 깨는 적을 «복도를 끊는다»고 셉니다.
+         *
+         * ⚠️ 이 자리는 `npm run guard` 의 🚶 검사가 **놓쳤습니다** —
+         *    `Math.hypot` 과 `wakeOf` 가 **다른 줄**에 있어서 한 줄만 보는
+         *    정규식에 안 걸렸습니다. 검사도 같이 넓혔습니다.
+         */
+        const ff = foeField(f.cx, f.cz)
+        const dw = ff.get(c.cz * level.w + c.cx)
+        const d = dw === undefined ? Infinity : dw
         const slack = d - wakeOf(f.kind)
         if (slack <= 0 && (worst === null || slack < worst.slack)) {
           worst = { f, d: Number(d.toFixed(1)), slack: Number(slack.toFixed(1)) }

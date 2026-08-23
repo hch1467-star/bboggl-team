@@ -823,7 +823,16 @@ check(
       const code = raw.replace(/\/\/.*$/, '')
       if (!/Math\s*\.\s*hypot\s*\(/.test(code)) continue
       // 깨는 거리와 견주는 줄만 — 다른 거리 계산은 상관없습니다.
-      if (!/wakeOf|wakeRange|aggroM|levelAggroRange|hearWalk|hearRun|hear\.walk|hear\.run/.test(code))
+      /**
+       * ⚠️ **다음 줄까지 봅니다.** 처음엔 같은 줄만 봤는데, 실제 코드는
+       *    이렇게 나뉘어 있는 자리가 있었습니다:
+       *        const d = Math.hypot(...)
+       *        const slack = d - wakeOf(f.kind)
+       *    그래서 「보스 앞 복도」 검사가 직선으로 재는 것을 **놓쳤고**,
+       *    그 검사가 실제보다 좁은 복도를 내고 있었습니다.
+       */
+      const scope = `${code}\n${(lines[i + 1] ?? '').replace(/\/\/.*$/, '')}`
+      if (!/wakeOf|wakeRange|aggroM|levelAggroRange|hearWalk|hearRun|hear\.walk|hear\.run/.test(scope))
         continue
       /**
        * 면제 표시는 **위 여덟 줄까지** 봅니다. 이유를 적으려면 한 줄로는

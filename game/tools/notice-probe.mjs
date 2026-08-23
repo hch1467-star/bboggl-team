@@ -524,6 +524,8 @@ try {
            */
           const walk = G.walkToPlayer(x, z)
           if (walk === null) continue
+          // guard-allow: 직선 — 여기서는 **직선과 걸음을 견주는 것**이 목적이라
+          //   직선 쪽을 일부러 계산합니다. 판정은 바로 위 `walkToPlayer` 로 합니다.
           const straight = Math.hypot(x - ox, z - oz)
           if (!far && walk > straight * rule.deaggroRatio && walk > rule.deaggroMin) {
             far = { x, z, straight: Number(straight.toFixed(1)), walk: Number(walk.toFixed(1)) }
