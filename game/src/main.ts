@@ -74,6 +74,10 @@ import {
   RETEACH_AFTER,
   INTENT_NAME,
   SNARE_MOVE_SCALE,
+  MAX_CONCURRENT_ATTACKERS,
+  MAX_CONCURRENT_WIDE,
+  MAX_CONCURRENT_RANGED,
+  ATTACK_COMMIT_GAP,
   attackAt,
   attacksFor,
   longestReach,
@@ -7282,8 +7286,42 @@ declare global {
            */
           minRange: number
           maxRange: number
+          /**
+           * 💥 **한 대의 피해.** 프로브가 *"8초에 최대 얼마까지 아플 수
+           * 있는가"*(천장)를 세려면 시간표만으로는 모자랍니다 — 붙잡는
+           * 시간 × 대수까지는 세도 **한 대가 얼마인지**를 몰라서 거기서
+           * 멈췄습니다. 실제로 `npm run bypass` 의 「끌고 온 무리의
+           * 청구서」가 그 천장을 못 재서 한 회차를 통째로 기다렸습니다.
+           */
+          damage: number
+          /**
+           * 🏹 **날아가는 패턴인가.** 토큰 줄이 근접·원거리로 갈려 있어서
+           * (`combatLimits`), 천장을 셀 때도 같은 기준으로 갈라야 합니다.
+           * ⚠️ 종류 이름(`archer`)으로 가르면 새 원거리 적이 조용히 근접
+           *    줄에 섭니다 — enemyAI 의 `isRanged` 가 이름이 아니라
+           *    **하는 일**로 가르는 것과 같은 이유입니다.
+           */
+          projectile: boolean
         }[]
       }[]
+      /**
+       * 🎟 **동시에 몇이 때릴 수 있는가** — 작업 #20 의 규칙(enemyAttacks.ts).
+       *
+       * 프로브가 *"무리가 아무리 많아도 8초에 최대 얼마"* 를 세려면 이
+       * 상한이 필요합니다. 여기서 내주는 이유는 하나입니다 — 프로브에
+       * `2` 를 적어 두면 토큰을 3으로 바꾸는 날 **프로브만 옛 게임을
+       * 재게 됩니다.** 「규칙은 한 곳에만」의 그 자리입니다.
+       */
+      combatLimits: () => {
+        /** 근접 동시 공격자 수 */
+        melee: number
+        /** 그중 광역(넓은 부채꼴)으로 나갈 수 있는 수 */
+        wide: number
+        /** 근접 줄과 **따로** 도는 원거리 자리 수 */
+        ranged: number
+        /** 누가 커밋한 뒤 다음 커밋까지 강제로 비는 시간(초) */
+        commitGap: number
+      }
       /** 지금 레벨에 배치된 적 종류별 마릿수. */
       levelRoster: () => Record<string, number>
       /** 종류를 id 문자열로 지정해 소환합니다. */
@@ -8301,9 +8339,23 @@ window.__game = {
           snare: a.snare ?? 0,
           minRange: a.minRange,
           maxRange: a.maxRange,
+          /** 💥 한 대의 피해 — 「8초의 천장」을 세는 데 필요합니다(선언부 주석). */
+          damage: a.damage,
+          /** 🏹 날아가는 패턴인가 — 토큰 줄이 근접·원거리로 갈려 있습니다. */
+          projectile: a.projectile === true,
         })),
       }
     }),
+  /**
+   * 🎟 토큰 규칙을 **표 그대로** 내보냅니다 — 프로브가 숫자를 베끼지
+   * 않도록(선언부 주석에 이유를 적어 두었습니다).
+   */
+  combatLimits: () => ({
+    melee: MAX_CONCURRENT_ATTACKERS,
+    wide: MAX_CONCURRENT_WIDE,
+    ranged: MAX_CONCURRENT_RANGED,
+    commitGap: ATTACK_COMMIT_GAP,
+  }),
   levelRoster: () => game.debugLevelRoster(),
   spawnEnemyKind: (id, x, z, asleep) => game.debugSpawnKind(id, x, z, asleep),
   bossTuning: () =>

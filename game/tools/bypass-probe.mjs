@@ -82,6 +82,12 @@ try {
   // ⚠️ `moveSpeed` 가 아니라 `approachSpeed` 로 고릅니다 — 도망을 따라잡는 건
   //    전투 속도가 아니라 **사거리 밖에서 내는 속도**입니다.
   const fastest = roster.reduce((m, r) => (r.approachSpeed > m.approachSpeed ? r : m), roster[0])
+  /**
+   * 🎟 **동시 공격 토큰의 규칙** — 아래 ⛰️ 천장 계산이 쓰는 값입니다.
+   * 게임에서 꺼냅니다(작업 #20). 여기에 2를 적어 두면 토큰을 바꾸는 날
+   * 프로브가 옛 게임을 잽니다.
+   */
+  const limits = await page.evaluate(() => window.__game.combatLimits())
   console.log(
     `  [적] 가장 빨리 다가오는 적 ${fastest.name} ${fastest.approachSpeed.toFixed(1)} m/s ` +
       `(전투 중엔 ${fastest.moveSpeed}) — 걷기의 ${((fastest.approachSpeed / walkSpeed) * 100).toFixed(0)}% · ` +
@@ -221,19 +227,71 @@ try {
        * 값이라 낮추면 검사가 뜻을 잃습니다. 그래서 **재는 창을 옮겼습니다.**
        * 첫 추격자가 영역에 들어오는 순간부터 8초. 흔들리는 것(도착 시각)을
        * 평균 내지 말고 **창 밖으로 빼는** 것이 맞습니다.
+       *
+       * ── ⚠️ **한 번 더 옮겼습니다 — «도착»을 잘못 정의했었습니다** ──────
+       * 위 처방("흔들리는 것을 창 밖으로")은 옳았는데, **「도착」을
+       * 보스 영역(17m) 안으로 정의한 것**이 틀렸습니다. 잡몹이 실제로
+       * 때리는 거리는 **2m 남짓**이라, 17m 를 넘은 순간부터 세면 창의
+       * 앞부분에 **15m 를 걸어오는 시간**이 그대로 들어옵니다 —
+       * 2.6 m/s 면 6초, 8초 창의 3/4 입니다. 빼려던 바로 그 «걸어오는
+       * 시간»이 이름만 바뀐 채 창 안에 남아 있었습니다.
+       *
+       * 그래서 도착을 **«나를 때릴 수 있는 자리에 섰다»** 로 다시 적습니다 —
+       * 그 종류의 `attackRange` 안. 쏘는 자는 12m 에서도 때릴 수 있으니
+       * 그 순간이 맞는 도착이고, 잡몹은 2.1m 입니다. 규칙을 미터가 아니라
+       * **«무엇을 할 수 있는가»** 로 적으면, 적을 새로 넣거나 사거리를
+       * 고치는 날에도 창이 저절로 따라옵니다.
+       *
+       * 기다리는 상한은 12→**20초**로 올립니다. 17m 를 더 걸어와야 하니
+       * 옛 상한으로는 «안 왔다»가 «아직 걷는 중»과 섞입니다.
        */
+      const rangeOf = new Map(G.enemyRoster().map((r) => [r.id, r.attackRange]))
       const trainWaitFrom = now()
       while (
-        now() - trainWaitFrom < 12 &&
+        now() - trainWaitFrom < 20 &&
         Date.now() < wallDeadline &&
-        G.threats(300).filter((t) => t.aggro && t.dist <= (G.bossEncounter()?.arenaRadius ?? 0))
-          .length === 0
+        G.threats(300).filter((t) => t.aggro && t.dist <= (rangeOf.get(t.kind) ?? 2)).length === 0
       )
         await sleep()
       const trainWait = now() - trainWaitFrom
       const arriveHp2 = G.state().player.hp
       const arenaSettle = now()
-      while (now() - arenaSettle < 8 && Date.now() < wallDeadline) await sleep()
+
+      /**
+       * 📏 **8초 창 동안 «때릴 수 있는 자리»에 적이 있었는가** — 청구서의 분모.
+       *
+       * 청구서가 작게 나올 때 그 뜻은 둘로 갈립니다:
+       *   ① 무리가 **약하다**       → 밸런스 문제
+       *   ② 무리가 **거기 없었다**  → 재는 창의 문제
+       * 이 줄이 그 둘을 갈라 줍니다. 안 재면 어느 쪽인지 말할 수 없고,
+       * 못 잰 것으로 밸런스를 만지면 엉뚱한 곳을 고치게 됩니다. 실제로
+       * 바로 위 주석의 «도착» 정의가 틀린 것을 이 값으로 잡았습니다.
+       *
+       * 창을 사거리에서 열도록 고친 지금은 이 값이 **8초에 가까워야**
+       * 정상입니다. 그런데도 청구서가 작으면 그때는 진짜 밸런스입니다.
+       *
+       * ⚠️ 사거리는 **패턴의 reach** 를 씁니다(`attackRange` 아님).
+       *    `attackRange` 는 *"공격을 시도할 마음이 드는 거리"* 이고,
+       *    실제로 맞는 거리는 패턴마다 다릅니다 — 이 저장소가 map-probe
+       *    에서 이미 한 번 틀렸던 자리라 같은 실수를 안 하려고 적어 둡니다.
+       */
+      const reachOf = new Map(
+        G.enemyRoster().map((r) => [r.id, Math.max(0, ...r.attacks.map((a) => a.reach))]),
+      )
+      let reachFrames = 0
+      let windowFrames = 0
+      let reachSum = 0
+      let nearest = 999
+      while (now() - arenaSettle < 8 && Date.now() < wallDeadline) {
+        const near = G.threats(300).filter(
+          (t) => t.aggro && t.dist <= (reachOf.get(t.kind) ?? 2),
+        ).length
+        windowFrames++
+        if (near > 0) reachFrames++
+        reachSum += near
+        for (const t of G.threats(300)) if (t.aggro && t.dist < nearest) nearest = t.dist
+        await sleep()
+      }
       const be2 = G.bossEncounter()
       const arenaR = be2?.arenaRadius ?? 0
       const inArena = G.threats(300).filter((t) => t.aggro && t.dist <= arenaR).length
@@ -261,6 +319,12 @@ try {
         trainBill: Number(Math.max(0, arriveHp2 - hpAfterSettle).toFixed(1)),
         /** 무리가 오기까지 기다린 시간(초) — 12초는 "안 왔다"는 뜻입니다. */
         trainWait: Number(trainWait.toFixed(1)),
+        /** 8초 창 중 **내 사거리 안에 적이 하나라도 있던** 시간(초) */
+        reachTime: Number(((reachFrames / Math.max(1, windowFrames)) * 8).toFixed(1)),
+        /** 그 창 동안 사거리 안에 있던 적 수의 평균 — 토큰(2)과 견줄 값 */
+        reachAvg: Number((reachSum / Math.max(1, windowFrames)).toFixed(2)),
+        /** 창 동안 가장 가까웠던 적의 거리(m) */
+        nearest: Number((nearest === 999 ? -1 : nearest).toFixed(1)),
         stuck: Number(stuckTime.toFixed(1)),
         enemiesLeft: end.enemiesLeft,
       }
@@ -315,6 +379,11 @@ try {
     trainWait: med(runs.map((r) => r.trainWait)),
     trainWaitSpan: span(runs.map((r) => r.trainWait)),
     trainBillSpan: span(runs.map((r) => r.trainBill)),
+    reachTime: med(runs.map((r) => r.reachTime)),
+    reachTimeSpan: span(runs.map((r) => r.reachTime)),
+    reachAvg: med(runs.map((r) => r.reachAvg)),
+    nearest: med(runs.map((r) => r.nearest)),
+    nearestSpan: span(runs.map((r) => r.nearest)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
     awakeMin: Math.min(...runs.map((r) => r.awake)),
@@ -337,7 +406,9 @@ try {
     `피격 ${r.hits}회(${r.hitsSpan})\n` +
     `           깨운 적 ${r.awake}마리(${r.awakeSpan}) · ` +
     `보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}) · ` +
-    `무리 도착까지 ${r.trainWait}초(${r.trainWaitSpan}) · 그 뒤 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})`
+    `무리 도착까지 ${r.trainWait}초(${r.trainWaitSpan}) · 그 뒤 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})\n` +
+    `           └ 그 8초 중 **때릴 수 있는 자리**에 적이 있던 시간 ${r.reachTime}초(${r.reachTimeSpan}) · ` +
+    `평균 ${r.reachAvg}마리 · 가장 가까웠던 거리 ${r.nearest}m(${r.nearestSpan})`
   console.log(line('걸어서', walk))
   console.log(line('달려서', run) + '\n')
 
@@ -469,16 +540,61 @@ try {
    * 벌점을 **보스에게만** 걸고 두 판을 다시 재니 16(16~28)·16(16~28) 로
    * **하나도 안 움직였습니다.** 그래서 그 설명은 아닙니다.
    *
-   * ── 다음에 볼 것: **8초에 몇 대가 가능한가**(천장) ────────────────────
-   * 이 게임에는 **동시 공격 토큰**이 있습니다(작업 #20 — 여럿이 한꺼번에
-   * 때리지 못하게). 그러면 무리가 몇이든 8초 창의 휘두름 수에는 상한이
-   * 있고, 그 상한 × 한 대의 피해가 **이 검사가 넘을 수 있는 최대**입니다.
-   * 그 값이 45(성수병 한 병)보다 작으면 이 문턱은 눈금이 아니라 **벽**이고,
-   * 그때 고칠 것은 배치도 잡몹도 아니라 **문턱 또는 토큰**입니다.
+   * ── 천장을 찍어 봤습니다 — **토큰은 벽이 아니었습니다** ─────────────
+   * 「8초에 몇 대가 가능한가」를 게임의 값으로 계산해 바로 아래 ⛰️ 줄에
+   * 찍습니다(토큰 수 × 8초 ÷ 한 번 휘두르는 데 무는 시간 × 한 대 피해).
+   * 그 값은 **45를 한참 넘습니다.** 그러니 이 문턱은 벽이 아니고, 낮출
+   * 이유도 없습니다 — 성수병 한 병이라는 뜻은 그대로 삽니다.
+   *
+   * ── 그러면 왜 16이 나왔나: **창이 문 앞에서 열리고 있었습니다** ──────
+   * 창을 여는 조건이 *"보스 영역(**17m**) 안에 추격자가 하나라도"* 였는데,
+   * 잡몹이 실제로 때리는 거리는 **2m 남짓**입니다. 즉 창이 열리는 순간
+   * 무리는 아직 **15m 밖**이고, 2.6 m/s 로 걸어오면 그 15m 에만 6초가
+   * 듭니다 — 8초 창의 3/4 을 «걸어오는 시간»이 먹고 있었습니다.
+   *
+   * 그래서 두 가지를 같이 고쳤습니다:
+   *   ① 창을 **사거리에서** 엽니다(위 `rangeOf` 주석).
+   *   ② `└ 때릴 수 있는 자리에 적이 있던 시간` 을 로그에 같이 찍습니다.
+   * ②가 없으면 «작다»의 뜻이 «약하다»와 «거기 없었다» 둘로 겹칩니다.
+   * 두 뜻이 한 수에 겹치면 밸런스를 엉뚱하게 만지게 되는데, 그건 이
+   * 저장소가 이미 여러 번 물린 모양입니다 — **처방이 다른 둘이 한 칸에
+   * 담기면 정확히 거꾸로 읽힙니다.**
    *
    * 「아무도 못 넘는 문턱은 눈금이 아니라 벽이다」 — 궁수의 2발 검사에서
-   * 이미 한 번 배운 자리라, 천장을 찍기 전에는 밸런스를 만지지 않습니다.
+   * 이미 한 번 배운 자리라, 천장을 찍기 전에는 밸런스를 안 만졌습니다.
+   * 찍어 보니 벽이 아니었으므로 **문턱은 그대로 둡니다.**
    */
+  /**
+   * ⛰️ **천장** — 이 검사가 넘을 수 있는 최대.
+   *
+   * ⚠️ **게임에서 꺼낸 값으로만** 셉니다. 토큰 수(2)나 잡몹 피해(14)를
+   *    여기 적어 두면, 밸런스를 고치는 날 프로브가 **옛 게임**을 재게
+   *    됩니다. 「규칙은 한 곳에만」의 그 자리입니다.
+   *
+   * 세는 법: 토큰 하나는 한 번 휘두르는 동안(예고+판정+후딜) 붙잡혀 있고,
+   * 그 뒤 **쿨다운은 다른 적이 대신 씁니다**(무리가 셋 이상이면). 그래서
+   * 천장의 분모는 쿨다운이 아니라 **붙잡는 시간**입니다.
+   */
+  {
+    const grunts = roster.filter((r) => r.attacks.length > 0 && !r.attacks.some((a) => a.projectile))
+    // 가장 «싼» 패턴 — 짧게 붙잡고 아프게 때리는 것이 천장을 만듭니다.
+    let best = null
+    for (const r of grunts)
+      for (const a of r.attacks) {
+        const hold = a.windup + a.active + a.recovery
+        const dps = a.damage / hold
+        if (!best || dps > best.dps) best = { r, a, hold, dps }
+      }
+    if (best) {
+      const ceil = limits.melee * (8 / best.hold) * best.a.damage
+      console.log(
+        `\n  ⛰️ [천장] 근접 토큰 ${limits.melee}개 · 가장 아픈 패턴 ${best.r.name} ${best.a.id} ` +
+          `(붙잡는 시간 ${best.hold.toFixed(2)}초 · 한 대 ${best.a.damage})\n` +
+          `        → 8초에 최대 ${(limits.melee * (8 / best.hold)).toFixed(1)}대 = **${ceil.toFixed(0)}** ` +
+          `(성수병 ${vialHeal}의 ${(ceil / vialHeal).toFixed(1)}배) — 문턱은 벽이 아닙니다`,
+      )
+    }
+  }
   check(
     run.trainBill >= vialHeal,
     '끌고 온 무리가 실제로 아프다 (장식이 아니다)',
