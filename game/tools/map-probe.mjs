@@ -1176,6 +1176,43 @@ try {
       }
       const bestShots = ((ceiling * CELL) / walkSpeed) / archerDef.attackCycle
       /**
+       * ⛰️ **걸음 거리로 잰 천장** — 위 `ceiling` 은 직선이라 **부풀려져**
+       * 있습니다(직선 ≤ 걸음이므로 상한으로는 맞지만, 「넘을 수 있는가」를
+       * 물을 때는 그 부풀림이 그대로 거짓 희망이 됩니다).
+       *
+       * ⚠️ **표본으로 잽니다** — 칸마다 걸음 장을 띄우면 6336번의 BFS 가
+       *    됩니다. 세 칸에 하나씩(가로·세로 3칸 간격) 훑어 약 700번으로
+       *    줄입니다. 표본이라 **진짜 천장보다 낮게** 나올 수 있으니,
+       *    이 값이 2를 넘으면 «넘을 수 있다»가 확실하고, 안 넘으면
+       *    «표본에서는 못 넘었다»입니다 — 그 차이를 로그에 적어 둡니다.
+       */
+      let walkCeilCells = 0
+      let walkCeilAt = null
+      for (let cz = 0; cz < level.h; cz += 3) {
+        for (let cx = 0; cx < level.w; cx += 3) {
+          if (heightAt(cx, cz) === VOID) continue
+          const f = walkField([{ cx, cz }], maxClimb, CELL)
+          let n = 0
+          for (const c of routeCells) {
+            const d = f.get(c.cz * level.w + c.cx)
+            if (d !== undefined && d <= wakeRange) n++
+          }
+          if (n > walkCeilCells) {
+            walkCeilCells = n
+            walkCeilAt = { cx, cz }
+          }
+        }
+      }
+      const walkCeilShots = ((walkCeilCells * CELL) / walkSpeed) / archerDef.attackCycle
+      console.log(
+        `\n  ⛰️ 쏘는 자의 천장 — 직선으로 ${bestShots.toFixed(
+          2,
+        )}발 · **걸어서 ${walkCeilShots.toFixed(2)}발**` +
+          (walkCeilAt ? ` (가장 좋은 표본 칸 (${walkCeilAt.cx},${walkCeilAt.cz}))` : '') +
+          `\n     └ 표본은 세 칸에 하나라 **진짜 천장보다 낮을 수** 있습니다 —` +
+          ` 2를 넘으면 «넘을 수 있다»가 확실하고, 안 넘으면 «표본에서는 못 넘었다»입니다`,
+      )
+      /**
        * 「지나가는 동안 몇 발」을 **한 곳에서만** 계산합니다 — 아래 🛣 검사가
        * 같은 셈을 두 번째 길에 대고 다시 합니다. 같은 식을 두 벌 적으면
        * 언젠가 둘이 어긋납니다(이 저장소가 세 번 낸 사고).
@@ -1232,12 +1269,66 @@ try {
           `🔴 쏘는 자(${ac.cx},${ac.cz}) — 걷는 길 하나에서 2발 이상 쏠 수 있다 (한 발은 사고입니다)`,
           `${table} · 깨는 거리 ${wakeRange}m ÷ 이동 ${walkSpeed}m/s ÷ 한 바퀴 ${archerDef.attackCycle.toFixed(2)}초` +
             (best.shots < 2
-              ? ` · ⛰️ **주 동선의 천장 ${bestShots.toFixed(2)}발**` +
-                (bestShots < 2
-                  ? ' — 어느 칸으로 옮겨도 2발이 안 됩니다. 자리가 아니라 사거리/한 바퀴를 보세요'
-                  : '')
+              ? ` · ⛰️ **걸어서 잰 천장 ${walkCeilShots.toFixed(2)}발**` +
+                (walkCeilShots < 2
+                  ? ` — **어느 칸으로 옮겨도 2발이 안 됩니다.** 넘게 하려면` +
+                    ` 덮는 길이 ${(walkCeilCells * CELL).toFixed(0)}m → ${(
+                      2 * archerDef.attackCycle * walkSpeed
+                    ).toFixed(0)}m 이거나, 한 바퀴가 ${archerDef.attackCycle.toFixed(
+                      2,
+                    )}초 → ${(((walkCeilCells * CELL) / walkSpeed) / 2).toFixed(2)}초여야 합니다`
+                  : ' — 옮길 칸은 있습니다(위 💡)')
               : ''),
         )
+        /**
+         * 💡 **2발이 안 되면 «어느 칸으로 옮기면 되는지»를 냅니다.**
+         *
+         * 절벽·발소리에서 두 번 통한 방식 그대로입니다 — 좌표를 눈으로
+         * 골라서 고친 것이 이 회차에 세 번 뒤집혔으므로, **곁 칸을 다 재서**
+         * 프로브가 이름을 내게 합니다.
+         *
+         * ⚠️ 후보는 **곁 20m 안**으로 좁힙니다. 지도 전체(6336칸)마다 걸음
+         *    장을 띄우면 4천만 번이 됩니다. 20m 는 «같은 방을 지키는 다른
+         *    자리»의 범위라, 그 밖으로 나가면 그 궁수가 하던 **다른 일**
+         *    (구역 위험도·색 배분·다른 궁수와의 간격)이 통째로 바뀝니다.
+         *
+         * ⚠️ **제안이지 판정이 아닙니다.** 옮기면 위 두 검사 말고도 여럿이
+         *    같이 움직이므로, 옮긴 뒤에는 지도 전체를 다시 재야 합니다.
+         */
+        // 💡 천장이 2 위일 때만 «옮길 칸»을 찾습니다 — 천장이 아래면
+        //    어느 칸도 답이 아니라, 찾는 일 자체가 헛수고입니다.
+        if (best.shots < 2 && walkCeilShots >= 2) {
+          const R = Math.ceil(20 / CELL)
+          const found = []
+          for (let dz = -R; dz <= R && found.length < 4; dz++) {
+            for (let dx = -R; dx <= R && found.length < 4; dx++) {
+              const cx = ac.cx + dx
+              const cz = ac.cz + dz
+              if (cx < 0 || cz < 0 || cx >= level.w || cz >= level.h) continue
+              if (heightAt(cx, cz) === VOID) continue
+              if (Math.hypot(dx, dz) * CELL > 20) continue
+              const f = walkField([{ cx, cz }], maxClimb, CELL)
+              let cover = 0
+              let ranged = 0
+              for (const c of routeCells) {
+                const d = f.get(c.cz * level.w + c.cx)
+                if (d === undefined) continue
+                if (d <= wakeRange) cover++
+                // 🎯 사거리는 **직선**이 맞습니다 — 화살은 걸어가지 않습니다.
+                // guard-allow: 직선 — 화살의 사거리(걷는 거리가 아님).
+                if (Math.hypot(c.cx - cx, c.cz - cz) * CELL <= archerDef.attackRange) ranged++
+              }
+              const shots = ((cover * CELL) / walkSpeed) / archerDef.attackCycle
+              if (shots >= 2 && ranged >= 8)
+                found.push(`(${cx},${cz}) ${shots.toFixed(1)}발 · 사거리 ${ranged}칸`)
+            }
+          }
+          console.log(
+            found.length
+              ? `     💡 옮기면 2발이 되는 칸 — ${found.join(' · ')}`
+              : `     💡 곁 20m 안에는 2발이 되는 칸이 없습니다 — 자리가 아니라 방을 옮겨야 합니다`,
+          )
+        }
         /**
          * 같은 궁수에게 **다른 것**을 한 번 더 묻습니다. 위는 *"깨어 있는
          * 동안 몇 발을 낼 시간이 되는가"* 이고, 이것은 *"화살이 실제로
