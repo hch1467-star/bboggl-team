@@ -5568,6 +5568,11 @@ class Game {
     hearRun: number
     /** 「보고 있다」로 치는 부채꼴(도). 이 밖이면 소리만 듣습니다. */
     frontArcDeg: number
+    /**
+     * 📣 **깬 적이 동료를 부르는 거리**(m). 조용히 지나갈 자리를 고르려면
+     * 이것도 봐야 합니다 — 곁에 동료가 있으면 **소리와 무관하게** 깨어납니다.
+     */
+    alertRadius: number
     /** 달리기 배율 · 공격 템포 배율 — 프로브가 상수를 베끼지 않게. */
     sprintScale: number
     /** 달릴 때 시야가 넓어지는 배율 · 기본 시야(m) · 지금 카메라 줌. */
@@ -5657,6 +5662,7 @@ class Game {
       hearWalk: hearDistance(PLAYER_CFG.moveSpeed),
       hearRun: hearDistance(PLAYER_CFG.moveSpeed * PLAYER_CFG.sprint.speedScale),
       frontArcDeg: AWARE.frontArcDeg,
+      alertRadius: AWARE.alertRadius,
       sprintScale: PLAYER_CFG.sprint.speedScale,
       sprintViewScale: CAMERA.sprintViewScale,
       cameraViewSize: CAMERA.viewSize,

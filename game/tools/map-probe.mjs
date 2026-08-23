@@ -2390,7 +2390,7 @@ try {
   {
     const hear = await page.evaluate(() => {
       const t = window.__game.terrainInfo()
-      return { walk: t.hearWalk, run: t.hearRun, arc: t.frontArcDeg }
+      return { walk: t.hearWalk, run: t.hearRun, arc: t.frontArcDeg, alert: t.alertRadius }
     })
     const arcCos = Math.cos(((hear.arc / 2) * Math.PI) / 180)
     /**
@@ -2470,7 +2470,29 @@ try {
       const facing = (tox / len) * fx + (toz / len) * fz >= arcCos
       // 🚶 판정은 **걸어야 하는 거리**로 합니다(게임과 같은 자).
       const w = walkFromRoute(c.cx, c.cz)
-      if (!facing && w !== undefined && w > hear.walk && w <= hear.run)
+      /**
+       * 📣 **고함이 닿는 곳에 동료가 없어야 합니다** — 조건 셋 중 마지막.
+       *
+       * ── 이걸 빼먹고 한 회차를 통째로 돌았습니다 ────────────────────
+       * 등을 돌리고 띠 안에 세운 파수꾼이 **걸어서도 깼습니다**(8m 접근 ·
+       * 걷기 듣는 거리 6.4m — 소리로는 불가능). 곁을 세어 보니
+       * **4.0m 에 다른 잡몹**이 있었고, 그 잡몹이 길에서 깨면서
+       * `AWARE.alertRadius`(7m)로 **고함**을 질러 파수꾼을 깨웠습니다.
+       * 소리도 시야도 아니고 **동료**였습니다.
+       *
+       * `balance.ts` 의 그 값 주석이 정확히 이 실패를 적어 두고 있습니다 —
+       * *"너무 크면 한 번 들킬 때 존이 통째로 일어나서, 걸어서 조용히 가는
+       * 선택이 사라집니다(npm run bypass)"*. **규칙은 자기가 어떻게 깨지는지
+       * 알고 있었고, 검사만 그걸 안 보고 있었습니다.**
+       *
+       * ⚠️ 곁 거리는 **직선**으로 봅니다 — 고함은 걸어오는 것이 아니라
+       *    들리는 것이라, 여기서는 걸음 거리가 아니라 직선이 맞습니다.
+       *    (같은 파일 안에서도 자를 규칙마다 골라야 합니다.)
+       */
+      const shouted = facingFoes.some(
+        (o) => o !== e && Math.hypot(o.x - e.x, o.z - e.z) <= hear.alert,
+      )
+      if (!facing && !shouted && w !== undefined && w > hear.walk && w <= hear.run)
         quiet.push({
           kind: e.kind,
           x: Math.round(e.x),
@@ -2514,6 +2536,10 @@ try {
           // 🚶 후보도 **걸어야 하는 거리**로 고릅니다 — 판정과 같은 자.
           const w = walkFromRoute(cx, cz)
           if (w === undefined || w <= hear.walk + 0.8 || w >= hear.run - 0.8) continue
+          // 📣 고함이 닿는 곳에 동료가 있으면 후보가 아닙니다(위 주석).
+          const wx = (cx - level.w / 2 + 0.5) * CELL
+          const wz = (cz - level.h / 2 + 0.5) * CELL
+          if (facingFoes.some((o) => Math.hypot(o.x - wx, o.z - wz) <= hear.alert)) continue
           const bucket = Math.floor(at / 20)
           const score = Math.abs(w - mid)
           const prev = best.get(bucket)
