@@ -1843,10 +1843,32 @@ try {
     }))
     let overlap = 0
     let sample = null
+    /**
+     * 📏 **여유도 같이 잽니다 — 「0m」만으로는 튼튼한지 아슬아슬한지 모릅니다.**
+     *
+     * 이 검사는 오래 `겹치는 동선 0m` 만 찍었습니다. 그런데 0m 은 두
+     * 가지를 한 수에 담습니다 — *"넉넉히 떨어져 있다"* 와 *"한 칸만
+     * 움직이면 겹친다"*. 이 저장소가 그 차이를 아프게 배웠습니다:
+     * 「한 칸 차이의 초록은 운이다」.
+     *
+     * 실제로 이번 회차에 절벽 어휘를 늘리려고 얽는 자를 **2m** 옮겼는데,
+     * 그 자리를 정할 때 근거로 삼았던 「여유 4.9m」가 얼마로 줄었는지
+     * 이 검사가 말해 주지 못했습니다. 통과했다는 사실만으로 안심하면
+     * 다음 사람이 남은 여유를 모르고 또 옮깁니다.
+     *
+     * 재는 법: 동선의 칸마다 **두 번째로 가까운** 속박 적이 자기 깨는
+     * 거리를 얼마나 남기고 비껴가는지 보고, 그중 **가장 작은 값**을 냅니다.
+     * 그 값이 0 이하가 되는 순간이 곧 겹침입니다.
+     */
+    let slack = Infinity
     for (const c of routeCells) {
+      const surplus = ccFoes
+        .map((f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) - wakeOf(f.kind))
+        .sort((a, b) => a - b)
       const near = ccFoes.filter(
         (f) => Math.hypot((f.cx - c.cx) * CELL, (f.cz - c.cz) * CELL) <= wakeOf(f.kind),
       )
+      if (surplus.length >= 2 && surplus[1] < slack) slack = surplus[1]
       if (near.length >= 2) {
         overlap++
         if (!sample) sample = near.map((f) => `(${f.x},${f.z})`).join(' · ')
@@ -1856,7 +1878,9 @@ try {
       overlap === 0,
       '**속박은 한 자리에서 하나만 깨어난다** (묶인 채로 또 묶이지 않게)',
       overlap === 0
-        ? `속박을 가진 적 ${ccFoes.length}마리 · 겹치는 동선 0m`
+        ? `속박을 가진 적 ${ccFoes.length}마리 · 겹치는 동선 0m · **여유 ${
+            slack === Infinity ? '–' : slack.toFixed(1)
+          }m** (0이 되면 겹칩니다)`
         : `겹치는 동선 ${overlap * CELL}m — ${sample}`,
     )
   }
@@ -2245,7 +2269,30 @@ try {
             cx: c.cx + dx - Math.round(m2.pux),
             cz: c.cz + dz - Math.round(m2.puz),
           }
-          if (heightAt(p2.cx, p2.cz) === VOID) continue
+          const ph2 = heightAt(p2.cx, p2.cz)
+          if (ph2 === VOID) continue
+          /**
+           * ⚠️ **세 번째 조건을 주석에만 적고 코드에 안 넣었었습니다.**
+           * 위에 *"내 등 뒤는 안전할 것"* 이라고 써 놓고 실제로는
+           * «걸을 수 있는 칸인가»만 봤습니다. 그래서 첫 실행이
+           * 양옆이 낭떠러지인 능선 칸을 **가르치는 자리라고 추천**했습니다.
+           *
+           * 이 저장소가 여러 번 겪은 모양입니다 — 주석이 약속한 것을
+           * 코드가 안 지키면, **아무도 안 지키는 규칙**이 생깁니다.
+           * 검사가 그걸 못 잡는 이유는 검사도 같은 주석을 읽지 않기
+           * 때문입니다. 그래서 조건을 **읽는 자리 바로 옆에** 둡니다.
+           */
+          let selfDrop2 = 0
+          for (let ax = -rad; ax <= rad; ax++)
+            for (let az = -rad; az <= rad; az++) {
+              const len = Math.hypot(ax * CELL, az * CELL)
+              if (len > PUSH || len === 0) continue
+              const hn = heightAt(p2.cx + ax, p2.cz + az)
+              if (hn === VOID) continue
+              const cos = ((ax * CELL) / len) * -m2.pux + ((az * CELL) / len) * -m2.puz
+              if (cos >= PUSH_ARC_COS) selfDrop2 = Math.max(selfDrop2, ph2 - hn)
+            }
+          if (selfDrop2 > fall.free) continue
           nudge = {
             x: Math.round((c.cx + dx - level.w / 2 + 0.5) * CELL),
             z: Math.round((c.cz + dz - level.h / 2 + 0.5) * CELL),
