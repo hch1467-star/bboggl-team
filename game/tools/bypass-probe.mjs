@@ -471,6 +471,7 @@ try {
        */
       const arenaR0 = G.bossEncounter()?.arenaRadius ?? 0
       let snap = { awake: 0, chasing: 0, inArena: 0 }
+      let arenaWho = []
       let billed = 0
       let settleDeaths = 0
       let settleHeal = 0
@@ -510,8 +511,26 @@ try {
           if (t.dist <= (reachOf.get(t.kind) ?? 2)) near++
           if (t.dist < nearest) nearest = t.dist
         }
-        // 죽은 프레임의 사진은 안 찍습니다 — 그 순간은 이미 화톳불입니다.
-        if (settleDeaths === 0) snap = { awake: awakeN, chasing: chasingN, inArena: inArenaN }
+        /**
+         * 🧾 **따라 들어온 다섯이 «누구»인가** — 청구서의 구성.
+         *
+         * 지금까지 수만 찍었습니다(5마리). 그런데 끄는 자는 한 대 12,
+         * 얽는 자는 **6** 입니다 — 잡몹(14)·달려드는 자(16)와 두 배 차이라,
+         * **같은 다섯 마리라도 청구서가 두 배 다릅니다.** 수만 보고
+         * *"무리가 약하다"* 고 말하면 그 안의 구성이 안 보입니다.
+         *
+         * 이 회차에 「10 = 10」에서 배운 것과 같은 자리입니다 —
+         * **수는 «누구»를 말해 주지 않습니다.**
+         */
+        if (settleDeaths === 0) {
+          snap = { awake: awakeN, chasing: chasingN, inArena: inArenaN }
+          const tally = {}
+          for (const t of th)
+            if (t.aggro && t.dist <= arenaR0) tally[t.kind] = (tally[t.kind] ?? 0) + 1
+          arenaWho = Object.entries(tally)
+            .map(([k, n]) => `${k}×${n}`)
+            .sort()
+        }
         windowFrames++
         if (near > 0) reachFrames++
         reachSum += near
@@ -550,6 +569,8 @@ try {
         facedWoke,
         chasing,
         inArena,
+        /** 영역 안 추격자의 **종류별 수** — 같은 다섯이라도 청구서가 다릅니다 */
+        arenaWho,
         arenaR: Number(arenaR.toFixed(1)),
         hpAfterSettle: Number(hpAfterSettle.toFixed(1)),
         /**
@@ -621,6 +642,7 @@ try {
     chasing: med(runs.map((r) => r.chasing)),
     inArena: med(runs.map((r) => r.inArena)),
     inArenaSpan: span(runs.map((r) => r.inArena)),
+    arenaWho: runs[0].arenaWho,
     trainBill: med(runs.map((r) => r.trainBill)),
     trainWait: med(runs.map((r) => r.trainWait)),
     trainWaitSpan: span(runs.map((r) => r.trainWait)),
@@ -661,7 +683,9 @@ try {
     `           도착 시 체력 ${r.hp}/${r.maxHp}(${r.hpSpan}) · 오는 길 피해 ${r.damage}(${r.damageSpan}) · ` +
     `피격 ${r.hits}회(${r.hitsSpan})\n` +
     `           깨운 적 ${r.awake}마리(${r.awakeSpan}) · ` +
-    `보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}) · ` +
+    `보스 영역 안까지 따라온 적 ${r.inArena}마리(${r.inArenaSpan}${
+      r.arenaWho.length ? ' — ' + r.arenaWho.join(' ') : ''
+    }) · ` +
     `무리 도착까지 ${r.trainWait}초(${r.trainWaitSpan}) · 그 뒤 8초의 청구서 ${r.trainBill}(${r.trainBillSpan})\n` +
     `           └ 그 8초 중 **때릴 수 있는 자리**에 적이 있던 시간 ${r.reachTime}초(${r.reachTimeSpan}) · ` +
     `평균 ${r.reachAvg}마리 · 가장 가까웠던 거리 ${r.nearest}m(${r.nearestSpan})` +
