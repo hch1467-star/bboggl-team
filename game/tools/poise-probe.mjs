@@ -126,30 +126,75 @@ try {
 
   const WINDOW = 14
 
-  // ---- 1. 때리기만 해서 적을 봉쇄할 수 있는가 ----
-  const grunt = await page.evaluate(
-    async (w) => ({
-      idle: await window.__t.observe('grunt', w, false),
-      spam: await window.__t.observe('grunt', w, true),
-    }),
-    WINDOW,
-  )
+  /**
+   * ⚠️ **세 번 재서 가운데값으로 봅니다** — 한 판의 휘두름 수는 한 자릿수라
+   *    하나만 달라져도 판정이 뒤집힙니다.
+   *
+   * 실제로 그랬습니다: 가만히 **6회** / 계속 때릴 때 **2회** 였고 문턱이
+   * `ceil(6 × 0.4) = 3` 이라, **휘두름 한 번 차이**로 빨갛게 나왔습니다.
+   * 「한 칸 차이의 초록은 운이다」— 빨강도 마찬가지입니다.
+   *
+   * 창을 늘리지 않고 **판을 늘리는** 이유: 창을 늘리면 적이 죽거나
+   * 체력이 바닥나 관측이 도중에 성질을 바꿉니다. 같은 길이의 판을
+   * 여러 번 보는 쪽이 재려던 것(**14초 동안의 박자**)을 안 바꿉니다.
+   */
+  const REPEATS = 3
+  const med = (xs) => [...xs].sort((a2, b2) => a2 - b2)[Math.floor(xs.length / 2)]
+  const trials = []
+  for (let i = 0; i < REPEATS; i++)
+    trials.push(
+      await page.evaluate(
+        async (w) => ({
+          idle: await window.__t.observe('grunt', w, false),
+          spam: await window.__t.observe('grunt', w, true),
+        }),
+        WINDOW,
+      ),
+    )
+  const grunt = {
+    idle: {
+      telegraphs: med(trials.map((t) => t.idle.telegraphs)),
+      swings: med(trials.map((t) => t.idle.swings)),
+      staggerRatio: med(trials.map((t) => t.idle.staggerRatio)),
+    },
+    spam: {
+      telegraphs: med(trials.map((t) => t.spam.telegraphs)),
+      swings: med(trials.map((t) => t.spam.swings)),
+      staggerRatio: med(trials.map((t) => t.spam.staggerRatio)),
+    },
+  }
   console.log(
     `  [잡몹 ${WINDOW}초] 가만히: 예고 ${grunt.idle.telegraphs}회 / 실제 공격 ${grunt.idle.swings}회 · ` +
       `계속 때릴 때: 예고 ${grunt.spam.telegraphs}회 / 실제 공격 ${grunt.spam.swings}회 ` +
-      `(경직 ${(grunt.spam.staggerRatio * 100).toFixed(0)}%)`,
+      `(경직 ${(grunt.spam.staggerRatio * 100).toFixed(0)}%)` +
+      `\n     ${REPEATS}판의 값 — 가만히 ${trials
+        .map((t) => t.idle.swings)
+        .join('·')} · 계속 때릴 때 ${trials.map((t) => t.spam.swings).join('·')} (판정은 가운데값)`,
   )
-  // 절반 이상 남아야 "예고를 읽는 게임"이 유지됩니다.
-  // 0에 가까우면 4색 설계 전체가 장식이 됩니다.
+  /**
+   * ⚠️ **주석과 코드가 어긋나 있었습니다.** 원래 여기 *"절반 이상 남아야"*
+   *    라고 적혀 있는데 코드는 `0.4`(40%)였습니다 — 이 회차에만 같은
+   *    모양을 다섯 번 봤습니다(절벽 제안기 · `alertRadius` · 검사의 블록
+   *    주석 · `archer_draw` 가중치 · 여기).
+   *
+   * **글을 코드에 맞춥니다** — 0.4 쪽이 옳다고 보기 때문입니다.
+   * 지키려는 것은 *"봉쇄가 안 된다"* 이지 *"때려도 절반은 낸다"* 가
+   * 아닙니다. 계속 때리면 눈에 띄게 줄어드는 것이 **강인도의 값어치**이고
+   * (그게 없으면 강인도를 깎을 이유가 없습니다), 다만 **0 이 되면 안**
+   * 됩니다 — 0 에 가까우면 4색 설계 전체가 장식이 됩니다.
+   */
+  const KEEP = 0.4
   check(
     grunt.idle.swings > 0,
     '가만히 두면 잡몹이 공격을 성사시킴 (기준선)',
     `${grunt.idle.swings}회`,
   )
   check(
-    grunt.spam.swings >= Math.ceil(grunt.idle.swings * 0.4),
-    '계속 때려도 잡몹이 반격함 (봉쇄 불가)',
-    `${grunt.idle.swings}회 → ${grunt.spam.swings}회`,
+    grunt.spam.swings >= Math.ceil(grunt.idle.swings * KEEP),
+    `계속 때려도 잡몹이 반격함 (봉쇄 불가 — ${(KEEP * 100).toFixed(0)}% 는 남아야)`,
+    `${grunt.idle.swings}회 → ${grunt.spam.swings}회 (문턱 ${Math.ceil(
+      grunt.idle.swings * KEEP,
+    )}회 · ${REPEATS}판 가운데값)`,
   )
 
   // ---- 2. 보스는 더 단단해야 합니다 ----
