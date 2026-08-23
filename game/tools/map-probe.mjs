@@ -2160,12 +2160,42 @@ try {
        * 결론이 아니다」. 가르치는 자리를 고르는 것도 재고 나서 합니다.
        */
       const routeAt = near ? Math.round(near.i * CELL) : -1
+      /**
+       * ⚠️ **내 등 뒤에도 낭떠러지가 있는가** — 같은 자리가 두 뜻을 가질 때.
+       *
+       * 넉백은 **양쪽 다** 받습니다(combat.ts 는 «맞은 쪽»을 밀 뿐, 적인지
+       * 사람인지 안 가립니다). 그러니 좁은 능선처럼 **양옆이 낭떠러지**인
+       * 자리는 «내가 미는 자리»이면서 동시에 «내가 밀리는 자리»입니다.
+       *
+       * 이 둘은 **둘 다 좋은 설계**입니다 — 다만 **가르치는 자리로는**
+       * 다릅니다. 처음 만나는 절벽에서 내가 먼저 떨어지면 배우는 문장이
+       * *"절벽은 내 무기다"* 가 아니라 *"절벽은 나를 아프게 한다"* 가
+       * 됩니다. 순서가 뒤집히면 같은 지형이 정반대를 가르칩니다.
+       *
+       * 플레이어가 서는 자리는 **적의 한 칸 앞**(미는 방향의 반대)으로
+       * 봅니다 — 근접 사거리가 2m 남짓이라 대략 한 칸입니다.
+       */
+      const px = c.cx - Math.round(pux)
+      const pz = c.cz - Math.round(puz)
+      const ph = heightAt(px, pz)
+      let selfDrop = 0
+      if (ph !== VOID)
+        for (let dx = -rad; dx <= rad; dx++)
+          for (let dz = -rad; dz <= rad; dz++) {
+            const len = Math.hypot(dx * CELL, dz * CELL)
+            if (len > PUSH || len === 0) continue
+            const hn = heightAt(px + dx, pz + dz)
+            if (hn === VOID) continue
+            const cos = near ? ((dx * CELL) / len) * -pux + ((dz * CELL) / len) * -puz : -1
+            if (cos >= PUSH_ARC_COS) selfDrop = Math.max(selfDrop, ph - hn)
+          }
       return {
         kind: e.kind,
         x: Math.round(e.x),
         z: Math.round(e.z),
         drop,
         behindDrop,
+        selfDrop,
         onRoute,
         routeAt,
       }
@@ -2184,7 +2214,9 @@ try {
                 (r) =>
                   `${r.kind}(${r.x},${r.z}) ${r.drop}단${
                     r.behindDrop > fall.free ? '·등 뒤' : '·옆/앞'
-                  }·동선 ${r.routeAt}m${r.onRoute ? '' : ' ·동선 밖'}`,
+                  }${r.selfDrop > fall.free ? `·⚠️내 뒤도 ${r.selfDrop}단` : ''}·동선 ${
+                    r.routeAt
+                  }m${r.onRoute ? '' : ' ·동선 밖'}`,
               )
               .join(' · ')}`
           : ''),
