@@ -2092,31 +2092,83 @@ try {
     const PUSH = 3.5 // 강타 넉백이 밀어낼 만한 거리(m) — 아래 ⚠️ 참고
     const foes = level.entities.filter((e) => FOE_KINDS.has(e.kind) || e.kind === 'archer')
     const rad = Math.ceil(PUSH / CELL)
+    /**
+     * ── 🧭 **낙차가 «어느 쪽»에 있는지도 봅니다** ─────────────────────
+     *
+     * 여기까지의 검사는 *"곁에 아픈 낙차가 있는가"* 만 물었습니다. 그런데
+     * 밀어서 떨어뜨리는 것은 **방향이 있는 동사**입니다 — 넉백은 플레이어의
+     * 반대쪽으로 나가므로, 낙차가 **적의 등 뒤**에 있어야 쓸 수 있습니다.
+     *
+     * 낭떠러지가 **내 등 뒤**에 있으면 같은 지형이 정반대의 뜻이 됩니다:
+     * 가르치는 자리가 아니라 **내가 떨어지는 자리**입니다. 두 경우의 칸
+     * 모양이 똑같아서, 방향을 안 재면 그 둘이 한 수에 담깁니다 —
+     * 이 저장소가 반복해서 물린 그 모양입니다(처방이 다른 둘이 한 칸에).
+     *
+     * 미는 방향은 **동선에서 적을 향하는 쪽**으로 봅니다. 플레이어는
+     * 길을 따라 와서 적을 마주 보므로, 그 연장선이 넉백이 나가는 쪽입니다.
+     * ±60°(부채꼴 120°)를 «등 뒤»로 칩니다 — 정확히 뒤에 서야만 성립하면
+     * 그건 지형이 아니라 **곡예**를 요구하는 것이라, 조작이 아무리 좋아도
+     * 우연에 기대게 됩니다.
+     *
+     * 참고한 것: 「무자비한 세계(No Rest for the Wicked)」가 절벽 처치를
+     * 가르치는 방식 — 좁은 길에 **혼자** 선 적, 플레이어가 오는 쪽의
+     * 반대편이 낭떠러지. 플레이어는 평소대로 때렸을 뿐인데 적이 떨어지고,
+     * 그 순간 *"세계가 무기다"* 를 스스로 알아냅니다. 가르쳐 준 것이
+     * 아니라 **알아낸 것**이라, 사용자가 말한 「스스로 잘한다는 느낌」이
+     * 바로 이 자리에서 납니다.
+     */
+    const PUSH_ARC_COS = Math.cos((60 * Math.PI) / 180)
     const rows = foes.map((e) => {
       const c = cellOf(e)
       const h0 = heightAt(c.cx, c.cz)
+      // 🧭 동선에서 이 적을 향하는 쪽 — 넉백이 나가는 방향입니다.
+      let near = null
+      for (const r of routeCells) {
+        const d = Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL)
+        // 같은 칸이면 방향이 안 나옵니다(0 벡터). 한 칸 밖부터 봅니다.
+        if (d < CELL) continue
+        if (!near || d < near.d) near = { r, d }
+      }
+      const pux = near ? (c.cx - near.r.cx) / (near.d / CELL) : 0
+      const puz = near ? (c.cz - near.r.cz) / (near.d / CELL) : 0
       let drop = 0
+      /** 🧭 그중 **등 뒤 부채꼴 안**에 있는 낙차 — 실제로 밀어 넣을 수 있는 것 */
+      let behindDrop = 0
       for (let dx = -rad; dx <= rad; dx++) {
         for (let dz = -rad; dz <= rad; dz++) {
-          if (Math.hypot(dx * CELL, dz * CELL) > PUSH) continue
+          const len = Math.hypot(dx * CELL, dz * CELL)
+          if (len > PUSH || len === 0) continue
           const hn = heightAt(c.cx + dx, c.cz + dz)
           if (hn === VOID) continue
-          drop = Math.max(drop, h0 - hn)
+          const d = h0 - hn
+          drop = Math.max(drop, d)
+          const cos = near ? ((dx * CELL) / len) * pux + ((dz * CELL) / len) * puz : -1
+          if (cos >= PUSH_ARC_COS) behindDrop = Math.max(behindDrop, d)
         }
       }
       // 이 적이 **동선에서 깨어나는가** — 안 깨면 있어도 없는 것입니다.
       const onRoute = routeCells.some(
         (r) => Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL) <= wakeOf(e.kind),
       )
-      return { kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), drop, onRoute }
+      return { kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), drop, behindDrop, onRoute }
     })
     const hurty = rows.filter((r) => r.drop > fall.free)
     const onRoad = hurty.filter((r) => r.onRoute)
+    /** 🧭 등 뒤에 낙차가 있고, 동선에서 깨는 것 — **실제로 밀어 넣을 수 있는** 적 */
+    const pushable = onRoad.filter((r) => r.behindDrop > fall.free)
     console.log(
       `\n  🪂 밀어서 떨어뜨릴 수 있는 자리 (${PUSH}m 안에 ${fall.free}단 초과 낙차) — ` +
-        `적 ${rows.length}마리 중 **${hurty.length}마리** · 그중 동선에서 깨는 것 ${onRoad.length}마리` +
+        `적 ${rows.length}마리 중 **${hurty.length}마리** · 그중 동선에서 깨는 것 ${onRoad.length}마리 · ` +
+        `그중 낙차가 **등 뒤**인 것 ${pushable.length}마리` +
         (hurty.length
-          ? `\n     ${hurty.map((r) => `${r.kind}(${r.x},${r.z}) ${r.drop}단${r.onRoute ? '' : ' ·동선 밖'}`).join(' · ')}`
+          ? `\n     ${hurty
+              .map(
+                (r) =>
+                  `${r.kind}(${r.x},${r.z}) ${r.drop}단${
+                    r.behindDrop > fall.free ? '·등 뒤' : '·옆/앞'
+                  }${r.onRoute ? '' : ' ·동선 밖'}`,
+              )
+              .join(' · ')}`
           : ''),
     )
     check(
@@ -2125,6 +2177,21 @@ try {
       onRoad.length
         ? `${onRoad.map((r) => `${r.kind}(${r.x},${r.z}) ${r.drop}단`).join(' · ')}`
         : `${fall.free}단 초과 낙차 곁에서 깨는 적이 하나도 없습니다 — 낙하 피해·무너짐 규칙이 코드에만 있게 됩니다`,
+    )
+    /**
+     * 🧭 **방향까지 맞는 자리가 하나는 있어야 합니다.**
+     *
+     * 위 줄만으로는 *"곁에 절벽이 있다"* 까지밖에 못 셉니다. 그 절벽이
+     * 플레이어 쪽에 있으면 같은 지형이 **가르치는 자리**가 아니라
+     * **죽는 자리**입니다. 하나만 요구하는 이유는 위 줄과 같습니다 —
+     * 마릿수를 요구하면 지도를 절벽투성이로 만들라는 말이 됩니다.
+     */
+    check(
+      pushable.length >= 1,
+      '🧭 **낙차가 적의 «등 뒤»인 자리가 하나는 있다** (넉백이 나가는 쪽에 절벽이 있어야 밀어 넣습니다)',
+      pushable.length
+        ? `${pushable.map((r) => `${r.kind}(${r.x},${r.z}) 등 뒤 ${r.behindDrop}단`).join(' · ')}`
+        : `동선에서 깨는 ${onRoad.length}마리 모두 낙차가 옆이나 앞입니다 — 밀면 벽에 붙고, 그 절벽은 **내가** 떨어지는 쪽입니다`,
     )
   }
 
