@@ -152,6 +152,7 @@ try {
        */
       const HALF_WAY = 90
       let awakeHalf = -1
+      let awakeHalfWho = []
       let stuckSince = t0
       let stuckPos = { x: start.x, z: start.z }
       let stuckTime = 0
@@ -190,8 +191,24 @@ try {
          *    **"더 갔는가"** 가 됩니다 — 이번 회차에 창을 두고 정확히 같은
          *    실수를 한 번 고쳤습니다.
          */
-        if (awakeHalf < 0 && travelled >= HALF_WAY)
-          awakeHalf = G.threats(300).filter((t) => t.aggro).length
+        if (awakeHalf < 0 && travelled >= HALF_WAY) {
+          const up = G.threats(300).filter((t) => t.aggro)
+          awakeHalf = up.length
+          /**
+           * 📋 **누가 깨어 있었는지도 적어 둡니다** — 수는 «누구»를 말해
+           * 주지 않습니다.
+           *
+           * 절반 지점에서 걸어서 10마리 vs 달려서 10마리가 나왔습니다.
+           * 그런데 「10 = 10」은 두 가지를 한 수에 담습니다:
+           *   ① 정말 같은 적들이 깼다 → 소리 규칙이 아무 일도 안 한다
+           *   ② 다른 적들이 깼는데 수만 같다 → 규칙은 사는데 상쇄됐다
+           * 이 목록을 걷기·달리기에서 견주면 그 둘이 갈립니다. 이번
+           * 회차에 «수만 보고 뜻을 정하다» 여러 번 물렸습니다.
+           */
+          awakeHalfWho = up
+            .map((t) => `${t.kind}(${Math.round(t.x)},${Math.round(t.z)})`)
+            .sort()
+        }
 
         // 받은 피해 — 회복이 없으므로 줄어든 만큼이 곧 피해입니다.
         if (p.hp < lastHp - 0.01) {
@@ -430,6 +447,8 @@ try {
         awake,
         /** 같은 거리(절반 지점)를 지났을 때 깨어 있던 수 — 소리 규칙의 자리 */
         awakeHalf: awakeHalf < 0 ? 0 : awakeHalf,
+        /** 절반 지점에서 깨어 있던 적의 이름표 — 수가 같아도 «누구»가 다를 수 있습니다 */
+        awakeHalfWho,
         chasing,
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
@@ -516,6 +535,7 @@ try {
     settleHeal: span(runs.map((r) => r.settleHeal)),
     settleMinHp: span(runs.map((r) => r.settleMinHp)),
     awakeHalf: med(runs.map((r) => r.awakeHalf)),
+    awakeHalfWho: runs[0].awakeHalfWho,
     awakeHalfSpan: span(runs.map((r) => r.awakeHalf)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
@@ -663,6 +683,22 @@ try {
    * 끝에서 세면 걷든 달리든 길 옆을 다 깨워 **포화**해서, 규칙이 살아
    * 있어도 두 수가 같습니다. 끝의 수는 사람이 읽으라고 옆에 찍습니다.
    */
+  /**
+   * 📋 **수가 같을 때는 «누구»를 봐야 뜻이 정해집니다** (traverse 안 주석).
+   * 두 목록의 차집합을 찍습니다 — 비어 있으면 소리 규칙이 이 길에서
+   * 아무 일도 안 한 것이고, 차이가 있으면 규칙은 사는데 수가 상쇄된 것입니다.
+   */
+  {
+    const w = new Set(walk.awakeHalfWho)
+    const r = new Set(run.awakeHalfWho)
+    const onlyRun = [...r].filter((k) => !w.has(k))
+    const onlyWalk = [...w].filter((k) => !r.has(k))
+    console.log(
+      `\n  📋 절반 지점에서 깨어 있던 적 — 달려야만 깬 것 ${
+        onlyRun.length ? onlyRun.join(' · ') : '없음'
+      } · 걸어야만 깬 것 ${onlyWalk.length ? onlyWalk.join(' · ') : '없음'}`,
+    )
+  }
   check(
     run.awakeHalf > walk.awakeHalf,
     '달리면 더 많이 깨운다 (발소리가 속도를 탄다 — **같은 거리를 지났을 때**)',
