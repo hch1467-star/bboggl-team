@@ -100,6 +100,9 @@ try {
       let behindAtHit = null
       let sawWindup = false
       const hp0 = G.state().player.hp
+      // 🧾 장부를 비우고 시작합니다 — 앞 판의 휘두름이 섞이면 이 판의
+      //    숫자가 거짓이 됩니다(crowd-probe 가 같은 사고를 한 번 냈습니다).
+      G.swings()
 
       const t0 = now()
       const deadline = Date.now() + 60000
@@ -127,13 +130,41 @@ try {
           // 플레이어가 적의 **뒤**에 있는가 = 적이 지나쳐 버렸다는 뜻입니다.
           behindAtHit = G.testBehind(s.x, s.z, info.x, info.z, info.rotY)
         } else if (sawWindup && info.attacking) {
-          // 예고가 끝났습니다 — 한 번이 끝난 것이므로 여기서 멈춥니다.
-          // 쿨다운(3.2초)까지 기다리면 두 번째 공격이 섞입니다.
+          /**
+           * ⚠️ **여기서 멈추면 «맞기 직전»에 체력을 읽습니다.**
+           *
+           * 원래는 이 프레임에서 바로 `break` 했습니다. 그런데 피해는
+           * **판정(active) 단계**에 들어갑니다 — 예고가 끝나는 순간은
+           * 아직 아무 일도 안 일어난 때입니다. 그래서 이 프로브는
+           * *"예고 3/3 · 판정 순간 5.12m vs 사거리 5.5m · 지나쳐 가지도
+           * 않음 · **피해 0**"* 이라는, 서로 모순인 표를 내고 있었습니다.
+           * 기하는 다 맞는데 피해만 0이면 **재는 순간**을 의심해야 합니다.
+           *
+           * 이 회차에 같은 병을 한 번 고쳤습니다 — `bypass` 의 8초 창이
+           * 무리가 **오기 전에** 열려 있던 자리입니다.
+           * **재는 순간이 판정보다 빠르면 언제나 0이 나옵니다.**
+           *
+           * 그래서 판정이 시작된 뒤 **0.6초를 더 봅니다.** 판정(0.16초)과
+           * 그 직후를 덮으면서, 쿨다운(3.2초)보다 훨씬 짧아 **두 번째
+           * 공격이 섞이지 않습니다** — 원래 주석이 걱정하던 그 조건을
+           * 그대로 지킵니다.
+           */
+          const until = G.state().simElapsed + 0.6
+          while (G.state().simElapsed < until) {
+            if (G.state().player.hp < hp0 - 0.01) break
+            await sleep()
+          }
           break
         }
         await sleep()
       }
       const dmg = hp0 - G.state().player.hp
+      /**
+       * 🧾 **왜 안 맞았는지는 장부가 압니다.** 「기하는 맞는데 피해가 0」
+       * 이 나왔을 때 짐작할 것이 넷이나 됩니다 — 무적 · 부채꼴 밖 ·
+       * 사거리 밖 · 아예 안 휘두름. 장부에는 그 넷이 다 적혀 있습니다.
+       */
+      const led = G.swings().filter((x) => x.attackId.startsWith('charger'))
       G.clearEnemies()
       return {
         sawWindup,
@@ -141,6 +172,14 @@ try {
         hitDist: Number(hitDist.toFixed(2)),
         behindAtHit,
         damage: Number(dmg.toFixed(1)),
+        ledger: led.map(
+          (x) =>
+            `${x.attackId} ${x.hit ? '맞음' : '빗나감'} 거리${x.dist.toFixed(
+              2,
+            )}/사거리${x.reach} 각${x.angleDeg.toFixed(0)}°/반부채${x.halfArcDeg}° ${
+              x.invuln ? '·무적' : ''
+            }`,
+        ),
       }
     }, startDist)
 
@@ -175,7 +214,10 @@ try {
       check(
         med(runs.map((r) => r.damage)) > 0,
         `${d}m — 가만히 서 있으면 실제로 맞는다`,
-        `피해 ${med(runs.map((r) => r.damage))}`,
+        `피해 ${med(runs.map((r) => r.damage))}` +
+          (med(runs.map((r) => r.damage)) === 0
+            ? `\n     🧾 장부 — ${runs.flatMap((r) => r.ledger).slice(0, 3).join(' · ') || '휘두름 기록 없음'}`
+            : ''),
       )
     } else {
       check(false, `${d}m — 예고를 관측했다`, '8초 안에 공격을 걸지 않았습니다')
