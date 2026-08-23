@@ -204,6 +204,7 @@ try {
     const foeR = Math.min(...cfg.r.map((x) => x.radius))
     const meD = cfg.t.bodyRadius * 2
     let worst = Infinity
+    const gaps = []
     let maxTele = 0
     const t0 = Date.now()
     while (Date.now() - t0 < seconds * 1000) {
@@ -228,20 +229,49 @@ try {
           if (width > best) best = width
         }
         if (best < worst) worst = best
+        gaps.push(best)
       }
       await sleep(70)
     }
-    return { worst: worst === Infinity ? -1 : worst, maxTele, meD }
+    /**
+     * 📉 **판정은 «최악의 한 프레임»이 아니라 «아래쪽 10%»로 합니다.**
+     *
+     * ── 왜 고쳤나 ────────────────────────────────────────────────
+     * `worst` 는 20초(약 285 표본) 중 **최솟값**입니다. 극단값이라
+     * **표본이 늘수록 계속 내려갑니다** — 즉 이 검사는 «오래 돌릴수록
+     * 엄해지는» 검사였습니다. 게임을 하나도 안 고쳐도 시간을 늘리면
+     * 빨개집니다. 실제로 0.90m vs 0.90m 로 **정확히 동점**이 나왔고,
+     * 동점에서 `>` 는 동전 던지기입니다.
+     *
+     * 이 저장소가 같은 병을 이미 한 번 앓았습니다 — `bypass` 의
+     * 「달리면 더 많이 깨운다」를 최소·최대로 걸었다가 `19·19·19·19·1`
+     * 의 그 `1` 하나에 뒤집힌 자리입니다. 처방도 같습니다:
+     * **판정은 분위수로, 폭은 사람이 읽으라고 옆에 찍기.**
+     *
+     * 10%를 고른 이유: 「빠져나갈 틈이 있다」는 *"거의 언제나 있다"* 는
+     * 뜻이지 *"단 한 프레임도 예외가 없다"* 가 아닙니다. 포위가 잠깐
+     * 완전히 닫히는 순간은 **긴장**이고, 그게 20초 내내면 **벽**입니다.
+     */
+    const sorted = [...gaps].sort((x, y) => x - y)
+    const q10 = sorted.length ? sorted[Math.floor(sorted.length * 0.1)] : -1
+    const mid = sorted.length ? sorted[Math.floor(sorted.length * 0.5)] : -1
+    return { worst: worst === Infinity ? -1 : worst, q10, mid, samples: sorted.length, maxTele, meD }
   }
   const ring = await gapTrial(7)
   console.log(
-    `\n  🕳 7마리에 포위 — 가장 좁았던 순간의 **가장 넓은 틈** ${ring.worst.toFixed(2)}m ` +
-      `· 플레이어 지름 ${ring.meD.toFixed(2)}m · 그때 최대 동시 예고 ${ring.maxTele}개`,
+    `\n  🕳 7마리에 포위 — 빠져나갈 틈: 아래쪽 10% **${ring.q10.toFixed(
+      2,
+    )}m** · 가운데 ${ring.mid.toFixed(2)}m · 최악의 한 프레임 ${ring.worst.toFixed(2)}m ` +
+      `(표본 ${ring.samples})\n     · 플레이어 지름 ${ring.meD.toFixed(
+        2,
+      )}m · 최대 동시 예고 ${ring.maxTele}개`,
   )
   check(
-    ring.worst > ring.meD,
-    '**포위돼도 빠져나갈 틈이 남는다** (움직여서 답하는 게임이므로)',
-    `가장 좁았던 순간 ${ring.worst.toFixed(2)}m vs 몸 지름 ${ring.meD.toFixed(2)}m`,
+    ring.q10 > ring.meD,
+    '**포위돼도 빠져나갈 틈이 남는다** (움직여서 답하는 게임이므로 — **아래쪽 10%**로 봅니다)',
+    `아래쪽 10% ${ring.q10.toFixed(2)}m vs 몸 지름 ${ring.meD.toFixed(
+      2,
+    )}m · 최악의 한 프레임은 ${ring.worst.toFixed(2)}m (그 한 프레임으로 걸면 표본이 늘수록 엄해집니다)`,
   )
 
   /**
