@@ -2512,6 +2512,42 @@ try {
           : ''),
     )
     /**
+     * 🔄 **이미 그 자리에 서 있는데 «방향만» 틀린 적** — 가장 싼 처방.
+     *
+     * 절벽에서 배운 것을 그대로 씁니다: 새로 놓기 전에 **있는 것을
+     * 돌려 보는 쪽**이 훨씬 쌉니다. 적을 늘리면 구역 위험도·무리 크기·
+     * 깨는 순서가 다 같이 바뀌지만, **방향은 그 적이 하는 다른 일을
+     * 하나도 안 건드립니다**(깨고 나면 어차피 플레이어를 봅니다).
+     *
+     * 조건 넷 중 셋(걸을 수 있음 · 띠 안 · 고함 밖)을 이미 만족하는데
+     * **길을 보고 있어서만** 탈락한 적을 찾아, 등을 돌리는 `face` 값을
+     * 같이 냅니다. 그러면 `make-zone` 에서 그 값을 그대로 적으면 됩니다.
+     */
+    {
+      const turnable = []
+      for (const e of facingFoes) {
+        const { r } = routeDist(e.cx, e.cz)
+        const w = walkFromRoute(e.cx, e.cz)
+        if (!r || w === undefined || w <= hear.walk || w > hear.run) continue
+        if (facingFoes.some((o) => o !== e && Math.hypot(o.x - e.x, o.z - e.z) <= hear.alert))
+          continue
+        const rx = (r.cx - level.w / 2 + 0.5) * CELL
+        const rz = (r.cz - level.h / 2 + 0.5) * CELL
+        const fx = Math.sin(e.rotY)
+        const fz = Math.cos(e.rotY)
+        const len = Math.hypot(rx - e.x, rz - e.z) || 1
+        const facing = ((rx - e.x) / len) * fx + ((rz - e.z) / len) * fz >= arcCos
+        if (!facing) continue // 이미 등을 돌린 적 — 위에서 셌습니다
+        turnable.push(
+          `${e.kind}(${Math.round(e.x)},${Math.round(e.z)}) 걸어서 ${w.toFixed(
+            1,
+          )}m · 길 (${r.cx},${r.cz}) 을 등지려면 face ${Math.atan2(e.x - rx, e.z - rz).toFixed(2)}`,
+        )
+      }
+      if (turnable.length)
+        console.log(`     🔄 **방향만 돌리면** 되는 적 — ${turnable.join(' · ')}`)
+    }
+    /**
      * 💡 하나도 없으면 **놓을 자리를 이름으로** 냅니다 — 절벽에서 쓴 그
      *    방식 그대로. 조건: 걸을 수 있고 · 띠 안이고 · 동선에서 보이는 곳.
      */
