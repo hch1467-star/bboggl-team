@@ -2118,20 +2118,24 @@ try {
      * 바로 이 자리에서 납니다.
      */
     const PUSH_ARC_COS = Math.cos((60 * Math.PI) / 180)
-    const rows = foes.map((e) => {
-      const c = cellOf(e)
-      const h0 = heightAt(c.cx, c.cz)
-      // 🧭 동선에서 이 적을 향하는 쪽 — 넉백이 나가는 방향입니다.
+    /**
+     * 🧮 **한 칸을 재는 일**을 함수로 빼 둡니다 — 아래에서 «옆으로 한 칸
+     * 옮기면 등 뒤가 되는가»를 물으려면 같은 계산을 후보 칸마다 돌려야
+     * 합니다. 두 곳에 같은 식을 적어 두면 갈라져도 아무도 모릅니다.
+     */
+    const dropsAt = (cx, cz) => {
+      const h0 = heightAt(cx, cz)
+      if (h0 === VOID) return null
       let near = null
       for (let i = 0; i < routeCells.length; i++) {
         const r = routeCells[i]
-        const d = Math.hypot((r.cx - c.cx) * CELL, (r.cz - c.cz) * CELL)
+        const d = Math.hypot((r.cx - cx) * CELL, (r.cz - cz) * CELL)
         // 같은 칸이면 방향이 안 나옵니다(0 벡터). 한 칸 밖부터 봅니다.
         if (d < CELL) continue
         if (!near || d < near.d) near = { r, d, i }
       }
-      const pux = near ? (c.cx - near.r.cx) / (near.d / CELL) : 0
-      const puz = near ? (c.cz - near.r.cz) / (near.d / CELL) : 0
+      const pux = near ? (cx - near.r.cx) / (near.d / CELL) : 0
+      const puz = near ? (cz - near.r.cz) / (near.d / CELL) : 0
       let drop = 0
       /** 🧭 그중 **등 뒤 부채꼴 안**에 있는 낙차 — 실제로 밀어 넣을 수 있는 것 */
       let behindDrop = 0
@@ -2139,13 +2143,25 @@ try {
         for (let dz = -rad; dz <= rad; dz++) {
           const len = Math.hypot(dx * CELL, dz * CELL)
           if (len > PUSH || len === 0) continue
-          const hn = heightAt(c.cx + dx, c.cz + dz)
+          const hn = heightAt(cx + dx, cz + dz)
           if (hn === VOID) continue
           const d = h0 - hn
           drop = Math.max(drop, d)
           const cos = near ? ((dx * CELL) / len) * pux + ((dz * CELL) / len) * puz : -1
           if (cos >= PUSH_ARC_COS) behindDrop = Math.max(behindDrop, d)
         }
+      }
+      return { h0, near, pux, puz, drop, behindDrop }
+    }
+    const rows = foes.map((e) => {
+      const c = cellOf(e)
+      const m = dropsAt(c.cx, c.cz)
+      const { near, pux, puz, drop, behindDrop } = m ?? {
+        near: null,
+        pux: 0,
+        puz: 0,
+        drop: 0,
+        behindDrop: 0,
       }
       // 이 적이 **동선에서 깨어나는가** — 안 깨면 있어도 없는 것입니다.
       const onRoute = routeCells.some(
@@ -2189,6 +2205,54 @@ try {
             const cos = near ? ((dx * CELL) / len) * -pux + ((dz * CELL) / len) * -puz : -1
             if (cos >= PUSH_ARC_COS) selfDrop = Math.max(selfDrop, ph - hn)
           }
+      /**
+       * 🧮 **한 칸 옮기면 «등 뒤»가 되는 자리가 있는가** — 좌표를 짐작하지
+       * 않으려고 프로브가 직접 찾습니다.
+       *
+       * ── 왜 이게 필요했나 ─────────────────────────────────────────
+       * 「등 뒤」인 자리가 지도에 **31마리 중 하나**뿐입니다. 그 한 마리를
+       * 그 방향으로 안 밀어 본 사람은 절벽이라는 동사를 **평생 못 배웁니다.**
+       * 늘려야 하는데, 그러려면 *"어느 칸으로 옮기면 되는가"* 를 알아야
+       * 합니다. 그걸 사람이 높이 지도를 눈으로 읽어 정하면 — 이번 회차에
+       * 그 방식으로 이미 두 번 틀렸습니다(70%/43% · 능선의 방향).
+       *
+       * 그래서 **곁 여덟 칸을 다 재서** 조건을 만족하는 칸을 이름으로
+       * 냅니다. 조건은 셋입니다:
+       *   · 걸을 수 있는 칸일 것(VOID 아님)
+       *   · 낙차가 **등 뒤**가 될 것
+       *   · **내 등 뒤는 안전할 것** — 안 그러면 가르치는 자리가 아니라
+       *     서로 떨어뜨리는 자리가 됩니다(바로 위 주석).
+       *
+       * ⚠️ 이건 **제안이지 판정이 아닙니다.** 옮기면 그 적이 지금 하는
+       *    다른 일(구역 위험도·무리 크기·깨는 순서)이 같이 바뀌므로,
+       *    옮긴 뒤에는 지도 전체를 다시 재야 합니다.
+       */
+      let nudge = null
+      if (drop > fall.free && behindDrop <= fall.free)
+        for (const [dx, dz] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+          [1, 1],
+          [1, -1],
+          [-1, 1],
+          [-1, -1],
+        ]) {
+          const m2 = dropsAt(c.cx + dx, c.cz + dz)
+          if (!m2 || m2.behindDrop <= fall.free) continue
+          const p2 = {
+            cx: c.cx + dx - Math.round(m2.pux),
+            cz: c.cz + dz - Math.round(m2.puz),
+          }
+          if (heightAt(p2.cx, p2.cz) === VOID) continue
+          nudge = {
+            x: Math.round((c.cx + dx - level.w / 2 + 0.5) * CELL),
+            z: Math.round((c.cz + dz - level.h / 2 + 0.5) * CELL),
+            behind: m2.behindDrop,
+          }
+          break
+        }
       return {
         kind: e.kind,
         x: Math.round(e.x),
@@ -2198,6 +2262,7 @@ try {
         selfDrop,
         onRoute,
         routeAt,
+        nudge,
       }
     })
     const hurty = rows.filter((r) => r.drop > fall.free)
@@ -2236,6 +2301,17 @@ try {
      * **죽는 자리**입니다. 하나만 요구하는 이유는 위 줄과 같습니다 —
      * 마릿수를 요구하면 지도를 절벽투성이로 만들라는 말이 됩니다.
      */
+    /**
+     * 💡 옮길 자리를 **프로브가 이름으로** 냅니다 — 사람이 높이 지도를
+     *    눈으로 읽어 좌표를 짐작하지 않도록(위 `nudge` 주석).
+     */
+    const nudges = hurty.filter((r) => r.onRoute && r.nudge)
+    if (nudges.length)
+      console.log(
+        `     💡 한 칸 옮기면 «등 뒤»가 되는 자리 — ${nudges
+          .map((r) => `${r.kind}(${r.x},${r.z}) → (${r.nudge.x},${r.nudge.z}) 등 뒤 ${r.nudge.behind}단`)
+          .join(' · ')}`,
+      )
     check(
       pushable.length >= 1,
       '🧭 **낙차가 적의 «등 뒤»인 자리가 하나는 있다** (넉백이 나가는 쪽에 절벽이 있어야 밀어 넣습니다)',
