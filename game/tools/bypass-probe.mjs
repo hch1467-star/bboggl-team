@@ -88,6 +88,8 @@ try {
    * 프로브가 옛 게임을 잽니다.
    */
   const limits = await page.evaluate(() => window.__game.combatLimits())
+  // 🔇 듣는 거리 — 게임의 식으로 냅니다(main.ts `hearWalk` 주석).
+  const hearRunM = terrain.hearRun
   console.log(
     `  [적] 가장 빨리 다가오는 적 ${fastest.name} ${fastest.approachSpeed.toFixed(1)} m/s ` +
       `(전투 중엔 ${fastest.moveSpeed}) — 걷기의 ${((fastest.approachSpeed / walkSpeed) * 100).toFixed(0)}% · ` +
@@ -153,6 +155,8 @@ try {
       const HALF_WAY = 90
       let awakeHalf = -1
       let awakeHalfWho = []
+      let awakeHalfHow = []
+      const closest = new Map()
       let stuckSince = t0
       let stuckPos = { x: start.x, z: start.z }
       let stuckTime = 0
@@ -167,6 +171,25 @@ try {
 
         travelled += Math.hypot(p.x - last.x, p.z - last.z)
         last = { x: p.x, z: p.z }
+
+        /**
+         * 📐 **개체마다 «가장 가까이 갔던 거리»** — 깬 이유가 소리인지
+         * 시야인지 가르는 유일한 값입니다.
+         *
+         * 깨는 식은 `보고 있으면 14m · 등 돌렸으면 6.4~9m` 입니다. 그러니
+         * 어떤 적이 깼을 때 **내가 그 적에게 몇 미터까지 갔었나**를 알면
+         * 둘이 갈립니다 — 14m 안까지 갔으면 시야로 설명되고, 그보다 멀리서
+         * 깼다면 소리밖에 없습니다.
+         *
+         * 이게 없으면 「걷기와 달리기가 같은 적을 깬다」를 보고 곧바로
+         * *"소리 규칙이 죽었다"* 고 말하게 되는데, 실은 *"둘 다 시야
+         * 안까지 들어가서 소리가 나설 자리가 없었다"* 일 수 있습니다.
+         * 처방이 다릅니다 — 앞은 **값**, 뒤는 **길의 모양**입니다.
+         */
+        for (const t of G.threats(300)) {
+          const prev = closest.get(t.entity)
+          if (prev === undefined || t.dist < prev) closest.set(t.entity, t.dist)
+        }
 
         /**
          * 🔔 **깨운 수는 «같은 지점»에서 견줍니다** — 끝에서 세면 포화합니다.
@@ -218,6 +241,10 @@ try {
            *    번호를 받습니다. 움직여도 안 바뀌는 유일한 값입니다.
            */
           awakeHalfWho = up.map((t) => `${t.kind}#${t.entity}`).sort()
+          // 📐 깬 적마다 «여태 가장 가까이 갔던 거리». 시야(14m)보다 멀면 소리입니다.
+          awakeHalfHow = up
+            .map((t) => ({ id: `${t.kind}#${t.entity}`, near: closest.get(t.entity) ?? 999 }))
+            .sort((a2, b2) => a2.near - b2.near)
         }
 
         // 받은 피해 — 회복이 없으므로 줄어든 만큼이 곧 피해입니다.
@@ -459,6 +486,8 @@ try {
         awakeHalf: awakeHalf < 0 ? 0 : awakeHalf,
         /** 절반 지점에서 깨어 있던 적의 이름표 — 수가 같아도 «누구»가 다를 수 있습니다 */
         awakeHalfWho,
+        /** 깬 적마다 «가장 가까이 갔던 거리» — 시야로 설명되는지 보려고 */
+        awakeHalfHow,
         chasing,
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
@@ -546,6 +575,7 @@ try {
     settleMinHp: span(runs.map((r) => r.settleMinHp)),
     awakeHalf: med(runs.map((r) => r.awakeHalf)),
     awakeHalfWho: runs[0].awakeHalfWho,
+    awakeHalfHow: runs[0].awakeHalfHow,
     awakeHalfSpan: span(runs.map((r) => r.awakeHalf)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
@@ -707,6 +737,20 @@ try {
       `\n  📋 절반 지점에서 깨어 있던 적 — 달려야만 깬 것 ${
         onlyRun.length ? onlyRun.join(' · ') : '없음'
       } · 걸어야만 깬 것 ${onlyWalk.length ? onlyWalk.join(' · ') : '없음'}`,
+    )
+    /**
+     * 📐 **깬 이유를 가릅니다.** 시야는 14m, 소리는 최대 9m 입니다.
+     * 그러니 «가장 가까이 갔던 거리»가 9m 보다 크면 그 적은 **시야로**
+     * 깬 것이고, 소리는 나설 자리조차 없었던 것입니다.
+     */
+    const sightOnly = walk.awakeHalfHow.filter((h) => h.near <= hearRunM)
+    console.log(
+      `  📐 걸어서 깬 적이 «가장 가까이 갔던 거리» — ${walk.awakeHalfHow
+        .map((h) => `${h.id} ${h.near.toFixed(1)}m`)
+        .join(' · ')}\n     └ 그중 소리 거리(${hearRunM.toFixed(
+        1,
+      )}m) 안까지 들어간 것 ${sightOnly.length}/${walk.awakeHalfHow.length}마리` +
+        ` — 나머지는 **시야로** 깬 것이라 소리가 나설 자리가 없었습니다`,
     )
   }
   check(
