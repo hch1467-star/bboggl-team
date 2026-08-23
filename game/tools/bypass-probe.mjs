@@ -305,6 +305,30 @@ try {
        *    실제 아픔의 **아래끝**이지 정확한 값이 아닙니다 — 로그에 죽음
        *    횟수를 같이 찍어 사람이 그렇게 읽을 수 있게 합니다.
        */
+      /**
+       * 📸 **주변 수는 «죽기 전 마지막 프레임»의 것을 씁니다.**
+       *
+       * ── 이 결함도 ⚰️ 줄이 드러냈습니다 ────────────────────────────
+       * 「깨운 적 / 따라온 적 / 추격」은 창이 닫힌 **뒤에** 재고 있었습니다.
+       * 그런데 그 창에서 죽으면 그때 플레이어는 이미 **화톳불**이라
+       * 주변에 아무도 없습니다 — 세 수가 한꺼번에 **0** 이 됩니다.
+       *
+       * 그래서 로그가 이렇게 나왔습니다:
+       *     달려서 15마리(0~15) vs 걸어서 **0마리(0~15)**
+       * 폭이 양쪽 다 0~15 인데 중앙값만 갈립니다. 걷기가 0으로 내려온
+       * 이유는 **소리가 아니라 죽음**입니다(걷기 5판 중 4판이 죽습니다).
+       * 「달리면 더 많이 깨운다」가 **죽음이 만든 초록**이 될 뻔했습니다.
+       *
+       * 고치는 법은 간단합니다 — 창 안에서 **매 프레임 찍어 두고**, 창이
+       * 어떻게 닫히든 마지막으로 찍힌 것을 씁니다. 「초록도 잘못 잰
+       * 초록일 수 있다」의 그 자리입니다.
+       *
+       * ⚠️ `G.threats(300)` 를 프레임마다 **한 번만** 부릅니다. 예전에는
+       *    같은 프레임에 두세 번 불렀는데, 값이 같더라도 부르는 횟수가
+       *    프레임 시간을 늘려 **재는 대상(프레임률)을 재는 행위가 바꿉니다.**
+       */
+      const arenaR0 = G.bossEncounter()?.arenaRadius ?? 0
+      let snap = { awake: 0, chasing: 0, inArena: 0 }
       let billed = 0
       let settleDeaths = 0
       let prevHp = arriveHp2
@@ -313,24 +337,34 @@ try {
         if (hp < prevHp - 0.01) billed += prevHp - hp
         if (hp > prevHp + 0.01) settleDeaths++ // 회복이 없으므로 = 부활
         prevHp = hp
-        const near = G.threats(300).filter(
-          (t) => t.aggro && t.dist <= (reachOf.get(t.kind) ?? 2),
-        ).length
+        const th = G.threats(300)
+        let near = 0
+        let awakeN = 0
+        let chasingN = 0
+        let inArenaN = 0
+        for (const t of th) {
+          if (!t.aggro) continue
+          awakeN++
+          if (t.dist < 25) chasingN++
+          if (t.dist <= arenaR0) inArenaN++
+          if (t.dist <= (reachOf.get(t.kind) ?? 2)) near++
+          if (t.dist < nearest) nearest = t.dist
+        }
+        // 죽은 프레임의 사진은 안 찍습니다 — 그 순간은 이미 화톳불입니다.
+        if (settleDeaths === 0) snap = { awake: awakeN, chasing: chasingN, inArena: inArenaN }
         windowFrames++
         if (near > 0) reachFrames++
         reachSum += near
-        for (const t of G.threats(300)) if (t.aggro && t.dist < nearest) nearest = t.dist
         if (settleDeaths > 0) break
         await sleep()
       }
-      const be2 = G.bossEncounter()
-      const arenaR = be2?.arenaRadius ?? 0
-      const inArena = G.threats(300).filter((t) => t.aggro && t.dist <= arenaR).length
+      const arenaR = arenaR0
+      const inArena = snap.inArena
       const hpAfterSettle = G.state().player.hp
 
       const end = G.state()
-      const awake = G.threats(300).filter((t) => t.aggro).length
-      const chasing = G.threats(300).filter((t) => t.aggro && t.dist < 25).length
+      const awake = snap.awake
+      const chasing = snap.chasing
       return {
         arrived,
         time: Number(travelTime.toFixed(1)),
