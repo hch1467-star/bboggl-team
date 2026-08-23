@@ -181,6 +181,10 @@ try {
       let awakeHalfHow = []
       const closest = new Map()
       const facedNear = faced.map(() => 999)
+      const facedSpeed = faced.map(() => 0)
+      const facedWoke = faced.map(() => 0)
+      let lastT = now()
+      let prevPos = { x: start.x, z: start.z }
       let stuckSince = t0
       let stuckPos = { x: start.x, z: start.z }
       let stuckTime = 0
@@ -214,10 +218,31 @@ try {
           const prev = closest.get(t.entity)
           if (prev === undefined || t.dist < prev) closest.set(t.entity, t.dist)
         }
-        // 🧭 지도가 등을 돌려 놓은 적에게 **실제로** 몇 미터까지 갔는가.
+        /**
+         * 🧭 지도가 등을 돌려 놓은 적에게 **실제로** 몇 미터까지 갔는가 —
+         * 그리고 **그 순간 내 속도가 얼마였는가.**
+         *
+         * ⚠️ 속도가 필요한 이유: 깨는 식은 최고 속도가 아니라 **그 프레임의
+         *    속도**로 듣는 거리를 계산합니다(`hearDistance(playerSpeed)`).
+         *    모퉁이에서 감속하면 질주 중이어도 듣는 거리가 줄어듭니다.
+         *    「달려서 8m 까지 갔다」만으로는 깼어야 하는지 말할 수 없습니다.
+         */
+        const dtNow = now() - lastT
+        const moved = Math.hypot(p.x - prevPos.x, p.z - prevPos.z)
+        const speedNow = dtNow > 0.0001 ? moved / dtNow : 0
+        lastT = now()
+        prevPos = { x: p.x, z: p.z }
         for (let i = 0; i < faced.length; i++) {
           const d = Math.hypot(p.x - faced[i].x, p.z - faced[i].z)
-          if (d < facedNear[i]) facedNear[i] = d
+          if (d < facedNear[i]) {
+            facedNear[i] = d
+            facedSpeed[i] = speedNow
+          }
+          // 이 적이 실제로 깼는가 — 자리에서 움직였거나 aggro 가 섰는가.
+          const th = G.threats(300).find(
+            (t) => Math.hypot(t.x - faced[i].x, t.z - faced[i].z) < 6 && t.kind === faced[i].kind,
+          )
+          if (th && th.aggro) facedWoke[i] = 1
         }
 
         /**
@@ -519,6 +544,10 @@ try {
         awakeHalfHow,
         /** 지도가 등을 돌려 놓은 적에게 실제로 다가간 최소 거리(m) */
         facedNear: facedNear.map((d) => Number(d.toFixed(1))),
+        /** 가장 가까웠던 그 프레임의 내 속도(m/s) — 듣는 거리를 정하는 값 */
+        facedSpeed: facedSpeed.map((v) => Number(v.toFixed(1))),
+        /** 그 적이 실제로 깼는가 */
+        facedWoke,
         chasing,
         inArena,
         arenaR: Number(arenaR.toFixed(1)),
@@ -608,6 +637,8 @@ try {
     awakeHalfWho: runs[0].awakeHalfWho,
     awakeHalfHow: runs[0].awakeHalfHow,
     facedNear: runs[0].facedNear,
+    facedSpeed: runs[0].facedSpeed,
+    facedWoke: runs[0].facedWoke,
     awakeHalfSpan: span(runs.map((r) => r.awakeHalf)),
     awake: med(runs.map((r) => r.awake)),
     awakeSpan: span(runs.map((r) => r.awake)),
@@ -785,8 +816,15 @@ try {
         `  🧭 지도가 등을 돌려 놓은 적 — ${faced
           .map(
             (f, i) =>
-              `(${f.x},${f.z}) 걸어서 ${walk.facedNear[i]}m · 달려서 ${run.facedNear[i]}m 까지` +
-              ` (걷기 문턱 ${(terrain.hearWalk ?? 0).toFixed(1)}m · 달리기 ${hearRunM.toFixed(1)}m)`,
+              `(${f.x},${f.z}) 걸어서 ${walk.facedNear[i]}m(속도 ${walk.facedSpeed[i]} · 깼나 ${
+                walk.facedWoke[i] ? '예' : '아니오'
+              }) · 달려서 ${run.facedNear[i]}m(속도 ${run.facedSpeed[i]} · 깼나 ${
+                run.facedWoke[i] ? '예' : '아니오'
+              })` +
+              ` · 그 속도의 듣는 거리 ${(
+                1.8 +
+                (hearRunM - 1.8) * Math.min(1, run.facedSpeed[i] / (walkSpeed * terrain.sprintScale))
+              ).toFixed(1)}m`,
           )
           .join(' · ')}`,
       )

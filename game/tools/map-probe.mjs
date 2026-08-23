@@ -2393,7 +2393,26 @@ try {
       return { walk: t.hearWalk, run: t.hearRun, arc: t.frontArcDeg }
     })
     const arcCos = Math.cos(((hear.arc / 2) * Math.PI) / 180)
-    /** 동선에서 이 칸까지의 가장 짧은 거리(m) */
+    /**
+     * 🚶 **동선에서 이 칸까지 «걸어야 하는» 거리** — 게임이 쓰는 자.
+     *
+     * ── 직선거리로 쟀다가 물렸습니다 ────────────────────────────────
+     * 깨는 식은 이렇습니다(`enemyAI`):
+     *     const effectiveDist = reachDistance(적의 x, z) ?? Infinity
+     *     if (effectiveDist <= (inFront ? range : hearDistance(speed)))
+     * 즉 **직선거리가 아니라 «그 적이 나에게 오려면 걸어야 하는 거리»**
+     * 입니다. 벽을 돌거나 비탈을 오르면 직선 8m 가 걸어서 20m 가 됩니다.
+     *
+     * 그걸 모르고 직선으로 8.0m 자리에 파수꾼을 놓았고, `map` 은
+     * 초록을 줬는데 `bypass` 에서는 **달려도 안 깼습니다**(봇은 실제로
+     * 8m 까지 갔습니다 — 자리가 아니라 **자**가 틀렸습니다).
+     *
+     * 이 저장소가 궁수 검사에서 이미 한 번 배운 자리입니다 —
+     * **깨는 판정이 쓰는 값과 프로브가 재는 값은 같아야 합니다.**
+     */
+    const routeWalk = walkField(routeCells, maxClimb, CELL)
+    const walkFromRoute = (cx, cz) => routeWalk.get(cz * level.w + cx)
+    /** 동선에서 이 칸까지의 **직선** 거리(m) — 사람이 읽으라고 같이 찍습니다 */
     const routeDist = (cx, cz) => {
       let best = Infinity
       let at = null
@@ -2449,14 +2468,26 @@ try {
       const toz = (r.cz - c.cz) * CELL
       const len = Math.hypot(tox, toz) || 1
       const facing = (tox / len) * fx + (toz / len) * fz >= arcCos
-      if (!facing && d > hear.walk && d <= hear.run)
-        quiet.push({ kind: e.kind, x: Math.round(e.x), z: Math.round(e.z), d: d.toFixed(1) })
+      // 🚶 판정은 **걸어야 하는 거리**로 합니다(게임과 같은 자).
+      const w = walkFromRoute(c.cx, c.cz)
+      if (!facing && w !== undefined && w > hear.walk && w <= hear.run)
+        quiet.push({
+          kind: e.kind,
+          x: Math.round(e.x),
+          z: Math.round(e.z),
+          d: d.toFixed(1),
+          w: w.toFixed(1),
+        })
     }
     console.log(
       `\n  🔇 조용히 지나갈 수 있는 적 (동선에서 ${hear.walk.toFixed(1)}m 밖 · ${hear.run.toFixed(
         1,
       )}m 안 · 등을 돌리고 있음) — **${quiet.length}마리**` +
-        (quiet.length ? `\n     ${quiet.map((q) => `${q.kind}(${q.x},${q.z}) ${q.d}m`).join(' · ')}` : ''),
+        (quiet.length
+          ? `\n     ${quiet
+              .map((q) => `${q.kind}(${q.x},${q.z}) 걸어서 ${q.w}m (직선 ${q.d}m)`)
+              .join(' · ')}`
+          : ''),
     )
     /**
      * 💡 하나도 없으면 **놓을 자리를 이름으로** 냅니다 — 절벽에서 쓴 그
@@ -2480,11 +2511,13 @@ try {
         for (let cx = 0; cx < level.w; cx++) {
           if (heightAt(cx, cz) === VOID) continue
           const { d, at, r } = routeDist(cx, cz)
-          if (d <= hear.walk + 0.8 || d >= hear.run - 0.8) continue
+          // 🚶 후보도 **걸어야 하는 거리**로 고릅니다 — 판정과 같은 자.
+          const w = walkFromRoute(cx, cz)
+          if (w === undefined || w <= hear.walk + 0.8 || w >= hear.run - 0.8) continue
           const bucket = Math.floor(at / 20)
-          const score = Math.abs(d - mid)
+          const score = Math.abs(w - mid)
           const prev = best.get(bucket)
-          if (!prev || score < prev.score) best.set(bucket, { cx, cz, d, at, score, r })
+          if (!prev || score < prev.score) best.set(bucket, { cx, cz, d, at, score, r, w })
         }
       const cands = [...best.values()].sort((a, b) => a.at - b.at)
       if (cands.length)
@@ -2499,9 +2532,9 @@ try {
              */
             .map(
               (c) =>
-                `(${c.cx},${c.cz}) 동선 ${c.at}m 지점·${c.d.toFixed(1)}m 옆·길은 (${c.r.cx},${
-                  c.r.cz
-                }) 쪽`,
+                `(${c.cx},${c.cz}) 동선 ${c.at}m 지점·걸어서 ${c.w.toFixed(
+                  1,
+                )}m(직선 ${c.d.toFixed(1)}m)·길은 (${c.r.cx},${c.r.cz}) 쪽`,
             )
             .join(' · ')}`,
         )
@@ -2522,7 +2555,7 @@ try {
       quiet.length >= 1,
       '🔇 **걸으면 안 깨우고 달리면 깨우는 적이 하나는 있다** (발소리 규칙이 일어날 자리)',
       quiet.length
-        ? quiet.map((q) => `${q.kind}(${q.x},${q.z}) ${q.d}m`).join(' · ')
+        ? quiet.map((q) => `${q.kind}(${q.x},${q.z}) 걸어서 ${q.w}m`).join(' · ')
         : `띠(${hear.walk.toFixed(1)}~${hear.run.toFixed(1)}m)에 등 돌린 적이 없습니다 — 소리가 속도를 타는 규칙이 코드에만 있게 됩니다`,
     )
   }
