@@ -2409,9 +2409,37 @@ try {
       }
       return { d: best, r: at, at: Math.round(idx * CELL) }
     }
+    /**
+     * ⚠️ **이름을 따로 짓습니다 — 바깥의 `foes` 를 잡아 썼다가 물렸습니다.**
+     *
+     * 이 파일에는 훨씬 위(1541줄)에 `const foes = mobs` 가 있고, 그건
+     * `{cx, cz, kind}` 만 든 목록입니다 — **`rotY` 도 `x` 도 없습니다.**
+     * 블록 스코프라 조용히 그게 잡혔고, `e.rotY ?? 0` 이 전부 0 이 되어
+     * **모두가 같은 쪽을 본다**고 읽혔습니다. 그 상태로 「0마리」가
+     * 찍혔는데, 그건 «없다»가 아니라 **«못 쟀다»** 입니다.
+     *
+     * 「빈 표본으로 통과하지 않게」의 쌍둥이 — **빈 표본으로 실패해도
+     * 안 됩니다.** 빨강이 나왔다고 계기를 믿어 버리면, 게임을 고쳐도
+     * 안 고쳐지는 자리를 며칠 파게 됩니다. 실제로 배치를 넣고 다시
+     * 돌렸는데도 0 이 나와서 잡혔습니다.
+     */
+    const facingFoes = level.entities
+      .filter((e) => FOE_KINDS.has(e.kind) && e.kind !== 'boss')
+      /**
+       * 🧭 **`face` 를 읽습니다**(`rotY` 아님). 지도가 명시하지 않았으면
+       * 게임의 기본값 — 세계 원점 쪽 — 을 **그대로 다시 계산**합니다.
+       * 여기서 0 으로 퉁치면 프로브가 게임과 **다른 방향**을 보게 됩니다.
+       */
+      .map((e) => ({
+        kind: e.kind,
+        x: e.x,
+        z: e.z,
+        rotY: e.face === undefined ? Math.atan2(-e.x, -e.z) : e.face,
+        ...cellOf(e),
+      }))
     const quiet = []
-    for (const e of foes) {
-      const c = cellOf(e)
+    for (const e of facingFoes) {
+      const c = { cx: e.cx, cz: e.cz }
       const { d, r } = routeDist(c.cx, c.cz)
       if (!r) continue
       // 적이 보는 쪽(레벨의 rotY) — 게임의 축과 같은 규약입니다.
@@ -2451,21 +2479,45 @@ try {
       for (let cz = 0; cz < level.h; cz++)
         for (let cx = 0; cx < level.w; cx++) {
           if (heightAt(cx, cz) === VOID) continue
-          const { d, at } = routeDist(cx, cz)
+          const { d, at, r } = routeDist(cx, cz)
           if (d <= hear.walk + 0.8 || d >= hear.run - 0.8) continue
           const bucket = Math.floor(at / 20)
           const score = Math.abs(d - mid)
           const prev = best.get(bucket)
-          if (!prev || score < prev.score) best.set(bucket, { cx, cz, d, at, score })
+          if (!prev || score < prev.score) best.set(bucket, { cx, cz, d, at, score, r })
         }
       const cands = [...best.values()].sort((a, b) => a.at - b.at)
       if (cands.length)
         console.log(
           `     💡 등 돌린 적을 놓을 만한 칸 (동선 20m 칸마다 하나) — ${cands
-            .map((c) => `(${c.cx},${c.cz}) 동선 ${c.at}m 지점·${c.d.toFixed(1)}m 옆`)
+            /**
+             * ⚠️ **길이 어느 쪽인지도 같이 냅니다.** 이게 없어서 한 번
+             *    물렸습니다 — 길이 북쪽이라고 짐작하고 남쪽을 보게 했는데
+             *    실제로는 길이 남쪽이라, 등을 돌리라고 놓은 적이 **길을
+             *    정면으로 보고** 서 있었습니다. 「등을 돌린다」는 길이
+             *    어디인지 알아야 정할 수 있는 말입니다.
+             */
+            .map(
+              (c) =>
+                `(${c.cx},${c.cz}) 동선 ${c.at}m 지점·${c.d.toFixed(1)}m 옆·길은 (${c.r.cx},${
+                  c.r.cz
+                }) 쪽`,
+            )
             .join(' · ')}`,
         )
     }
+    /**
+     * 🚧 **표본이 있었는지 먼저 겁니다.** 위 ⚠️ 의 사고가 정확히 이
+     * 게이트가 없어서 지나갔습니다 — 빈 목록을 훑고 「0마리」를 냈고,
+     * 그 0이 **게임의 성질처럼** 읽혔습니다.
+     */
+    check(
+      facingFoes.length > 0,
+      '🔇 방향을 읽을 적 목록이 비어 있지 않다 (비교의 게이트)',
+      `${facingFoes.length}마리 · 지도가 방향을 **명시한** 것 ${
+        level.entities.filter((e) => e.face !== undefined).length
+      }마리 (나머지는 게임 기본값 — 원점 쪽)`,
+    )
     check(
       quiet.length >= 1,
       '🔇 **걸으면 안 깨우고 달리면 깨우는 적이 하나는 있다** (발소리 규칙이 일어날 자리)',

@@ -201,6 +201,20 @@ export interface LevelEntity {
   z: number
   rotY: number
   /**
+   * 🧭 **지도가 «명시한» 바라보는 쪽**(라디안). 안 적으면 `undefined`.
+   *
+   * ⚠️ `rotY` 를 쓰지 않는 이유가 있습니다. 생성기가 모든 배치에
+   *    `rotY: 0` 을 적으므로 **0 이 «정면이 +z» 인지 «안 정했다» 인지
+   *    구분되지 않습니다.** 실제로 한 번 물렸습니다 — 스폰이 `rotY` 를
+   *    존중하게 고쳤더니 존의 **적 31마리 전부**가 «원점 쪽»에서
+   *    «전부 +z» 로 바뀌었습니다. 한 마리를 등 돌리게 하려던 변경이
+   *    지도 전체의 깨는 규칙을 건드린 것입니다.
+   *
+   *    그래서 «안 정했다»를 표현할 수 있는 **별도 칸**을 둡니다.
+   *    안 적으면 `spawnEnemy` 의 기본값(원점 쪽)이 그대로 삽니다.
+   */
+  face?: number
+  /**
    * 🕯 **안내가 말하지 않는 보물**(`treasure` 에만 뜻이 있습니다).
    * 왜 필요한지는 `core/components.ts` 의 `Pickup.secret` 자리에 있습니다.
    * 없으면 false — 지금까지 만든 레벨 파일은 그대로 읽힙니다.
@@ -342,6 +356,9 @@ export function parseLevel(text: string): { level: LevelData } | { error: string
           x: Number(e.x) || 0,
           z: Number(e.z) || 0,
           rotY: Number(e.rotY) || 0,
+          // 🧭 «명시한 방향»은 **있을 때만** 옮깁니다 — 0 과 «안 적음»을
+          //    구분해야 하므로 `Number(x) || 0` 을 쓰면 안 됩니다.
+          ...(e.face === undefined ? {} : { face: Number(e.face) || 0 }),
           /**
            * 🕯 **여기서 빠뜨려 한 번 데었습니다.** 이 `map` 은 필드를 하나씩
            * 옮겨 적으므로 **새 필드는 여기 안 적으면 조용히 사라집니다.**

@@ -204,9 +204,9 @@ function region(name, x0, x1, z0, z1, hint, tint) {
   regions.push({ name, x0, x1, z0, z1, hint, tint })
 }
 
-function put(kind, cx, cz, rotY = 0) {
+function put(kind, cx, cz) {
   const { x, z } = world(cx, cz)
-  entities.push({ kind, x, z, rotY })
+  entities.push({ kind, x, z, rotY: 0 })
 }
 
 /**
@@ -242,8 +242,14 @@ function put(kind, cx, cz, rotY = 0) {
 function putFacing(kind, cx, cz, awayFromCx, awayFromCz) {
   const { x, z } = world(cx, cz)
   const { x: ax, z: az } = world(awayFromCx, awayFromCz)
-  // 「등을 돌린다」 = 그 자리의 **반대쪽**을 본다.
-  entities.push({ kind, x, z, rotY: Math.atan2(x - ax, z - az) })
+  /**
+   * 「등을 돌린다」 = 그 자리의 **반대쪽**을 본다.
+   * ⚠️ `rotY` 가 아니라 **`face`** 에 적습니다 — 위의 `put` 이 모든 배치에
+   *    `rotY: 0` 을 적으므로, `rotY` 로 말하면 «안 정했다»와 구분되지
+   *    않아 **지도 전체의 적이 같은 쪽을 보게 됩니다**(실제로 한 번
+   *    그렇게 만들었습니다 — format.ts `face` 주석).
+   */
+  entities.push({ kind, x, z, rotY: 0, face: Math.atan2(x - ax, z - az) })
 }
 
 /**
@@ -649,12 +655,15 @@ put('grunt', 47, 37)
  * 어느 쪽이든 «알아본 사람»이 이깁니다. 사용자가 말한 *"게이머들이
  * 스스로 게임을 잘한다는 느낌"* 이 나는 자리가 이런 모양입니다.
  *
- * ⚠️ 등을 돌릴 대상으로 **길 쪽 점 (45,28)** 을 줍니다. 정확한 동선 칸을
- *    안 쓰는 이유: 길이 cz27 이든 29 든 이 적은 **정남향**이 되고,
- *    길 방향과 180° 가까이 벌어져 정면 부채꼴(±75°) 밖에 확실히 남습니다.
- *    한 칸 어긋나도 안 뒤집히는 자리를 고릅니다.
+ * ⚠️ **길이 어느 쪽인지도 재서 정했습니다** — 처음엔 (45,28)(북쪽)을
+ *    주고 남쪽을 보게 했는데, 프로브가 *"길은 (45,36) 쪽"* 이라고
+ *    찍었습니다. **길은 남쪽**이었고, 등을 돌리라고 놓은 적이 정작
+ *    **길을 정면으로** 보고 서 있었습니다. 「등을 돌린다」는 길이
+ *    어디인지 알아야 정할 수 있는 말이고, 그것도 짐작하면 안 됩니다.
+ *    (계기가 「길은 어느 쪽」을 안 찍고 있어서 한 바퀴를 돌았습니다.
+ *     지금은 후보 칸마다 길 쪽을 같이 냅니다.)
  */
-putFacing('grunt', 45, 32, 45, 28)
+putFacing('grunt', 45, 32, 45, 36)
 
 /**
  * 조합 3 「나갈까 물러날까」 — 🟢 달려드는 자 + 🔵 얽는 자.

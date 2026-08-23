@@ -533,8 +533,9 @@ export function respawnLevelEnemies(
     if (kind === null) continue
     if (kind === EnemyKind.Boss && defeatedBosses?.has(bossKey(item.x, item.z))) continue
     // 🧭 지도가 적어 둔 **바라보는 쪽**을 그대로 넘깁니다(spawnEnemy 주석).
-    //    안 넘기면 이 적은 세계 원점을 보고 서고, 소리 규칙이 죽습니다.
-    const e = spawnEnemy(kind, item.x, item.z, item.rotY)
+    //    ⚠️ `rotY` 가 아니라 `face` 입니다 — 생성기가 모든 배치에 rotY:0 을
+    //    적으므로 0 이 «안 정했다»와 구분되지 않습니다(format.ts `face` 주석).
+    const e = spawnEnemy(kind, item.x, item.z, item.face)
     Transform.y[e] = terrain.groundYAt(item.x, item.z)
     out.push(e)
   }
@@ -573,7 +574,7 @@ export function spawnFromLevel(level: LevelData, terrain: Terrain): SpawnedLevel
     // 여기를 고쳐야 하고, 빠뜨리면 **레벨에 배치했는데 안 나오는** 버그가 됩니다.
     const enemyKind = kindFromId(item.kind)
     // 🧭 바라보는 쪽 — 위 `spawnLevelEnemies` 와 같은 이유로 그대로 넘깁니다.
-    if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z, item.rotY)
+    if (enemyKind !== null) e = spawnEnemy(enemyKind, item.x, item.z, item.face)
     else if (item.kind === 'treasure') {
       e = spawnTreasure(item.x, item.z, item.secret === true)
       treasureTotal++
