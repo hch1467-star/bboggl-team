@@ -1857,6 +1857,18 @@ if (process.env.BENCH_JSON === '1') {
          */
         phase: [0, 1, 2].map((i) => ({
           secs: Number((median(phaseSrc.map((l) => l.boss.phaseTime?.[i] ?? 0)) || 0).toFixed(1)),
+          /**
+           * 📉 **흔들림도 같이 냅니다.** 중앙값만 보내면 받는 쪽이 그
+           *    값으로 판정하는데, 3단계는 판마다 **5배 넘게** 벌어집니다
+           *    (2.1 · 3.3 · 5.2 · 11.0초를 실제로 봤습니다). 폭을 안 보내면
+           *    받는 쪽은 그게 흔들리는 값인지 알 방법이 없습니다.
+           */
+          swing: (() => {
+            const xs = phaseSrc.map((l) => l.boss.phaseTime?.[i] ?? 0).filter((v) => v > 0.05)
+            return xs.length >= 2
+              ? Number((Math.max(...xs) / Math.min(...xs)).toFixed(1))
+              : 1
+          })(),
           breaks: Number((median(phaseSrc.map((l) => l.boss.phaseBreaks?.[i] ?? 0)) || 0).toFixed(1)),
           fins: Number((median(phaseSrc.map((l) => l.boss.phaseFinishers?.[i] ?? 0)) || 0).toFixed(1)),
         })),
