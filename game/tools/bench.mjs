@@ -914,19 +914,35 @@ for (let i = 0; i < 3; i++) {
    * 쪽이 얼마나 올랐는가»가 보이고, 그래야 처방이 «체력을 더 준다»
    * 인지 «플레이어의 상승을 깎는다»인지 갈립니다.
    */
+  /**
+   * ── 🎓 **1단계는 «깎던 시간»으로 나눕니다** ──────────────────────
+   *
+   * 여기 적혀 있던 「7.3배」(15.7 → 114.7)는 **취소된 숫자**입니다.
+   * 1단계 시간에 학습 잠금으로 붙들린 초가 섞여 있었고 — 그동안 보스
+   * 체력은 1→2 경계에 고정이라 때려도 안 깎입니다 — 그걸 분모에 넣으니
+   * 1단계 화력만 낮게 찍혀 *"뒤로 갈수록 손이 세진다"* 는 착시가
+   * 만들어졌습니다. `npm run boss` 에서 갈라 재니 방향이 **뒤집혔습니다**:
+   * 초당 119 → 77 → 67 로 **내려갑니다**(감산이 설계대로 일하는 모습).
+   *
+   * 그래서 1단계만 `p1Race`(체력이 실제로 깎이던 초)로 나눕니다.
+   * 2·3단계에는 잠금이 없으므로 구간 시간 그대로입니다.
+   */
+  const secsOf = (l) => (i === 0 ? (l.boss.p1Race ?? l.boss.phaseTime?.[0] ?? 0) : l.boss.phaseTime?.[i] ?? 0)
   const raw = phaseSrc
-    .filter((l) => (l.boss.phaseTime?.[i] ?? 0) >= 0.5)
-    .map(
-      (l) =>
-        (l.boss.phaseBands?.[i] ?? 0) / (l.boss.phaseTough?.[i] ?? 1) / l.boss.phaseTime[i],
-    )
+    .filter((l) => secsOf(l) >= 0.5)
+    .map((l) => (l.boss.phaseBands?.[i] ?? 0) / (l.boss.phaseTough?.[i] ?? 1) / secsOf(l))
   console.log(
     `  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초 · ` +
       `처형 ${fmt(fin, 1)} · 붕괴 ${fmt(brk, 1)}${i === 0 ? phaseNote : ''}`,
   )
   console.log(
     `                 └ 누워 있던 비중 ${fmt(lay, 0)}% · ` +
-      `감산 되돌린 화력 ${fmt(raw)}/초 (감산 ×${(phaseSrc[0]?.boss?.phaseTough?.[i] ?? 1).toFixed(2)})`,
+      `감산 되돌린 화력 ${fmt(raw)}/초 (감산 ×${(phaseSrc[0]?.boss?.phaseTough?.[i] ?? 1).toFixed(2)})` +
+      (i === 0
+        ? ` · 🎓 깎기 ${fmt(phaseSrc.map((l) => l.boss.p1Race ?? 0))}초 + 붙듦 ${fmt(
+            phaseSrc.map((l) => l.boss.p1Held ?? 0),
+          )}초`
+        : ''),
   )
 }
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)

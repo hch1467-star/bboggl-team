@@ -673,6 +673,36 @@ try {
     let bossWindingSamples = 0
     const bossDist = { near: 0, mid: 0, far: 0, away: 0 }
     const bossPhaseTime = [0, 0, 0]
+    /**
+     * ── 🎓 **1단계: «깎던 시간» 과 «가르치느라 붙들린 시간»** ──────────
+     *
+     * `npm run boss`(죽음 없는 침대)에서 이 갈래를 넣자마자 결론이
+     * 뒤집혔습니다. 그 전까지 1단계 시간에는 학습 잠금으로 붙들린 초가
+     * 통째로 섞여 있었고(`enemyAI.ts` 는 색 3가지를 볼 때까지 보스
+     * 체력을 1→2 경계에 고정합니다), 그래서 1단계 화력만 낮게 찍혀
+     * *"뒤로 갈수록 손이 세진다"* 는 **없는 이야기**가 만들어졌습니다.
+     * 갈라서 재니 화력은 초당 119 → 77 → 67 로 **내려갑니다.**
+     *
+     * 그 침대는 기력 무한으로 붙어 평타만 넣는 최악의 압력이라
+     * 1단계 «깎기»가 1.3초까지 줄어듭니다 — 극단값입니다. 실제 플레이는
+     * 여기(벤치)이고, 여기서 1단계는 9.9초였습니다. **그중 얼마가
+     * 잠금인지는 아직 아무도 모릅니다.** 그걸 모르는 채로는 체력 배분을
+     * 만질 수 없어서 같은 갈래를 이쪽에도 넣습니다.
+     *
+     * ⚠️ 깃발(`teachHold.holding`)이 아니라 **사건**으로 셉니다. 그 깃발은
+     *    *"색을 아직 다 못 봤다"* 는 뜻이라 1단계 **시작부터** 참이고,
+     *    그대로 세면 «깎던 시간»까지 붙듦에 들어갑니다(침대에서 실제로
+     *    그래서 1단계 5.6초 중 5.2초가 붙듦으로 찍혔습니다). 실제로
+     *    손해 보는 것은 **체력이 경계선에 닿은 뒤**입니다.
+     */
+    let bossP1Race = 0
+    let bossP1Held = 0
+    /**
+     * 1→2 경계 체력 비율. **게임에게 물어봅니다** — 여기 0.75 라고 베껴
+     * 적으면 `bossPhases.ts` 에서 경계를 옮기는 날 이 갈래만 조용히
+     * 옛 경계로 재게 됩니다(이 저장소가 가장 싫어하는 「규칙이 두 곳에」).
+     */
+    const p1Edge = G.bossTuning()[1]?.enterBelow ?? 0.75
     let bossIntroTime = 0
     /**
      * ── 페이즈별 **실효 화력** ───────────────────────────────────────
@@ -1806,7 +1836,16 @@ try {
            * 계기에도 있는지 찾아봐야 합니다.**
            */
           if (be.encounter === 1) bossIntroTime += dtB
-          else bossPhaseTime[Math.min(2, be.phase)] += dtB
+          else {
+            bossPhaseTime[Math.min(2, be.phase)] += dtB
+            // 🎓 1단계 시간이 담기는 **그 프레임에서** 갈라 담습니다.
+            //    따로 세면 두 값이 다른 구간을 덮게 되고, 빼는 순간
+            //    음수가 나옵니다(침대에서 실제로 겪었습니다).
+            if (be.phase === 0) {
+              if (be.hp / Math.max(1, be.maxHp) <= p1Edge + 0.01) bossP1Held += dtB
+              else bossP1Race += dtB
+            }
+          }
           bossEngaged += dtB
         } else if (bossSeen) bossDisengaged += dtB
         if (!engaged && bossWasEngaged) {
@@ -4019,6 +4058,9 @@ try {
         attackRange: bossAttackRange,
         dist: bossDist,
         phaseTime: bossPhaseTime.map((v) => Number(v.toFixed(1))),
+        /** 1단계에서 **체력이 실제로 깎이던** 초 / 학습 잠금에 붙들린 초. */
+        p1Race: Number(bossP1Race.toFixed(1)),
+        p1Held: Number(bossP1Held.toFixed(1)),
         introTime: Number(bossIntroTime.toFixed(1)),
         budget: Object.fromEntries(
           Object.entries(bossBudget).map(([k, v]) => [k, Number(v.toFixed(1))]),
