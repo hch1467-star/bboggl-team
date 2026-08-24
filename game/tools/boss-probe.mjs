@@ -459,8 +459,36 @@ try {
          *    있던 것과 정확히 같은 고장입니다. 전환은 두 번뿐이라 2·3단계만
          *    손해를 봅니다.
          */
+        /**
+         * ── 🧊 **`be.transitionT` 는 없는 칸이었습니다** ────────────
+         *
+         * 이 줄은 원래 `be.transitionT > 0` 이었습니다. 그런데
+         * `bossEncounter()` 에는 **`transitionT` 가 없습니다**(main.ts 의
+         * 타입을 보십시오 — entity·encounter·aggro·hp·maxHp·phase·
+         * homeDist·selfHomeDist·arenaRadius·leashRadius·teachHold).
+         * 그 값은 `enemyInfo()` 에 있습니다. 그래서 식은 늘
+         * `undefined > 0` = **false** 였고, 이 가지는 **한 번도 실행된
+         * 적이 없습니다.**
+         *
+         * 증거는 출력에 그대로 있었습니다 — 세 판 모두 `전환 0.0초`.
+         * 전환은 1.25초(`PHASE_TRANSITION_TIME`)이고 이 판은 한 프레임이
+         * 0.16초라 일곱 번쯤 잡혀야 합니다. **0.0 은 «없었다»가 아니라
+         * «못 봤다»였습니다.** 0 을 관측으로 읽으면 이렇게 됩니다.
+         *
+         * 그동안 전환 시간은 통째로 **2·3단계 시간에 섞여** 있었습니다.
+         * 바로 위 주석이 *"그 시간을 그냥 두면 뒤 구간이 길어 보인다"* 고
+         * 경고한 그 고장이, 경고를 적어 둔 채로 **살아 있었습니다.**
+         * 이 저장소의 `lungeSpeed` 와 같은 모양입니다 — 선언·주석·분기가
+         * 다 있는데 값이 없어서 조용히 아무 일도 안 하던 자리.
+         *
+         * ⚠️ 이게 왜 큰가: 「마지막 구간이 가장 길다」의 **판정이 바로 이
+         *    침대에 있습니다.** 벤치가 죽음 때문에 못 믿을 값을 낸다고 해서
+         *    일부러 여기로 옮겨 온 판정입니다. 그 판정이 2·3단계에 각각
+         *    최대 1.25초가 얹힌 값 위에서 초록을 내고 있었습니다.
+         */
+        const bt = G.enemyInfo(be.entity)?.transitionT ?? 0
         if (be.encounter === 1) intro[0] += dt
-        else if (be.transitionT > 0) trans[0] += dt
+        else if (bt > 0) trans[0] += dt
         else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
 
         /**
