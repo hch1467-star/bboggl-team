@@ -17,7 +17,7 @@
  */
 
 import { SKILLS, type SkillDef } from '../config/arsenal'
-import { TRIPOD_TIERS, tripodsFor, type TripodMods } from '../config/tripods'
+import { TRIPOD_TIERS, findPart, tripodsFor, type TripodMods } from '../config/tripods'
 
 /** skillId -> 단계별 선택 (-1 = 아직 안 고름) */
 const selections = new Map<string, number[]>()
@@ -27,6 +27,28 @@ let points = 0
 
 /** 이미 해금한 (스킬, 단계) — 포인트를 한 번만 쓰게 합니다. */
 const unlocked = new Set<string>()
+
+/**
+ * ── 🧩 **고르지 않은 길 — 그리고 그것을 이식한 자리** ──────────────────
+ *
+ * 「레벨업하며 나만의 스킬을 만든다」(DESIGN.md 제안 절)를 **새 축 없이**
+ * 만듭니다. 지금 트라이포드는 한 단계를 열면 둘 중 하나를 고르고 **안 고른
+ * 쪽은 그냥 사라집니다.** 그 버려지는 쪽을 **부품으로 남깁니다.**
+ *
+ * ── 왜 이 방식인가 ──────────────────────────────────────────────────
+ *   · **새 화폐도 새 소비처도 안 만듭니다** — 각인석 경제(`npm run economy`)를
+ *     건드리지 않습니다. 저장소 습관: *"새 시스템 만들기 전에 있는 것으로
+ *     되는지 본다."*
+ *   · 각 단계의 선택은 **여전히 진짜 선택**입니다 — 이 스킬에는 하나만 붙습니다.
+ *   · 버린 쪽이 **다른 스킬의 재료**가 되니 빌드가 사람마다 갈립니다.
+ *   · 희소성은 부품이 아니라 **슬롯**에서 옵니다 — 스킬당 이식은 한 칸뿐입니다.
+ *
+ * ⚠️ **자기 스킬에는 도로 못 끼웁니다.** 그러면 «둘 다 고르기»가 되어 단계의
+ *    선택이 사라집니다. 옮기는 것이지 무르는 것이 아닙니다.
+ */
+const spareParts = new Set<string>()
+/** skillId -> 이식한 부품 id (없으면 미설치). 스킬당 **한 칸**. */
+const grafts = new Map<string, string>()
 
 /** 합성 결과 캐시. 매 프레임 판정마다 새 객체를 만들면 GC가 돕니다. */
 const resolvedCache = new Map<string, SkillDef>()
@@ -39,6 +61,8 @@ export function resetTripods(): void {
   selections.clear()
   unlocked.clear()
   resolvedCache.clear()
+  spareParts.clear()
+  grafts.clear()
   points = 0
 }
 
@@ -84,6 +108,79 @@ export function unlockTripod(skillId: string, tier: number, option: number): boo
   points--
   unlocked.add(key(skillId, tier))
   selectionsFor(skillId)[tier] = option
+  /**
+   * 🧩 **고르지 않은 쪽이 부품이 됩니다.**
+   *
+   * 지금까지 이 한 줄이 없어서, 단계를 열 때마다 옵션 하나가 **아무 흔적
+   * 없이 사라졌습니다.** 플레이어 입장에서는 *"저건 못 쓰는 거였구나"* 로
+   * 끝났고, 고민한 값이 화면에 남지 않았습니다.
+   *
+   * 이제 남습니다 — **다른 스킬에 이식할 수 있는 조각**으로. 선택은
+   * 그대로 선택이지만(이 스킬엔 하나만), 버린 쪽이 **다음 스킬의 재료**가
+   * 됩니다. 「버리는 것이 아니라 옮기는 것」.
+   */
+  for (let i = 0; i < tiers[tier].options.length; i++) {
+    if (i !== option) spareParts.add(tiers[tier].options[i].id)
+  }
+  resolvedCache.delete(skillId)
+  return true
+}
+
+/** 지금 갖고 있는 부품 — 고르지 않아서 남은 조각들. */
+export function sparePartIds(): string[] {
+  return [...spareParts]
+}
+
+/** 이 스킬에 이식된 부품 id (없으면 null). */
+export function graftOn(skillId: string): string | null {
+  return grafts.get(skillId) ?? null
+}
+
+/**
+ * ── 🧩 **이식 — 세 가지를 다 통과해야 합니다** ────────────────────────
+ *
+ *   ① **갖고 있는 부품인가** — 안 그러면 아무거나 붙일 수 있습니다.
+ *   ② **자기가 나온 스킬이 아닌가** — 도로 끼우면 «둘 다 고르기»가 되어
+ *      그 단계의 선택이 사라집니다. 옮기는 것이지 무르는 것이 아닙니다.
+ *   ③ **이 스킬에서 뜻이 있는가**(`partFitsSkill`) — 헛도는 조합을 막습니다.
+ *      끼웠는데 화면이 그대로면 «내가 만든 스킬»이 아니라 «안 되는 걸 고른»
+ *      경험이 됩니다.
+ *
+ * 실패하면 **왜 안 되는지**를 돌려줍니다. UI 가 «회색으로 막기»만 하면
+ * 플레이어는 이유를 모른 채 다른 걸 눌러 봅니다 — 이 게임의 원칙
+ * (*"스스로 잘한다고 느끼게"*)은 **막는 이유를 말해 주는 것**까지입니다.
+ */
+export type GraftFail = 'none' | 'notOwned' | 'ownSkill' | 'noEffect' | 'noSkill'
+
+export function graftReason(skillId: string, partId: string): GraftFail {
+  const base = SKILLS[skillId]
+  if (!base) return 'noSkill'
+  if (!spareParts.has(partId)) return 'notOwned'
+  const found = findPart(partId)
+  if (!found) return 'notOwned'
+  if (found.skillId === skillId) return 'ownSkill'
+  if (!partFitsSkill(found.part.mods, base)) return 'noEffect'
+  return 'none'
+}
+
+export function graftPart(skillId: string, partId: string): boolean {
+  if (graftReason(skillId, partId) !== 'none') return false
+  // 갈아 끼우면 **이전 것이 부품으로 돌아옵니다** — 실험이 벌이 되면
+  // 아무도 실험하지 않습니다. 슬롯이 하나뿐이라 선택은 여전히 선택입니다.
+  const prev = grafts.get(skillId)
+  if (prev) spareParts.add(prev)
+  grafts.set(skillId, partId)
+  spareParts.delete(partId)
+  resolvedCache.delete(skillId)
+  return true
+}
+
+/** 이식을 빼냅니다 — 부품은 다시 손에 들어옵니다. */
+export function ungraftPart(skillId: string): boolean {
+  const prev = grafts.get(skillId)
+  if (!prev) return false
+  spareParts.add(prev)
+  grafts.delete(skillId)
   resolvedCache.delete(skillId)
   return true
 }
@@ -200,13 +297,29 @@ export function resolveSkill(skillId: string): SkillDef | null {
 
   const tiers = tripodsFor(skillId)
   const sel = selections.get(skillId)
-  if (!tiers || !sel) return base
+  const graftId = grafts.get(skillId)
+  // 이식만 있고 단계 선택이 없는 스킬도 있습니다 — 둘 다 없을 때만 원본입니다.
+  if ((!tiers || !sel) && !graftId) return base
 
   let out: SkillDef | null = null
-  for (let t = 0; t < TRIPOD_TIERS; t++) {
-    const pick = sel[t]
-    if (pick < 0 || !isTierUnlocked(skillId, t)) continue
-    out = applyMods(out ?? base, tiers[t].options[pick].mods)
+  if (tiers && sel) {
+    for (let t = 0; t < TRIPOD_TIERS; t++) {
+      const pick = sel[t]
+      if (pick < 0 || !isTierUnlocked(skillId, t)) continue
+      out = applyMods(out ?? base, tiers[t].options[pick].mods)
+    }
+  }
+  /**
+   * 🧩 **이식 부품은 마지막에 얹습니다.**
+   *
+   * 순서가 뜻을 갖습니다 — 배수(`damageMult`)는 곱이라 순서를 안 타지만
+   * `shape` 처럼 **덮어쓰는** 칸은 나중에 얹은 쪽이 이깁니다. 이식은
+   * 플레이어가 **일부러 가져온 것**이라, 기본 단계보다 뒤에 두어
+   * *"내가 끼운 것이 이긴다"* 를 지킵니다.
+   */
+  if (graftId) {
+    const found = findPart(graftId)
+    if (found) out = applyMods(out ?? base, found.part.mods)
   }
   if (!out) return base
   resolvedCache.set(skillId, out)
@@ -222,6 +335,10 @@ export function resolveSkill(skillId: string): SkillDef | null {
  */
 export interface TripodSaveData {
   points: number
+  /** 🧩 고르지 않아서 남은 부품 id — 없으면 옛 세이브입니다(빈 배열로 읽힙니다). */
+  spare?: string[]
+  /** 🧩 스킬id -> 이식한 부품 id */
+  grafts?: Record<string, string>
   /** "스킬id#단계" 목록 */
   unlocked: string[]
   /** 스킬id -> 단계별 선택 */
@@ -234,7 +351,9 @@ export function exportTripods(): TripodSaveData {
     // 아무것도 안 고른 스킬은 저장하지 않습니다 — 세이브가 쓸데없이 커집니다.
     if (sel.some((v) => v >= 0)) out[skillId] = [...sel]
   }
-  return { points, unlocked: [...unlocked], selections: out }
+  const g: Record<string, string> = {}
+  for (const [skillId, partId] of grafts) g[skillId] = partId
+  return { points, unlocked: [...unlocked], selections: out, spare: [...spareParts], grafts: g }
 }
 
 export function importTripods(data: TripodSaveData | null | undefined): void {
@@ -251,6 +370,26 @@ export function importTripods(data: TripodSaveData | null | undefined): void {
       const v = Number(sel[i])
       target[i] = Number.isFinite(v) ? v : -1
     }
+  }
+  /**
+   * 🧩 **읽을 때 실재를 확인합니다.** 세이브는 옛 버전일 수도 있고 손으로
+   * 고쳐졌을 수도 있습니다. 없는 부품 id 를 그대로 들이면 `resolveSkill`
+   * 이 조용히 아무것도 안 얹고, 플레이어는 «분명 끼웠는데 효과가 없는»
+   * 스킬을 들고 다니게 됩니다 — 이 기능이 가장 피하려는 경험입니다.
+   */
+  for (const id of data.spare ?? []) {
+    if (typeof id === 'string' && findPart(id)) spareParts.add(id)
+  }
+  for (const [skillId, partId] of Object.entries(data.grafts ?? {})) {
+    if (typeof partId !== 'string') continue
+    const found = findPart(partId)
+    const base = SKILLS[skillId]
+    // 규칙이 바뀌어 더 이상 안 맞는 조합이면 **부품으로 돌려줍니다** —
+    // 잃어버리게 두면 세이브를 열 때마다 조용히 손해를 봅니다.
+    if (found && base && found.skillId !== skillId && partFitsSkill(found.part.mods, base)) {
+      grafts.set(skillId, partId)
+      spareParts.delete(partId)
+    } else if (found) spareParts.add(partId)
   }
   resolvedCache.clear()
 }

@@ -521,6 +521,27 @@ export const TRIPODS: Record<string, [TripodTier, TripodTier, TripodTier]> = {
 }
 
 /** 이 스킬에 트라이포드가 있는가. 룬은 아직 없습니다(탐험 보상 자체이므로). */
+/**
+ * ── 🧩 **부품 하나를 id 로 찾습니다** ──────────────────────────────────
+ *
+ * 「나만의 스킬」은 부품을 **다른 스킬로 옮겨** 끼우는 설계라, 부품을
+ * «어느 스킬의 몇 단계 몇 번째»가 아니라 **id 하나로** 집을 수 있어야
+ * 합니다(DESIGN.md 의 제안 절 참고).
+ *
+ * 표를 새로 만들지 않고 `TRIPODS` 를 훑습니다 — 부품 목록을 따로 두면
+ * 「규칙이 두 곳에」가 되고, 부품을 추가할 때 한쪽만 고치는 날이 옵니다.
+ */
+export function findPart(partId: string): { part: TripodOption; skillId: string; tier: number } | null {
+  for (const [skillId, tiers] of Object.entries(TRIPODS)) {
+    for (let t = 0; t < tiers.length; t++) {
+      for (const opt of tiers[t].options) {
+        if (opt.id === partId) return { part: opt, skillId, tier: t }
+      }
+    }
+  }
+  return null
+}
+
 export function tripodsFor(skillId: string): [TripodTier, TripodTier, TripodTier] | null {
   return TRIPODS[skillId] ?? null
 }

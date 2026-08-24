@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { TRIPOD_TIERS, tripodsFor } from './config/tripods'
+import { TRIPOD_TIERS, findPart, tripodsFor } from './config/tripods'
 import { appliedTweaks, assertAllTweaksApplied } from './config/tweak'
 import {
   RUNE_ORDER,
@@ -227,7 +227,19 @@ import {
   weaponSpeedScale,
   weaponTier,
 } from './systems/loadout'
-import { grantTripodPoint, resetTripods, switchTripod, tripodPoints, unlockTripod } from './systems/tripod'
+import {
+  graftOn,
+  graftPart,
+  graftReason,
+  grantTripodPoint,
+  resetTripods,
+  resolveSkill,
+  sparePartIds,
+  switchTripod,
+  tripodPoints,
+  ungraftPart,
+  unlockTripod,
+} from './systems/tripod'
 import {
   applySave,
   captureSave,
@@ -7481,6 +7493,24 @@ declare global {
        * 이 창구를 냅니다.
        */
       treasureKinds: () => string[]
+      /**
+       * 🧩 「나만의 스킬」 — 손에 든 부품과 이식 상태.
+       * `spare` = 고르지 않아서 남은 조각 · `grafts` = 스킬별 이식.
+       */
+      partsInfo: () => {
+        spare: { id: string; name: string; from: string }[]
+        grafts: Record<string, string | null>
+      }
+      /** 왜 못 끼우는지 — 'none' 이면 끼울 수 있습니다. */
+      graftReason: (skillId: string, partId: string) => string
+      graftPart: (skillId: string, partId: string) => boolean
+      ungraftPart: (skillId: string) => boolean
+      /**
+       * 🧩 **id 로** 실효 스킬을 봅니다. `effectiveSkill` 은 슬롯 번호로만
+       * 되는데, 슬롯 번호를 검사에 적으면 무기 구성이 바뀌는 날 조용히
+       * 다른 스킬을 재게 됩니다 — 이 저장소가 여러 번 데인 「베낀 값」입니다.
+       */
+      resolvedSkill: (skillId: string) => Record<string, number | string> | null
       /** 종류를 id 문자열로 지정해 소환합니다. */
       /** 실험대 전용 스폰. 기본은 **깨어 있는 적** — 재우려면 `asleep: true`. */
       spawnEnemyKind: (id: string, x: number, z: number, asleep?: boolean) => number
@@ -8529,6 +8559,35 @@ window.__game = {
   }),
   levelRoster: () => game.debugLevelRoster(),
   treasureKinds: () => [...TREASURE_KINDS],
+  /**
+   * 🧩 「나만의 스킬」 — 손에 든 부품과 이식 상태. 프로브가 규칙을
+   *    베끼지 않고 **게임에게 물어보게** 하는 창구입니다.
+   */
+  partsInfo: () => ({
+    spare: sparePartIds().map((id) => {
+      const f = findPart(id)
+      return { id, name: f?.part.name ?? '?', from: f?.skillId ?? '?' }
+    }),
+    grafts: Object.fromEntries(
+      Object.keys(SKILLS).map((sid) => [sid, graftOn(sid)]).filter(([, v]) => v !== null),
+    ),
+  }),
+  graftReason: (skillId: string, partId: string) => graftReason(skillId, partId),
+  graftPart: (skillId: string, partId: string) => graftPart(skillId, partId),
+  ungraftPart: (skillId: string) => ungraftPart(skillId),
+  resolvedSkill: (skillId: string) => {
+    const r = resolveSkill(skillId)
+    if (!r) return null
+    return {
+      damage: r.damage,
+      cooldown: Number(r.cooldown.toFixed(3)),
+      range: r.range,
+      arcDeg: r.arcDeg,
+      shape: r.shape,
+      dash: r.dash,
+      snare: r.snare,
+    }
+  },
   spawnEnemyKind: (id, x, z, asleep) => game.debugSpawnKind(id, x, z, asleep),
   bossTuning: () =>
     BOSS_PHASES.map((ph) => ({

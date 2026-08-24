@@ -1643,6 +1643,41 @@ async function main() {
       levelTreasures > 0 && zs.treasureTotal === levelTreasures,
       `게임 ${zs.treasureTotal}개 · 레벨 데이터 ${levelTreasures}개 (${treasureKinds.join('+') || '종류 없음❗'})`,
     )
+    /**
+     * ── 🧩 **「나만의 스킬」 — 이식이 실제로 스킬을 바꾸는가** ──────────
+     *
+     * 이 기능이 가장 피하려는 경험은 *"끼웠는데 아무 일도 안 일어난다"* 입니다.
+     * 그러면 «내가 만든 스킬»이 아니라 «안 되는 걸 고른» 경험이 되고,
+     * 이 게임의 원칙(*"스스로 잘한다고 느끼게"*)과 정면으로 부딪힙니다.
+     *
+     * 그래서 **효과가 숫자로 바뀌는 것까지** 확인합니다. 규칙은 게임에게
+     * 물어봅니다(`partsInfo` · `graftReason`) — 프로브가 베끼지 않게.
+     */
+    const graft = await zone.evaluate(() => {
+      const G = window.__game
+      G.resetProgress()
+      // 부품은 «고르지 않은 쪽»에서 나옵니다 — 한 단계를 열어야 생깁니다.
+      G.grantTripod(1)
+      const opened = G.unlockTripod('lunge_slash', 0, 0)
+      const spare = G.partsInfo().spare
+      // 같은 스킬에는 도로 못 끼웁니다(무르기 방지) · 다른 스킬에는 됩니다.
+      const own = spare[0] ? G.graftReason('lunge_slash', spare[0].id) : 'nospare'
+      const target = 'whirlwind'
+      const before = G.resolvedSkill(target)?.damage ?? null
+      const why = spare[0] ? G.graftReason(target, spare[0].id) : 'nospare'
+      const did = spare[0] ? G.graftPart(target, spare[0].id) : false
+      const after = G.resolvedSkill(target)?.damage ?? null
+      return { opened, spareN: spare.length, spareName: spare[0]?.name ?? '', own, why, did, before, after }
+    })
+    check('🧩 단계를 열면 **고르지 않은 쪽이 부품으로 남는다**', graft.opened && graft.spareN > 0, `부품 ${graft.spareN}개 — "${graft.spareName}"`)
+    check('🧩 **자기가 나온 스킬에는 도로 못 끼운다** (무르기 방지)', graft.own === 'ownSkill', `사유 "${graft.own}"`)
+    check('🧩 다른 스킬에는 **끼울 수 있다**', graft.why === 'none' && graft.did, `사유 "${graft.why}" · 끼움 ${graft.did}`)
+    check(
+      '🧩 **끼우면 실제로 값이 바뀐다** (아무 일도 안 일어나는 조합이 없게)',
+      graft.before !== null && graft.after !== null && graft.after !== graft.before,
+      `피해 ${graft.before} → ${graft.after}`,
+    )
+
     const roster = await zone.evaluate(() => window.__game.levelRoster())
     const rosterTotal = Object.values(roster).reduce((a, b) => a + b, 0)
     check(
