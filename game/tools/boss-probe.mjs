@@ -568,12 +568,32 @@ try {
         }
         wasTrans = bt > 0
         wasWinding = bt <= 0 && bInfo?.attacking === true && bInfo?.attackPhase === 0
-        // 🎓 붙들려 있는 동안은 «가르치는 시간» 으로도 같이 담습니다.
-        //    (1단계 시간에서 빼지 **않습니다** — 아래 판정에서 둘 다 냅니다.)
-        if (be.teachHold?.holding === true) heldT += dt
         if (be.encounter === 1) intro[0] += dt
         else if (bt > 0) trans[0] += dt
-        else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
+        else if (be.encounter === 2) {
+          phase[Math.min(2, be.phase)] += dt
+          /**
+           * 🎓 **1단계 시간에 담기는 그 프레임에서만** 붙듦을 셉니다.
+           *
+           * ── 여기 있던 제 버그 ────────────────────────────────────
+           * 처음엔 이 줄을 바깥에 두고 `teachHold.holding` 이 참인 모든
+           * 프레임에 쌓았습니다. 그런데 1단계 시간은 «인트로도 아니고
+           * 전환도 아닐 때»만 쌓입니다. 그래서 붙듦에는 **인트로 1.6초와
+           * 전환 시간이 섞였고**, 빼고 나니 이렇게 됐습니다:
+           *
+           *     1단계 5.5초 · 붙듦 **6.7초** → 5.5 − 6.7 = **−1.1초**
+           *     💪 1단계 0/초 (6748.3배)
+           *     ✅ 🏁 … 3단계/1단계 **525.00배**  ← 음수 위의 초록
+           *
+           * 빨강을 없애려고 만든 수정이 **말이 안 되는 숫자로 초록**을
+           * 만들어 냈습니다. 「초록도 잘못 잰 초록일 수 있다」 그대로입니다.
+           * 그리고 이건 제가 바로 전 커밋에서 «세 번째 같은 모양»이라고
+           * 지적한 그 실수입니다 — **서로 다른 구간의 시간을 빼기.**
+           * 지적한 사람이 같은 자리에서 넘어졌으니, 규칙이 아니라 **구조**로
+           * 막습니다: 빼는 두 값을 **같은 줄에서, 같은 조건으로** 셉니다.
+           */
+          if (be.phase === 0 && be.teachHold?.holding === true) heldT += dt
+        }
 
         /**
          * **일정한 압력** — 붙어 서서 쉬지 않고 평타만.
@@ -799,12 +819,18 @@ try {
       const hold = i === 0 ? mid(ok.map((s) => s.heldT)) : 0
       const secs = mid(ok.map((s) => s.phase[i])) - hold
       const tough = tune.t[i].damageTakenScale ?? 1
-      return secs > 0.05 ? band / tough / secs : 0
+      // 0.05 로는 못 막습니다 — 음수도 «> 0.05 가 아님»으로 0이 되지만,
+      // 0 을 화력으로 찍으면 «약하다»로 읽힙니다. 못 잰 것은 0이 아닙니다.
+      return secs > 0.5 ? band / tough / secs : NaN
     }
     const raws = [0, 1, 2].map(rawOf)
     console.log(
-      `     💪 감산 되돌린 화력 ${raws.map((v, i) => `${i + 1}단계 ${v.toFixed(0)}`).join(' · ')}/초` +
-        ` (${(raws[2] / Math.max(0.01, raws[0])).toFixed(1)}배)` +
+      `     💪 감산 되돌린 화력 ${raws
+        .map((v, i) => `${i + 1}단계 ${Number.isFinite(v) ? v.toFixed(0) : '못 잼'}`)
+        .join(' · ')}/초` +
+        (Number.isFinite(raws[0]) && Number.isFinite(raws[2])
+          ? ` (${(raws[2] / raws[0]).toFixed(1)}배)`
+          : ' (배수는 못 냅니다 — 성한 분모가 없습니다)') +
         ` — 1단계는 **가르치느라 붙든 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초를 뺀** 값입니다`,
     )
   }
@@ -880,6 +906,20 @@ try {
      */
     const hold = mid(ok.map((s) => s.heldT))
     const p1Fight = per[0] - hold
+    /**
+     * ⚠️ **음수·0 위에서는 판정하지 않습니다.**
+     *
+     * 이 게이트가 없어서 `1단계 −1.1초` 가 `3단계/1단계 525배` 로
+     * 계산되어 **초록**이 떴습니다. 빼기가 어긋나면 비율은 아무 값이나
+     * 됩니다 — 「비율은 분모가 성한지부터」.
+     */
+    if (p1Fight <= 0.5) {
+      console.log(
+        `  ⏸ 🏁 마지막 구간이 가장 길다 — **판정하지 않습니다**: ` +
+          `1단계 ${per[0].toFixed(1)}초에서 붙듦 ${hold.toFixed(1)}초를 빼면 ` +
+          `${p1Fight.toFixed(1)}초입니다. 분모가 성하지 않으면 배수는 아무 값이나 됩니다.`,
+      )
+    } else
     check(
       per[2] >= p1Fight,
       '🏁 **마지막 구간이 가장 길다** (bossPhases.ts 의 약속 — 죽음 없는 자리에서 · **가르치느라 붙든 시간 제외**)',
