@@ -695,6 +695,24 @@ try {
      *    그래서 1단계 5.6초 중 5.2초가 붙듦으로 찍혔습니다). 실제로
      *    손해 보는 것은 **체력이 경계선에 닿은 뒤**입니다.
      */
+    /**
+     * ── 🌱 **성장을 미리 쥐여 주고 재는 자리** (`GROWTH=n`) ─────────────
+     *
+     * 봇은 판당 보물을 **2~4개**밖에 못 줍고, 보물은 **먼저 룬 4개를 채운
+     * 뒤에야** 각인석을 줍니다(main.ts). 즉 **봇은 트라이포드에 도달하지
+     * 못합니다** — 그중 둘은 금 간 벽 뒤라 원리적으로도 못 갑니다.
+     *
+     * 그래서 「봇이 탐험을 잘 하는가」와 「성장한 플레이어에게 게임이
+     * 어떤가」가 한 덩어리로 묶여 있었습니다. **둘은 다른 질문입니다.**
+     * 이 저장소가 이미 적어 둔 구분 그대로입니다 — *자동 플레이는
+     * "무엇이 실제로 일어나는가"를, 벤치는 "무엇이 가능한가"를 잽니다.*
+     *
+     * `GROWTH=n` 이면 시작할 때 각인석 n개를 쥐여 줍니다. 탐험 정책을
+     * 안 건드리고 **성장 단계별 밸런스**를 잴 수 있습니다.
+     * 기본값 0 — 안 켜면 지금까지와 똑같이 굽니다.
+     */
+    const PREGROWTH = Math.max(0, Number(process.env.GROWTH ?? 0) || 0)
+    if (PREGROWTH > 0) G.grantTripod(PREGROWTH)
     /** 🧩 봇이 실제로 연 단계 수 / 이식한 부품 수 — 안 세면 «썼는지»를 모릅니다. */
     let tripodUnlocks = 0
     let graftsMade = 0
@@ -4200,6 +4218,8 @@ try {
       /** 🧩 이 판에서 연 트라이포드 단계 / 이식한 부품 — 성장을 실제로 했는가. */
       tripodUnlocks,
       graftsMade,
+      /** 🌱 시작할 때 쥐여 준 각인석 — 0이면 «봇이 직접 주운 것만». */
+      pregrowth: PREGROWTH,
       minStamina: Number(minStamina.toFixed(0)),
       dodgeCost,
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,

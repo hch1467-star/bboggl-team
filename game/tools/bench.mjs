@@ -987,7 +987,10 @@ for (let i = 0; i < 3; i++) {
  */
 console.log(
   `  성장          트라이포드 ${fmt(pick((l) => l.tripodUnlocks ?? 0), 0)}단계 · ` +
-    `이식 ${fmt(pick((l) => l.graftsMade ?? 0), 0)}개`,
+    `이식 ${fmt(pick((l) => l.graftsMade ?? 0), 0)}개` +
+    (logs[0]?.pregrowth
+      ? ` · 🌱 시작 각인석 ${logs[0].pregrowth}개 (GROWTH=${logs[0].pregrowth})`
+      : ' · 봇이 직접 주운 것만'),
 )
 console.log(
   `  스태미나      최저 ${fmt(pick((l) => l.minStamina ?? 0), 0)} · ` +
