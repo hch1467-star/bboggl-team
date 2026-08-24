@@ -1663,19 +1663,39 @@ async function main() {
       // 같은 스킬에는 도로 못 끼웁니다(무르기 방지) · 다른 스킬에는 됩니다.
       const own = spare[0] ? G.graftReason('lunge_slash', spare[0].id) : 'nospare'
       const target = 'whirlwind'
-      const before = G.resolvedSkill(target)?.damage ?? null
+      /**
+       * ⚠️ **어느 칸이 바뀔지 미리 안다고 가정하지 않습니다.**
+       *    처음엔 `damage` 만 봤다가 빨간불이 났습니다 — 뽑힌 부품이
+       *    「가벼운 검」(쿨다운 -30%)이라 피해는 **당연히** 그대로였습니다.
+       *    부품은 14개 칸 중 아무 곳이나 건드릴 수 있으므로, **통째로**
+       *    견줘서 «무엇이든 바뀌었는가»를 묻습니다.
+       */
+      const before = JSON.stringify(G.resolvedSkill(target))
       const why = spare[0] ? G.graftReason(target, spare[0].id) : 'nospare'
       const did = spare[0] ? G.graftPart(target, spare[0].id) : false
-      const after = G.resolvedSkill(target)?.damage ?? null
-      return { opened, spareN: spare.length, spareName: spare[0]?.name ?? '', own, why, did, before, after }
+      const afterObj = G.resolvedSkill(target)
+      const after = JSON.stringify(afterObj)
+      // 무엇이 바뀌었는지 이름으로 말해 줍니다 — 빨간불일 때 «왜»가 보이게.
+      const b = JSON.parse(before) ?? {}
+      const changed = Object.keys(afterObj ?? {}).filter((k) => (afterObj ?? {})[k] !== b[k])
+      return {
+        opened,
+        spareN: spare.length,
+        spareName: spare[0]?.name ?? '',
+        own,
+        why,
+        did,
+        same: before === after,
+        changed: changed.map((k) => `${k} ${b[k]}→${(afterObj ?? {})[k]}`).join(' · '),
+      }
     })
     check('🧩 단계를 열면 **고르지 않은 쪽이 부품으로 남는다**', graft.opened && graft.spareN > 0, `부품 ${graft.spareN}개 — "${graft.spareName}"`)
     check('🧩 **자기가 나온 스킬에는 도로 못 끼운다** (무르기 방지)', graft.own === 'ownSkill', `사유 "${graft.own}"`)
     check('🧩 다른 스킬에는 **끼울 수 있다**', graft.why === 'none' && graft.did, `사유 "${graft.why}" · 끼움 ${graft.did}`)
     check(
       '🧩 **끼우면 실제로 값이 바뀐다** (아무 일도 안 일어나는 조합이 없게)',
-      graft.before !== null && graft.after !== null && graft.after !== graft.before,
-      `피해 ${graft.before} → ${graft.after}`,
+      graft.did && !graft.same,
+      graft.changed || '아무 칸도 안 바뀜',
     )
 
     const roster = await zone.evaluate(() => window.__game.levelRoster())
