@@ -388,6 +388,33 @@ try {
       const fired = [0, 0, 0]
       let lastArmed = st0.chainsArmed ?? 0
       let lastFired = st0.chainsFired ?? 0
+      /**
+       * ── 🎬 **보스가 시작한 예고 / 끝낸 휘두름** ──────────────────
+       *
+       * `balance.ts` 의 `breakResistStep` 주석이 이 병을 이미 한 번
+       * 진단해 놓았습니다:
+       *
+       *     보스전 15.4초 · 예고 여섯 번 · **판정까지 간 것은 한 번**
+       *     붕괴 3회 · 처형 3회 — "15초에 세 번이면 기본기입니다"
+       *
+       * 처방(무너질 때마다 저항 +45%)을 넣은 뒤 벤치는 이렇게 말합니다:
+       *
+       *     보스전 22초 · **예고 8회 → 판정 3회(끊김 63%)** · 붕괴 3회
+       *
+       * 나아졌지만 **같은 병이 남아 있습니다.** 그런데 이 숫자를 지금까지
+       * 아무 검사도 안 봤습니다 — 주석이 약속을 하고, 벤치가 찍기만 하고,
+       * 판정은 어디에도 없었습니다. 「주석의 약속은 지켜지지 않는다」.
+       *
+       * ⚠️ **여기서는 아직 판정하지 않고 기록만 합니다.** 이 침대는
+       *    붙어 서서 기력 무한으로 평타를 쉬지 않고 넣는 **최악의 압력**
+       *    이라, 사람이 낼 수 없는 조건입니다. 문턱을 눈으로 정하지 않고
+       *    **재고 나서** 답니다 — 「아무도 못 넘는 문턱은 눈금이 아니라
+       *    벽이다」.
+       */
+      const swing0 = Object.values(G.bossSwingLog()).reduce(
+        (a, v) => ({ com: a.com + (v.commits ?? 0), sw: a.sw + v.swings }),
+        { com: 0, sw: 0 },
+      )
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -446,12 +473,29 @@ try {
         }
         await sleep()
       }
-      return { intro: intro[0], trans: trans[0], phase, breaks, fins, armed, fired, killed: done }
+      const swing1 = Object.values(G.bossSwingLog()).reduce(
+        (a, v) => ({ com: a.com + (v.commits ?? 0), sw: a.sw + v.swings }),
+        { com: 0, sw: 0 },
+      )
+      return {
+        intro: intro[0],
+        trans: trans[0],
+        phase,
+        breaks,
+        fins,
+        armed,
+        fired,
+        killed: done,
+        commits: swing1.com - swing0.com,
+        swings: swing1.sw - swing0.sw,
+      }
     })
     shapes.push(r)
     console.log(
       `     ${run + 1}판 — 인트로 ${r.intro.toFixed(1)} · 전환 ${r.trans.toFixed(1)} · 1단계 ${r.phase[0].toFixed(1)} · 2단계 ${r.phase[1].toFixed(1)} · 3단계 ${r.phase[2].toFixed(1)}초` +
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
+        ` · 예고 ${r.commits}→판정 ${r.swings}` +
+        (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
     )
   }
