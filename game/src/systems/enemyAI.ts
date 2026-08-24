@@ -305,6 +305,23 @@ const chainsLost: [number, number, number] = [0, 0, 0]
  * 갔는지 모릅니다. 그래서 칸을 따로 둡니다 — 다른 사건은 다른 칸에.
  */
 let chainsResumed = 0
+/**
+ * 📏 **사거리 밖이라 «미룬»(버리지 않은) 연계 횟수.**
+ *
+ * ⚠️ **장부 칸이 아닙니다 — 진단용입니다.**
+ *
+ * 처음엔 *"미룸을 안 세면 장부에 유령이 생긴다"* 고 적었는데 **틀렸습니다.**
+ * 미룬 예약은 **소비되지 않습니다** — 그대로 살아 있다가 나중에 발동되면
+ * `chainsFired`, 판이 끝날 때까지 남으면 `chainsPending` 으로 잡힙니다.
+ * 장부(예약 = 발동 + 무너짐 + 전환 + 귀환 + 사망 + 덮어씀 + 통째지움 +
+ * 판끝잔여)는 이 값 없이도 맞습니다.
+ *
+ * 그래도 세는 이유는 다릅니다: **새 규칙이 실제로 일하는지** 보려고요.
+ * 0이면 규칙이 한 번도 안 걸린 것이고(사거리가 이미 충분했다는 뜻),
+ * 너무 크면 연계가 계속 미뤄져 **어휘가 사라지는** 쪽을 의심해야 합니다.
+ * 그래서 `chainsDropped`(손실) 옆이 아니라 **따로** 냅니다.
+ */
+let chainsHeldFar = 0
 export function readChainsLost(): [number, number, number, number] {
   return [chainsLost[0], chainsLost[1], chainsLost[2], chainsResumed]
 }
@@ -525,8 +542,10 @@ export function readChainsDropped(): {
   leash: number
   death: number
   overwrite: number
+  /** 📏 사거리 밖이라 **미룬** 것 — 손실이 아니라 «아직 살아 있음». */
+  heldFar: number
 } {
-  return { ...chainsDropped }
+  return { ...chainsDropped, heldFar: chainsHeldFar }
 }
 
 /** 지금 예약을 안고 있는 적이 몇인지 — 판이 끝날 때 남은 몫을 세려고. */
@@ -564,6 +583,7 @@ export function resetChainLedger(): void {
   chainsLost[1] = 0
   chainsLost[2] = 0
   chainsResumed = 0
+  chainsHeldFar = 0
   chainsDropped.phase = 0
   chainsDropped.leash = 0
   chainsDropped.death = 0
@@ -1742,7 +1762,37 @@ export function enemyAiSystem(
            */
           const next = Enemy.chainNext[e]
           Actor.state[e] = ActorState.Idle
-          if (next !== NO_CHAIN) {
+          /**
+           * ── 📏 **뒷타도 «고르는 거리»를 지킵니다** ────────────────
+           *
+           * 여기는 거리를 **한 번도 안 보고** 있었습니다. 그 대가를
+           * 4판 벤치가 이렇게 찍었습니다:
+           *
+           *     boss_cleave  **연계 7→0 (100% 끊김)** · 그냥 1→1 (0%)
+           *
+           * 같은 공격인데 경로에 따라 정반대입니다. 정상 경로는
+           * `pickAttack` 이 `minRange` 로 걸러 주는데, 연계는 그 문을
+           * 통과하지 않아 **1.7m 붙은 자리에서** 걸리고 전부 죽습니다.
+           * 「🔴 직격이 안 닿는다」를 며칠 쫓았는데 원인이 여기였습니다.
+           *
+           * ── 왜 «취소»가 아니라 «미룸»인가 ─────────────────────────
+           * 그냥 버리면 연계가 사라져 **보스의 어휘가 줄어듭니다**.
+           * 그래서 사거리 안이면 지금 잇고, 밖이면 **예약을 그대로 안고**
+           * 갑니다 — 보스가 거리를 잡는 동안 예약은 살아 있고, 조건이
+           * 맞는 순간 위쪽 굴림 자리에서 이어집니다. 쿨다운은 그대로
+           * 0으로 두어 *"이어지는 하나의 공격"* 이라는 성질을 지킵니다.
+           *
+           * ⚠️ 이 줄이 «속박 → 직격» 을 성립시키는 자리이기도 합니다.
+           *    속박은 걷는 속도만 줄이지 공격을 막지 않습니다(그건
+           *    일부러 그렇게 뒀습니다 — 「손쓸 방법이 없었네」를 피하려고).
+           *    그래서 붙어 있는 한 플레이어가 계속 때려 뒷타를 끊습니다.
+           *    거리를 두고 걸어야 **묶인 플레이어가 못 쫓아오고**, 그제야
+           *    예고가 화면에 남아 «읽고 구르는» 문제가 됩니다.
+           */
+          if (next !== NO_CHAIN && dist < attackAt(kind, next).minRange) {
+            chainsHeldFar++
+            Actor.cooldownT[e] = 0
+          } else if (next !== NO_CHAIN) {
             Enemy.chainNext[e] = NO_CHAIN
             Actor.cooldownT[e] = 0
             commitAttack(e, playerEntity, kind, next, ph.windupScale, true)

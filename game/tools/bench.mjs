@@ -1494,6 +1494,17 @@ console.log(`  연계 예약/발동 ${fmt(boss.map((l) => l.boss.chainsArmed ?? 
       ` · 통째지움 ${m((l) => l.boss.chainsDropped?.wiped ?? 0)}` +
       ` · 판 끝에 남음 ${m((l) => l.boss.chainsPending ?? 0)}`,
   )
+  /**
+   * 📏 **미룸은 장부 칸이 아니라 진단입니다.** 예약이 소비되지 않으므로
+   *    위 결말 목록에 넣으면 이중으로 세집니다(나중에 발동되면 «발동»
+   *    에도 잡힙니다). 새 규칙(뒷타도 minRange 를 지킨다)이 실제로
+   *    걸리는지만 봅니다 — 0이면 안 걸린 것, 너무 크면 연계가 계속
+   *    미뤄져 **보스 어휘가 사라지는** 쪽을 의심합니다.
+   */
+  console.log(
+    `                 📏 사거리 밖이라 미룬 연계 ${m((l) => l.boss.chainsDropped?.heldFar ?? 0)}회` +
+      ' (장부 칸 아님 — 예약은 살아 있습니다)',
+  )
   console.log(
     `                 장부 잔액(판별) ${rests.join(', ')}` +
       (worst === 0 ? '  → 맞음' : `  ⚠️ 최악 ${worst}회가 설명 안 됩니다`),

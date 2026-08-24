@@ -5949,7 +5949,7 @@ class Game {
     /** [예고 · 휘두름 · 후딜 · **일어나며 이어 냄**] — 마지막 칸은 잃은 것이 아닙니다. */
     chainsLost: [number, number, number, number]
     /** 무너짐 말고 다른 이유로 사라진 예약 — 장부가 맞아떨어지게(enemyAI 설계 노트). */
-    chainsDropped: { phase: number; leash: number; death: number; overwrite: number }
+    chainsDropped: { phase: number; leash: number; death: number; overwrite: number; heldFar: number }
     /** 판이 끝나는 순간 아직 예약을 안고 있는 적 수. */
     chainsPending: number
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
