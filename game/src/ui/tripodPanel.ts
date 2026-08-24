@@ -1,7 +1,18 @@
 import { SKILL_KEYS } from '../config/arsenal'
 import { TRIPOD_TIERS } from '../config/tripods'
 import { skillIdForSlot, SLOT_COUNT } from '../systems/loadout'
-import { switchTripod, tripodPoints, tripodStatus, unlockTripod } from '../systems/tripod'
+import {
+  graftOn,
+  graftPart,
+  graftReason,
+  sparePartIds,
+  switchTripod,
+  tripodPoints,
+  tripodStatus,
+  ungraftPart,
+  unlockTripod,
+} from '../systems/tripod'
+import { findPart } from '../config/tripods'
 
 /**
  * 트라이포드 선택 창 (T 키).
@@ -124,6 +135,79 @@ export class TripodPanel {
       row.appendChild(opts)
       card.appendChild(row)
     }
+    card.appendChild(this.renderGraft(skillId))
     return card
+  }
+
+  /**
+   * ── 🧩 **이식 칸** — 다른 스킬에서 «고르지 않아 남은» 조각을 끼웁니다 ──
+   *
+   * 단계 셋과 **같은 모양**(tpTier/tpOpts/tpOpt)으로 그립니다. 새 스타일을
+   * 만들면 화면이 따로 놀고, 플레이어는 *"이건 다른 종류의 무엇이지?"* 를
+   * 한 번 더 배워야 합니다. 같은 자리에 같은 모양으로 두면 **배울 것이
+   * 늘지 않습니다.**
+   *
+   * ⚠️ **못 끼우는 부품도 보여 주고, 이유를 적습니다.** 목록에서 빼 버리면
+   *    플레이어는 그 부품이 존재하는지도 모릅니다. 회색으로만 막으면
+   *    *"왜 안 되지"* 하고 다른 걸 눌러 봅니다. 이 게임의 원칙
+   *    (*"스스로 잘한다고 느끼게"*)은 **막는 이유를 말해 주는 것**까지입니다 —
+   *    이유를 알면 «다음엔 저 스킬에 써야지» 라는 계획이 생깁니다.
+   */
+  private renderGraft(skillId: string): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'tpTier'
+
+    const installed = graftOn(skillId)
+    const label = document.createElement('div')
+    label.className = 'tpTierName'
+    label.textContent = installed ? '이식 · 끼운 조각' : '이식 · 다른 스킬의 조각'
+    row.appendChild(label)
+
+    const opts = document.createElement('div')
+    opts.className = 'tpOpts'
+
+    if (installed) {
+      const f = findPart(installed)
+      const btn = document.createElement('button')
+      btn.className = 'tpOpt sel'
+      btn.innerHTML = `<b>${f?.part.name ?? '?'}</b><span>${f?.part.desc ?? ''} — 누르면 빼냅니다</span>`
+      btn.addEventListener('click', () => {
+        if (ungraftPart(skillId)) this.refresh()
+      })
+      opts.appendChild(btn)
+    }
+
+    const spare = sparePartIds()
+    for (const id of spare) {
+      const f = findPart(id)
+      if (!f) continue
+      const why = graftReason(skillId, id)
+      const btn = document.createElement('button')
+      btn.className = 'tpOpt'
+      btn.classList.toggle('locked', why !== 'none')
+      btn.disabled = why !== 'none'
+      // 왜 안 되는지를 **부품 설명 자리에** 씁니다 — 눈이 가는 곳에.
+      const reason =
+        why === 'ownSkill'
+          ? '이 스킬에서 나온 조각입니다 — 다른 스킬에만'
+          : why === 'noEffect'
+            ? '이 스킬에서는 아무것도 안 바뀝니다'
+            : f.part.desc
+      btn.innerHTML = `<b>${f.part.name}</b><span>${reason}</span>`
+      btn.addEventListener('click', () => {
+        if (graftPart(skillId, id)) this.refresh()
+      })
+      opts.appendChild(btn)
+    }
+
+    if (!opts.childElementCount) {
+      const empty = document.createElement('div')
+      empty.className = 'tpEmpty'
+      // 아직 아무 단계도 안 연 사람에게 **어디서 나오는지**를 알려 줍니다.
+      empty.textContent = '남은 조각이 없습니다 — 단계를 열면 고르지 않은 쪽이 조각으로 남습니다.'
+      opts.appendChild(empty)
+    }
+    row.appendChild(opts)
+    return row
   }
 }

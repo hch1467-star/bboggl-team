@@ -1698,6 +1698,31 @@ async function main() {
       graft.changed || '아무 칸도 안 바뀜',
     )
 
+    /**
+     * 🧩 **화면에 실제로 보이는가.** 규칙이 맞아도 UI 에 안 뜨면 플레이어는
+     *    이 기능이 있는 줄도 모릅니다 — 「없는 기능」과 구분되지 않습니다.
+     */
+    const graftUi = await zone.evaluate(() => {
+      const G = window.__game
+      G.toggleTripodPanel()
+      const rows = [...document.querySelectorAll('#tripodBody .tpTierName')].map((n) => n.textContent ?? '')
+      const graftRows = rows.filter((t) => t.startsWith('이식'))
+      const opts = [...document.querySelectorAll('#tripodBody .tpOpt')].length
+      const hint = [...document.querySelectorAll('#tripodBody .tpEmpty')].map((n) => n.textContent ?? '')
+      G.toggleTripodPanel()
+      return { skills: rows.length, graftRows: graftRows.length, opts, hint: hint[0] ?? '' }
+    })
+    check(
+      '🧩 T 창의 **스킬마다 이식 칸이 있다**',
+      graftUi.graftRows > 0 && graftUi.graftRows * 4 === graftUi.skills,
+      `이식 칸 ${graftUi.graftRows}개 · 전체 줄 ${graftUi.skills}개 (스킬당 단계 3 + 이식 1)`,
+    )
+    check(
+      '🧩 조각이 없을 때 **어디서 나오는지 알려준다** (막힌 화면을 안 남김)',
+      graftUi.hint.includes('단계를 열면'),
+      `"${graftUi.hint}"`,
+    )
+
     const roster = await zone.evaluate(() => window.__game.levelRoster())
     const rosterTotal = Object.values(roster).reduce((a, b) => a + b, 0)
     check(
