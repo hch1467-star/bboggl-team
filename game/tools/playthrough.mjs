@@ -695,6 +695,9 @@ try {
      *    그래서 1단계 5.6초 중 5.2초가 붙듦으로 찍혔습니다). 실제로
      *    손해 보는 것은 **체력이 경계선에 닿은 뒤**입니다.
      */
+    /** 🧩 봇이 실제로 연 단계 수 / 이식한 부품 수 — 안 세면 «썼는지»를 모릅니다. */
+    let tripodUnlocks = 0
+    let graftsMade = 0
     let bossP1Race = 0
     let bossP1Held = 0
     /**
@@ -1700,6 +1703,61 @@ try {
         const until = now() + 2
         while (now() < until) await sleep()
         continue
+      }
+
+      /**
+       * ── 🧩 **각인석을 씁니다 — 그리고 남은 조각을 이식합니다** ────────
+       *
+       * ⚠️ **이 블록이 없었습니다.** `playthrough.mjs` 에 `tripod` 이라는
+       *    글자가 한 번도 안 나왔습니다. 봇은 보물을 주워 각인석을
+       *    **모으기만 하고 한 번도 안 썼습니다.**
+       *
+       * 그래서 지금까지 잰 밸런스가 전부 **「성장 0」 플레이어**의 값입니다 —
+       * 받은 피해도 클리어 시간도, 스킬 변형을 하나도 안 한 손으로 낸
+       * 기록이었습니다. `DESIGN.md` 는 트라이포드를 *"로스트아크에서 가져온
+       * 유일한 성장 시스템"* 이라고 부르는데 **계측기가 그걸 한 번도 안
+       * 켜 봤습니다.** 「안 켜 본 시스템은 없는 시스템과 구분되지 않습니다」.
+       *
+       * ── 고르는 방식: **똑똑하게 고르지 않습니다** ─────────────────────
+       * 봇이 최적해를 고르면 «사람이 낼 수 있는 최대»를 재게 되어 밸런스가
+       * 실제보다 세 보입니다. 그렇다고 늘 0번을 고르면 표에서 **먼저 적힌
+       * 쪽**으로 쏠립니다. 그래서 **단계 번호로 번갈아** 고릅니다 —
+       * 무작위가 아니라 **재현 가능한** 규칙입니다(이 저장소는 씨앗 없는
+       * 난수를 금지합니다).
+       *
+       * 이식은 **맞는 자리 아무 데나** 넣습니다. 「어디에 넣는 것이 좋은가」는
+       * 사람이 판단할 몫이고, 봇은 *"이 기능이 실제 판에서 돌아가는가"* 만
+       * 확인합니다.
+       */
+      {
+        const tp = G.tripodInfo?.().points ?? 0
+        if (tp > 0) {
+          const slots = G.equippedSkills?.() ?? []
+          outer: for (const skillId of slots) {
+            if (!skillId) continue
+            for (let t = 0; t < 3; t++) {
+              // 번갈아 고르기 — 단계가 짝수면 0번, 홀수면 1번.
+              if (G.unlockTripod(skillId, t, t % 2)) {
+                tripodUnlocks++
+                break outer
+              }
+            }
+          }
+        }
+        const parts = G.partsInfo?.()
+        if (parts && parts.spare.length > 0) {
+          const slots = G.equippedSkills?.() ?? []
+          fit: for (const part of parts.spare) {
+            for (const skillId of slots) {
+              if (!skillId) continue
+              if (G.graftReason(skillId, part.id) !== 'none') continue
+              if (G.graftPart(skillId, part.id)) {
+                graftsMade++
+                break fit
+              }
+            }
+          }
+        }
       }
 
       // ---- 성수병 ----
@@ -4125,6 +4183,9 @@ try {
       gapCount: gaps.length,
       longGaps: longGaps.sort((a, b) => b.secs - a.secs).slice(0, 4),
       /** 스태미나가 실제로 제약이 되는가 */
+      /** 🧩 이 판에서 연 트라이포드 단계 / 이식한 부품 — 성장을 실제로 했는가. */
+      tripodUnlocks,
+      graftsMade,
       minStamina: Number(minStamina.toFixed(0)),
       dodgeCost,
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,

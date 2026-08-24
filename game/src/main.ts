@@ -217,6 +217,7 @@ import {
   equipGear,
   setWeaponLevel,
   skillForSlot,
+  skillIdForSlot,
   weaponAffixes,
   weaponLevel,
   weaponOf,
@@ -7665,6 +7666,12 @@ declare global {
       }
       /** 🎛 슬롯 규약 — 검사가 숫자를 베끼지 않게 */
       slotInfo: () => { count: number; firstRuneSlot: number }
+      /**
+       * 🧩 **지금 장착한 스킬의 id 목록** — 봇이 트라이포드를 쓰려면
+       * «무엇을 끼고 있는지»를 알아야 합니다. 슬롯 번호로만 물으면 무기
+       * 구성이 바뀌는 날 조용히 다른 스킬을 만지게 됩니다.
+       */
+      equippedSkills: () => string[]
       /** 🌿 트라이포드 표의 크기 */
       tripodTable: () => { skills: number; tiers: number; perTier: number }
       /** ⚔️ 지금 좌클릭이 무엇이 되는가 — 상황 모션 검증용 */
@@ -8894,6 +8901,14 @@ window.__game = {
    * 게임은 멀쩡한데 검사만 빨개집니다(실제로 그렇게 됐습니다).
    */
   slotInfo: () => ({ count: SLOT_COUNT, firstRuneSlot: FIRST_RUNE_SLOT }),
+  equippedSkills: () => {
+    const out: string[] = []
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      const id = skillIdForSlot(game.debugPlayerEntity(), slot)
+      if (id) out.push(id)
+    }
+    return out
+  },
   /** 🌿 트라이포드 **표의 크기** — 창에 몇 개가 그려져야 하는지 게임이 압니다. */
   tripodTable: () => ({
     skills: WEAPONS[Loadout.weapon[game.debugPlayerEntity()]].skills.filter((id) =>
