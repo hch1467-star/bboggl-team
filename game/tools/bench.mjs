@@ -1850,6 +1850,16 @@ if (process.env.BENCH_JSON === '1') {
         tripodUnlocks: Math.round(median(pick((l) => l.tripodUnlocks ?? 0)) || 0),
         grafts: Math.round(median(pick((l) => l.graftsMade ?? 0)) || 0),
         melt,
+        /**
+         * 🏁 **구간의 모양** — 성장이 마지막 구간을 무너뜨리는지 보려면
+         *    총량이 아니라 «어떻게 끝나는가»가 필요합니다.
+         *    시간 · 붕괴 · 처형을 구간별로 냅니다.
+         */
+        phase: [0, 1, 2].map((i) => ({
+          secs: Number((median(phaseSrc.map((l) => l.boss.phaseTime?.[i] ?? 0)) || 0).toFixed(1)),
+          breaks: Number((median(phaseSrc.map((l) => l.boss.phaseBreaks?.[i] ?? 0)) || 0).toFixed(1)),
+          fins: Number((median(phaseSrc.map((l) => l.boss.phaseFinishers?.[i] ?? 0)) || 0).toFixed(1)),
+        })),
       }) +
       '\n',
   )

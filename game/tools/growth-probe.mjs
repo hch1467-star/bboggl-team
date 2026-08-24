@@ -119,6 +119,62 @@ if (a && b) {
       `가장 크게 움직인 것: ${biggest.k} ${biggest.d >= 0 ? '+' : ''}${biggest.d.toFixed(1)}%p`,
     )
 
+    /**
+     * ── 🏁 **성장이 «마지막 구간»을 무너뜨리는가** ────────────────────
+     *
+     * `bossPhases.ts` 는 *"마지막 구간이 가장 길다"* 를 약속합니다.
+     * 성장 없이 재면 0.94배로 아슬아슬하게 못 지키는데, 성장을 켜면
+     * 3단계가 **2초 만에 증발**합니다(1단계 9.8초 vs 3단계 2.1초).
+     *
+     * 그리고 그 구간에는 **붕괴도 처형도 0** 입니다. 처형은
+     * *"내가 무너뜨렸다 → 마무리한다"* 는 **가장 알아보기 쉬운 성취**인데,
+     * 절정에서 그 순간이 사라집니다. 이 게임의 원칙(*"스스로 잘한다고
+     * 느끼게, 그러면서도 난이도는 있어야"*)과 정면으로 부딪히는 자리라
+     * 성장 단계별로 나란히 냅니다.
+     *
+     * 📌 «처형 비중이 준다»·«3단계 붕괴 0»·«마지막 구간이 짧다»는 셋이
+     *    아니라 **하나**입니다 — 마지막 구간이 시작하기도 전에 끝납니다.
+     */
+    const ph = (r) => (r.phase ?? []).map((p) => p ?? { secs: 0, breaks: 0, fins: 0 })
+    const pa = ph(a)
+    const pb = ph(b)
+    if (pa.length === 3 && pb.length === 3) {
+      console.log(`\n  🏁 구간의 모양 (시간 · 붕괴 · 처형)\n`)
+      for (let i = 0; i < 3; i++) {
+        console.log(
+          `     ${i + 1}단계   성장 0 ${pa[i].secs.toFixed(1).padStart(5)}초 ` +
+            `붕괴 ${pa[i].breaks} 처형 ${pa[i].fins}` +
+            `   →   성장 ${GROWN} ${pb[i].secs.toFixed(1).padStart(5)}초 ` +
+            `붕괴 ${pb[i].breaks} 처형 ${pb[i].fins}`,
+        )
+      }
+      const ratioA = pa[0].secs > 0 ? pa[2].secs / pa[0].secs : 0
+      const ratioB = pb[0].secs > 0 ? pb[2].secs / pb[0].secs : 0
+      console.log(
+        `     3단계/1단계 — 성장 0 ${ratioA.toFixed(2)}배 · 성장 ${GROWN} ${ratioB.toFixed(2)}배` +
+          ` (bossPhases.ts 의 약속은 «마지막이 가장 길다» = 1.00배 이상)`,
+      )
+      /**
+       * ⚠️ **판정은 «성장이 이 약속을 더 어기게 만드는가»만** 합니다.
+       *    약속 자체를 지키는지는 `npm run boss`(죽음 없는 침대)의 몫이고,
+       *    여기서는 **성장이 방향을 나쁘게 미는지**만 봅니다. 두 계기가
+       *    같은 것을 두 번 판정하면 어느 쪽을 믿을지 알 수 없게 됩니다.
+       */
+      check(
+        ratioB >= ratioA * 0.7,
+        '🏁 **성장이 «마지막 구간»을 더 무너뜨리지 않는다** (절정이 시작 전에 끝나지 않게)',
+        `3단계/1단계 ${ratioA.toFixed(2)}배 → ${ratioB.toFixed(2)}배` +
+          (ratioB < ratioA * 0.7 ? ' ← 성장할수록 절정이 짧아집니다' : ''),
+      )
+      const finLost = pa[2].fins - pb[2].fins
+      console.log(
+        `     📌 3단계 처형 ${pa[2].fins} → ${pb[2].fins}` +
+          (finLost > 0
+            ? ' — «내가 무너뜨렸다»는 가장 알아보기 쉬운 성취가 절정에서 줄어듭니다'
+            : ''),
+      )
+    }
+
     /** 세졌는지는 **따로** 냅니다 — 두 질문을 한 칸에 담지 않습니다. */
     console.log(
       `\n  💪 세졌는가(참고 · 판정 안 함) — 받은 피해 ${a.hurt} → ${b.hurt} · ` +
