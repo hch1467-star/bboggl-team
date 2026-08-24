@@ -1178,12 +1178,17 @@ if (boss.length > 0) {
   /** 🔗 그중 **연계로 나온** 예고 / 판정 — 「왜 🔴만 끊기는가」의 갈래. */
   const chCom = new Map()
   const chSw = new Map()
+  /** 📏 건 거리 합 / 닿은 거리 합 — 평균을 내서 견줍니다. */
+  const cD = new Map()
+  const sD = new Map()
   for (const l of boss)
     for (const a of l.bossSwings ?? []) {
       per.set(a.id, (per.get(a.id) ?? 0) + a.swings)
       com.set(a.id, (com.get(a.id) ?? 0) + (a.commits ?? 0))
       chCom.set(a.id, (chCom.get(a.id) ?? 0) + (a.chainedCommits ?? 0))
       chSw.set(a.id, (chSw.get(a.id) ?? 0) + (a.chained ?? 0))
+      cD.set(a.id, (cD.get(a.id) ?? 0) + (a.comDist ?? 0))
+      sD.set(a.id, (sD.get(a.id) ?? 0) + (a.swDist ?? 0))
     }
   /** 이 보스가 **가질 수 있는** 패턴 전부 — 게임이 적어 준 목록에서 옵니다. */
   const all = (logs.find((l) => (l.bossPatterns ?? []).length)?.bossPatterns ?? [...per.keys()]).slice()
@@ -1265,6 +1270,33 @@ if (boss.length > 0) {
             return `${id} 연계 ${cc}→${cs} · 그냥 ${oc}→${os}`
           })
           .join(' · ') + ' (표본이 작습니다 — 갈래만 봅니다)',
+    )
+  /**
+   * ── 📏 **건 거리 vs 닿은 거리** ─────────────────────────────────
+   *
+   * 연계 갈래는 «연계 탓만은 아니다»로 끝났습니다(cleave 연계 3→0,
+   * 그냥 4→1). 남은 후보가 거리입니다. 다만 `maxRange` 는 «고를 수
+   * 있는 거리»지 «실제로 건 거리»가 아니라서, **그 순간을 잽니다.**
+   *
+   * 판정까지 간 것이 평균적으로 **더 멀리서** 걸렸다면 이야기는
+   * 거리입니다 — 붙어서 건 예고가 플레이어 콤보에 먹힙니다.
+   * 차이가 없다면 거리도 아니고, 다시 갈래를 찾아야 합니다.
+   *
+   * ⚠️ 여기서도 판정은 안 답니다. 색당 표본이 한 자릿수입니다.
+   */
+  const dRows = all.filter((id) => (com.get(id) ?? 0) > 0)
+  if (dRows.length)
+    console.log(
+      `                 📏 건 거리 → 닿은 거리: ` +
+        dRows
+          .map((id) => {
+            const c = com.get(id) ?? 0
+            const w = per.get(id) ?? 0
+            const cm = c > 0 ? (cD.get(id) ?? 0) / c : 0
+            const sm = w > 0 ? (sD.get(id) ?? 0) / w : null
+            return `${id} ${cm.toFixed(1)}m→${sm === null ? '없음' : sm.toFixed(1) + 'm'}`
+          })
+          .join(' · '),
     )
   if (noCommits) {
     console.log(

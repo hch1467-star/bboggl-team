@@ -675,6 +675,8 @@ class Game {
       byPhase: number[]
       commits?: number
       chainedCommits?: number
+      comDist?: number
+      swDist?: number
     }
   > = {}
   private readonly bossLastSwing = new Map<number, string>()
@@ -1569,6 +1571,13 @@ class Game {
             byPhase: [0, 0, 0],
           })
           rec.swings++
+          {
+            // 📏 판정까지 **간** 것의 거리 — 위 `comDist` 의 짝입니다.
+            //    (같은 자리에서 같은 방식으로 재야 둘을 견줄 수 있습니다.)
+            const dx = Transform.x[this.playerEntity] - Transform.x[e]
+            const dz = Transform.z[this.playerEntity] - Transform.z[e]
+            rec.swDist = (rec.swDist ?? 0) + Math.hypot(dx, dz)
+          }
           /**
            * **이 휘두름이 연계로 나온 것인가.**
            *
@@ -1676,6 +1685,31 @@ class Game {
            *    전에 원인을 이름 붙였다가 네 번 틀렸습니다.
            */
           if (Enemy.chained[e] === 1) brec.chainedCommits = (brec.chainedCommits ?? 0) + 1
+          /**
+           * 📏 **예고를 건 그 순간의 거리** — 남은 갈래 하나.
+           *
+           * 연계 갈래는 이미 갈렸습니다: cleave 는 연계 3→0, **그냥도
+           * 4→1** 입니다. 연계 탓«만»은 아닙니다.
+           *
+           * 남은 차이는 **거리**입니다. 세 색의 고르는 거리가 이렇습니다:
+           *
+           *     boss_cleave maxRange **4.0** → 끊김 87.5% (16번 중 2번 닿음)
+           *     boss_quake  maxRange  6.5   → 29%
+           *     boss_bind   maxRange  9     → 0%
+           *
+           * 붙어서 거는 예고일수록 플레이어 콤보와 겹치니 그럴듯합니다.
+           * 그런데 `boss_charge`(minRange 3)가 67% 라 깔끔하지 않고,
+           * 무엇보다 **maxRange 는 «고를 수 있는 거리»지 «실제로 건
+           * 거리»가 아닙니다.** 정의를 보고 짐작하는 것과 그 순간을 재는
+           * 것은 다릅니다 — 이 세션에서 정의만 보고 세운 짐작이 이미 두 번
+           * 틀렸습니다(예고 길이·minRange).
+           *
+           * 그래서 **건 거리**와 **닿은 거리**를 각각 더해 둡니다. 판정까지
+           * 간 것이 평균적으로 더 멀리서 걸렸다면, 이야기는 «거리»입니다.
+           */
+          const dx = Transform.x[this.playerEntity] - Transform.x[e]
+          const dz = Transform.z[this.playerEntity] - Transform.z[e]
+          brec.comDist = (brec.comDist ?? 0) + Math.hypot(dx, dz)
         }
       }
 
@@ -7998,6 +8032,9 @@ declare global {
           byPhase: number[]
           commits?: number
           chainedCommits?: number
+          /** 예고를 건 순간의 거리 합 / 판정까지 간 것의 거리 합(m). */
+          comDist?: number
+          swDist?: number
         }
       >
       /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
