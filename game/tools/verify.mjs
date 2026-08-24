@@ -299,6 +299,50 @@ async function main() {
        * 아니라 그냥 최대 기력을 깎은 것입니다.
        */
       const gate = await page.evaluate(() => window.__game.dodgeInfo())
+      /**
+       * ── 🔓 **유보분이 0이면 이 약속은 «없는» 약속입니다** ──────────
+       *
+       * `dodge.staminaCost` 를 0으로 두면서(요청: *"구르기를 무한히 쓸 수
+       * 있도록"*) `attackReserve` 도 0이 됐습니다. 그러면 위 두 검사가
+       * 재려던 **«유보분이 물리는 자리»가 존재하지 않습니다** —
+       * `between` 이 공격값과 같아져 공격이 그냥 나갑니다.
+       *
+       * 세 가지 중 무엇을 할까가 갈립니다:
+       *   · 그냥 빨갛게 둔다 → **거짓 빨강**입니다. 게임은 설계대로입니다.
+       *   · 검사를 지운다   → 유보분을 되살리는 날 아무도 안 봅니다.
+       *   · **문턱을 게이트로 감싼다** ← 이걸 합니다.
+       *
+       * 유보분이 돌아오면 검사도 같이 돌아옵니다. 그리고 0인 동안에는
+       * **새 약속**을 대신 검사합니다 — *"기력이 바닥이어도 구르기는
+       * 나간다"*. 빈 자리를 만들지 않습니다(「사라지는 검사는 통과가
+       * 아니다」).
+       */
+      if (gate.attackReserve <= 0) {
+        const freeRoll = await page.evaluate(async () => {
+          const G = window.__game
+          G.setStamina(0)
+          const info = G.dodgeInfo()
+          G.press('Space')
+          await new Promise((r) => setTimeout(r, 40))
+          G.release('Space')
+          const t0 = G.state().elapsed
+          while (G.state().elapsed - t0 < 0.6) {
+            if (G.state().player.state === 2) return { rolled: true, block: info.block }
+            await new Promise((r) => setTimeout(r, 8))
+          }
+          return { rolled: false, block: G.dodgeInfo().block }
+        })
+        check(
+          '🔓 **기력이 0이어도 구르기가 나간다** (구르기를 기력에서 뗀 설계 — balance.ts `dodge.staminaCost` 0)',
+          freeRoll.rolled === true && freeRoll.block !== 'stamina',
+          `굴렀나 ${freeRoll.rolled} · 막힌 이유 "${freeRoll.block || '없음'}"`,
+        )
+        console.log(
+          '  ⏸ 🛡 유보분 검사 두 개 — **판정하지 않습니다**: ' +
+            `유보분이 ${gate.attackReserve} 입니다(구르기를 기력에서 뗐습니다). ` +
+            '되살리면 이 두 검사도 같이 돌아옵니다.',
+        )
+      } else {
       // 지금 든 무기의 1타 값 — 게임이 말한 것을 그대로 씁니다(베끼지 않습니다).
       const cheapest = await page.evaluate(() => {
         const G = window.__game
@@ -346,6 +390,7 @@ async function main() {
         rolledTired.rolled,
         rolledTired.rolled ? `기력 ${between}에서 구름` : `막힘 — ${rolledTired.block || '알 수 없음'}`,
       )
+      }
       /**
        * ⚠️ **구르기가 끝나기를 기다린 뒤에 나갑니다.**
        *

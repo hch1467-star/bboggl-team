@@ -2,3 +2,4 @@ node_modules/
 dist/
 tools/shots/
 *.local
+tools/zone-shots/
