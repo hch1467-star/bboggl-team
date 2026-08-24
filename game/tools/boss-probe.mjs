@@ -415,6 +415,33 @@ try {
         (a, v) => ({ com: a.com + (v.commits ?? 0), sw: a.sw + v.swings }),
         { com: 0, sw: 0 },
       )
+      /**
+       * ── 🧾 **잃어버린 예고의 «영수증»** ──────────────────────────
+       *
+       * 첫 판이 이렇게 나왔습니다:
+       *
+       *     예고 6 → 판정 2 (끊김 67%) · **무너짐 1/1/0** (합 2회)
+       *
+       * 끊긴 것은 4번인데 무너진 것은 2번입니다. **둘이 안 맞습니다.**
+       * 붕괴로 설명되는 것은 절반뿐이고, 나머지 절반은 무엇이 가져갔는지
+       * 아무도 모릅니다. 이대로 문턱을 달면 «설명 못 하는 절반» 위에
+       * 판정을 세우게 됩니다 — 「못 잰 것은 통과가 아니다」.
+       *
+       * `windupBreaks` 는 **예고 도중에 일어난 붕괴만** 셉니다(main.ts 가
+       * `breakEvents.duringWindup` 으로 갈라 둡니다). 그러니 이게 곧
+       * *"붕괴가 죽인 예고의 수"* 이고, 장부가 맞아야 합니다:
+       *
+       *     잃은 예고 = 예고 − 판정   vs   예고 중 붕괴
+       *
+       *   · 같다      → 원인은 전부 강인도입니다. 처방이 하나로 정해집니다.
+       *   · 잃은 쪽이 크다 → **다른 것이 예고를 지웁니다**(페이즈 전환·
+       *     자기 취소…) 또는 제 계수기가 겹쳐 셉니다. 어느 쪽이든
+       *     **먼저 밝힐 것**이지 문턱을 달 자리가 아닙니다.
+       *
+       * 잔액을 안 찍으면 이런 어긋남은 조용히 지나갑니다 — 이 저장소가
+       * 연계 장부(`장부 잔액 -2회`)에서 이미 배운 자리입니다.
+       */
+      const wb0 = G.runStats?.().windupBreaks ?? 0
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -488,6 +515,7 @@ try {
         killed: done,
         commits: swing1.com - swing0.com,
         swings: swing1.sw - swing0.sw,
+        windupBreaks: (G.runStats?.().windupBreaks ?? 0) - wb0,
       }
     })
     shapes.push(r)
@@ -496,6 +524,8 @@ try {
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
+        ` · 예고중붕괴 ${r.windupBreaks}` +
+        (r.commits - r.swings === r.windupBreaks ? '(장부 맞음)' : '(⚠️ 장부 안 맞음)') +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
     )
   }
