@@ -38,7 +38,14 @@ const ROOT = path.join(HERE, '..')
 const PORT = 5207
 
 /** 잴 거리(m). 보스 패턴의 minRange/maxRange 를 가로지르게 고릅니다. */
-const BANDS = [1.6, 4.5]
+/**
+ * ⚠️ **3.2m 이 빠져 있었습니다.** 처음엔 [1.6, 4.5] 로 골랐는데,
+ *    조사하려던 `boss_cleave` 의 창이 **2.4~4.0m** 라 두 띠가 그 창을
+ *    **양쪽으로 비껴갑니다.** 그래서 첫 판에 cleave 가 **한 번도** 안
+ *    나왔습니다 — 조사 대상을 조사에서 빼놓은 계기였습니다.
+ *    띠를 고를 때는 **패턴의 창을 먼저 보고** 골라야 합니다.
+ */
+const BANDS = [1.6, 3.2, 4.5]
 /** 거리·압력 한 조합에서 받을 예고 수. 색이 5개니 색당 10개쯤 쌓입니다. */
 const WANT = 30
 
@@ -90,11 +97,11 @@ try {
    */
   await page.evaluate(() => window.__game.setPhaseTeaching?.(false))
 
-  console.log(`\n🎨 보스 예고 표본 — 거리 ${BANDS.length}종 × 압력 2종, 조합마다 ${WANT}개 목표\n`)
+  console.log(`\n🎨 보스 예고 표본 — 거리 ${BANDS.length}종 × 손 3갈래, 조합마다 ${WANT}개 목표\n`)
 
   const rows = []
   for (const band of BANDS) {
-    for (const hitting of [false, true]) {
+    for (const hitting of [0, 1, 2]) {
       const r = await page.evaluate(
         async ([dist, mash, want]) => {
           const G = window.__game
@@ -129,9 +136,40 @@ try {
             G.setStamina(100)
             /** 보스도 안 죽게 채웁니다 — 재려는 것은 예고지 승패가 아닙니다. */
             G.setHp(b, G.enemyInfo(b).max)
-            if (mash) {
+            /**
+             * ── 🥋 **손을 세 갈래로 나눕니다** ────────────────────────
+             *
+             * 첫 판이 이렇게 나왔습니다 — 거리를 고정하니 **끊김이
+             * 0~14%** 뿐입니다. 그런데 벤치(실제 플레이)는 50~100% 입니다.
+             * 같은 게임인데 계기마다 답이 다르면, 다른 것은 «게임»이
+             * 아니라 **«플레이어가 쥔 것»** 입니다:
+             *
+             *     이 침대 — 평타만        강인도 ×0.35 → 끊김 0~14%
+             *     보스 침대 — 평타만       (같은 조건) → 33%
+             *     벤치 — 평타+강타+스킬                → 50~100%
+             *
+             * `POISE` 를 보면 답이 있습니다: 평타는 **×0.35** 로 일부러
+             * 약하게 눌러 뒀고, 끊는 힘은 **강타(×2.2)** 와 «예고 중
+             * 타격»(×2.5)에 몰아줬습니다. 그게 설계였습니다.
+             *
+             * 그러니 «붙어 있으면 예고가 죽는다»가 아니라 **«강타를 쓰면
+             * 예고가 죽는다»** 일 수 있습니다. 둘은 처방이 정반대입니다 —
+             * 앞은 거리(minRange), 뒤는 강인도 배수입니다.
+             *
+             * 그래서 손을 나눠 잽니다. 0=가만히 · 1=평타만 · 2=강타 섞기.
+             */
+            if (mash === 1) {
               G.press('Mouse0')
               G.release('Mouse0')
+            } else if (mash === 2) {
+              // 집중이 차면 강타로 태웁니다 — 안 차면 평타로 채웁니다.
+              if ((G.focusInfo?.().focus ?? 0) >= 1) {
+                G.press('Mouse2')
+                G.release('Mouse2')
+              } else {
+                G.press('Mouse0')
+                G.release('Mouse0')
+              }
             }
             const inWindup = bi.attacking === true && bi.attackPhase === 0
             if (inWindup && !winding) {
@@ -186,17 +224,17 @@ try {
     0,
   )
   check(
-    totalCommits >= BANDS.length * 2 * 10,
+    totalCommits >= BANDS.length * 3 * 8,
     '🎨 예고 표본이 모였다 (판정의 게이트)',
-    `${totalCommits}개 — 조합당 평균 ${(totalCommits / (BANDS.length * 2)).toFixed(0)}개`,
+    `${totalCommits}개 — 조합당 평균 ${(totalCommits / (BANDS.length * 3)).toFixed(0)}개`,
   )
 
-  if (totalCommits >= BANDS.length * 2 * 10) {
+  if (totalCommits >= BANDS.length * 3 * 8) {
     /**
      * 이 계기가 답하려는 질문 하나: **거리가 예고의 생사를 정하는가.**
      * 「계속 때림」 갈래에서 가장 가까운 띠와 가장 먼 띠의 끊김을 견줍니다.
      */
-    const mashed = rows.filter((r) => r.hitting)
+    const mashed = rows.filter((r) => r.hitting === 1)
     const cutOf = (r) => {
       const t = Object.values(r.seen).reduce(
         (a, v) => ({ c: a.c + v.commits, s: a.s + v.swings }),
