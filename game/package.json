@@ -21,6 +21,7 @@
     "aim": "node tools/aim-probe.mjs",
     "audio": "node tools/audio-probe.mjs",
     "boss": "node tools/boss-probe.mjs",
+    "telegraph": "node tools/telegraph-probe.mjs",
     "enemies": "node tools/enemy-probe.mjs",
     "vial": "node tools/vial-probe.mjs",
     "ember": "node tools/ember-probe.mjs",
