@@ -657,6 +657,18 @@ try {
    * 평균을 망칩니다). 그래서 시간 검사만 `ok` 안에 두고, 장부는
    * 밖으로 꺼냅니다. 「없어지는 검사는 통과가 아닙니다」.
    */
+  /**
+   * ⚠️ **여기 있어야 합니다.** 원래 이 함수는 `if (ok.length)` 안에
+   * 있었는데, 장부 블록을 그 앞으로 옮기면서 «선언보다 먼저 쓰는» 꼴이
+   * 됐고 프로브가 `ReferenceError: mid is not defined` 로 죽었습니다
+   * (32개 중 19개만 돌고 끝났습니다). 이 세션에서만 세 번째 같은 실수라,
+   * 블록을 옮길 때는 **그 블록이 쓰는 이름이 위에 있는지**를 같이 봅니다.
+   */
+  const mid = (xs) => {
+    const a = [...xs].sort((x, y) => x - y)
+    const h = a.length >> 1
+    return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2
+  }
   const led = shapes.map((s) => ({
     com: s.commits,
     lost: s.commits - s.swings,
@@ -702,11 +714,6 @@ try {
     )
   }
   if (ok.length) {
-    const mid = (xs) => {
-      const a = [...xs].sort((x, y) => x - y)
-      const h = a.length >> 1
-      return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2
-    }
     const per = [0, 1, 2].map((i) => mid(ok.map((s) => s.phase[i])))
     const bands = await page.evaluate(() => window.__game.bossTuning().map((p) => p.hpFrom ?? null))
     console.log(
