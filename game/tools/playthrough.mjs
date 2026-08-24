@@ -1747,9 +1747,23 @@ try {
         const parts = G.partsInfo?.()
         if (parts && parts.spare.length > 0) {
           const slots = G.equippedSkills?.() ?? []
+          /**
+           * ⚠️ **빈 칸에만 넣습니다 — 갈아 끼우지 않습니다.**
+           *
+           * 처음엔 «맞는 자리 아무 데나»로 뒀더니 판당 **이식 9386회**가
+           * 찍혔습니다. 사람에게 옳은 규칙 하나가 봇에게는 무한 고리가
+           * 됩니다: 이미 이식된 스킬에 다른 부품을 끼우면 **이전 것이
+           * 조각으로 돌아오고**(실험이 벌이 되지 않게 일부러 그렇게
+           * 만들었습니다), 다음 틱에 그게 다시 끼워집니다.
+           *
+           * 그 판의 수치는 매 틱 스킬이 바뀌는 상태로 잰 것이라 **표본이
+           * 아닙니다**(받은 피해가 두 배로 찍혔습니다). 세는 칸을 안
+           * 만들었으면 그 값을 새 기준선으로 받아들였을 것입니다.
+           */
           fit: for (const part of parts.spare) {
             for (const skillId of slots) {
               if (!skillId) continue
+              if (parts.grafts[skillId]) continue
               if (G.graftReason(skillId, part.id) !== 'none') continue
               if (G.graftPart(skillId, part.id)) {
                 graftsMade++
