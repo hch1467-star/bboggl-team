@@ -514,6 +514,10 @@ try {
        * 있었을 뿐입니다.
        */
       let heldT = 0
+      /** 1단계에서 **실제로 체력이 깎이던** 시간 — 붙듦의 짝입니다. */
+      let raceT = 0
+      /** 1→2 경계 체력 비율. 게임에게 물어봅니다 — 베껴 적지 않습니다. */
+      const p1Edge = G.bossTuning()[1]?.enterBelow ?? 0.75
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -592,7 +596,27 @@ try {
            * 지적한 사람이 같은 자리에서 넘어졌으니, 규칙이 아니라 **구조**로
            * 막습니다: 빼는 두 값을 **같은 줄에서, 같은 조건으로** 셉니다.
            */
-          if (be.phase === 0 && be.teachHold?.holding === true) heldT += dt
+          /**
+           * ── 🎯 **«잠금이 켜져 있다»와 «지금 붙들려 있다»는 다릅니다** ──
+           *
+           * 처음엔 `teachHold.holding` 을 그대로 붙듦으로 셌습니다. 그런데
+           * 그 깃발의 뜻은 *"색을 아직 다 못 봤다"* 이고, **1단계 시작부터
+           * 참**입니다 — 플레이어가 체력을 한창 깎고 있는 동안에도요.
+           * 그래서 «체력을 깎던 시간»까지 붙듦에 들어가 1단계 5.6초 중
+           * 5.2초가 붙듦으로 찍혔고, 남은 0.5초로는 판정을 못 했습니다.
+           *
+           * 실제로 손해 보는 시간은 **체력이 경계선에 닿은 뒤**입니다.
+           * 그 전까지는 때리는 만큼 깎입니다(클램프는 «경계 아래로 못
+           * 내려간다»는 규칙이지 «안 깎인다»가 아닙니다). 그래서
+           * **체력 비율로 가릅니다** — 깃발이 아니라 **사건**으로.
+           *
+           * 이 세션에서 대리 지표를 사건으로 바꾼 두 번째 자리입니다
+           * (첫 번째는 「전환 횟수 → 전환이 실제로 지운 예고」).
+           */
+          if (be.phase === 0) {
+            if (be.hp / Math.max(1, be.maxHp) <= p1Edge + 0.01) heldT += dt
+            else raceT += dt
+          }
         }
 
         /**
@@ -651,6 +675,7 @@ try {
         transitions,
         transKilled,
         heldT,
+        raceT,
       }
     })
     shapes.push(r)
@@ -659,7 +684,7 @@ try {
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
-        ` · 가르치느라 붙듦 ${r.heldT.toFixed(1)}초` +
+        ` · 1단계 깎기 ${r.raceT.toFixed(1)}초 + 붙듦 ${r.heldT.toFixed(1)}초` +
         ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled}` +
         (() => {
           const rest = r.commits - r.swings - r.windupBreaks - r.transKilled
@@ -816,8 +841,7 @@ try {
       const upper = tune.t[i].enterBelow
       const lower = i + 1 < tune.t.length ? tune.t[i + 1].enterBelow : 0
       const band = tune.maxHp * (upper - lower)
-      const hold = i === 0 ? mid(ok.map((s) => s.heldT)) : 0
-      const secs = mid(ok.map((s) => s.phase[i])) - hold
+      const secs = i === 0 ? mid(ok.map((s) => s.raceT)) : mid(ok.map((s) => s.phase[i]))
       const tough = tune.t[i].damageTakenScale ?? 1
       // 0.05 로는 못 막습니다 — 음수도 «> 0.05 가 아님»으로 0이 되지만,
       // 0 을 화력으로 찍으면 «약하다»로 읽힙니다. 못 잰 것은 0이 아닙니다.
@@ -831,7 +855,8 @@ try {
         (Number.isFinite(raws[0]) && Number.isFinite(raws[2])
           ? ` (${(raws[2] / raws[0]).toFixed(1)}배)`
           : ' (배수는 못 냅니다 — 성한 분모가 없습니다)') +
-        ` — 1단계는 **가르치느라 붙든 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초를 뺀** 값입니다`,
+        ` — 1단계는 **체력이 실제로 깎이던 ${mid(ok.map((s) => s.raceT)).toFixed(1)}초**로 잰 값입니다` +
+        ` (붙듦 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초는 뺐습니다)`,
     )
   }
   if (ok.length) {
@@ -905,7 +930,15 @@ try {
      *    인트로·전환에서 두 번 겪은 자리입니다.
      */
     const hold = mid(ok.map((s) => s.heldT))
-    const p1Fight = per[0] - hold
+    /**
+     * ⚠️ **빼기가 아니라 «그 자리에서 센 값»을 씁니다.**
+     *
+     * `per[0] − hold` 로 구하던 것을 그만둡니다. 빼기는 두 값이 정확히
+     * 같은 구간을 덮을 때만 맞고, 이 세션에서 그게 어긋나 **음수 분모
+     * 위의 초록**이 한 번 나왔습니다. 이제 깎던 시간을 **같은 프레임에서
+     * 직접** 셉니다 — 빼기가 없으면 어긋날 것도 없습니다.
+     */
+    const p1Fight = mid(ok.map((s) => s.raceT))
     /**
      * ⚠️ **음수·0 위에서는 판정하지 않습니다.**
      *
@@ -923,7 +956,7 @@ try {
     check(
       per[2] >= p1Fight,
       '🏁 **마지막 구간이 가장 길다** (bossPhases.ts 의 약속 — 죽음 없는 자리에서 · **가르치느라 붙든 시간 제외**)',
-      `1단계 ${p1Fight.toFixed(1)}초(붙듦 ${hold.toFixed(1)}초 뺀 값 · 안 빼면 ${per[0].toFixed(1)}초) · ` +
+      `1단계 ${p1Fight.toFixed(1)}초(깎던 시간 · 붙듦 ${hold.toFixed(1)}초 별도 · 합 ${per[0].toFixed(1)}초) · ` +
         `2단계 ${per[1].toFixed(1)}초 · 3단계 ${per[2].toFixed(1)}초` +
         ` (3단계/1단계 ${(per[2] / Math.max(0.01, p1Fight)).toFixed(2)}배)`,
     )
