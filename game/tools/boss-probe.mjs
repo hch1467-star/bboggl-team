@@ -483,6 +483,37 @@ try {
        */
       let transKilled = 0
       let wasWinding = false
+      /**
+       * ── 🎓 **가르치느라 붙들려 있던 시간** ──────────────────────────
+       *
+       * `enemyAI.ts` 는 플레이어가 색 3가지를 볼 때까지 보스 체력을
+       * 1→2단계 경계에 **붙들어 둡니다**(`PHASE1_TEACH_COLORS`, 상한
+       * `PHASE1_TEACH_CAP` 12초). 그러니 **1단계는 체력 깎기 시합이
+       * 아닙니다** — 일부러 늘려 놓은 구간입니다.
+       *
+       * 그런데 이 프로브는 그 시간을 그냥 「1단계에 걸린 시간」으로
+       * 셌습니다. 결과가 이렇게 나왔습니다:
+       *
+       *     💪 감산 되돌린 화력  1단계 **28** · 2단계 77 · 3단계 67/초
+       *
+       * 1→2 에서 2.75배 튀고 3단계는 오히려 내려옵니다. 「플레이어가
+       * 점점 세진다」로는 안 나오는 모양입니다 — **1단계만 낮습니다.**
+       * 분모에 «안 깎이는 시간»이 섞여 있으니 당연합니다.
+       *
+       * 그리고 같은 이유로 「마지막 구간이 가장 길다」가 못 넘는 문턱이
+       * 됩니다: 1단계는 학습 잠금만큼 **공짜로** 길어집니다.
+       *
+       * ⚠️ 이게 이 세션에서 **세 번째 같은 모양**입니다 —
+       *      · 인트로 1.6초가 1단계에 섞여 있었고(고침)
+       *      · 전환 2.5초가 2·3단계에 섞여 있었고(고침)
+       *      · 이번엔 학습 잠금이 1단계에 섞여 있습니다
+       *    「재려는 것이 아닌 시간이 재려는 것 안에」. 한 번 고친 고장은
+       *    다른 자리에도 있는지 찾아봐야 한다는 규칙 그대로입니다.
+       *
+       * 게임은 이미 `teachHold` 로 말해 주고 있었습니다 — 안 듣고
+       * 있었을 뿐입니다.
+       */
+      let heldT = 0
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -537,6 +568,9 @@ try {
         }
         wasTrans = bt > 0
         wasWinding = bt <= 0 && bInfo?.attacking === true && bInfo?.attackPhase === 0
+        // 🎓 붙들려 있는 동안은 «가르치는 시간» 으로도 같이 담습니다.
+        //    (1단계 시간에서 빼지 **않습니다** — 아래 판정에서 둘 다 냅니다.)
+        if (be.teachHold?.holding === true) heldT += dt
         if (be.encounter === 1) intro[0] += dt
         else if (bt > 0) trans[0] += dt
         else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
@@ -596,6 +630,7 @@ try {
         windupBreaks: (G.runStats?.().windupBreaks ?? 0) - wb0,
         transitions,
         transKilled,
+        heldT,
       }
     })
     shapes.push(r)
@@ -604,6 +639,7 @@ try {
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
+        ` · 가르치느라 붙듦 ${r.heldT.toFixed(1)}초` +
         ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled}` +
         (() => {
           const rest = r.commits - r.swings - r.windupBreaks - r.transKilled
@@ -749,18 +785,27 @@ try {
       t: window.__game.bossTuning(),
       maxHp: window.__game.enemyRoster().find((r) => r.id === 'boss')?.maxHp ?? 0,
     }))
+    /**
+     * 🎓 **1단계에서는 붙들린 시간을 뺍니다.** 그 초 동안 보스 체력은
+     *    경계선에 고정입니다 — 때려도 안 깎입니다. 분모에 넣으면
+     *    «플레이어가 약하다»로 읽히는데, 실제로는 «게임이 안 깎아 준
+     *    시간»입니다. 이걸 빼기 전에는 1단계만 28/초로 찍혀서 저는
+     *    「뒤로 갈수록 손이 세진다」는 없는 이야기를 쫓고 있었습니다.
+     */
     const rawOf = (i) => {
       const upper = tune.t[i].enterBelow
       const lower = i + 1 < tune.t.length ? tune.t[i + 1].enterBelow : 0
       const band = tune.maxHp * (upper - lower)
-      const secs = mid(ok.map((s) => s.phase[i]))
+      const hold = i === 0 ? mid(ok.map((s) => s.heldT)) : 0
+      const secs = mid(ok.map((s) => s.phase[i])) - hold
       const tough = tune.t[i].damageTakenScale ?? 1
       return secs > 0.05 ? band / tough / secs : 0
     }
     const raws = [0, 1, 2].map(rawOf)
     console.log(
       `     💪 감산 되돌린 화력 ${raws.map((v, i) => `${i + 1}단계 ${v.toFixed(0)}`).join(' · ')}/초` +
-        ` (${(raws[2] / Math.max(0.01, raws[0])).toFixed(1)}배) — 평타만 누르는 손인데도 오릅니다`,
+        ` (${(raws[2] / Math.max(0.01, raws[0])).toFixed(1)}배)` +
+        ` — 1단계는 **가르치느라 붙든 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초를 뺀** 값입니다`,
     )
   }
   if (ok.length) {
@@ -811,11 +856,36 @@ try {
      * 에 정확히 맞는 침대입니다. **재는 자리를 옮긴 것이지 문턱을 낮춘
      * 것이 아닙니다** — 스펀지 쪽 게이트는 바로 위에 그대로 있습니다.
      */
+    /**
+     * ── 🎓 **1단계에서 «가르치느라 붙든 시간»을 뺍니다** ────────────────
+     *
+     * 이 검사의 질문은 바로 위 주석이 적어 둔 그대로입니다 —
+     * *"체력 배분과 실제 시간이 맞는가."* 그렇다면 **체력이 안 깎이는
+     * 시간은 그 질문에 속하지 않습니다.**
+     *
+     * `enemyAI.ts` 는 색 3가지를 보여줄 때까지 보스 체력을 1→2 경계에
+     * 고정합니다(상한 12초). 그 동안 플레이어가 아무리 때려도 게이지는
+     * 안 움직입니다. 그 초를 1단계에 얹으면 1단계는 **공짜로** 길어지고,
+     * 3단계는 그걸 이길 방법이 없습니다.
+     *
+     * ⚠️ 그리고 이 침대에서는 붙드는 시간이 **더 길어집니다.** 여기 손은
+     *    쉬지 않고 평타를 넣어 보스를 자주 무너뜨리는데, 무너지면 예고가
+     *    끊기고, 예고가 끊기면 **색을 못 보여 줍니다.** 즉 이 침대는
+     *    학습 잠금을 실제 플레이보다 오래 붙잡습니다 — 침대의 성질이지
+     *    게임의 성질이 아닙니다. 더더욱 빼고 봐야 합니다.
+     *
+     * 🔎 **뺀 값과 안 뺀 값을 나란히 냅니다.** 하나만 내면 다음 사람이
+     *    «무엇을 뺀 숫자인지» 모른 채 값을 만지게 됩니다. 이 세션이
+     *    인트로·전환에서 두 번 겪은 자리입니다.
+     */
+    const hold = mid(ok.map((s) => s.heldT))
+    const p1Fight = per[0] - hold
     check(
-      per[2] >= per[0],
-      '🏁 **마지막 구간이 가장 길다** (bossPhases.ts 의 약속 — 죽음 없는 자리에서)',
-      `1단계 ${per[0].toFixed(1)}초 · 2단계 ${per[1].toFixed(1)}초 · 3단계 ${per[2].toFixed(1)}초` +
-        ` (3단계/1단계 ${(per[2] / Math.max(0.01, per[0])).toFixed(2)}배)`,
+      per[2] >= p1Fight,
+      '🏁 **마지막 구간이 가장 길다** (bossPhases.ts 의 약속 — 죽음 없는 자리에서 · **가르치느라 붙든 시간 제외**)',
+      `1단계 ${p1Fight.toFixed(1)}초(붙듦 ${hold.toFixed(1)}초 뺀 값 · 안 빼면 ${per[0].toFixed(1)}초) · ` +
+        `2단계 ${per[1].toFixed(1)}초 · 3단계 ${per[2].toFixed(1)}초` +
+        ` (3단계/1단계 ${(per[2] / Math.max(0.01, p1Fight)).toFixed(2)}배)`,
     )
   }
 
