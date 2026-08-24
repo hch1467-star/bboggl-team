@@ -1050,6 +1050,39 @@ check(
   )
   const missing = applied.filter((k) => !known.includes(k))
   const extra = known.filter((k) => !applied.includes(k))
+  /**
+   * ── ⚖️ **«교환인가» 를 보는 칸도 같이 대조합니다** ────────────────
+   *
+   * `partIsTradeoff` 는 *"이 부품이 대가를 요구하는가"* 를 계산합니다.
+   * 새 mod 칸이 생겼는데 여기 안 넣으면, **그 칸으로만 나빠지는 부품이
+   * «순수 이득»으로 읽힙니다** — 봇은 그걸 집고, 성장할수록 약해지고,
+   * 아무도 이유를 모릅니다.
+   *
+   * ⚠️ 다만 **모든 칸이 방향을 갖는 것은 아닙니다.** `shape`(도형 교체)와
+   *    `iFrames`(무적 구간)와 `snareAdd`·`dashAdd`(없던 것이 생김)는
+   *    «나빠지는 쪽»이 없습니다. 그래서 «전부 일치»가 아니라 **«방향이
+   *    있는 칸이 빠지지 않았는가»** 를 봅니다 — 문턱을 세게 잡으면
+   *    아무도 못 넘는 벽이 됩니다.
+   */
+  const tradeBlock = cut('export function partIsTradeoff', '\nexport function partFitsSkill')
+  const graded = [...new Set([...tradeBlock.matchAll(/mods\.([A-Za-z]+)/g)].map((m) => m[1]))]
+  /** 방향이 있는 칸 = 배수(Mult)와 더하기(Add) — 크고 작음이 뜻을 갖습니다. */
+  const directional = applied.filter((k) => /Mult$|Add$/.test(k))
+  /**
+   * «생각하고 뺀» 칸은 인정합니다 — 주석에 이름과 이유가 적혀 있어야
+   * 합니다(`⚖️ \`이름\` 는 일부러 안 봅니다`). 조용히 빠진 것과
+   * 판단해서 뺀 것은 다릅니다.
+   */
+  const waived = [...tradeBlock.matchAll(/⚖️ \*\*`([A-Za-z]+)` 는 일부러 안 봅니다/g)].map((m) => m[1])
+  const ungraded = directional.filter((k) => !graded.includes(k) && !waived.includes(k))
+  check(
+    ungraded.length === 0,
+    '⚖️ **방향이 있는 칸은 전부 «교환인가» 판정에 들어간다** (나빠지는 부품이 «순수 이득»으로 읽히지 않게)',
+    ungraded.length
+      ? `빠진 칸: ${ungraded.join(' · ')}`
+      : `방향 있는 칸 ${directional.length}개 확인` +
+        (waived.length ? ` (판단해서 뺀 것: ${waived.join(' · ')})` : ''),
+  )
   check(
     missing.length === 0 && extra.length === 0,
     '🧩 **부품이 바꾸는 칸과 «뜻이 있는지» 보는 칸이 정확히 같다** (끼웠는데 아무 일도 안 하는 조합이 없게)',

@@ -232,6 +232,7 @@ import {
   graftOn,
   graftPart,
   graftReason,
+  partIsTradeoff,
   grantTripodPoint,
   resetTripods,
   resolveSkill,
@@ -7504,6 +7505,11 @@ declare global {
       }
       /** 왜 못 끼우는지 — 'none' 이면 끼울 수 있습니다. */
       graftReason: (skillId: string, partId: string) => string
+      /**
+       * ⚖️ 이 부품이 **대가를 요구하는가**(피해 −25% 같은 교환).
+       * 봇이 «순수 이득»만 집게 하려면 이 판단이 필요합니다.
+       */
+      partIsTradeoff: (partId: string) => boolean
       graftPart: (skillId: string, partId: string) => boolean
       ungraftPart: (skillId: string) => boolean
       /**
@@ -8580,6 +8586,10 @@ window.__game = {
     ),
   }),
   graftReason: (skillId: string, partId: string) => graftReason(skillId, partId),
+  partIsTradeoff: (partId: string) => {
+    const f = findPart(partId)
+    return f ? partIsTradeoff(f.part.mods) : false
+  },
   graftPart: (skillId: string, partId: string) => graftPart(skillId, partId),
   ungraftPart: (skillId: string) => ungraftPart(skillId),
   resolvedSkill: (skillId: string) => {

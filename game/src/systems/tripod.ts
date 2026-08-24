@@ -251,6 +251,60 @@ const MOD_NEEDS: Record<keyof TripodMods, (s: SkillDef) => boolean> = {
  * 이 부품을 이 스킬에 끼울 수 있는가 — **건드리는 칸이 전부 뜻이 있어야**
  * 합니다. 하나라도 헛돌면 «아무것도 안 바뀌는 조합»이 되므로 막습니다.
  */
+/**
+ * ── ⚖️ **이 부품은 «순수 이득»인가 «교환»인가** ────────────────────────
+ *
+ * 72개 중 **14개**가 대가를 지불합니다:
+ *
+ *     관통  판정이 원형이 된다 · **피해 −25%**
+ *     확산  각도 +72° · **피해 −30%**
+ *     처형  피해 +80% · **쿨다운 +60%**
+ *
+ * 사람은 그 대가를 **다른 데서 회수할 계획**이 있을 때만 집습니다 —
+ * 「관통」은 적이 줄지어 설 때, 「처형」은 한 방을 몰아칠 때. 봇은 그
+ * 계획이 없으니 눈감고 집고, **성장할수록 약해집니다.** 실제로 성장을
+ * 켜자 받은 피해가 53 → 128 로 늘었습니다.
+ *
+ * ⚠️ **손으로 «이건 함정» 태그를 달지 않습니다.** 그러면 규칙이 두 곳에
+ *    생기고, 값을 조정하는 날 태그만 옛말이 됩니다(부품 호환 규칙에서
+ *    이미 같은 판단을 했습니다). **계산합니다** — 나빠지는 방향으로
+ *    움직이는 칸이 하나라도 있으면 «교환»입니다.
+ *
+ * 📌 이 함수는 **밸런스를 정하지 않습니다.** *"이 부품이 대가를 요구하는가"*
+ *    만 답합니다. 그걸 집을지 말지는 부르는 쪽(봇의 정책 · UI 의 표시)이
+ *    정합니다 — 계기가 설계 결정을 대신하지 않습니다.
+ */
+export function partIsTradeoff(mods: TripodMods): boolean {
+  if (mods.damageMult !== undefined && mods.damageMult < 1) return true
+  if (mods.cooldownMult !== undefined && mods.cooldownMult > 1) return true
+  if (mods.rangeAdd !== undefined && mods.rangeAdd < 0) return true
+  if (mods.hitsAdd !== undefined && mods.hitsAdd < 0) return true
+  if (mods.arcAdd !== undefined && mods.arcAdd < 0) return true
+  // 선행동작·후딜은 **길어지면** 나쁩니다(배수가 1보다 큼).
+  if (mods.windupMult !== undefined && mods.windupMult > 1) return true
+  if (mods.recoveryMult !== undefined && mods.recoveryMult > 1) return true
+  // 시전 중 이동이 느려지는 것도 대가입니다.
+  if (mods.moveScaleAdd !== undefined && mods.moveScaleAdd < 0) return true
+  // 강인도 피해가 줄면 무너뜨리기가 느려집니다 — 명백한 대가입니다.
+  if (mods.traumaMult !== undefined && mods.traumaMult < 1) return true
+  // 돌진·속박이 줄어드는 부품은 지금 없지만, 방향은 분명합니다.
+  if (mods.dashAdd !== undefined && mods.dashAdd < 0) return true
+  if (mods.snareAdd !== undefined && mods.snareAdd < 0) return true
+  /**
+   * ⚖️ **`knockbackMult` 는 일부러 안 봅니다 — 방향이 없습니다.**
+   *
+   * 이 게임에서 넉백은 **양날**입니다. 밀어내면 안전하지만 콤보가 끊기고,
+   * 무방비 창을 열어 놓고 적을 2~4m 밖으로 보내면 그 창의 대부분이
+   * **다시 걸어가는 시간**으로 사라집니다. 저장소가 이미 같은 판단을
+   * 한 자리가 있습니다 — *"무너뜨린 타격은 밀지 않습니다"*(combat.ts).
+   *
+   * 그러니 «넉백이 크면 이득»도 «작으면 이득»도 아닙니다. 상황이 정합니다.
+   * 모르는 것을 «순수 이득»으로도 «대가»로도 세지 않고 **비워 둡니다.**
+   * (`npm run guard` 가 이 줄을 읽고 «생각하고 뺐다»로 인정합니다.)
+   */
+  return false
+}
+
 export function partFitsSkill(mods: TripodMods, skill: SkillDef): boolean {
   for (const key of Object.keys(mods) as (keyof TripodMods)[]) {
     if (mods[key] === undefined) continue
