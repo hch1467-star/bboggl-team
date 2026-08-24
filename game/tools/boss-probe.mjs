@@ -459,6 +459,30 @@ try {
        */
       let transitions = 0
       let wasTrans = false
+      /**
+       * ── ⚖️ **전환 «횟수»가 아니라 «전환이 실제로 지운 예고»** ────────
+       *
+       * 판마다 전환이 2번이니 2개를 지운다 — 로 셌더니 깨끗한 기계에서
+       * 3판째가 이렇게 나왔습니다:
+       *
+       *     잃은예고 3 = 붕괴 2 + 전환 2 + **설명못함 −1** ⚠️
+       *
+       * 음수입니다. 잃은 것보다 **설명이 더 많습니다** — 예고 하나를
+       * 둘이 각자 제 몫이라고 주장한 것입니다. 그럴 수 있는 자리가
+       * 있습니다: 예고 중에 무너뜨린 그 타격(+처형)이 체력을 경계 아래로
+       * 밀면, **같은 예고 하나**가 붕괴로도 죽고 그 직후 전환도 납니다.
+       *
+       * 문턱을 달기 전에 게이트를 세운 이유가 이것이었습니다. 게이트가
+       * 없었으면 이 겹침은 조용히 지나갔고, 저는 「전환이 판마다 2개를
+       * 가져간다」를 **한 번 더** 사실처럼 적었을 것입니다.
+       *
+       * 그래서 대리 지표(전환 횟수)를 버리고 **사건 자체**를 셉니다:
+       * *"전환이 시작된 그 프레임에 보스가 예고 중이었는가."* 예고가
+       * 이미 붕괴로 끝났으면 그 순간 예고 중이 아니라 겹치지 않습니다.
+       * 한 손실에 원인 하나 — 장부는 그래야 닫힙니다.
+       */
+      let transKilled = 0
+      let wasWinding = false
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -505,8 +529,14 @@ try {
          */
         const bt = G.enemyInfo(be.entity)?.transitionT ?? 0
         // 올라가는 모서리에서만 셉니다 — 프레임마다 세면 «횟수»가 «시간»이 됩니다.
-        if (bt > 0 && !wasTrans) transitions++
+        const bInfo = G.enemyInfo(be.entity)
+        if (bt > 0 && !wasTrans) {
+          transitions++
+          // 직전 프레임에 예고 중이었다면, 그 예고는 전환이 지운 것입니다.
+          if (wasWinding) transKilled++
+        }
         wasTrans = bt > 0
+        wasWinding = bt <= 0 && bInfo?.attacking === true && bInfo?.attackPhase === 0
         if (be.encounter === 1) intro[0] += dt
         else if (bt > 0) trans[0] += dt
         else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
@@ -565,6 +595,7 @@ try {
         swings: swing1.sw - swing0.sw,
         windupBreaks: (G.runStats?.().windupBreaks ?? 0) - wb0,
         transitions,
+        transKilled,
       }
     })
     shapes.push(r)
@@ -573,9 +604,9 @@ try {
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
-        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transitions}` +
+        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled}` +
         (() => {
-          const rest = r.commits - r.swings - r.windupBreaks - r.transitions
+          const rest = r.commits - r.swings - r.windupBreaks - r.transKilled
           return rest === 0 ? ' (장부 맞음)' : ` + 설명못함 **${rest}** ⚠️`
         })() +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
@@ -630,7 +661,8 @@ try {
     com: s.commits,
     lost: s.commits - s.swings,
     wb: s.windupBreaks,
-    tr: s.transitions,
+    tr: s.transKilled,
+    trAll: s.transitions,
   }))
   const rest = led.reduce((a, r) => a + (r.lost - r.wb - r.tr), 0)
   check(
@@ -665,7 +697,8 @@ try {
         led.map((r) => `${r.wb}/${r.com}`).join(' · '),
     )
     console.log(
-      `     📏 전환이 지운 예고 ${led.map((r) => r.tr).join('/')} (판당 전환 2번 · 강인도가 아니라 연출 몫 — 판정 안 함)`,
+      `     📏 전환이 지운 예고 ${led.map((r) => r.tr).join('/')} · 전환 자체는 ${led.map((r) => r.trAll).join('/')}회` +
+        ' (전환이 늘 예고를 지우는 것은 아닙니다 · 강인도가 아니라 연출 몫 — 판정 안 함)',
     )
   }
   if (ok.length) {
