@@ -104,6 +104,67 @@ export function switchTripod(skillId: string, tier: number, option: number): boo
   return true
 }
 
+/**
+ * ── 🧩 **부품이 이 스킬에서 «뜻이 있는가»** ────────────────────────────
+ *
+ * 「나만의 스킬」(DESIGN.md 의 제안 절)로 가려면 부품이 스킬에 **붙박이가
+ * 아니어야** 합니다. 같은 부품이 다른 스킬에 들어가야 사람마다 다른 빌드가
+ * 나옵니다. 그런데 아무 데나 끼우게 두면 **아무 일도 안 일어나는 조합**이
+ * 생깁니다 — 「긴 도약(돌진 +2.5m)」을 돌진이 없는 스킬에 끼우는 식으로요.
+ *
+ * 그러면 플레이어는 **자기가 뭘 했는지 모릅니다.** 이 게임의 원칙
+ * (*"게이머가 스스로 잘한다고 느끼게"*)과 정면으로 부딪힙니다 — 고른 것이
+ * 화면에서 아무것도 안 바꾸면 «내가 만든 스킬»이 아니라 «안 되는 걸 고른»
+ * 경험이 됩니다.
+ *
+ * ── 태그를 손으로 안 답니다 ────────────────────────────────────────
+ * 부품마다 *"이건 돌진 스킬 전용"* 이라고 적어 두면 **규칙이 두 곳에**
+ * 생깁니다(부품 표 · 스킬 표). 대신 **계산합니다**: 부품이 건드리는 값을
+ * 그 스킬이 실제로 갖고 있는지 보면 됩니다.
+ *
+ * ⚠️ 이 표는 바로 아래 `applyMods` 와 **같은 칸을 다뤄야** 합니다. 한쪽에만
+ *    칸이 늘면, 새 부품이 **아무 데나 끼워지면서 아무 일도 안 하게** 됩니다 —
+ *    `lungeSpeed`(선언·주석·분기는 있는데 값이 없어 조용히 아무 일도 안 하던
+ *    자리)와 같은 모양입니다. 그래서 `npm run guard` 가 둘을 대조합니다.
+ */
+const MOD_NEEDS: Record<keyof TripodMods, (s: SkillDef) => boolean> = {
+  // 값이 있어야 배수가 뜻을 갖습니다 — 0에 곱하면 0입니다.
+  damageMult: (s) => s.damage > 0,
+  cooldownMult: (s) => s.cooldown > 0,
+  knockbackMult: (s) => s.knockback > 0,
+  traumaMult: (s) => s.trauma > 0,
+  windupMult: (s) => s.windup > 0,
+  recoveryMult: (s) => s.recovery > 0,
+  // 더하기는 0에서 시작해도 뜻이 있습니다 — 없던 것이 생깁니다.
+  rangeAdd: () => true,
+  hitsAdd: () => true,
+  moveScaleAdd: () => true,
+  iFrames: () => true,
+  shape: () => true,
+  // 🔑 **여기가 이 표의 존재 이유입니다.** 없던 돌진·속박을 «더해» 봐야
+  //    그 스킬에는 돌진 구간도 속박 판정도 없어서 화면에서 아무 일도
+  //    안 일어납니다. 원래 있는 스킬에만 붙습니다.
+  dashAdd: (s) => s.dash > 0,
+  snareAdd: (s) => s.snare > 0,
+  // 부채꼴을 넓히는 것은 **부채꼴일 때만** 뜻이 있습니다.
+  arcAdd: (s) => s.shape === 'cone',
+}
+
+/**
+ * 이 부품을 이 스킬에 끼울 수 있는가 — **건드리는 칸이 전부 뜻이 있어야**
+ * 합니다. 하나라도 헛돌면 «아무것도 안 바뀌는 조합»이 되므로 막습니다.
+ */
+export function partFitsSkill(mods: TripodMods, skill: SkillDef): boolean {
+  for (const key of Object.keys(mods) as (keyof TripodMods)[]) {
+    if (mods[key] === undefined) continue
+    const needs = MOD_NEEDS[key]
+    // 표에 없는 칸이면 **막습니다.** 모르면 끼우게 두는 쪽이 위험합니다 —
+    // 조용히 아무 일도 안 하는 조합이 생기니까요. (가드가 이 경우를 미리 잡습니다.)
+    if (!needs || !needs(skill)) return false
+  }
+  return true
+}
+
 function applyMods(base: SkillDef, mods: TripodMods): SkillDef {
   const out: SkillDef = { ...base }
   if (mods.shape) out.shape = mods.shape

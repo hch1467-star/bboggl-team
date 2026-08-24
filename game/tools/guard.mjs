@@ -1012,5 +1012,54 @@ check(
   )
 }
 
+/**
+ * ── 🧩 **부품이 «건드리는 칸»과 «뜻이 있는지 보는 칸»이 같은가** ────────
+ *
+ * 「나만의 스킬」은 부품을 **아무 스킬에나** 끼우게 하는 설계입니다. 그래서
+ * `tripod.ts` 에 표가 둘 있습니다:
+ *
+ *   · `applyMods`  — 부품이 **무엇을 바꾸는가**
+ *   · `MOD_NEEDS`  — 그 칸이 **이 스킬에서 뜻이 있는가**
+ *
+ * 한쪽에만 칸이 늘면 조용히 고장 납니다:
+ *   · `applyMods` 에만 있으면 → `partFitsSkill` 이 «모르는 칸»으로 막습니다.
+ *     안전한 쪽이지만 **새 부품이 아무 데도 안 끼워집니다.**
+ *   · `MOD_NEEDS` 에만 있으면 → 끼워지는데 **아무 일도 안 일어납니다.**
+ *     이게 `lungeSpeed` 와 같은 모양입니다 — 선언은 있는데 효과가 없는 값.
+ *
+ * 그래서 두 목록을 **대조**합니다. 규칙을 주석으로 부탁하지 않고 기계가 봅니다.
+ */
+{
+  const src = readFileSync(path.join(HERE, '..', 'src', 'systems', 'tripod.ts'), 'utf8')
+  const cut = (from, to) => {
+    const a = src.indexOf(from)
+    if (a < 0) return ''
+    const b = to ? src.indexOf(to, a) : -1
+    return src.slice(a, b < 0 ? src.length : b)
+  }
+  const needsBlock = cut('const MOD_NEEDS', 'export function partFitsSkill')
+  const applyBlock = cut('function applyMods(', '\n}\n')
+  /** `mods.foo` 로 읽는 칸 전부 — 이게 «바꾸는 칸»의 목록입니다. */
+  const applied = [...new Set([...applyBlock.matchAll(/mods\.([A-Za-z]+)/g)].map((m) => m[1]))]
+  /** `foo: (s) => …` 로 적힌 칸 전부 — 이게 «뜻을 보는 칸»의 목록입니다. */
+  const known = [...new Set([...needsBlock.matchAll(/^\s{2}([A-Za-z]+):\s*\(/gm)].map((m) => m[1]))]
+  check(
+    applied.length > 0 && known.length > 0,
+    '🧩 부품 표 둘을 실제로 찾았다 (비교의 게이트)',
+    `바꾸는 칸 ${applied.length}개 · 뜻 보는 칸 ${known.length}개`,
+  )
+  const missing = applied.filter((k) => !known.includes(k))
+  const extra = known.filter((k) => !applied.includes(k))
+  check(
+    missing.length === 0 && extra.length === 0,
+    '🧩 **부품이 바꾸는 칸과 «뜻이 있는지» 보는 칸이 정확히 같다** (끼웠는데 아무 일도 안 하는 조합이 없게)',
+    missing.length || extra.length
+      ? `${missing.length ? `MOD_NEEDS 에 없음: ${missing.join(' · ')}` : ''}` +
+        `${missing.length && extra.length ? ' | ' : ''}` +
+        `${extra.length ? `applyMods 에 없음: ${extra.join(' · ')}` : ''}`
+      : `칸 ${applied.length}개 일치`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)
