@@ -713,6 +713,56 @@ try {
         ' (전환이 늘 예고를 지우는 것은 아닙니다 · 강인도가 아니라 연출 몫 — 판정 안 함)',
     )
   }
+  /**
+   * ── 💪 **구간마다 «같은 손»이 얼마나 세지는가** ──────────────────
+   *
+   * 이 침대는 평타(Mouse0)만 누릅니다. 강타도 스킬도 성수병도 없습니다.
+   * 그러니 구간이 바뀌어도 **플레이어가 하는 일은 똑같습니다.** 그런데
+   * 세 판이 이렇게 나왔습니다:
+   *
+   *     1단계 5.6초 · 무너짐 1 · 처형 1
+   *     3단계 5.3초 · 무너짐 **0** · 처형 **0**
+   *
+   * 3단계는 붕괴도 처형도 **한 번도 없는데** 1단계와 비슷한 시간에
+   * 끝납니다. 그런데 3단계가 지고 있는 짐은 훨씬 무겁습니다:
+   *
+   *     구간 체력  40% vs 25%            → 1.6배
+   *     피해 감산  0.70 vs 1.00          → 1.43배 더 때려야 함
+   *     ─────────────────────────────────────────
+   *     실효 일감 **2.3배**  ·  걸린 시간 **0.94배**
+   *
+   * 즉 같은 손이 3단계에서 **2.4배쯤 세집니다.** 붕괴도 처형도 아니고
+   * 집중(안 씁니다)도 아닙니다. 무엇인지 저는 아직 모릅니다.
+   *
+   * 「마지막 구간이 가장 길다」의 빨강(0.94배)이 실은 이 이야기입니다 —
+   * 체력을 더 주면 스펀지가 되고, 원인을 모르면 어디를 만질지 못 정합니다.
+   * 그래서 먼저 **숫자로 세웁니다.** 새로 잴 것은 없습니다: 구간 체력은
+   * `bossTuning()` 이 알고, 시간은 이미 재고 있으니 나누기만 하면 됩니다
+   * (프레임 표본을 안 쓰는 이유는 playthrough.mjs 의 `phaseBands` 주석에).
+   *
+   * 🔬 지금 가장 그럴듯한 가설은 **출혈**입니다 — combat.ts 가 출혈만은
+   *    «어느 가지로 갔든» 쌓이게 사슬 밖에 두었고, 그러면 전투가 길어질수록
+   *    저절로 커집니다. 가설일 뿐이니 다음 판에서 갈라 봐야 합니다.
+   */
+  if (ok.length) {
+    const tune = await page.evaluate(() => ({
+      t: window.__game.bossTuning(),
+      maxHp: window.__game.enemyRoster().find((r) => r.id === 'boss')?.maxHp ?? 0,
+    }))
+    const rawOf = (i) => {
+      const upper = tune.t[i].enterBelow
+      const lower = i + 1 < tune.t.length ? tune.t[i + 1].enterBelow : 0
+      const band = tune.maxHp * (upper - lower)
+      const secs = mid(ok.map((s) => s.phase[i]))
+      const tough = tune.t[i].damageTakenScale ?? 1
+      return secs > 0.05 ? band / tough / secs : 0
+    }
+    const raws = [0, 1, 2].map(rawOf)
+    console.log(
+      `     💪 감산 되돌린 화력 ${raws.map((v, i) => `${i + 1}단계 ${v.toFixed(0)}`).join(' · ')}/초` +
+        ` (${(raws[2] / Math.max(0.01, raws[0])).toFixed(1)}배) — 평타만 누르는 손인데도 오릅니다`,
+    )
+  }
   if (ok.length) {
     const per = [0, 1, 2].map((i) => mid(ok.map((s) => s.phase[i])))
     const bands = await page.evaluate(() => window.__game.bossTuning().map((p) => p.hpFrom ?? null))
