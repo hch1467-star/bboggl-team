@@ -442,6 +442,23 @@ try {
        * 연계 장부(`장부 잔액 -2회`)에서 이미 배운 자리입니다.
        */
       const wb0 = G.runStats?.().windupBreaks ?? 0
+      /**
+       * 🧊 **전환이 지운 예고** — 장부의 셋째 칸.
+       *
+       * `enemyAI.ts` 가 페이즈를 올릴 때 `Actor.state[e] = ActorState.Idle`
+       * 로 **자세를 통째로 끊습니다.** 그 주석의 뜻은 *"붙어서 딜을 넣던
+       * 자세를 끊는다"* 이고 그건 플레이어 쪽 이야기인데, 부수 효과로
+       * **보스가 걸어 둔 예고도 같이 사라집니다.** 플레이어가 보는 것은
+       * 「🔴 예고가 떴다 → 배너가 떴다 → 공격이 그냥 없어졌다」입니다.
+       *
+       * 붕괴로 설명되는 것은 잃은 예고의 절반뿐이었습니다(예고중붕괴
+       * 2·1·1 vs 잃은 예고 4·4·3). 전환은 판마다 2번(전환 2.5초 =
+       * 1.25 × 2)이라 남는 2~3 과 자릿수가 맞습니다. **자릿수가 맞는
+       * 것과 같은 사건인 것은 다르므로**(greenOutcome 주석) 세어서
+       * 잔액을 0으로 만들어 확인합니다.
+       */
+      let transitions = 0
+      let wasTrans = false
       let done = false
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
@@ -487,6 +504,9 @@ try {
          *    최대 1.25초가 얹힌 값 위에서 초록을 내고 있었습니다.
          */
         const bt = G.enemyInfo(be.entity)?.transitionT ?? 0
+        // 올라가는 모서리에서만 셉니다 — 프레임마다 세면 «횟수»가 «시간»이 됩니다.
+        if (bt > 0 && !wasTrans) transitions++
+        wasTrans = bt > 0
         if (be.encounter === 1) intro[0] += dt
         else if (bt > 0) trans[0] += dt
         else if (be.encounter === 2) phase[Math.min(2, be.phase)] += dt
@@ -544,6 +564,7 @@ try {
         commits: swing1.com - swing0.com,
         swings: swing1.sw - swing0.sw,
         windupBreaks: (G.runStats?.().windupBreaks ?? 0) - wb0,
+        transitions,
       }
     })
     shapes.push(r)
@@ -552,8 +573,11 @@ try {
         ` · 무너짐 ${r.breaks.join('/')} · 처형 ${r.fins.join('/')}` +
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
-        ` · 예고중붕괴 ${r.windupBreaks}` +
-        (r.commits - r.swings === r.windupBreaks ? '(장부 맞음)' : '(⚠️ 장부 안 맞음)') +
+        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transitions}` +
+        (() => {
+          const rest = r.commits - r.swings - r.windupBreaks - r.transitions
+          return rest === 0 ? ' (장부 맞음)' : ` + 설명못함 **${rest}** ⚠️`
+        })() +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
     )
   }
