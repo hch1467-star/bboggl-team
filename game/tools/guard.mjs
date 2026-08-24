@@ -1061,5 +1061,70 @@ check(
   )
 }
 
+/**
+ * ── 🌐 **`page.evaluate` 안에서 Node 것을 만지지 않는다** ────────────────
+ *
+ * 맨 위 검사가 「evaluate 안에서 **모듈 상수**를 참조하지 않는다」를 보는데,
+ * `process.env` 는 상수가 아니라 **Node 전역**이라 그 그물을 빠져나갔습니다.
+ * 실제로 `GROWTH=8` 을 evaluate 안에서 읽었다가 판이 통째로 죽었습니다:
+ *
+ *     page.evaluate: ReferenceError: process is not defined
+ *     💥 프로브가 도중에 죽었습니다
+ *
+ * 같은 고장(브라우저에 없는 것을 브라우저에서 씀)인데 검사만 둘로 갈려
+ * 있었습니다. 브라우저에 **없는 전역**을 한 줄에 모아 같이 봅니다.
+ */
+{
+  const NODE_ONLY = ['process', 'require', '__dirname', '__filename', 'Buffer']
+  const bad = []
+  let scanned = 0
+  for (const f of files) {
+    const src = readFileSync(path.join(HERE, f), 'utf8')
+    for (const block of evaluateBlocks(src)) {
+      scanned++
+      /**
+       * ⚠️ **인자 배열은 빼고 봅니다.** `page.evaluate(fn, args)` 의 `args` 는
+       *    **Node 쪽에서** 평가되어 넘어가므로 `process.env` 를 써도 맞습니다.
+       *    처음엔 블록 전체를 훑어서 그 인자 배열이 빨갛게 떴습니다 —
+       *    **옳은 코드를 틀렸다고 부르는** 검사였습니다.
+       *    그래서 화살표 함수의 **몸통만** 떠냅니다.
+       *
+       * ⚠️ `evaluateBlocks` 는 문자열이 아니라 `{ start, text }` 를 줍니다.
+       */
+      const t = block.text
+      const arrow = t.indexOf('=> {')
+      let body = t
+      if (arrow >= 0) {
+        let depth = 0
+        for (let i = arrow + 3; i < t.length; i++) {
+          if (t[i] === '{') depth++
+          else if (t[i] === '}') {
+            depth--
+            if (depth === 0) {
+              body = t.slice(arrow, i + 1)
+              break
+            }
+          }
+        }
+      }
+      // 주석 안의 예시는 빼고 봅니다(설명에 `process.env` 를 적을 수 있습니다).
+      // `m` 플래그가 있어야 **줄마다** `//` 를 지웁니다 — 없으면 첫 줄만 지워집니다.
+      const bare = body
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/(^|[^:])\/\/[^\n]*/gm, '$1 ')
+      for (const g of NODE_ONLY) {
+        const re = new RegExp(`(^|[^\\w.])${g}\\s*[.[(]`)
+        if (re.test(bare)) bad.push(`${f}: ${g}`)
+      }
+    }
+  }
+  check(scanned > 0, '🌐 `page.evaluate` 블록을 실제로 찾았다 (비교의 게이트)', `${scanned}개`)
+  check(
+    bad.length === 0,
+    '🌐 **`page.evaluate` 안에서 Node 전역을 쓰지 않는다** (브라우저에는 `process` 가 없습니다)',
+    bad.length ? [...new Set(bad)].join(' | ') : `블록 ${scanned}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

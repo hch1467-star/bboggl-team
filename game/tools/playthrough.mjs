@@ -160,7 +160,7 @@ try {
   console.log(`\n🤖 자동 플레이 — 제한 ${TIME_LIMIT} 시뮬레이션초\n`)
 
   const log = await page.evaluate(
-    async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND, BARREL_ON, WORTH]) => {
+    async ([LIMIT, WEAPON_SLOT, WALL, RECOVERY_ONLY, DETOUR, SPEND, BARREL_ON, WORTH, PREGROWTH]) => {
     const G = window.__game
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
@@ -711,7 +711,10 @@ try {
      * 안 건드리고 **성장 단계별 밸런스**를 잴 수 있습니다.
      * 기본값 0 — 안 켜면 지금까지와 똑같이 굽니다.
      */
-    const PREGROWTH = Math.max(0, Number(process.env.GROWTH ?? 0) || 0)
+    // ⚠️ `PREGROWTH` 는 **바깥에서 인자로 받습니다.** 여기는 브라우저라
+    //    `process` 가 없습니다 — 실제로 `process is not defined` 로 판이
+    //    통째로 죽었습니다(guard 의 「evaluate 안에서 모듈 상수 참조 금지」와
+    //    같은 고장인데, 그 검사가 `process.env` 는 안 보고 있었습니다).
     if (PREGROWTH > 0) G.grantTripod(PREGROWTH)
     /** 🧩 봇이 실제로 연 단계 수 / 이식한 부품 수 — 안 세면 «썼는지»를 모릅니다. */
     let tripodUnlocks = 0
@@ -4533,6 +4536,8 @@ try {
       SPEND_BUDGET,
       USE_BARREL,
       SHORTCUT_WORTH,
+      // 🌱 시작 각인석 — 바깥(Node)에서 읽어 **인자로** 넘깁니다.
+      Math.max(0, Number(process.env.GROWTH ?? 0) || 0),
     ],
   )
 
