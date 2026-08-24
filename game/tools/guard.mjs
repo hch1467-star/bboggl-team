@@ -922,5 +922,95 @@ check(
   )
 }
 
+/**
+ * ── 🕳 **선언만 있고 아무도 값을 안 준 「선택 칸」** ─────────────────
+ *
+ * 이 검사가 생긴 이유는 실제로 있었던 고장 하나입니다.
+ *
+ * `enemyAttacks.ts` 에 `lungeSpeed?: number` 가 있었습니다. 타입에
+ * 선언돼 있었고, 긴 한국어 주석으로 *왜* 필요한지까지 적혀 있었고,
+ * `enemyAI.ts` 가 그 값으로 **분기까지** 하고 있었습니다. 그런데
+ * **어느 공격에도 값이 안 적혀 있었습니다.** 그래서:
+ *
+ *   · 달려드는 자는 한 번도 달려들지 않았고
+ *   · 보스의 가장 큰 공격은 4.50m 에서 휘둘러 4.45m 사거리를 **빗나갔고**
+ *   · 그 분기는 만든 이래 **한 번도 참이 된 적이 없었습니다**
+ *
+ * 아무 검사도 못 잡았습니다. 타입은 «선택»이니 통과하고, 코드는 읽기만
+ * 하니 통과하고, 프로브는 «돌진이 없는 것이 정상»인 줄 알았습니다.
+ * **`undefined` 는 조용합니다 — 없는 값은 아무 소리도 내지 않습니다.**
+ *
+ * 그래서 모양 자체를 잡습니다: **읽히는데 아무 데서도 안 채워지는 칸.**
+ *   · 읽히지도 않으면 그냥 미래를 위한 자리입니다 — 안 잡습니다.
+ *   · 읽히는데 값이 없으면 그 분기는 **죽은 코드**입니다.
+ *
+ * 면제는 선언 위 8줄 안에 `guard-allow: 빈칸` 주석으로.
+ */
+{
+  const CFG = path.join(HERE, '..', 'src', 'config')
+  /** 값을 «어디서든» 찾습니다 — 레벨 JSON 과 생성기(tools)까지 봅니다. */
+  const hay = []
+  const walk = (dir) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, f.name)
+      if (f.isDirectory()) walk(full)
+      else if (/\.(ts|mjs|json)$/.test(f.name)) hay.push([full, readFileSync(full, 'utf8')])
+    }
+  }
+  walk(path.join(HERE, '..', 'src'))
+  walk(HERE)
+
+  const dead = []
+  let seen = 0
+  for (const f of readdirSync(CFG).filter((n) => n.endsWith('.ts'))) {
+    const src = readFileSync(path.join(CFG, f), 'utf8')
+    const lines = src.split('\n')
+    /** 주석 안의 예시 코드를 선언으로 오해하지 않게 블록 주석을 지웁니다. */
+    const bareLines = src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .split('\n')
+    for (let i = 0; i < bareLines.length; i++) {
+      const m = bareLines[i].match(/^\s{2,}(\w+)\?:\s*\S/)
+      if (!m) continue
+      const name = m[1]
+      /**
+       * 면제 표시는 **바로 위에 붙은 주석 덩어리 안**에서만 찾습니다.
+       *
+       * 처음엔 "위 8줄"로 했는데, 사정을 제대로 적은 주석은 8줄을 쉽게
+       * 넘깁니다 — 실제로 첫 면제가 11줄짜리라 안 먹혔습니다. 그렇다고
+       * 숫자만 늘리면 **옆 칸의 면제가 흘러들어옵니다.** 줄 수가 아니라
+       * *"이 선언에 붙은 주석인가"* 로 봅니다.
+       */
+      let allow = false
+      for (let j = i - 1; j >= 0; j--) {
+        const t = lines[j].trim()
+        if (t === '') continue
+        if (!(t.startsWith('*') || t.startsWith('/*') || t.startsWith('//'))) break
+        if (t.includes('guard-allow: 빈칸')) allow = true
+      }
+      if (allow) continue
+      seen++
+      /** 읽히는가 — `.name` 이나 `['name']` 으로 꺼내 쓰는 자리가 있는가. */
+      const readRe = new RegExp('\\.' + name + '\\b|\\[[\'"]' + name + '[\'"]\\]')
+      if (!hay.some(([, t]) => readRe.test(t))) continue
+      /**
+       * 채워지는가 — `name: <값>` 이 **선언이 아닌 자리**에 있는가.
+       * `name?:` 는 선언이므로 제외합니다(그게 지금 보고 있는 줄입니다).
+       */
+      const setRe = new RegExp('(^|[{,\\s])[\'"]?' + name + '[\'"]?:\\s*\\S')
+      const filled = hay.some(([, t]) =>
+        t.split('\n').some((l) => setRe.test(l) && !/\?\s*:/.test(l)),
+      )
+      if (!filled) dead.push(`${f} → ${name}`)
+    }
+  }
+  check(seen > 0, '🕳 설정에서 「선택 칸」 선언을 실제로 찾았다 (비교의 게이트)', `${seen}개`)
+  check(
+    dead.length === 0,
+    '🕳 **읽히는데 아무 데서도 안 채워지는 「선택 칸」이 없다** (`undefined` 는 조용합니다 · 면제는 `guard-allow: 빈칸`)',
+    dead.length ? `${dead.length}개 — ${dead.join(' | ')}` : `선택 칸 ${seen}개 확인`,
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

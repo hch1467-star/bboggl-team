@@ -121,7 +121,6 @@ function applyMods(base: SkillDef, mods: TripodMods): SkillDef {
     out.moveScale = Math.min(1, Math.max(0, out.moveScale + mods.moveScaleAdd))
   }
   if (mods.dashAdd !== undefined) out.dash = Math.max(0, out.dash + mods.dashAdd)
-  if (mods.healAdd !== undefined) out.healSelf += mods.healAdd
   if (mods.snareAdd !== undefined) out.snare = Math.max(0, out.snare + mods.snareAdd)
   if (mods.iFrames) out.iFrames = mods.iFrames
   return out
