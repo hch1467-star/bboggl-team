@@ -1818,3 +1818,39 @@ console.log(`  교전 사이 빈 시간 평균 ${fmt(pick((l) => l.gapAvg))}초 
   }
 }
 console.log('')
+
+/**
+ * ── 🤖 **기계용 한 줄** (`BENCH_JSON=1`) ────────────────────────────
+ *
+ * `npm run growth` 가 두 조건을 견주려면 값이 필요한데, **사람용 출력을
+ * 파싱하면 안 됩니다.** 그 줄들은 읽으라고 만든 것이라 모양이 자주 바뀌고,
+ * 파싱은 바뀐 줄을 만나면 **조용히** 틀립니다(0으로 읽히거나 사라집니다).
+ *
+ * 그래서 같은 값을 **한 줄 JSON** 으로 따로 냅니다. 사람용 출력은 그대로
+ * 두고, 기계는 이 줄만 봅니다 — 한 곳에서 두 독자를 섬기지 않습니다.
+ */
+if (process.env.BENCH_JSON === '1') {
+  const sumOf = (k) =>
+    Math.round(
+      median(
+        boss.map((l) => (l.bossDamageBySource?.[k] ?? []).reduce((a, b) => a + b, 0)),
+      ) || 0,
+    )
+  const melt = {}
+  for (const k of ['평타', '상황', '강타', '처형', '스킬', '출혈']) melt[k] = sumOf(k)
+  process.stdout.write(
+    'BENCH_JSON ' +
+      JSON.stringify({
+        runs: logs.length,
+        hurt: Math.round(median(pick((l) => l.damageTaken ?? 0)) || 0),
+        // ⚠️ 클리어 시간은 **깬 판만** 씁니다 — 못 깬 판을 0으로 섞으면
+        //    «빨라졌다»가 됩니다. 사람용 줄(`cleared.map`)과 같은 자를 씁니다.
+        clear: Number((median(cleared.map((l) => l.clearedAt)) || 0).toFixed(1)),
+        deaths: Number((median(pick((l) => l.deaths ?? 0)) || 0).toFixed(1)),
+        tripodUnlocks: Math.round(median(pick((l) => l.tripodUnlocks ?? 0)) || 0),
+        grafts: Math.round(median(pick((l) => l.graftsMade ?? 0)) || 0),
+        melt,
+      }) +
+      '\n',
+  )
+}
