@@ -668,7 +668,14 @@ class Game {
   /** 보스가 색깔별로 몇 번 휘두르고 몇 번 맞혔는가 */
   private bossSwingLog: Record<
     string,
-    { swings: number; hits: number; chained: number; byPhase: number[]; commits?: number }
+    {
+      swings: number
+      hits: number
+      chained: number
+      byPhase: number[]
+      commits?: number
+      chainedCommits?: number
+    }
   > = {}
   private readonly bossLastSwing = new Map<number, string>()
   /** 무너진 순간의 체력 비율 합 — 평균을 내면 "붕괴가 언제 터지는가"가 나옵니다. */
@@ -1640,6 +1647,35 @@ class Game {
             byPhase: [0, 0, 0],
           })
           brec.commits = (brec.commits ?? 0) + 1
+          /**
+           * 🔗 **그중 연계로 나온 예고** — 「왜 🔴만 유독 끊기는가」의 갈래.
+           *
+           * 실제 플레이 3판에서 색깔별 예고→판정이 이렇게 나왔습니다:
+           *
+           *     boss_cleave 9→1 (끊김 **89%**)   ← 가중치 3, 가장 자주 고름
+           *     boss_quake  8→5 (38%)
+           *     boss_bind   3→3 (0%)
+           *     boss_hook   4→4 (0%)
+           *     boss_charge 3→1 (67%)
+           *
+           * 처음엔 «예고가 길어서»로 짐작했는데 **정반대**였습니다 —
+           * cleave 는 0.78초로 가장 짧고, 1.5초짜리 hook 은 0% 끊깁니다.
+           * «붙어서 내니까»도 안 맞습니다 — bind 도 minRange 0인데 0% 입니다.
+           *
+           * 남은 단서: **cleave 는 2·3단계 모두 연계의 뒷타**입니다
+           * (🔵속박 → 🔴직격, 🟣갈고리 → 🔴직격). 연계 뒷타는 앞 공격
+           * **직후 붙어서** 나오니, 플레이어가 콤보 한창일 때 겹칩니다.
+           * 벤치도 연계 5개 중 **2개가 무너짐으로 죽는다**고 말합니다.
+           *
+           * 그래서 «연계로 나온 예고»를 따로 셉니다. 이게 갈라 줍니다:
+           *   · 연계 뒷타만 끊긴다 → **연계 설계**의 문제(뒷타가 살아남지
+           *     못하면 🔵→🔴 는 아무것도 못 가르칩니다)
+           *   · 연계든 아니든 끊긴다 → cleave 자체의 문제
+           *
+           * ⚠️ 짐작으로 둘을 가르지 않습니다. 이 세션에서 장부가 닫히기
+           *    전에 원인을 이름 붙였다가 네 번 틀렸습니다.
+           */
+          if (Enemy.chained[e] === 1) brec.chainedCommits = (brec.chainedCommits ?? 0) + 1
         }
       }
 
@@ -7951,8 +7987,18 @@ declare global {
       }[]
       bossSwingLog: () => Record<
         string,
-        /** `commits` = 예고를 **시작한** 횟수. `swings` = 판정까지 **간** 횟수. */
-        { swings: number; hits: number; chained: number; byPhase: number[]; commits?: number }
+        /**
+         * `commits` = 예고를 **시작한** 횟수 · `swings` = 판정까지 **간** 횟수.
+         * `chainedCommits` = 그 예고 중 **연계로 나온** 것 · `chained` = 그중 판정까지 간 것.
+         */
+        {
+          swings: number
+          hits: number
+          chained: number
+          byPhase: number[]
+          commits?: number
+          chainedCommits?: number
+        }
       >
       /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
       levelFoes: () => { kind: string; x: number; z: number; region: string; level: number }[]

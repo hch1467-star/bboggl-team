@@ -1175,10 +1175,15 @@ if (boss.length > 0) {
    * 화면에 색이 뜨는 순간이 예고이기 때문입니다.
    */
   const com = new Map()
+  /** 🔗 그중 **연계로 나온** 예고 / 판정 — 「왜 🔴만 끊기는가」의 갈래. */
+  const chCom = new Map()
+  const chSw = new Map()
   for (const l of boss)
     for (const a of l.bossSwings ?? []) {
       per.set(a.id, (per.get(a.id) ?? 0) + a.swings)
       com.set(a.id, (com.get(a.id) ?? 0) + (a.commits ?? 0))
+      chCom.set(a.id, (chCom.get(a.id) ?? 0) + (a.chainedCommits ?? 0))
+      chSw.set(a.id, (chSw.get(a.id) ?? 0) + (a.chained ?? 0))
     }
   /** 이 보스가 **가질 수 있는** 패턴 전부 — 게임이 적어 준 목록에서 옵니다. */
   const all = (logs.find((l) => (l.bossPatterns ?? []).length)?.bossPatterns ?? [...per.keys()]).slice()
@@ -1228,6 +1233,39 @@ if (boss.length > 0) {
   console.log(
     `                 예고 기준   ${all.map((id) => `${id} ${com.get(id) ?? 0}`).join(' · ')}`,
   )
+  /**
+   * ── 🔗 **연계 뒷타만 끊기는가, 아니면 그 색 자체가 끊기는가** ────────
+   *
+   * `boss_cleave` 가 예고 9회 중 1회만 판정에 갔습니다(89% 끊김). 짐작을
+   * 두 개 세웠다가 둘 다 데이터에 부딪혀 버렸습니다:
+   *   · «예고가 길어서» → **반대**입니다. cleave 0.78초로 가장 짧고,
+   *     1.5초짜리 hook 은 0% 끊깁니다.
+   *   · «붙어서 내니까» → bind 도 minRange 0인데 0% 입니다.
+   *
+   * 남은 단서는 **cleave 가 2·3단계 모두 연계의 뒷타**라는 것입니다.
+   * 뒷타는 앞 공격 직후 붙어서 나오니 플레이어의 콤보와 겹칩니다.
+   *
+   * 그래서 색깔마다 «연계로 나온 예고»를 따로 냅니다. 갈라지는 지점:
+   *   · 연계 뒷타만 끊긴다 → **연계 설계** 문제(🔵→🔴 가 못 가르칩니다)
+   *   · 연계든 아니든 끊긴다 → 그 색 자체의 문제
+   *
+   * ⚠️ **판정은 안 답니다.** 색당 표본이 3~9개뿐이라 비율을 못 정합니다.
+   *    갈래만 찍고, 표본이 쌓이면 그때 문턱을 답니다.
+   */
+  const chRows = all.filter((id) => (chCom.get(id) ?? 0) > 0)
+  if (chRows.length)
+    console.log(
+      `                 🔗 그중 연계로 나온 예고: ` +
+        chRows
+          .map((id) => {
+            const cc = chCom.get(id) ?? 0
+            const cs = chSw.get(id) ?? 0
+            const oc = (com.get(id) ?? 0) - cc
+            const os = (per.get(id) ?? 0) - cs
+            return `${id} 연계 ${cc}→${cs} · 그냥 ${oc}→${os}`
+          })
+          .join(' · ') + ' (표본이 작습니다 — 갈래만 봅니다)',
+    )
   if (noCommits) {
     console.log(
       '                 ⏸ 보스가 **가진 패턴을 전부 냈다** — **판정하지 않습니다**: ' +
