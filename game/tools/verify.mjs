@@ -1920,7 +1920,13 @@ async function main() {
     const panel = await page.evaluate(() => ({
       open: document.getElementById('tripod')?.classList.contains('show') ?? false,
       skills: document.querySelectorAll('#tripodBody .tpSkill').length,
-      options: document.querySelectorAll('#tripodBody .tpOpt').length,
+      /**
+       * ⚠️ **이식 버튼은 빼고 셉니다.** 이 줄이 묻는 것은 «단계 선택지»이고,
+       *    이식은 다른 것입니다(`tpGraftOpt`). 둘을 한 칸에 담았더니 이
+       *    검사가 24 → 36 으로 빨개졌습니다 — 게임은 멀쩡한데 세는 자가
+       *    두 가지를 같이 세고 있었습니다.
+       */
+      options: document.querySelectorAll('#tripodBody .tpOpt:not(.tpGraftOpt)').length,
     }))
     // 몇 개가 그려져야 하는지도 **게임이 압니다** — 스킬을 하나 넣는 날
     // 이 줄만 옛 숫자를 들고 빨개지면, 고쳐야 할 것은 게임이 아니라 검사입니다.

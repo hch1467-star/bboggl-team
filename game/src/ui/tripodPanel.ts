@@ -169,7 +169,14 @@ export class TripodPanel {
     if (installed) {
       const f = findPart(installed)
       const btn = document.createElement('button')
-      btn.className = 'tpOpt sel'
+      /**
+       * ⚠️ `tpOpt` 는 **모양** 때문에 그대로 씁니다(단계와 같은 자리·같은
+       *    생김새). 다만 `tpGraftOpt` 를 같이 답니다 — 「단계 선택지가 몇
+       *    개인가」를 세는 검사가 이식 버튼까지 세면 **두 가지가 한 칸에**
+       *    담겨 정확히 거꾸로 읽힙니다. 실제로 그 검사가 24 → 36 으로
+       *    빨개져서 이 표시를 달았습니다.
+       */
+      btn.className = 'tpOpt tpGraftOpt sel'
       btn.innerHTML = `<b>${f?.part.name ?? '?'}</b><span>${f?.part.desc ?? ''} — 누르면 빼냅니다</span>`
       btn.addEventListener('click', () => {
         if (ungraftPart(skillId)) this.refresh()
@@ -183,7 +190,7 @@ export class TripodPanel {
       if (!f) continue
       const why = graftReason(skillId, id)
       const btn = document.createElement('button')
-      btn.className = 'tpOpt'
+      btn.className = 'tpOpt tpGraftOpt'
       btn.classList.toggle('locked', why !== 'none')
       btn.disabled = why !== 'none'
       // 왜 안 되는지를 **부품 설명 자리에** 씁니다 — 눈이 가는 곳에.
