@@ -4032,6 +4032,18 @@ try {
             return maxHp * (upper - lower)
           })
         })(),
+        /**
+         * ── 🛡 구간별 **피해 감산**(`damageTakenScale`) ────────────────
+         *
+         * 「실효 화력」(구간 체력 ÷ 시간)만 보면 플레이어가 얼마나 세졌는지
+         * 를 **감산이 가려 줍니다.** 3단계는 0.7 이라 같은 손놀림이 30%
+         * 작게 찍힙니다. 갚아 주지 않으면 «플레이어가 세진 정도»를 늘
+         * 실제보다 작게 보게 됩니다 — 그리고 그 위에서 체력을 올리면
+         * 벤치가 스스로 경고한 **스펀지**로 갑니다.
+         *
+         * 여기 베껴 적지 않고 `bossTuning()` 에서 그대로 받아옵니다.
+         */
+        phaseTough: G.bossTuning().map((ph) => ph.damageTakenScale ?? 1),
         phaseFinishers: bossPhaseFinishers,
         phaseBreaks: bossPhaseBreaks,
         phaseBroken: bossPhaseBroken.map((v) => Number(v.toFixed(1))),

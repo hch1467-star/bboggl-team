@@ -668,7 +668,7 @@ class Game {
   /** 보스가 색깔별로 몇 번 휘두르고 몇 번 맞혔는가 */
   private bossSwingLog: Record<
     string,
-    { swings: number; hits: number; chained: number; byPhase: number[] }
+    { swings: number; hits: number; chained: number; byPhase: number[]; commits?: number }
   > = {}
   private readonly bossLastSwing = new Map<number, string>()
   /** 무너진 순간의 체력 비율 합 — 평균을 내면 "붕괴가 언제 터지는가"가 나옵니다. */
@@ -1611,6 +1611,36 @@ class Game {
          *    똑같은 구멍입니다.
          */
         if (Enemy.chained[e] === 1) rec.chained = (rec.chained ?? 0) + 1
+        /**
+         * 🎨 **보스는 색깔별로도 예고를 셉니다.**
+         *
+         * 벤치가 *"보스가 가진 패턴을 전부 냈다"* 를 빨갛게 띄웠습니다 —
+         * `boss_cleave` 와 `boss_charge` 가 3판 내내 0회라고. 그런데 같은
+         * 벤치의 다른 줄이 이렇게 말합니다:
+         *
+         *     boss  예고 8회 → 판정 3회 (**끊김 63%**)
+         *
+         * 보스가 건 예고의 **3분의 2가 판정 전에 끊깁니다.** 그런데
+         * `bossSwingLog` 는 판정에 **도달한** 휘두름만 셉니다. 그러면
+         * *"그 색을 안 낸다"* 와 *"그 색을 냈는데 매번 끊겼다"* 가
+         * **똑같이 0회**로 보입니다 — 처방이 정반대인 둘인데도요:
+         *
+         *   · 정말 안 낸다  → 가중치·거리 조건(`minRange` 등)의 문제
+         *   · 끊겨서 못 낸다 → 강인도 문제. 보스가 너무 자주 무너집니다.
+         *
+         * 이 저장소가 여러 번 배운 자리입니다 — *처방이 다른 둘이 한 칸에
+         * 담기면 정확히 거꾸로 읽힙니다.* 그래서 칸을 하나 더 냅니다.
+         */
+        if (Enemy.kind[e] === EnemyKind.Boss) {
+          const bid = attackAt(Enemy.kind[e], Enemy.attackIndex[e]).id
+          const brec = (this.bossSwingLog[bid] ??= {
+            swings: 0,
+            hits: 0,
+            chained: 0,
+            byPhase: [0, 0, 0],
+          })
+          brec.commits = (brec.commits ?? 0) + 1
+        }
       }
 
       this.swungLastFrame.clear()
@@ -7921,7 +7951,8 @@ declare global {
       }[]
       bossSwingLog: () => Record<
         string,
-        { swings: number; hits: number; chained: number; byPhase: number[] }
+        /** `commits` = 예고를 **시작한** 횟수. `swings` = 판정까지 **간** 횟수. */
+        { swings: number; hits: number; chained: number; byPhase: number[]; commits?: number }
       >
       /** 레벨에 배치된 적 + 그 적이 선 구역 — 구역 판정은 **게임이** 합니다. */
       levelFoes: () => { kind: string; x: number; z: number; region: string; level: number }[]

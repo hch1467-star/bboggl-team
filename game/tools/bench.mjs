@@ -887,9 +887,42 @@ for (let i = 0; i < 3; i++) {
    */
   const fin = phaseSrc.map((l) => l.boss.phaseFinishers?.[i] ?? 0)
   const brk = phaseSrc.map((l) => l.boss.phaseBreaks?.[i] ?? 0)
+  /**
+   * ── 🕳 **누워 있던 비중** — 횟수만으로는 안 보이는 것 ────────────
+   *
+   * 붕괴 «횟수»는 세 구간 모두 1.0 이라 *"뒤로 몰리지 않았다"* 로 읽힙니다.
+   * 그런데 무방비는 한 번에 1.9초(`POISE.brokenTimeBoss`)로 **길이가
+   * 고정**이라, 구간이 짧아질수록 그 1.9초가 차지하는 **비중**이 커집니다.
+   * 10.3초 구간에서는 18%, 4.4초 구간에서는 43% — 같은 «1회»입니다.
+   *
+   * 횟수와 비중은 **처방이 다릅니다**(붕괴 저항 vs 무방비 길이). 이
+   * 저장소가 여러 번 배운 그대로 — *처방이 다른 둘을 한 칸에 담으면
+   * 정확히 거꾸로 읽힙니다.* 그래서 나란히 냅니다.
+   */
+  const lay = phaseSrc
+    .filter((l) => (l.boss.phaseTime?.[i] ?? 0) >= 0.5)
+    .map((l) => ((l.boss.phaseBroken?.[i] ?? 0) / l.boss.phaseTime[i]) * 100)
+  /**
+   * ── 💪 **감산을 갚은 화력** — 플레이어가 실제로 얼마나 세졌는가 ──
+   *
+   * 「실효 화력」은 보스 체력이 깎인 속도입니다. 3단계는 감산 0.7 이라
+   * 같은 손놀림이 30% 작게 찍힙니다. 감산을 되돌려 놓아야 «플레이어
+   * 쪽이 얼마나 올랐는가»가 보이고, 그래야 처방이 «체력을 더 준다»
+   * 인지 «플레이어의 상승을 깎는다»인지 갈립니다.
+   */
+  const raw = phaseSrc
+    .filter((l) => (l.boss.phaseTime?.[i] ?? 0) >= 0.5)
+    .map(
+      (l) =>
+        (l.boss.phaseBands?.[i] ?? 0) / (l.boss.phaseTough?.[i] ?? 1) / l.boss.phaseTime[i],
+    )
   console.log(
     `  ${i + 1}단계         ${fmt(times)}초 · 실효 화력 ${fmt(dps)}/초 · ` +
       `처형 ${fmt(fin, 1)} · 붕괴 ${fmt(brk, 1)}${i === 0 ? phaseNote : ''}`,
+  )
+  console.log(
+    `                 └ 누워 있던 비중 ${fmt(lay, 0)}% · ` +
+      `감산 되돌린 화력 ${fmt(raw)}/초 (감산 ×${(phaseSrc[0]?.boss?.phaseTough?.[i] ?? 1).toFixed(2)})`,
   )
 }
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)
@@ -1000,15 +1033,63 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
           `중앙값은 1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초지만 ` +
           `이 폭 위에서는 배율을 못 정합니다 — 판정은 \`npm run boss\`(죽지 않는 침대)에 있습니다.`,
       )
-    } else
-    console.log(
-      `  ${ok ? '✅' : '❌'} 마지막 구간이 가장 길다 — **그리고 스펀지는 아니다** (bossPhases.ts 의 약속) — ` +
-        `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초` +
-        (t1 > 0 ? ` (${(t3 / t1).toFixed(1)}배 · 허용 1.0~2.5배)` : '') +
-        (cleanBoss.length < boss.length ? ` [초기화 없는 ${cleanBoss.length}판만]` : '') +
-        (longest ? '' : ' ← 마지막이 짧습니다') +
-        (notSponge ? '' : ' ← **너무 깁니다**: 단단한 게 아니라 안 죽는 것입니다'),
-    )
+    } else {
+      console.log(
+        `  ${ok ? '✅' : '❌'} 마지막 구간이 가장 길다 — **그리고 스펀지는 아니다** (bossPhases.ts 의 약속) — ` +
+          `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초` +
+          (t1 > 0 ? ` (${(t3 / t1).toFixed(1)}배 · 허용 1.0~2.5배)` : '') +
+          (cleanBoss.length < boss.length ? ` [초기화 없는 ${cleanBoss.length}판만]` : '') +
+          (longest ? '' : ' ← 마지막이 짧습니다') +
+          (notSponge ? '' : ' ← **너무 깁니다**: 단단한 게 아니라 안 죽는 것입니다'),
+      )
+      /**
+       * ── 🔎 **빨강 옆에 «어느 쪽이 움직였는가»를 같이 냅니다** ────────
+       *
+       * 이 줄이 빨개진 회차마다 저는 곧장 `bossPhases.ts` 의 체력 배분을
+       * 만질 계산을 했습니다. 그런데 배분은 **이미 뒤로 실려 있습니다** —
+       * 구간 체력이 155 / 217 / **248** 인데도 3단계가 제일 짧습니다.
+       * 거기서 체력을 더 주면 그건 이 검사가 바로 옆 줄에서 금지한
+       * **스펀지**입니다. 즉 빨강의 처방은 체력 쪽이 아닙니다.
+       *
+       * 그래서 빨강 밑에 **갈래를 찍습니다.** 두 수치를 나란히 놓으면
+       * 처방이 갈립니다:
+       *
+       *   · 누워 있던 비중이 뒤로 갈수록 커진다 → **강인도** 쪽
+       *     (`POISE.brokenTimeBoss` · `breakResistStep` · `poiseResist`)
+       *   · 비중은 비슷한데 감산 되돌린 화력만 오른다 → **플레이어** 쪽
+       *     (집중 `FOCUS.damagePerPoint` · 강화 · 연계)
+       *
+       * 판정은 여기서 하지 않습니다 — 갈래만 찍고 사람이 고릅니다.
+       * 「한 판은 표본이 아니다」이므로, 3판짜리 벤치의 갈래로 값을
+       * 정하지는 마십시오. 어디를 다시 재야 하는지만 알려 주는 줄입니다.
+       */
+      const lay1 = median(phaseSrc.map((l) => l.boss.phaseBroken?.[0] ?? 0)) / (t1 || 1)
+      const lay3 = median(phaseSrc.map((l) => l.boss.phaseBroken?.[2] ?? 0)) / (t3 || 1)
+      const raw1 =
+        median(phaseSrc.map((l) => l.boss.phaseBands?.[0] ?? 0)) /
+        (phaseSrc[0]?.boss?.phaseTough?.[0] ?? 1) /
+        (t1 || 1)
+      const raw3 =
+        median(phaseSrc.map((l) => l.boss.phaseBands?.[2] ?? 0)) /
+        (phaseSrc[0]?.boss?.phaseTough?.[2] ?? 1) /
+        (t3 || 1)
+      const noBroken = phaseSrc.every((l) => (l.boss.phaseBroken ?? []).length === 0)
+      if (!ok) {
+        console.log(
+          noBroken
+            ? '                 🔎 갈래를 못 찍습니다 — 이 판들은 `phaseBroken` 을 안 재던 벤치입니다(다시 돌리십시오).'
+            : `                 🔎 갈래 — 누워 있던 비중 ${(lay1 * 100).toFixed(0)}% → ${(lay3 * 100).toFixed(0)}% · ` +
+              `감산 되돌린 화력 ${raw1.toFixed(0)} → ${raw3.toFixed(0)}/초 (${(raw3 / (raw1 || 1)).toFixed(1)}배)` +
+              `\n                    ${
+                lay3 >= lay1 * 1.5
+                  ? '**강인도 쪽**이 큽니다 — 붕괴 횟수는 같아도 짧은 구간에서 1.9초가 차지하는 몫이 커집니다.'
+                  : raw3 >= raw1 * 1.5
+                    ? '**플레이어 쪽**이 큽니다 — 보스가 약해진 게 아니라 손이 세졌습니다. 체력을 더 주면 스펀지입니다.'
+                    : '둘 다 크지 않습니다 — 다른 원인이 있습니다(다시 재십시오).'
+              }`,
+        )
+      }
+    }
   }
 }
 console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 1)}회`)
@@ -1036,19 +1117,69 @@ console.log(`  보스 처형      ${fmt(boss.map((l) => l.boss.finishers ?? 0), 
  */
 if (boss.length > 0) {
   const per = new Map()
-  for (const l of boss) for (const a of l.bossSwings ?? []) per.set(a.id, (per.get(a.id) ?? 0) + a.swings)
+  /**
+   * ── 🎨 **«안 냈다»와 «내다가 끊겼다»를 갈라 셉니다** ──────────────
+   *
+   * 이 줄이 3판 벤치에서 `boss_cleave · boss_charge` 를 0회라고 빨갛게
+   * 띄웠습니다. 그런데 같은 벤치의 위쪽 줄이 이렇게 말합니다:
+   *
+   *     boss  예고 8회 → 판정 3회 (**끊김 63%**)
+   *
+   * 보스가 건 예고의 3분의 2가 판정에 못 갑니다. 그리고 이 줄이 세던
+   * `swings` 는 **판정에 도달한 것만**입니다 — 즉 *"그 색을 안 낸다"* 와
+   * *"냈는데 매번 끊겼다"* 가 똑같이 0으로 보입니다. 처방은 정반대인데도요:
+   *
+   *   · 예고도 0회 → **안 고른 것**. 가중치·거리 조건(`minRange`)을 봅니다.
+   *   · 예고는 있는데 판정 0회 → **끊긴 것**. 강인도 이야기입니다
+   *     (보스가 너무 자주 무너져서 자기 패턴을 못 끝냅니다).
+   *
+   * 그래서 예고(`commits`)를 같이 세고, 빨강도 **예고 기준**으로 답니다.
+   * 플레이어가 «시험에서 봤는가»의 기준으로는 예고 쪽이 더 정확합니다 —
+   * 화면에 색이 뜨는 순간이 예고이기 때문입니다.
+   */
+  const com = new Map()
+  for (const l of boss)
+    for (const a of l.bossSwings ?? []) {
+      per.set(a.id, (per.get(a.id) ?? 0) + a.swings)
+      com.set(a.id, (com.get(a.id) ?? 0) + (a.commits ?? 0))
+    }
   /** 이 보스가 **가질 수 있는** 패턴 전부 — 게임이 적어 준 목록에서 옵니다. */
   const all = (logs.find((l) => (l.bossPatterns ?? []).length)?.bossPatterns ?? [...per.keys()]).slice()
   const shown = all.filter((id) => (per.get(id) ?? 0) > 0)
-  const never = all.filter((id) => (per.get(id) ?? 0) === 0)
+  /** 예고조차 안 한 것 = **안 고른 것**. 빨강은 여기에 답니다. */
+  const never = all.filter((id) => (com.get(id) ?? 0) === 0)
+  /** 예고는 했는데 판정에 못 간 것 = **끊긴 것**. 처방이 다르므로 따로 냅니다. */
+  const cut = all.filter((id) => (com.get(id) ?? 0) > 0 && (per.get(id) ?? 0) === 0)
+  /**
+   * ⚠️ **예고를 못 세는 판이면 판정하지 않습니다.** `commits` 는 나중에
+   *    생긴 칸이라, 그 전에 남긴 로그로 벤치를 돌리면 전부 0으로 읽혀
+   *    **모든 패턴이 «안 고른 것»** 이 됩니다. 「빈 표본으로 실패해도
+   *    안 된다」 — 못 잰 것은 빨강이 아니라 **판정 보류**입니다.
+   */
+  const noCommits = all.every((id) => (com.get(id) ?? 0) === 0)
   console.log(
     `  보스가 낸 색   ${shown.map((id) => `${id} ${per.get(id)}`).join(' · ') || '없음'}` +
       ` (${boss.length}판 합)`,
   )
   console.log(
-    `                 ${never.length === 0 ? '✅' : '❌'} 보스가 **가진 패턴을 전부 냈다** (종합 시험)` +
-      (never.length ? ` — 한 번도 안 나온 것: **${never.join(' · ')}**` : ` — ${all.length}개 전부`),
+    `                 예고 기준   ${all.map((id) => `${id} ${com.get(id) ?? 0}`).join(' · ')}`,
   )
+  if (noCommits) {
+    console.log(
+      '                 ⏸ 보스가 **가진 패턴을 전부 냈다** — **판정하지 않습니다**: ' +
+        '이 판들은 색깔별 예고(`commits`)를 안 재던 벤치입니다. 다시 돌리십시오.',
+    )
+  } else {
+    console.log(
+      `                 ${never.length === 0 ? '✅' : '❌'} 보스가 **가진 패턴을 전부 냈다** (종합 시험 · **예고 기준**)` +
+        (never.length ? ` — 한 번도 안 고른 것: **${never.join(' · ')}**` : ` — ${all.length}개 전부`),
+    )
+    if (cut.length)
+      console.log(
+        `                 ⚠️ 예고는 했는데 **판정까지 못 간** 것: ${cut.join(' · ')} — ` +
+          '가중치가 아니라 **강인도** 이야기입니다(보스가 자기 패턴을 끝내기 전에 무너집니다).',
+      )
+  }
 }
 /**
  * ── ⚔️ **보스 앞에 설 때 몇 단계였는가** ─────────────────────────────
