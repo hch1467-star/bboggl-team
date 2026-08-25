@@ -3735,6 +3735,22 @@ class Game {
     if (this.props) this.props.visible = on
   }
 
+  /**
+   * 🖥 **화면 한 장이 담는 넓이**(m²).
+   *
+   * 「성기다」는 인상이지만 **«화면 한 장에 몇 개»** 는 숫자입니다. 그러려면
+   * 분모가 있어야 하고, 그 분모는 게임만 압니다 — 직교 투영이라 화면 넓이는
+   * `CAMERA.viewSize` 와 종횡비로 정해집니다(`camera.ts`). 프로브가 22 를
+   * 베껴 적으면 카메라를 손보는 날 검사만 옛 세계에 삽니다.
+   *
+   * ⚠️ 이 값은 «예쁜가»를 재지 **않습니다.** 견줄 수 있는 단위를 줄 뿐입니다.
+   */
+  debugScreenArea(): number {
+    const h = CAMERA.viewSize
+    const w = h * (window.innerWidth / Math.max(1, window.innerHeight))
+    return Number((w * h).toFixed(1))
+  }
+
   debugProps(): PropsInfo {
     return (
       this.propsInfo ?? {
@@ -7586,6 +7602,7 @@ declare global {
       }[]
       showProps: (on: boolean) => void
       propCaps: () => { pillars: number; rubble: number }
+      screenArea: () => number
       props: () => {
         pillars: number
         rubble: number
@@ -8669,6 +8686,8 @@ window.__game = {
   props: () => game.debugProps(),
   /** 🏗 지물 상한 — 검사가 숫자를 베끼지 않게 게임이 냅니다(props.ts `MAX_PILLARS`). */
   propCaps: () => propCaps(),
+  /** 🖥 화면 한 장이 담는 넓이(m²) — 「성기다」에 단위를 붙이려면 분모가 필요합니다. */
+  screenArea: () => game.debugScreenArea(),
   /**
    * 🏛 잔해를 통째로 껐다 켭니다 — **"세어서 있다"와 "화면에 보인다"는
    * 다른 말**이라, 프로브가 끄고 한 장 더 찍어 견주려고 씁니다.

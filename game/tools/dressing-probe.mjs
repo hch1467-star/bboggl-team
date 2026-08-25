@@ -74,7 +74,7 @@ try {
 
   const info = await page.evaluate(() => {
     const G = window.__game
-    return { props: G.props(), regions: G.regionList() }
+    return { props: G.props(), regions: G.regionList(), screenArea: G.screenArea() }
   })
 
   const p = info.props
@@ -156,6 +156,27 @@ try {
         empty.length ? `빈 곳 ${empty.length}: ${empty.map((r) => r.n).join(' · ')}` : `${rows.length}곳 모두 있음`,
       )
     }
+  }
+
+  /**
+   * ── 🖥 **「성기다」에 단위를 붙입니다** ────────────────────────────
+   *
+   * 스크린샷을 보고 «성기다»라고 적었는데, 그건 인상입니다. **«화면 한 장에
+   * 몇 개»** 는 숫자이고, 그러면 고친 뒤에 «나아졌는가»를 물을 수 있습니다.
+   *
+   * ⚠️ 이 줄은 **판정하지 않습니다.** 몇 개가 옳은지는 이 자로 못 잽니다 —
+   *    참고 게임의 화면은 손으로 놓은 미술이고 이쪽은 절차적 상자입니다.
+   *    **못 재는 것을 재는 척하면 그때부터 숫자가 거짓말을 시작합니다.**
+   *    다만 «성기다»가 인상으로만 남으면 다음 사람이 또 인상으로 고칩니다.
+   */
+  const zoneArea = (info.regions ?? []).length > 0 ? 176 * 144 : 0
+  if (info.screenArea > 0 && zoneArea > 0) {
+    const perScreen = ((p.pillars + p.rubble) / zoneArea) * info.screenArea
+    console.log(
+      `\n  🖥 화면 한 장(${info.screenArea}m²)에 담기는 지물 — **약 ${perScreen.toFixed(1)}개**` +
+        `  (존 ${zoneArea}m² 에 ${p.pillars + p.rubble}개)\n` +
+        `     ⚠️ 이 줄은 판정이 아닙니다 — 몇 개가 옳은지는 이 자로 못 잽니다.`,
+    )
   }
 
   /**
