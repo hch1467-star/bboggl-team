@@ -328,6 +328,21 @@ export function flushSwingRecords(): void {
   for (const a of [...openSwings.keys()]) closeSwing(a)
 }
 
+/**
+ * 🎯 **간파가 성립한 순간** — 연출과 계측이 읽습니다.
+ *
+ * ⚠️ 이 배열이 처음엔 없었습니다. 간파는 «예고를 읽고 · 자원을 모으고 ·
+ *    0.3초 안에 넣어야» 나오는 이 게임에서 **가장 어려운 한 수**인데,
+ *    성립해도 화면에 **아무 일도 안 일어났습니다** — 강인도만 조용히
+ *    부서졌습니다. 반격은 화면 흔들림 · 히트스톱 · 소리 · 배너를 전부
+ *    갖고 있는데요.
+ *
+ *    **보상이 안 보이면 그 동작은 없는 것과 같습니다.** 플레이어는
+ *    «내가 방금 뭘 잘한 건지» 알 방법이 없고, 그러면 두 번째로 시도할
+ *    이유가 없습니다. 배움은 성공을 **알아볼 수 있을 때만** 일어납니다.
+ */
+export const mikiriEvents: { entity: number; x: number; y: number; z: number }[] = []
+
 /** 처형이 들어간 순간 — 연출과 계측이 읽습니다. */
 export const finisherEvents: { entity: number; x: number; y: number; z: number }[] = []
 
@@ -790,6 +805,8 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
     // 남아 있던 만큼이 이 한 방이 «한 일»입니다(breakPoise 가 장부에 답니다).
     poiseDealt += Math.max(0, Enemy.poise[t])
     breakPoise(t, '간파')
+    // 🎯 연출·계측·«배웠다» 표시가 전부 이 한 줄에서 갈라집니다(위 주석).
+    mikiriEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
     return
   }
 

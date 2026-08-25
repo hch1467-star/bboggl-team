@@ -148,6 +148,7 @@ import {
   breakPoise,
   finisherEvents,
   counterEvents,
+  mikiriEvents,
   crossfireEvents,
   barrelSystem,
   barrelLitEvents,
@@ -268,6 +269,7 @@ import {
   readInputFlow,
   canGuardNow,
   readLearnedActions,
+  noteLearnedAction,
   readRhythm,
   readStaminaSpent,
   resetStaminaSpent,
@@ -634,6 +636,8 @@ class Game {
   private deathCount = 0
   /** 🟢 반격 성공 횟수 — 프로브와 봇이 추측하지 않고 읽습니다. */
   private counterCount = 0
+  /** 🎯 간파 성립 횟수 — 「배웠다」 표시와 장부가 같이 씁니다. */
+  private mikiriCount = 0
   /** 🛡 이번 판에 성립한 저스트 가드 수 — 프로브가 "실제로 되는가"를 묻습니다. */
   private justGuards = 0
   /** 🩸 이번 판에 출혈이 터진 횟수 — 넣어 두고 안 터지면 잴 수가 없습니다. */
@@ -2089,6 +2093,45 @@ class Game {
       }
     }
     counterEvents.length = 0
+
+    /**
+     * ── 🎯 **간파 연출 — 이 게임에서 가장 어려운 한 수** ──────────────
+     *
+     * 예고를 읽고 · 집중을 모아 두고 · 0.3초 창 안에 강타를 넣어야 나옵니다.
+     * 그런데 성립해도 화면에 **아무 일도 안 일어나고 있었습니다.**
+     * 반격은 흔들림·히트스톱·소리·배너를 전부 갖고 있는데요.
+     *
+     * **보상이 안 보이면 그 동작은 없는 것과 같습니다.** 플레이어는 «내가
+     * 방금 뭘 잘한 건지» 알 수가 없고, 그러면 두 번째로 시도할 이유가
+     * 없습니다. 배움은 성공을 **알아볼 수 있을 때만** 일어납니다.
+     *
+     * ⚠️ **반격보다 세게 줍니다.** 반격은 🟢 한 색에만 답하고 스킬 슬롯이
+     *    내 주지만, 간파는 **모든 색**에 통하고 «자원 + 타이밍» 둘 다를
+     *    요구합니다. 더 어려운 것이 더 크게 울려야 «잘했다»가 읽힙니다.
+     */
+    for (const m of mikiriEvents) {
+      this.mikiriCount++
+      this.cam.addTrauma(COUNTER.trauma * 1.15)
+      requestHitstop(COUNTER.hitstop * 1.2)
+      sfx.bossPhase()
+      this.hud.showBanner('간파!', '예고를 읽고 끊었습니다 — 자세가 통째로 무너집니다', 1.5)
+      /**
+       * 「해냈다」는 **성립한 자리**에서 셉니다 — 우클릭을 눌렀다고 세면
+       * 창을 못 맞혀도 안내가 사라져 **못 배운 채로 안내만 잃습니다**
+       * (playerControl `noteLearnedAction` 주석).
+       */
+      noteLearnedAction('mikiri')
+      this.hud.markLearned('mikiri')
+      /**
+       * 16방향 — 반격(12)보다 촘촘하게. 같은 불꽃이라도 밀도가 다르면
+       * «더 큰 일이 일어났다»가 말 없이 읽힙니다(반격 연출의 같은 근거).
+       */
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2
+        this.vfx.spawnHitSpark(m.x + Math.cos(a) * 1.35, m.y + 1.1, m.z + Math.sin(a) * 1.35, 1.9)
+      }
+    }
+    mikiriEvents.length = 0
 
     /**
      * ---- 💥 오사 연출 — **작게, 그러나 확실히** ----

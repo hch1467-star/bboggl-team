@@ -646,6 +646,21 @@ function noteLearned(id: string): void {
   learnedActions.add(id)
 }
 
+/**
+ * 🎯 **판정 쪽에서 «해냈다»를 알려 주는 자리.**
+ *
+ * 대부분의 동작은 **입력을 처리하는 이 파일**에서 시작되므로 여기서
+ * 셌습니다. 그런데 **간파**는 다릅니다 — 누른 것은 그냥 강타이고,
+ * 그것이 간파가 되었는지는 **닿는 순간 판정**(`combat.ts`)이 압니다.
+ *
+ * 여기서 «우클릭을 눌렀다»로 세면 안 됩니다. 그러면 창을 못 맞혀도
+ * 안내가 사라지고, **못 배운 채로 안내만 잃습니다** — 바로 위 주석이
+ * 경고한 그 실수입니다. 성립한 자리에서 알려 줍니다.
+ */
+export function noteLearnedAction(id: string): void {
+  learnedActions.add(id)
+}
+
 /** 이번 프레임까지 해낸 동작들. 게임 루프가 읽어 HUD·세이브로 넘깁니다. */
 export function readLearnedActions(): string[] {
   return [...learnedActions]
