@@ -987,7 +987,12 @@ for (let i = 0; i < 3; i++) {
  *    느낌은 없는"* 게임이고, 그건 받은 피해로는 절대 안 보입니다.
  */
 {
-  const DELIBERATE = ['반격', '기습', '강타', '스킬', '통']
+  /**
+   * 🏅 **골라서 낸 것** — 자원을 태우거나(강타), 타이밍을 맞추거나(반격),
+   *    자리를 잡아야(백어택·기습) 나오는 것들. 환경을 쓴 것(통)도 판단입니다.
+   *    남는 «평타 · 출혈»만 «시간이 한 일»입니다.
+   */
+  const DELIBERATE = ['반격', '기습', '백어택', '강타', '스킬', '통']
   const rows = pick((l) => l.breakBy ?? {})
   const totals = {}
   for (const r of rows) for (const [k, v] of Object.entries(r)) totals[k] = (totals[k] ?? 0) + v

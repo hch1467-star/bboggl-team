@@ -682,9 +682,18 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
   Enemy.poise[t] -= dmg
   if (Enemy.poise[t] > 0) return
 
-  // 무너뜨린 그 타격의 **출처 이름 그대로** 넘깁니다 — 벤치의
-  // 「보스를 녹인 것」과 같은 이름이라 둘을 나란히 읽을 수 있습니다.
-  breakPoise(t, spec.source ?? '평타')
+  /**
+   * 무너뜨린 그 타격의 **출처 이름 그대로** 넘깁니다 — 벤치의
+   * 「보스를 녹인 것」과 같은 이름이라 둘을 나란히 읽을 수 있습니다.
+   *
+   * ⚠️ **등 뒤만 따로 부릅니다.** 백어택은 «자리를 잡아야 나오는 것»이라
+   *    골라서 낸 쪽인데, 출처 이름은 그냥 `평타` 입니다. 그대로 두면
+   *    첫 측정처럼 **실력이 «우연» 칸에 섞입니다**(붕괴 45회 중 평타 25 로
+   *    찍혔는데, 그중 얼마가 등 뒤였는지 알 수 없었습니다).
+   *    같은 «평타»라도 앞에서 친 것과 등 뒤를 잡은 것은 다른 사건입니다.
+   */
+  const src = spec.source ?? '평타'
+  breakPoise(t, (behind || crossfire) && src === '평타' ? '백어택' : src)
 }
 
 /**
@@ -1094,7 +1103,17 @@ export function resetBleedPeak(): void {
  *    그 목록에 없는 둘만 더합니다 — 반격·기습은 강인도를 **깎지 않고
  *    즉시 부수는** 별개의 길이라 출처 이름이 없습니다.
  */
-export type BreakCause = '평타' | '강타' | '처형' | '스킬' | '상황' | '반격' | '기습' | '출혈' | '통'
+export type BreakCause =
+  | '평타'
+  | '백어택'
+  | '강타'
+  | '처형'
+  | '스킬'
+  | '상황'
+  | '반격'
+  | '기습'
+  | '출혈'
+  | '통'
 
 export function breakPoise(t: number, by: BreakCause = '평타'): void {
   const cfg = enemyDef(Enemy.kind[t])
