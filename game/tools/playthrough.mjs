@@ -4267,6 +4267,8 @@ try {
       poiseWork: G.runStats().poiseWork ?? {},
       /** 🔧 그 일을 «어느 지렛대»가 했는가 — 설계가 몰아준 배수가 도는지. */
       poiseLever: G.runStats().poiseLever ?? {},
+      /** 🔢 지렛대별 **대수** — 일한 몫은 배수가 곱해진 값이라 이것 없이는 못 읽습니다. */
+      poiseHits: G.runStats().poiseHits ?? {},
       /**
        * 🥋 **봇이 강타를 태우는 문턱 — 봇이 직접 보고합니다.**
        *

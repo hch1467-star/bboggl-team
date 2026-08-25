@@ -1245,6 +1245,29 @@ export type BreakCause =
 const poiseWorkBySource: Record<string, number> = {}
 /** 🔧 같은 일을 **어느 지렛대가** 했는가 — 배수를 고른 그 가지가 곧 이름. */
 const poiseWorkByLever: Record<string, number> = {}
+/**
+ * 🔢 **그리고 «몇 대»였는가** — 일한 몫과 반드시 나란히 봐야 합니다.
+ *
+ * ── 왜 칸이 하나 더 필요한가 ────────────────────────────────────────
+ * 「일한 몫」은 **배수가 곱해진 값**입니다. 그래서 배수가 큰 지렛대는
+ * **드물게 걸려도 커 보입니다.** 실측이 이렇게 나왔습니다:
+ *
+ *     잡몹에게 평타만 연타 → 지렛대: **예고중 81%** · 평타 19%
+ *
+ * 이걸 *"연타의 81%가 예고 중에 들어갔다"* 로 읽으면 틀립니다. 한 대당
+ * 배수 비가 2.5 / 0.35 = **7.14배** 이므로, 대수(臺數) 비는
+ * (81/19) ÷ 7.14 ≈ **0.6** — 실제로는 **열 대 중 넉 대쯤**입니다.
+ *
+ * 즉 같은 숫자가 두 질문에 다른 답을 냅니다:
+ *   · *"무엇이 강인도를 깎았나"*        → 일한 몫 (배수 포함)
+ *   · *"그 일이 얼마나 자주 일어나나"*  → **대수** (배수 없음)
+ *
+ * 뒤엣것이 없으면 «배수가 커서 커 보이는 것»과 «자주 일어나서 큰 것»을
+ * 못 가릅니다. 처방이 정반대입니다 — 앞은 배수를, 뒤는 빈도를 손봐야
+ * 합니다. 이 저장소가 이미 한 번 데인 모양입니다(「배수만 보고 빈도를
+ * 안 봤습니다」).
+ */
+const poiseHitsByLever: Record<string, number> = {}
 
 /**
  * 강인도 장부에 한 줄 적습니다. **쓰는 자리가 셋이라 함수로 뺍니다** —
@@ -1255,6 +1278,7 @@ function notePoiseWork(source: BreakCause, lever: BreakCause, amount: number): v
   if (!(amount > 0)) return
   poiseWorkBySource[source] = (poiseWorkBySource[source] ?? 0) + amount
   poiseWorkByLever[lever] = (poiseWorkByLever[lever] ?? 0) + amount
+  poiseHitsByLever[lever] = (poiseHitsByLever[lever] ?? 0) + 1
 }
 
 export function readPoiseWork(): Record<string, number> {
@@ -1265,9 +1289,15 @@ export function readPoiseLever(): Record<string, number> {
   return { ...poiseWorkByLever }
 }
 
+/** 🔢 지렛대별 **대수** — 위 `poiseHitsByLever` 주석의 이유로 따로 냅니다. */
+export function readPoiseHits(): Record<string, number> {
+  return { ...poiseHitsByLever }
+}
+
 export function resetPoiseWork(): void {
   for (const k of Object.keys(poiseWorkBySource)) delete poiseWorkBySource[k]
   for (const k of Object.keys(poiseWorkByLever)) delete poiseWorkByLever[k]
+  for (const k of Object.keys(poiseHitsByLever)) delete poiseHitsByLever[k]
 }
 
 /**

@@ -170,6 +170,7 @@ import {
   poiseDamage,
   readPoiseWork,
   readPoiseLever,
+  readPoiseHits,
   countInBlast,
   pickupBlownEvents,
 } from './systems/combat'
@@ -6003,6 +6004,8 @@ class Game {
     poiseWork: Record<string, number>
     /** 🔧 같은 일을 **어느 지렛대가** 했는가 — 설계가 몰아준 배수가 실제로 도는지. */
     poiseLever: Record<string, number>
+    /** 🔢 지렛대별 **대수** — 일한 몫은 배수가 곱해진 값이라 이것 없이는 못 읽습니다. */
+    poiseHits: Record<string, number>
     windupBreaks: number
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
@@ -6139,6 +6142,7 @@ class Game {
        */
       poiseWork: readPoiseWork(),
       poiseLever: readPoiseLever(),
+      poiseHits: readPoiseHits(),
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
@@ -8372,6 +8376,7 @@ declare global {
         breakBy: Record<string, number>
         poiseWork: Record<string, number>
         poiseLever: Record<string, number>
+        poiseHits: Record<string, number>
         windupBreaks: number
         greenSwung: number
         greenDied: number

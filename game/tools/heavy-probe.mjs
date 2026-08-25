@@ -150,6 +150,8 @@ try {
           const baseWork = { ...(before.poiseWork ?? {}) }
           /** 🔧 «무엇 덕분에 깎였나» — 이게 없으면 ×2.5 를 직접 볼 수가 없습니다. */
           const baseLever = { ...(before.poiseLever ?? {}) }
+          /** 🔢 대수 — 「배수가 커서 커 보이는 것」과 「자주 걸려서 큰 것」을 가릅니다. */
+          const baseHits = { ...(before.poiseHits ?? {}) }
 
           /**
            * ⚠️ **실험장을 먼저 비웁니다.**
@@ -267,6 +269,7 @@ try {
             by: delta(after.breakBy, baseBreaks),
             work: delta(after.poiseWork, baseWork),
             lever: delta(after.poiseLever, baseLever),
+            hits: delta(after.poiseHits, baseHits),
           }
         },
         [tgt.id, hand, WANT_BREAKS, CAP_SECONDS],
@@ -288,7 +291,8 @@ try {
         `  ${tgt.label}· ${HANDS[hand]} — 붕괴 ${String(r.breaks).padStart(2)}회 / ${r.elapsed}초\n` +
           `            이름이 남은 것: ${fmt(r.by, byTot)}\n` +
           `            일한 몫(${Math.round(workTot)}): ${fmt(r.work, workTot)}\n` +
-          `            지렛대: ${fmt(r.lever, Object.values(r.lever).reduce((a, v) => a + v, 0))}`,
+          `            지렛대(일한 몫): ${fmt(r.lever, Object.values(r.lever).reduce((a, v) => a + v, 0))}\n` +
+          `            지렛대(대수)   : ${fmt(r.hits, Object.values(r.hits).reduce((a, v) => a + v, 0))}`,
       )
     }
   }
@@ -375,11 +379,48 @@ try {
      * 실제로 도는지 봅니다. 이 손은 **예고가 아닐 때 아무것도 안 하므로**,
      * 휘두른 횟수가 곧 분모입니다.
      */
+
+    /**
+     * ⚠️ **선언을 쓰는 자리보다 위에 둡니다.** 이 세션에만 «선언 전에 쓴»
+     *    실수로 계기가 세 번 죽었습니다(그중 한 번은 **종료 코드 0으로**
+     *    죽어서 초록처럼 보였습니다).
+     */
     const windRows = rows.filter((r) => r.hand === 2)
+    const lightRows = rows.filter((r) => r.hand === 0)
     const wSwings = windRows.reduce((a, r) => a + r.windupSwings, 0)
     const wBreaks = windRows.reduce((a, r) => a + r.breaks, 0)
-    const lightRows = rows.filter((r) => r.hand === 0)
     const lBreaks = lightRows.reduce((a, r) => a + r.breaks, 0)
+    /**
+     * ── 🎯 **「예고 중 타격」은 읽어서 얻는 것인가, 그냥 붙는 것인가** ─────
+     *
+     * 설계는 ×2.5 를 *"예고를 읽고 끼워 넣는 판단"* 에 대한 보상이라고
+     * 적었습니다. 그렇다면 **아무 생각 없이 연타하는 손**에서는 이 지렛대가
+     * 드물어야 합니다. 그래서 「평타만」 손의 **대수** 비율을 봅니다.
+     *
+     * ⚠️ **일한 몫이 아니라 대수로 봅니다.** 일한 몫은 배수(×2.5 vs ×0.35,
+     *    7.14배)가 곱해진 값이라, 열 대 중 넉 대만 예고 중이어도 **81%** 로
+     *    찍힙니다. 그 숫자로 «연타의 81%가 예고 중» 이라고 읽으면 정확히
+     *    거꾸로입니다.
+     */
+    const lightHits = lightRows.reduce((a, r) => {
+      for (const [k, v] of Object.entries(r.hits ?? {})) a[k] = (a[k] ?? 0) + v
+      return a
+    }, {})
+    const lightHitTot = Object.values(lightHits).reduce((a, v) => a + v, 0)
+    const freeShare = share(lightHits['예고중'] ?? 0, lightHitTot)
+    check(lightHitTot >= 30, '🔢 「평타만」 손의 대수 표본이 모였다 (아래 판정의 게이트)', `${lightHitTot}대`)
+    if (lightHitTot >= 30 && freeShare !== null) {
+      console.log(
+        `  🎯 **아무 생각 없이 연타할 때 예고 중에 들어간 대수** — ${pct(freeShare)} ` +
+          `(${lightHits['예고중'] ?? 0} / ${lightHitTot}대)\n` +
+          `     ${
+            freeShare >= 0.3
+              ? '→ ×2.5 는 **읽어서 얻는 것이 아닙니다.** 붙어서 치면 저절로 붙습니다 — ' +
+                '설계가 «판단에 대한 보상»이라 부른 것이 실은 «연타에 붙는 보너스»입니다.'
+              : '→ 연타로는 잘 안 걸립니다 — 읽어야 얻는 지렛대가 맞습니다.'
+          }`,
+      )
+    }
     check(wSwings >= 10, '🎯 「예고중노림」 손이 실제로 휘둘렀다 (분모)', `${wSwings}번`)
     if (wSwings >= 10) {
       const wSec = windRows.reduce((a, r) => a + r.elapsed, 0)

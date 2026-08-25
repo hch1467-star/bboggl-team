@@ -593,14 +593,20 @@ try {
    *    게임에게 묻습니다(`guardPoise`).
    */
   const gp = wear.guard
+  /**
+   * ⚠️ **`.every` 는 빈 표본에서 참입니다.** `npm run guard` 가 이 줄을
+   *    잡아 줬습니다 — 대상 셋을 못 읽어 오면 `{}` 가 되고, 그때 아래
+   *    검사는 «증거 없이» 초록이 됩니다. 개수를 **먼저** 못 박습니다.
+   */
+  const gpRows = Object.values(gp)
   check(
-    Object.values(gp).every((g) => g.dmg > 0 && g.poiseMax > 0),
+    gpRows.length === 3 && gpRows.every((g) => g.dmg > 0 && g.poiseMax > 0),
     '🚧 저스트 가드의 강인도 피해가 나왔다 (아래 비교의 게이트)',
     Object.entries(gp)
       .map(([k, g]) => `${k} ${g.dmg}/${g.poiseMax}`)
       .join(' · '),
   )
-  if (Object.values(gp).every((g) => g.dmg > 0 && g.poiseMax > 0)) {
+  if (gpRows.length === 3 && gpRows.every((g) => g.dmg > 0 && g.poiseMax > 0)) {
     console.log(
       `\n  🛡 **저스트 가드 한 번이 깎는 몫** — ` +
         Object.entries(gp)
