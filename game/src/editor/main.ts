@@ -137,6 +137,8 @@ class Editor {
       // 신호가 정확히 그것이라(색도 예고도 같습니다) 지도 위에서도 같은
       // 그림이라야 배치하며 보는 것과 플레이하며 보는 것이 어긋나지 않습니다.
       elite: new THREE.CapsuleGeometry(0.66, 0.9, 4, 10),
+      // 🛡 철갑병 — 정예보다 한 겹 더 굵게(0.88). 답이 다르므로 덩치로 갈립니다.
+      ironclad: new THREE.CapsuleGeometry(0.84, 0.9, 4, 12),
       treasure: new THREE.OctahedronGeometry(0.55),
       /**
        * 🏺 항아리 둘은 **같은 도형**입니다 — 게임 안에서 똑같이 생겼다는
