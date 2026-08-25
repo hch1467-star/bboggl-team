@@ -24,6 +24,7 @@
     "telegraph": "node tools/telegraph-probe.mjs",
     "heavy": "node tools/heavy-probe.mjs",
     "crossfire": "node tools/crossfire-probe.mjs",
+    "dressing": "node tools/dressing-probe.mjs",
     "growth": "node tools/growth-probe.mjs",
     "enemies": "node tools/enemy-probe.mjs",
     "vial": "node tools/vial-probe.mjs",
