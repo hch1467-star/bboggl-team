@@ -118,13 +118,28 @@ try {
   await page.waitForFunction(() => window.__game?.ready === true, { timeout: 30000 })
   await sleep(1200)
 
+  /**
+   * ⚠️ **`simElapsed` 입니다 — `elapsed` 가 아닙니다.**
+   *
+   * `elapsed` 는 **실제 시간**이라 **히트스톱 동안에도 흐릅니다.** 그래서
+   * 이 계기로 «초당 붕괴»를 재면, 큰 한 방을 낼수록 그 연출만큼 **느려
+   * 보입니다** — 잘한 손을 벌주는 자입니다.
+   *
+   * 실제로 그렇게 겪었습니다. 간파에 연출(히트스톱 ×1.2 · 흔들림)을
+   * 넣은 바로 다음 판에서 「간파노림」의 초당 붕괴가 **0.250 → 0.203**
+   * 으로 떨어졌습니다. 게임은 아무것도 안 느려졌는데 **계기가 축하를
+   * 손해로 적은 것**입니다.
+   *
+   * `playthrough.mjs` 가 이미 같은 자리에서 데였고 그 기록이 남아 있습니다:
+   * *"전투 중 11~13%가 히트스톱이었습니다."*
+   */
   /** 시뮬 시간으로 기다립니다 — 벽시계로 재면 판마다 다른 시간이 됩니다. */
   await page.evaluate(() => {
     window.__t = {
       runFor: async (seconds) => {
-        const target = window.__game.state().elapsed + seconds
+        const target = window.__game.state().simElapsed + seconds
         const deadline = Date.now() + 200000
-        while (window.__game.state().elapsed < target && Date.now() < deadline) {
+        while (window.__game.state().simElapsed < target && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 8))
         }
       },
@@ -144,7 +159,7 @@ try {
       const r = await page.evaluate(
         async ([kindId, hand, wantBreaks, capSeconds]) => {
           const G = window.__game
-          const now = () => G.state().elapsed
+          const now = () => G.state().simElapsed
           const before = G.runStats()
           const baseBreaks = { ...(before.breakBy ?? {}) }
           const baseWork = { ...(before.poiseWork ?? {}) }
