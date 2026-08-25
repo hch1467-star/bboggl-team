@@ -1345,15 +1345,46 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
      * 문턱 2배는 위 흔들림 줄과 **같은 값**입니다. 같은 질문("이 숫자로
      * 값을 정해도 되는가")에 두 개의 답을 두지 않습니다.
      */
+    /**
+     * ── ⚠️ **비율의 «두 수»를 다 봐야 합니다 — 하나만 보다 초록이 샜습니다** ──
+     *
+     * 이 게이트는 원래 **3단계의 폭만** 봤습니다. 그런데 판정은 `t3 / t1`
+     * 이라 **1단계가 흔들려도 배율이 흔들립니다.** 실제로 그렇게 샜습니다:
+     *
+     *     3단계 14.4초 (13.9~14.5)  ← 폭 1.0배 · 게이트 통과 ✅
+     *     1단계  7.5초 (5.7~**15.4**) ← 폭 **2.7배** · **아무도 안 봄**
+     *     → 「1.9배 ✅」 초록
+     *
+     * 같은 회차의 판정 계열이 이렇습니다 — **0.4 · 0.3 · 0.1 · 1.4 · 0.3
+     * · 1.9배.** 마지막 하나만 초록입니다. 그 초록을 근거로 «약속이
+     * 지켜진다»고 적었으면, 다음 회차가 그 문장을 물려받습니다.
+     *
+     * ⭐ **비율을 판정할 때는 분자와 분모의 폭을 둘 다 게이트에 넣어야
+     *    합니다.** 한쪽만 재는 게이트는 «잰 척하는 게이트»입니다.
+     *
+     * ── 그리고 **표본 수**도 봅니다 ────────────────────────────────────
+     * 이 계열의 절반이 `[초기화 없는 1판만]` 이었습니다. **한 판은 표본이
+     * 아닙니다** — 이 저장소가 여러 번 적어 둔 문장인데, 정작 이 검사는
+     * 한 판으로도 ✅/❌ 를 냈습니다.
+     */
     const ph3 = phaseSrc.map((l) => l.boss.phaseTime?.[2] ?? 0).filter((n) => n > 0)
-    const swing = ph3.length >= 2 ? Math.max(...ph3) / Math.min(...ph3) : 1
-    if (swing >= 2) {
+    const ph1 = phaseSrc.map((l) => l.boss.phaseTime?.[0] ?? 0).filter((n) => n > 0)
+    const spread = (a) => (a.length >= 2 ? Math.max(...a) / Math.min(...a) : 1)
+    const swing3 = spread(ph3)
+    const swing1 = spread(ph1)
+    const swing = Math.max(swing1, swing3)
+    const tooFew = Math.min(ph1.length, ph3.length) < 2
+    if (swing >= 2 || tooFew) {
       console.log(
         `  ⏸ 마지막 구간이 가장 길다 (bossPhases.ts 의 약속) — **이 벤치로는 판정하지 않습니다**: ` +
-          `3단계가 판마다 ${swing.toFixed(1)}배 벌어졌습니다 ` +
-          `(${Math.min(...ph3).toFixed(1)}~${Math.max(...ph3).toFixed(1)}초). ` +
-          `중앙값은 1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초지만 ` +
-          `이 폭 위에서는 배율을 못 정합니다 — 판정은 \`npm run boss\`(죽지 않는 침대)에 있습니다.`,
+          (tooFew
+            ? `쓸 수 있는 판이 ${Math.min(ph1.length, ph3.length)}판뿐입니다 — **한 판은 표본이 아닙니다.**`
+            : `1단계가 ${swing1.toFixed(1)}배 · 3단계가 ${swing3.toFixed(1)}배 벌어졌습니다 ` +
+              `(1단계 ${Math.min(...ph1).toFixed(1)}~${Math.max(...ph1).toFixed(1)}초 · ` +
+              `3단계 ${Math.min(...ph3).toFixed(1)}~${Math.max(...ph3).toFixed(1)}초). ` +
+              `**배율은 두 수의 몫이라 어느 쪽이 흔들려도 못 정합니다.**`) +
+          ` 중앙값은 1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초 — ` +
+          `판정은 \`npm run boss\`(죽지 않는 침대)에 있습니다.`,
       )
     } else {
       console.log(
