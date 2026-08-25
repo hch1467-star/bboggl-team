@@ -68,8 +68,18 @@ const TARGETS = [
   { id: 'elite', label: '정예  ' },
   { id: 'boss', label: '보스  ' },
 ]
-/** 손 세 갈래. 숫자가 아니라 이름으로 다룹니다 — 출력에서 바로 읽히게. */
-const HANDS = ['평타만  ', '강타섞기', '예고중노림']
+/**
+ * 손 세 갈래. 숫자가 아니라 이름으로 다룹니다 — 출력에서 바로 읽히게.
+ *
+ * ⚠️ **「예고중노림」은 평타만 씁니다 — 강타를 섞으면 안 됩니다.**
+ *    첫 판에서 이 손에도 강타를 태웠다가 재려던 것을 못 쟀습니다.
+ *    `applyPoise` 의 배수는 **겹치지 않고 하나만** 고르는데 그 순서가
+ *    `heavyBlow` → `winding` 입니다. 즉 예고 중에 낸 강타는 ×2.5 가
+ *    아니라 **×2.2** 를 받습니다. 그래서 그 손의 일한 몫이 «강타 57%» 로
+ *    나왔고, 저는 ×2.5 를 재고 있다고 믿으면서 실은 ×2.2 를 다시
+ *    재고 있었습니다 — **한 손에 두 지렛대를 쥐여 준 것**입니다.
+ */
+const HANDS = ['평타만  ', '강타섞기', '예고중(평타)']
 /** 한 조합에서 볼 붕괴 수. 못 채우면 시간 제한으로 끊고 **분모를 밝힙니다.** */
 const WANT_BREAKS = 8
 /** 한 조합의 시간 상한(시뮬 초). 안 끊기는 손도 있으므로 반드시 필요합니다. */
@@ -138,6 +148,23 @@ try {
           const before = G.runStats()
           const baseBreaks = { ...(before.breakBy ?? {}) }
           const baseWork = { ...(before.poiseWork ?? {}) }
+          /** 🔧 «무엇 덕분에 깎였나» — 이게 없으면 ×2.5 를 직접 볼 수가 없습니다. */
+          const baseLever = { ...(before.poiseLever ?? {}) }
+
+          /**
+           * ⚠️ **실험장을 먼저 비웁니다.**
+           *
+           * 첫 판의 「잡몹」 줄에 **오사 27~38%** 가 찍혔습니다. 오사는
+           * «적이 적을 때린 것»인데, 1:1 을 재는 계기에서 나올 수가 없는
+           * 값입니다 — 실험장에 원래 있던 적들이 남아 있었습니다.
+           *
+           * 장부(`breakBy`/`poiseWork`)는 **판 전체의 누계**라 대상별로
+           * 갈라지지 않습니다. 그러니 다른 적이 한 마리라도 살아 있으면
+           * 그 줄은 «이 상대에게 잰 값»이 아닙니다. 이름표만 붙어 있고
+           * 안에는 다른 것이 섞인 셈입니다.
+           */
+          G.clearEnemies()
+          await window.__t.runFor(0.2)
 
           /** 상대를 하나 세우고 그 곁에 붙습니다. */
           let foe = G.spawnEnemyKind(kindId, 8, 0)
@@ -207,14 +234,14 @@ try {
                */
               if (fi.winding === true) {
                 windupSwings++
-                if (canHeavy) {
-                  G.press('Mouse2')
-                  G.release('Mouse2')
-                  heavySwings++
-                } else {
-                  G.press('Mouse0')
-                  G.release('Mouse0')
-                }
+                /**
+                 * ⚠️ **여기서 강타를 태우면 안 됩니다** — 위 `HANDS` 주석.
+                 *    배수는 하나만 걸리고 `heavyBlow` 가 `winding` 보다
+                 *    앞서므로, 강타를 섞는 순간 이 손은 ×2.5 가 아니라
+                 *    ×2.2 를 재게 됩니다. 평타만 씁니다.
+                 */
+                G.press('Mouse0')
+                G.release('Mouse0')
               }
             }
             await window.__t.runFor(0.05)
@@ -239,6 +266,7 @@ try {
             elapsed: Number(elapsed.toFixed(1)),
             by: delta(after.breakBy, baseBreaks),
             work: delta(after.poiseWork, baseWork),
+            lever: delta(after.poiseLever, baseLever),
           }
         },
         [tgt.id, hand, WANT_BREAKS, CAP_SECONDS],
@@ -259,7 +287,8 @@ try {
       console.log(
         `  ${tgt.label}· ${HANDS[hand]} — 붕괴 ${String(r.breaks).padStart(2)}회 / ${r.elapsed}초\n` +
           `            이름이 남은 것: ${fmt(r.by, byTot)}\n` +
-          `            일한 몫(${Math.round(workTot)}): ${fmt(r.work, workTot)}`,
+          `            일한 몫(${Math.round(workTot)}): ${fmt(r.work, workTot)}\n` +
+          `            지렛대: ${fmt(r.lever, Object.values(r.lever).reduce((a, v) => a + v, 0))}`,
       )
     }
   }
