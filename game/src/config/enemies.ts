@@ -13,8 +13,7 @@
  *
  * (Unity 이식 노트: 이 표의 한 항목이 EnemyDefinition.asset 하나가 됩니다.)
  */
-import {
-  IRONCLAD, ARCHER, BINDER, BLEED, BOSS, CHARGER, DRAGGER, ELITE, GRUNT } from './balance'
+import { ARCHER, BINDER, BLEED, BOSS, CHARGER, DRAGGER, ELITE, GRUNT } from './balance'
 import { EnemyKind } from '../core/components'
 
 /**
@@ -122,14 +121,6 @@ export interface EnemyDef {
    *   보스 105   — 세 콤보 이상. 예고 중에 끊으면 훨씬 빨라집니다.
    */
   poiseMax: number
-  /**
-   * 🛡 **무너지기 전에 받는 피해 배율**(없으면 1).
-   *
-   * 「철갑」의 전부입니다. 이 값이 1보다 작으면 **연타로는 못 이깁니다** —
-   * 무너뜨려야 제 피해가 들어갑니다. 판정은 `combat.ts` `bossTakenScale`
-   * 한 곳에서만 봅니다(체력·출혈이 둘 다 그 함수를 지나갑니다).
-   */
-  armor?: number
   ember: number
   /** 타격했을 때의 손맛 배율 — 큰 적일수록 크게 */
   hitstop: number
@@ -202,39 +193,6 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
    * 설계 근거는 balance.ts `ELITE` 에 다 있습니다. 여기서는 *"무엇이
    * 잡몹과 다른가"* 만 적습니다 — 그리고 그건 세 줄뿐입니다.
    */
-  /**
-   * ── 🛡 **철갑병** — 답을 하나로 좁히는 적 ────────────────────────
-   *
-   * 설계 근거는 balance.ts `IRONCLAD` 에 다 있습니다. 여기서는 *"무엇이
-   * 정예와 다른가"* 만 적습니다 — 그리고 그건 `armor` 한 줄뿐입니다.
-   */
-  [EnemyKind.Ironclad]: {
-    id: 'ironclad',
-    name: '철갑병',
-    ...IRONCLAD,
-    /** 🔴 → 🔴 — 잡몹·정예와 **같습니다.** 새로 외울 것을 안 만듭니다. */
-    chains: { grunt_jab: 'grunt_jab' },
-    /**
-     * 🥋 **95** — 강타 두 방(109) 또는 **간파 한 번**. 정예 85 보다 높고
-     * 보스 105 보다 낮아서 「작은 보스」의 자리를 지킵니다.
-     */
-    poiseMax: 95,
-    /**
-     * 🛡 **이 한 줄이 이 적의 전부입니다.** 무너지기 전에는 피해가 1/3
-     * 이하 — 연타로 이기려면 정예의 세 배쯤 때려야 하는데, 그동안 이놈은
-     * 가만히 있지 않습니다. 판정은 `combat.ts` `bossTakenScale` 한 곳에서만
-     * 봅니다(체력·출혈이 둘 다 그 함수를 지나갑니다).
-     */
-    armor: 0.35,
-    /** 정예(60)와 보스 사이 — 답을 찾아낸 값이지 «오래 때린» 값이 아닙니다. */
-    ember: 55,
-    /** 차가운 쇠빛 — 잡몹의 붉은 흙빛과 정면으로 갈립니다. */
-    color: 0x6f7d92,
-    hitstop: 0.07,
-    trauma: 0.34,
-    /** 💢 무거운 적 — 무너뜨릴수록 단단해지는 규칙을 받습니다. */
-    heavy: true,
-  },
   [EnemyKind.Elite]: {
     id: 'elite',
     name: '정예',

@@ -96,14 +96,6 @@ export type EntityKind =
   /** 🛡️ 정예 — 잡몹과 **같은 공격**을 쓰는 큰 개체. 근거는 balance.ts `ELITE`. */
   | 'elite'
   /**
-   * 🛡 **철갑병.** 이 줄이 없어서 배치가 **조용히 걸러졌습니다** — 레벨
-   *    JSON 에는 있는데 게임에는 안 서고, `npm run enemies` 가 «배치 7종 ·
-   *    표 8종» 으로 그걸 말해 줬습니다. 새 적을 넣을 때 **두 곳**(종류표와
-   *    이 파서)을 고쳐야 하는 것이 이 형식의 성질이고, 그래서 그 검사가
-   *    있습니다.
-   */
-  | 'ironclad'
-  /**
    * 🧱 **금 간 벽** — 한 대 치면 무너지는 벽. 뒤에 방이 있습니다.
    *
    * 사다리(`ladder`)와 **같은 부품**으로 만듭니다 — 둘 다 *"평소에는 못
@@ -141,7 +133,6 @@ export const ENTITY_KINDS: EntityKind[] = [
   'urn',
   'urnFull',
   'elite',
-  'ironclad',
   'crackedWall',
   'thickWall',
 ]
@@ -186,7 +177,6 @@ export const ENTITY_LABEL: Record<EntityKind, string> = {
   urn: '항아리 🏺(빈 것)',
   urnFull: '항아리 🏺(보물 있음)',
   elite: '정예 🛡️(잡몹과 같은 색)',
-  ironclad: '철갑병 🛡(무너뜨려야 함)',
   crackedWall: '금 간 벽 🧱(치면 열림)',
   thickWall: '두꺼운 벽 🧱💥(폭발이라야 열림)',
 }
@@ -220,8 +210,6 @@ export const ENTITY_COLOR: Record<EntityKind, number> = {
   // 잡몹과 **같은 예고 색**입니다 — 같은 공격을 쓰니까요. 에디터에서
   // 둘을 가르는 것은 색이 아니라 라벨이라야 그 사실이 안 흐려집니다.
   elite: 0xc0453f,
-  /** 🛡 차가운 쇠빛 — 잡몹·정예의 붉은 흙빛과 정면으로 갈립니다. */
-  ironclad: 0x6f7d92,
   // 🧱 사다리(0x9ee37d)와 **같은 계열의 초록**입니다 — 에디터에서 이 둘은
   //    「지나갈 수 없던 곳을 여는 것」이라는 한 무리로 보여야 합니다.
   crackedWall: 0x6fbf7d,
