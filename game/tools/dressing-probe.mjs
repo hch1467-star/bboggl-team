@@ -134,6 +134,57 @@ try {
     }
   }
 
+  /**
+   * ── ⏱ **상한의 근거를 재 봅니다** ─────────────────────────────────
+   *
+   * `MAX_PILLARS`/`MAX_RUBBLE` 옆의 주석은 이렇게 적혀 있습니다:
+   * *"GPU 없는 환경에서도 돌아가야 해서(20fps 언저리)"*. 즉 **이 컨테이너에
+   * 맞춰 정한 값**입니다. 그런데 지물은 `InstancedMesh` 라 140개든 1400개든
+   * **드로우콜은 하나**입니다 — 비용 구조가 주석이 가정한 것과 다릅니다.
+   *
+   * 그래서 «지물을 껐다 켰을 때 기계 속도가 움직이는가»를 잽니다. 이건
+   * **상한을 올렸을 때의 비용을 재는 것이 아니라, 지금 있는 것의 값을
+   * 재는 것**입니다 — 240개가 공짜면 상한의 근거가 흔들리고, 240개가
+   * 비싸면 상한은 정당합니다.
+   *
+   * ⚠️ **시뮬/벽시계 비**로 잽니다(벤치의 「기계 속도」와 같은 자). 프레임률을
+   *    직접 세면 이 컨테이너의 들쭉날쭉함이 그대로 들어옵니다.
+   *
+   * ⚠️ **같은 판에서 두 번 잽니다.** 따로 돌리면 기계의 부하 차이가 결과에
+   *    섞입니다 — 이 저장소가 «재는 동안 기계를 빼앗으면 그 판은 표본이
+   *    아니다»로 이미 데인 자리입니다.
+   */
+  const speed = await page.evaluate(async () => {
+    const G = window.__game
+    const run = async (seconds) => {
+      const t0 = G.state().simElapsed
+      const w0 = Date.now()
+      while (G.state().simElapsed - t0 < seconds && Date.now() - w0 < 60000) {
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      return (G.state().simElapsed - t0) / ((Date.now() - w0) / 1000)
+    }
+    await run(2) // 예열 — 첫 몇 초는 셰이더 컴파일이 섞입니다
+    G.showProps(true)
+    const on = await run(6)
+    G.showProps(false)
+    const off = await run(6)
+    G.showProps(true)
+    return { on, off }
+  })
+  const gain = speed.on > 0 ? speed.off / speed.on : 0
+  console.log(
+    `\n  ⏱ 기계 속도 — 지물 켜짐 ${speed.on.toFixed(3)} vs 꺼짐 ${speed.off.toFixed(3)} 시뮬초/벽시계초` +
+      ` (끄면 ${gain.toFixed(2)}배)\n` +
+      `     ${
+        gain >= 1.15
+          ? '→ 지물이 **실제로 비쌉니다.** 상한의 근거가 섭니다.'
+          : '→ 지물을 통째로 꺼도 **거의 안 빨라집니다.** ' +
+            '상한(140/170)의 근거였던 «GPU 없는 환경» 은 이 240개에 대해서는 ' +
+            '**성립하지 않습니다** — 인스턴싱이라 드로우콜이 하나이기 때문입니다.'
+      }`,
+  )
+
   await browser.close()
   console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
   process.exitCode = fail === 0 ? 0 : 1
