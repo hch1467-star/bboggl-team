@@ -666,6 +666,13 @@ class Game {
    * 것이고, 잦은데 활용을 못 하면 보상의 형태가 틀린 것입니다 — 답이 다릅니다.
    */
   private poiseBreaks = 0
+  /**
+   * 🏅 **붕괴를 만든 것의 이름별 횟수** — 「이긴 이유가 나에게 있는가」.
+   *
+   * 이름은 `combat.ts` 의 `BreakCause` 이고, 그건 피해 출처(`AttackSpec.source`)와
+   * **같은 이름**을 씁니다 — 「보스를 녹인 것」과 나란히 읽히게.
+   */
+  private breakBy: Record<string, number> = {}
   /** 처형이 실제로 몇 번 나갔는가 — 무방비 창을 쓰게 됐는지 재는 값입니다. */
   private finishers = 0
   /**
@@ -5939,6 +5946,8 @@ class Game {
     enemySwings: number
     enemyHits: number
     poiseBreaks: number
+    /** 🏅 붕괴를 만든 것의 이름별 횟수 — 실력인지 우연인지 가르는 칸. */
+    breakBy: Record<string, number>
     windupBreaks: number
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
@@ -6068,6 +6077,7 @@ class Game {
   } {
     return {
       poiseBreaks: this.poiseBreaks,
+      breakBy: { ...this.breakBy },
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
@@ -8297,6 +8307,7 @@ declare global {
         enemySwings: number
         enemyHits: number
         poiseBreaks: number
+        breakBy: Record<string, number>
         windupBreaks: number
         greenSwung: number
         greenDied: number

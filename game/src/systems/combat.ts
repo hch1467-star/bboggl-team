@@ -682,7 +682,9 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
   Enemy.poise[t] -= dmg
   if (Enemy.poise[t] > 0) return
 
-  breakPoise(t)
+  // 무너뜨린 그 타격의 **출처 이름 그대로** 넘깁니다 — 벤치의
+  // 「보스를 녹인 것」과 같은 이름이라 둘을 나란히 읽을 수 있습니다.
+  breakPoise(t, spec.source ?? '평타')
 }
 
 /**
@@ -752,7 +754,7 @@ function applyBleed(t: number, spec: AttackSpec): void {
    */
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t], Enemy.breaks[t])
-  if (Enemy.poise[t] <= 0) breakPoise(t)
+  if (Enemy.poise[t] <= 0) breakPoise(t, '출혈')
 }
 
 /**
@@ -1068,7 +1070,33 @@ export function resetBleedPeak(): void {
  * 긴 무방비 자체가 보상입니다. 별도의 피해 배수는 붙이지 않았습니다 —
  * 백어택 치명타와 겹치면 한 번의 실수로 전투가 끝나 버립니다.
  */
-export function breakPoise(t: number): void {
+/**
+ * ── 🏅 **무엇이 이 붕괴를 만들었는가** ─────────────────────────────────
+ *
+ * 이 게임의 원칙은 *"게이머가 **스스로 잘한다**고 느끼게"* 입니다. 그런데
+ * 저장소는 **난이도**(받은 피해)와 **공정성**(맞은 이유)은 재면서
+ * **«이긴 이유가 나에게 있는가»** 는 안 잽니다.
+ *
+ * 붕괴가 그 질문의 좋은 표본입니다 — 같은 «무너뜨림»이라도:
+ *
+ *   · 🟢 반격 · 기습 · 강타 · 스킬 → **골라서 낸 것**. 잘한 것입니다.
+ *   · 평타 콤보 중에 얻어걸림      → 손이 아니라 **시간이 한 일**입니다.
+ *
+ * 둘을 한 칸에 담으면 *"붕괴 3회"* 가 실력인지 우연인지 알 수 없습니다.
+ * 실제로 오늘 「끊김 100%」를 보고 **플레이어가 잘해서인 줄** 알았다가,
+ * 재 보니 대부분 구조적인 것이었던 자리가 있었습니다.
+ */
+/**
+ * ⚠️ **새 이름표를 만들지 않습니다.** `AttackSpec.source` 가 이미
+ *    «평타 · 강타 · 처형 · 스킬 · 상황» 을 갖고 있고, 벤치의
+ *    「보스를 녹인 것」이 그 이름으로 찍힙니다. 여기서 다른 이름을 만들면
+ *    같은 사건이 두 이름으로 불리고, 둘이 어긋나는 날이 옵니다.
+ *    그 목록에 없는 둘만 더합니다 — 반격·기습은 강인도를 **깎지 않고
+ *    즉시 부수는** 별개의 길이라 출처 이름이 없습니다.
+ */
+export type BreakCause = '평타' | '강타' | '처형' | '스킬' | '상황' | '반격' | '기습' | '출혈' | '통'
+
+export function breakPoise(t: number, by: BreakCause = '평타'): void {
   const cfg = enemyDef(Enemy.kind[t])
   /**
    * 💢 **몇 번째 붕괴인지 셉니다** — 다음 붕괴를 어렵게 만드는 근거입니다
@@ -1146,6 +1174,7 @@ export function breakPoise(t: number): void {
     y: Transform.y[t],
     z: Transform.z[t],
     duringWindup,
+    by,
   })
 }
 
@@ -1157,6 +1186,8 @@ export interface BreakEvent {
   z: number
   /** 끊긴 순간이 **예고 중**이었는가 (반격 프로브가 읽습니다) */
   duringWindup?: boolean
+  /** 🏅 무엇이 무너뜨렸는가 — 실력인지 우연인지 가르는 칸. */
+  by?: BreakCause
 }
 export const breakEvents: BreakEvent[] = []
 
@@ -1459,7 +1490,7 @@ function explodeBarrel(b: number): void {
      * 흉내 내면 처형 창의 규칙이 두 벌이 됩니다.
      */
     if (hasComponent(Enemy, t)) {
-      breakPoise(t)
+      breakPoise(t, '통')
       Health.flashT[t] = hurtFlash(BARREL.hitstop)
       caught++
     }
@@ -2359,13 +2390,13 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         if (countered) {
           // 강인도를 **깎지 않고 즉시 부숩니다.** 반격은 누적의 결과가 아니라
           // 타이밍의 결과여야 합니다 — 강인도가 얼마나 남았든 성공해야 합니다.
-          breakPoise(t)
+          breakPoise(t, '반격')
           Enemy.brokenT[t] = COUNTER.brokenTime
           Actor.timer[t] = COUNTER.brokenTime
           counterEvents.push({ entity: t, x: Transform.x[t], y: Transform.y[t], z: Transform.z[t] })
         } else if (ambush) {
           // 기습은 **강인도를 깎지 않고 즉시 부숩니다** — 위 설계 노트 참고.
-          breakPoise(t)
+          breakPoise(t, '기습')
           // 유예를 비웁니다 — 한 번 놀란 적을 계속 기습할 수는 없습니다.
           Enemy.unawareT[t] = 0
         } else if (spec.finisher) {
