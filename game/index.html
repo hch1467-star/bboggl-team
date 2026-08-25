@@ -513,7 +513,12 @@
             <div class="fill" id="hpFill"></div>
             <div class="label"><span>체력</span><span id="hpText">100 / 100</span></div>
           </div>
-          <div class="bar" style="height: 13px">
+          <!--
+            🫁 기력 바. balance.ts `STAMINA.enabled` 가 false 면 hud.ts 가
+            통째로 감춥니다 — 마크업을 지우지 않는 이유는 스위치를 다시
+            켰을 때 되살리는 일이 "다시 만들기"가 되면 안 되기 때문입니다.
+          -->
+          <div class="bar" id="stamBar" style="height: 13px">
             <div class="fill" id="stamFill"></div>
             <div class="label" style="font-size: 10px">
               <span>스태미나</span><span id="stamText">100</span>

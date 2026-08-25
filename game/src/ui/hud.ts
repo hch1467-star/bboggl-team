@@ -5,7 +5,7 @@
  * 훨씬 선명하고, 캔버스에 UI를 그리면 드로우콜과 폰트 처리로 프레임을 잡아먹습니다.
  * (Unity 이식 시에는 이 파일이 그대로 UI Toolkit / uGUI 로 대체됩니다.)
  */
-import { PLAYER } from '../config/balance'
+import { PLAYER, STAMINA } from '../config/balance'
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id)
@@ -19,6 +19,7 @@ export class Hud {
   private readonly hpText = el<HTMLSpanElement>('hpText')
   private readonly stamFill = el<HTMLDivElement>('stamFill')
   private readonly stamText = el<HTMLSpanElement>('stamText')
+  private readonly stamBar = el<HTMLDivElement>('stamBar')
   private readonly arenaStats = el<HTMLElement>('arenaStats')
   private readonly levelStats = el<HTMLElement>('levelStats')
   private readonly levelNameText = el<HTMLElement>('levelNameText')
@@ -74,6 +75,16 @@ export class Hud {
       this.hpGhost.style.transform = `scaleX(${hpRatio})`
       this.hpText.textContent = `${Math.ceil(Math.max(0, hp))} / ${maxHp}`
       this.lastHp = hpRatio
+    }
+    /**
+     * 🫁 기력을 안 쓰는 판에서는 **바를 아예 지웁니다.**
+     * 남겨 두면 늘 100%인 초록 막대가 화면 위에 있고, 처음 잡는 사람은
+     * *"저게 왜 안 줄지?"* 를 계속 궁금해합니다. 아무 뜻이 없는 눈금은
+     * 정보가 아니라 소음입니다 — 근거는 balance.ts `STAMINA`.
+     */
+    if (!STAMINA.enabled) {
+      this.stamBar.style.display = 'none'
+      return
     }
     const stamRatio = Math.max(0, stamina) / maxStamina
     // 스태미나는 매 프레임 변해서, 1% 단위로만 DOM을 건드립니다(레이아웃 비용 절감).

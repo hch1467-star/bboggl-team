@@ -9,7 +9,15 @@ import {
   type SkillDef,
   swingPower,
 } from '../config/arsenal'
-import { FINISHER, FOCUS, GUARD, PLAYER, SKILL_COOLDOWN_SCALE, VIAL } from '../config/balance'
+import {
+  FINISHER,
+  FOCUS,
+  GUARD,
+  PLAYER,
+  SKILL_COOLDOWN_SCALE,
+  STAMINA,
+  VIAL,
+} from '../config/balance'
 import { SNARE_MOVE_SCALE } from '../config/enemyAttacks'
 import {
   Actor,
@@ -304,7 +312,32 @@ export function resetLastSpender(): void {
   lastSpendAt = -1
 }
 
+/**
+ * 🫁 **지금 쓸 수 있는 기력.** 막는 쪽은 전부 이 함수를 통해서만 봅니다.
+ *
+ * ── 왜 `Stamina.value[p]` 를 직접 읽지 않는가 ───────────────────────
+ * 기력을 끄기로 했을 때(balance.ts `STAMINA`), 막는 자리가 **다섯 곳**
+ * 이었습니다 — 가드 커밋 · 구르기(평상시) · 구르기(끊고) · 공격 · 버퍼된
+ * 구르기. 다섯 곳에 각각 `if (꺼져 있으면)` 을 적으면 여섯 번째를 만들 때
+ * 반드시 빠뜨립니다. 이 저장소가 **콤보 해석 세 곳** 과 **공격 비용 여섯
+ * 곳** 에서 이미 당한 일입니다.
+ *
+ * 그래서 꺼진 동안은 **무한**을 돌려줍니다. 부등식(`>= 비용`)이 전부
+ * 그대로 참이 되므로, 막는 쪽 코드는 한 글자도 특별해질 필요가 없습니다.
+ * 나중에 켜면 원래 규칙이 그대로 돌아옵니다.
+ */
+export function staminaLeft(p: number): number {
+  return STAMINA.enabled ? Stamina.value[p] : Number.POSITIVE_INFINITY
+}
+
 function spendStamina(p: number, cost: number, by: StaminaSpender): void {
+  /**
+   * 🫁 꺼져 있으면 **아무것도 안 냅니다.** 내는 자리가 다섯 군데인데
+   * (공격·구르기·구르기취소·헛친가드·스킬) 값 자체는 `arsenal.ts` 의
+   * 콤보 단계마다 흩어져 있어서, 값을 0으로 고치는 길은 빠뜨리기 쉽습니다.
+   * **내는 문을 하나 닫는 편이 확실합니다.**
+   */
+  if (!STAMINA.enabled) return
   const used = Math.min(Stamina.value[p], cost)
   staminaSpent += used
   Stamina.value[p] = Math.max(0, Stamina.value[p] - cost)
@@ -710,7 +743,7 @@ export function canGuardNow(p: number): boolean {
    * 예고·판정 중(=커밋 중)에도 열 수 있되 **기력을 냅니다.**
    * 근거와 값은 balance.ts `GUARD.commitCost` — 구르기 취소와 같은 계약입니다.
    */
-  return Stamina.value[p] >= GUARD.commitCost
+  return staminaLeft(p) >= GUARD.commitCost
 }
 
 /** 지금 창을 여는 것이 **커밋을 뚫고 나가는 것**인가(= 값을 내야 하는가). */
@@ -756,7 +789,7 @@ export function dodgeBlock(p: number): DodgeBlock {
      */
     const cancel =
       PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1) + PLAYER.dodge.cancelExtraCost
-    return Stamina.value[p] >= cancel ? '' : 'stamina'
+    return staminaLeft(p) >= cancel ? '' : 'stamina'
   }
   /**
    * 평상시 구르기(서 있을 때·후딜)는 **비용 이상**이어야 합니다.
@@ -767,7 +800,7 @@ export function dodgeBlock(p: number): DodgeBlock {
    *    — balance.ts `dodge.staminaCost` 25 → 18.
    */
   const cost = PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
-  return Stamina.value[p] >= cost ? '' : 'stamina'
+  return staminaLeft(p) >= cost ? '' : 'stamina'
 }
 
 /**
@@ -813,7 +846,7 @@ export function dodgeBlock(p: number): DodgeBlock {
  */
 export function canAffordAttack(p: number, cost: number): boolean {
   const reserve = PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
-  return Stamina.value[p] >= cost + reserve * PLAYER.dodge.reserveMult
+  return staminaLeft(p) >= cost + reserve * PLAYER.dodge.reserveMult
 }
 
 /**
@@ -1129,7 +1162,7 @@ export function playerControlSystem(ctx: ControlContext): void {
               const keep = GUARD.whiffKeepsDodge
                 ? PLAYER.dodge.staminaCost * (weaponOf(p).dodgeCostScale ?? 1)
                 : 0
-              const room = Math.max(0, Stamina.value[p] - keep)
+              const room = Math.max(0, staminaLeft(p) - keep)
               spendStamina(p, Math.min(GUARD.whiffStamina, room), '헛친가드')
             }
             sfx.deny()
@@ -1358,7 +1391,7 @@ export function playerControlSystem(ctx: ControlContext): void {
        * 나갈 수 있었던 구르기가 사라집니다 — takeBufferedSkill 이 경고하는
        * 것과 똑같은 함정입니다. 못 나가면 그냥 취소가 아닌 게 될 뿐입니다.
        */
-      if (Stamina.value[p] < cancelCost) return false
+      if (staminaLeft(p) < cancelCost) return false
       takeBufferedDodge()
       // 추가분만 여기서, 기본분은 beginDodge 가 무기 배율까지 얹어 뺍니다.
       spendStamina(p, PLAYER.dodge.cancelExtraCost, '구르기취소')

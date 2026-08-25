@@ -1318,5 +1318,84 @@ check(
   )
 }
 
+/**
+ * ── 🫁 **기력을 끈 스위치가 실제로 한 곳인가** ──────────────────────
+ *
+ * ── 무슨 일이 있었나 ────────────────────────────────────────────────
+ * 사용자가 *"왜 스태미너가 아직 그대로 있어?"* 라고 물었습니다. 맞는
+ * 말이었습니다 — 앞서 **구르기 값만** 0으로 내려 두고 「없앴다」고
+ * 말했는데, 공격·헛친 가드·가드 커밋은 그대로 내고 있었습니다.
+ *
+ * 원인은 값이 흩어져 있어서가 아니라 **막는 자리가 다섯 곳** 이었기
+ * 때문입니다. 그래서 `staminaLeft()` 하나로 모았습니다. 그런데 이건
+ * 지금까지 이 저장소가 열 번쯤 적어 온 그 약속입니다 —
+ *
+ *   > 주석의 약속은 지켜지지 않습니다. 검사로 굳혀야 합니다.
+ *
+ * 다음에 여섯 번째 문을 만드는 사람은 `Stamina.value[p] >= 뭐` 라고 쓸
+ * 것이고, 스위치는 **조용히** 반만 듣는 상태로 돌아갑니다. 이번에 이미
+ * 겪은 그대로요.
+ */
+{
+  const src = readFileSync(path.join(HERE, '..', 'src', 'systems', 'playerControl.ts'), 'utf8')
+  const bare = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  /**
+   * ⚠️ 「내는 것」과 「비교하는 것」을 가릅니다. 기력을 **깎는** 줄
+   *    (`Stamina.value[p] = ...`)과 회복은 정상이고, 잡아야 하는 것은
+   *    **부등호로 문을 여닫는** 줄입니다 — `>=` · `<` · `>` · `<=`.
+   */
+  const gates = bare
+    .split('\n')
+    .filter((l) => /Stamina\.value\[[^\]]+\]\s*(>=|<=|<|>)/.test(l))
+    /**
+     * ⚠️ 회복의 **상한 비교**는 뺍니다 — `Stamina.value < Stamina.max` 는
+     *    문을 여닫는 게 아니라 *"다 찼는가"* 를 묻는 줄입니다. 첫 판에서
+     *    이 줄이 빨강으로 떴는데, 고칠 것이 없는 빨강은 다음 사람이
+     *    **검사를 끄게** 만듭니다. 가르는 기준은 오른쪽에 무엇이 오는가
+     *    입니다 — 비용이 오면 문, `Stamina.max` 가 오면 상한.
+     */
+    .filter((l) => !/Stamina\.max\[/.test(l))
+  check(
+    bare.includes('function staminaLeft'),
+    '🫁 기력을 읽는 창구가 실제로 있다 (아래 검사의 게이트)',
+    'playerControl `staminaLeft()`',
+  )
+  check(
+    gates.length === 0,
+    '🫁 **막는 자리는 `Stamina.value` 를 직접 안 본다** (스위치가 반만 듣지 않게)',
+    gates.length ? gates.map((l) => l.trim()).join(' · ') : '문 다섯 곳 전부 staminaLeft 경유',
+  )
+}
+
+/**
+ * ── 🫁 **못 움직이는 눈금을 초록으로 읽지 않는가** ──────────────────
+ *
+ * 기력이 꺼진 판에서 `minStamina` 는 늘 만땅, `lowStaminaRatio` 는 늘 0
+ * 입니다. 그걸 그대로 찍으면 «최저 130 · 묶인 시간 0%» 라는, 읽는 사람이
+ * **성과로 착각할** 줄이 나옵니다. 이 저장소가 이미 두 번 데인 모양의
+ * 뒤집힌 판입니다 — *"아무도 못 넘는 문턱은 눈금이 아니라 벽"* 이었다면,
+ * 이번엔 *"아무도 못 내리는 눈금"* 입니다. 둘 다 답을 안 줍니다.
+ *
+ * 그래서 게임이 `runStats().staminaOn` 으로 스위치를 직접 내보내고,
+ * 벤치는 그 값을 보고 해당 줄을 **뺍니다.** 이 검사는 그 고리가 실제로
+ * 이어져 있는지만 봅니다 — 게임 → 봇 → 벤치, 세 칸 전부.
+ */
+{
+  const files = [
+    ['src/main.ts', 'staminaOn'],
+    ['tools/playthrough.mjs', 'staminaOn'],
+    ['tools/bench.mjs', 'l.staminaOn'],
+  ]
+  const missing = files.filter(([f, needle]) => {
+    const full = path.join(HERE, '..', f)
+    return !existsSync(full) || !readFileSync(full, 'utf8').includes(needle)
+  })
+  check(
+    missing.length === 0,
+    '🫁 **기력 스위치가 게임 → 봇 → 벤치까지 이어져 있다** (움직일 수 없는 눈금을 판정에서 빼려면)',
+    missing.length ? `끊긴 곳: ${missing.map(([f]) => f).join(' · ')}` : '세 칸 전부 이어짐',
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

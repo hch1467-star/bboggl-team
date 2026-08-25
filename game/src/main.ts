@@ -52,6 +52,7 @@ import {
   HURT,
   hurtFlash,
   PLAYER as PLAYER_CFG,
+  STAMINA as STAMINA_CFG,
   NAV,
   TRAVEL_KEY,
   POISE,
@@ -6198,6 +6199,16 @@ class Game {
     chainsDropped: { phase: number; leash: number; death: number; overwrite: number; heldFar: number }
     /** 판이 끝나는 순간 아직 예약을 안고 있는 적 수. */
     chainsPending: number
+    /**
+     * 🫁 **이 판에서 기력이 자원인가** (balance.ts `STAMINA.enabled`).
+     *
+     * ⚠️ 이게 false 면 아래 `staminaSpent` · `minStamina` · `lowStaminaRatio`
+     *    · `noStaminaPct` · `finisherNoStamina` 는 **영원히 0/만땅**입니다.
+     *    재는 쪽이 그걸 「초록」으로 읽으면, 움직일 수 없는 눈금을 보고
+     *    *"괜찮다"* 고 말하는 셈이 됩니다. 그래서 게임이 스위치를 직접
+     *    내보내고, 벤치는 이 값을 보고 그 줄들을 **판정에서 뺍니다.**
+     */
+    staminaOn: boolean
     /** 회피 한 번의 스태미나 값 — 봇이 상수를 베끼지 않게 게임이 알려줍니다. */
     dodgeStamina: number
     /** 지금까지 쓴 스태미나 누적 — 무기 효율을 정확히 재기 위해 게임이 셉니다. */
@@ -6362,6 +6373,7 @@ class Game {
       chainsDropped: readChainsDropped(),
       chainsPending: countChainsPending(),
       chainsLost: readChainsLost(),
+      staminaOn: STAMINA_CFG.enabled,
       dodgeStamina: PLAYER_CFG.dodge.staminaCost,
       staminaSpent: Number(readStaminaSpent().toFixed(1)),
       skillCasts: readRhythm().skillCasts,

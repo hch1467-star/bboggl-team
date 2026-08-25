@@ -4356,6 +4356,12 @@ try {
       graftsMade,
       /** 🌱 시작할 때 쥐여 준 각인석 — 0이면 «봇이 직접 주운 것만». */
       pregrowth: PREGROWTH,
+      /**
+       * 🫁 **이 판에서 기력이 자원이었는가** (게임이 알려 줍니다).
+       * false 면 바로 아래 세 줄은 움직일 수 없는 눈금입니다 — 벤치가
+       * 이걸 보고 그 줄들을 판정에서 뺍니다.
+       */
+      staminaOn: G.runStats().staminaOn,
       minStamina: Number(minStamina.toFixed(0)),
       dodgeCost,
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,

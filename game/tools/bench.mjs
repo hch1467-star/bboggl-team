@@ -1243,10 +1243,21 @@ console.log(
       ? ` · 🌱 시작 각인석 ${logs[0].pregrowth}개 (GROWTH=${logs[0].pregrowth})`
       : ' · 봇이 직접 주운 것만'),
 )
-console.log(
-  `  스태미나      최저 ${fmt(pick((l) => l.minStamina ?? 0), 0)} · ` +
-    `교전 중 **회피를 못 낼 만큼** 낮았던 시간 ${fmt(pick((l) => l.lowStaminaRatio ?? 0), 0)}%`,
-)
+/**
+ * ⚠️ **기력이 꺼져 있으면 이 줄을 아예 안 냅니다.**
+ * 꺼진 판에서 `minStamina` 는 항상 만땅이고 `lowStaminaRatio` 는 항상 0
+ * 입니다. 그 두 숫자를 그대로 찍으면 «최저 130 · 묶인 시간 0%» 라는
+ * 완벽해 보이는 줄이 나오고, 읽는 사람은 그걸 **성과**로 읽습니다.
+ * 움직일 수 없는 눈금은 좋은 소식이 아니라 **없는 눈금**입니다.
+ */
+if (logs.some((l) => l.staminaOn)) {
+  console.log(
+    `  스태미나      최저 ${fmt(pick((l) => l.minStamina ?? 0), 0)} · ` +
+      `교전 중 **회피를 못 낼 만큼** 낮았던 시간 ${fmt(pick((l) => l.lowStaminaRatio ?? 0), 0)}%`,
+  )
+} else {
+  console.log('  스태미나      🫁 **없는 판입니다** — 회피·공격 둘 다 공짜(balance.ts STAMINA)')
+}
 console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}회`)
 /**
  * ── ⏳ **마지막 구간이 가장 길어야 합니다** ────────────────────────
@@ -1812,7 +1823,9 @@ console.log(`  스킬 : 기본    ${fmt(pick((l) => (l.skillCasts ?? []).reduce(
   `${fmt(pick((l) => l.lightSwings ?? 0), 0)}회`)
 console.log(`  쓸 스킬 없음   ${fmt(pick((l) => l.noSkillPct), 0)}%`)
 console.log(`  셋 이상 준비   ${fmt(pick((l) => l.manySkillPct), 0)}%`)
-console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
+if (logs.some((l) => l.staminaOn)) {
+  console.log(`  회피 못 낼 때  ${fmt(pick((l) => l.lowStaminaRatio), 0)}%`)
+}
 /**
  * ── 이어짐 — 눌러 둔 것이 실제로 일했는가 ──────────────────────────
  *
