@@ -51,6 +51,7 @@ export class Hud {
   private readonly upgradeHint = el<HTMLElement>('upgradeHint')
   private readonly shortcutHint = el<HTMLElement>('shortcutHint')
   private readonly finisherHint = el<HTMLElement>('finisherHint')
+  private readonly mikiriHint = el<HTMLElement>('mikiriHint')
   private readonly colorHint = el<HTMLElement>('colorHint')
   private colorHintT = 0
   private readonly focusPips = el<HTMLElement>('focusPips')
@@ -253,6 +254,26 @@ export class Hud {
    */
   setFinisher(ready: boolean): void {
     this.finisherHint.style.display = ready ? 'block' : 'none'
+  }
+
+  /**
+   * 🎯 **간파 안내 — 처음 한 번만.**
+   *
+   * 간파는 셋이 동시에 갖춰져야 나옵니다: 예고의 창이 열려 있고 · 집중이
+   * 있고 · 상대가 사거리 안. 그 **교집합의 순간**을 짚어 주지 않으면
+   * 조작표의 한 줄만으로는 «지금이 그때인지»를 알 수가 없습니다.
+   *
+   * ⚠️ **해내면 다시는 안 뜹니다.** 부르는 쪽이 «아직 못 해 봤는가»를
+   *    같이 봅니다(main.ts). 계속 뜨면 그건 안내가 아니라 잔소리이고,
+   *    잔소리는 화면에서 **읽히지 않는 것**이 됩니다.
+   *
+   * ⚠️ **처형 안내와 같은 자리·같은 모양**입니다. 새 모양을 만들면 외울
+   *    것이 하나 늘어나는데, 둘이 하는 말은 같습니다 — *"지금 이것을
+   *    하라."* 둘이 동시에 뜰 일은 없습니다(처형은 무방비인 적에게,
+   *    간파는 예고 중인 적에게 — 한 적이 둘 다일 수 없습니다).
+   */
+  setMikiri(ready: boolean): void {
+    this.mikiriHint.style.display = ready ? 'block' : 'none'
   }
 
   /**

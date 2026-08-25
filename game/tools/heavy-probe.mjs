@@ -194,6 +194,14 @@ try {
           let respawns = 0
           let windupSwings = 0
           let heavySwings = 0
+          /**
+           * 🎯 **간파 안내가 실제로 뜬 적이 있는가.**
+           *
+           * 안내를 넣어 놓고 «뜨는지»를 안 보면, 이 회차에 두 번 겪은
+           * 그 모양이 셋째가 됩니다 — 만들었는데 **닿는 길이 없는 것**.
+           * 화면을 눈으로 볼 수 없으니 게임에게 묻습니다.
+           */
+          let hintSeen = 0
           const t0 = now()
           let guard = 0
           while (breaks < wantBreaks && now() - t0 < capSeconds && guard++ < 200000) {
@@ -231,6 +239,7 @@ try {
               continue
             }
 
+            if (G.mikiriHintUp?.() === true) hintSeen++
             const canHeavy = (G.focusInfo?.().focus ?? 0) >= 1
             if (hand === 0) {
               G.press('Mouse0')
@@ -319,6 +328,7 @@ try {
             lever: delta(after.poiseLever, baseLever),
             hits: delta(after.poiseHits, baseHits),
             mikiri: delta(after.mikiri, baseMik),
+            hintSeen,
           }
         },
         [tgt.id, hand, WANT_BREAKS, CAP_SECONDS],
@@ -471,6 +481,17 @@ try {
           }`,
       )
     }
+    /**
+     * 🎯 **안내가 실제로 뜬 적이 있는가** — 「띄우기만 하고 뜨는지는 안 본
+     *    안내」가 되지 않게. 조건이 셋(창·집중·사거리)이라 하나만 어긋나도
+     *    영영 안 뜨는데, **안 뜨는 안내는 없는 안내**입니다.
+     */
+    const hintFrames = rows.reduce((a, r) => a + (r.hintSeen ?? 0), 0)
+    check(
+      hintFrames > 0,
+      '🎯 **간파 안내가 실제로 화면에 떴다** (조건 셋이 겹치는 순간이 존재한다)',
+      `${hintFrames}프레임`,
+    )
     check(wSwings >= 10, '🎯 「간파노림」 손이 실제로 창에서 휘둘렀다 (분모)', `${wSwings}번`)
     if (wSwings >= 10) {
       const wSec = windRows.reduce((a, r) => a + r.elapsed, 0)

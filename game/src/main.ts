@@ -1838,6 +1838,40 @@ class Game {
     // 지나갑니다 — 자동 플레이가 "무방비인 적 곁에서 실제로 때린 시간 44%"
     // 라고 재 준 그 상태입니다.
     this.hud.setFinisher(playerAlive && finisherTarget(p) >= 0)
+    /**
+     * ── 🎯 **간파 안내 — 셋이 동시에 참인 순간에만** ────────────────────
+     *
+     * 간파는 이 게임에서 가장 어려운 한 수입니다: **예고의 창이 열려 있고 ·
+     * 집중이 있고 · 사거리 안**. 셋이 동시에 갖춰지는 순간은 짧고, 그 순간을
+     * 짚어 주지 않으면 조작표의 한 줄로는 «지금이 그때인지»를 알 수가
+     * 없습니다.
+     *
+     * ⚠️ **아직 못 해 봤을 때만** 뜹니다. 계속 뜨면 그건 안내가 아니라
+     *    잔소리이고, 잔소리는 화면에서 **읽히지 않는 것**이 됩니다.
+     *    셀레스트·하데스가 쓰는 규칙 그대로 — **해내면 사라집니다**
+     *    (`noteLearnedAction('mikiri')` 이 간파가 성립한 자리에서 켜집니다).
+     *
+     * ⚠️ **창을 여기서 다시 계산하지 않습니다.** 판정이 쓰는 그 함수를
+     *    그대로 부릅니다(`punishPressOpen`). 화면이 자기 창을 따로 가지면
+     *    «떴는데 안 되는» 자리가 생기고, 그건 거짓말하는 화면입니다 —
+     *    이 저장소가 이번 회차에 직접 만든 실패입니다(강타 준비 0.42초 >
+     *    창 0.3초).
+     */
+    const mikiriKnown = readLearnedActions().includes('mikiri')
+    let mikiriReady = false
+    if (playerAlive && !mikiriKnown && Player.focus[p] >= 1) {
+      const ids = enemyQuery.run()
+      for (let i = 0; i < enemyQuery.count; i++) {
+        const e = ids[i]
+        if (!isAlive(e) || !punishPressOpen(e, p)) continue
+        const d = Math.hypot(Transform.x[e] - Transform.x[p], Transform.z[e] - Transform.z[p])
+        if (d <= 3.2) {
+          mikiriReady = true
+          break
+        }
+      }
+    }
+    this.hud.setMikiri(mikiriReady)
 
     /** ---- 3.72 사다리(지름길) ---- */
     this.tryDropLadder(p, playerAlive)
@@ -3655,6 +3689,18 @@ class Game {
    * 자리가 생깁니다. 짧으면 그 공격은 **영영 간파 불가**인데, 그건 설계
    * 결정일 수는 있어도 **모르고 있으면 안 되는** 것입니다.
    */
+  /**
+   * 🎯 **간파 안내가 지금 떠 있는가** — 검사가 화면 대신 물어봅니다.
+   *
+   * ⚠️ 이 훅이 없으면 「안내를 넣었다」가 **검사되지 않는 약속**이 됩니다.
+   *    이 회차에 정확히 그 모양으로 두 번 데였습니다 — 물리적으로 못 내는
+   *    창을 만들고, 도달할 수 없는 가지에 규칙을 두고. **띄우기만 하고
+   *    뜨는지는 안 본 안내**가 셋째가 되지 않게 합니다.
+   */
+  debugMikiriHint(): boolean {
+    return (document.getElementById('mikiriHint')?.style.display ?? 'none') !== 'none'
+  }
+
   debugPunishable(): { id: string; windup: number; need: number; ok: boolean }[] {
     const p = this.playerEntity
     const need = heavyLandDelay(p)
@@ -7526,6 +7572,7 @@ declare global {
       poiseRule: (kindId: string, breaks: number) => number
       guardPoise: (kindId: string) => { dmg: number; poiseMax: number }
       punishable: () => { id: string; windup: number; need: number; ok: boolean }[]
+      mikiriHintUp: () => boolean
       swings: () => {
         attackId: string
         hit: boolean
@@ -8605,6 +8652,8 @@ window.__game = {
   guardPoise: (kindId) => game.debugGuardPoise(kindId),
   /** 🎯 공격마다 «간파할 창이 존재하는가» — 게임이 산수를 합니다. */
   punishable: () => game.debugPunishable(),
+  /** 🎯 간파 안내가 지금 떠 있는가 — 「띄우기만 하고 뜨는지는 안 본 안내」가 되지 않게. */
+  mikiriHintUp: () => game.debugMikiriHint(),
   /** 🔎 적이 안 때리고 서 있던 프레임의 이유 — 읽으면서 비웁니다. */
   idleReasons: () => readIdleReasons(),
   /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */
