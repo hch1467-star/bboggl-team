@@ -3006,7 +3006,30 @@ try {
            * 지금 규칙은 여전히 단순합니다 — *"있으면 쓴다"*. 다만 이번에는
            * 단순한 쪽이 **수치가 가리키는 쪽**입니다.
            */
-          if (G.focusInfo().focus >= HEAVY_BURN_AT) tap('Mouse2')
+          /**
+           * ── 🎯 **간파를 노립니다 — 창이 열렸고 집중이 있으면** ──────────
+           *
+           * 간파는 «예고의 마지막 구간에 강타를 넣으면 강인도를 통째로
+           * 부수는» 사건입니다(combat.ts `punishing && spec.heavyBlow`).
+           * 봇이 이걸 안 노리면 **모든 벤치가 이 지렛대를 영영 0%로
+           * 적습니다** — 앞 회차에서 「예고중」이 정확히 그렇게 1%로
+           * 찍혔고, 저는 하마터면 그걸 *"규칙이 안 통한다"* 로 읽을
+           * 뻔했습니다.
+           *
+           * ⚠️ **창은 게임에게 묻습니다**(`punishOpen`). 봇이
+           *    `punishFraction × windup` 을 계산하면 규칙이 두 벌이 되고,
+           *    바로 그 «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로
+           *    만든 자리입니다.
+           *
+           * ⚠️ **가까운 적이 아니라 «지금 창이 열린 적»을 봅니다.** 여럿이
+           *    붙어 있을 때 창을 연 놈이 가장 가깝다는 보장이 없습니다.
+           */
+          const punishTarget = G.threats(3.2).find((f) => f.punishOpen === true)
+          if (punishTarget && G.focusInfo().focus >= HEAVY_BURN_AT) {
+            markAct('간파')
+            G.aimAtWorld(punishTarget.x, punishTarget.z)
+            tap('Mouse2')
+          } else if (G.focusInfo().focus >= HEAVY_BURN_AT) tap('Mouse2')
           else if (ready.length > 0) tap(pickSkill(ready).key)
           else tap('Mouse0')
         }

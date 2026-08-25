@@ -6923,6 +6923,14 @@ class Game {
     intent: number
     aggro: boolean
     winding: boolean
+    /**
+     * 🎯 **지금 강타를 넣으면 «간파»인가** — 예고의 마지막 구간.
+     *
+     * 봇에게 숨은 정보를 주는 것이 아닙니다: 예고 도형은 안쪽이 차오르고
+     * 다 차면 터집니다(`vfx.ts`). 즉 «예고의 끝»은 사람도 화면에서
+     * 보고 있습니다 — 바로 아래 `timer` 주석과 같은 근거입니다.
+     */
+    punishOpen: boolean
     /** 내가 이 적의 정면에 있는가 (반격 가능 방향) */
     inFront: boolean
     /**
@@ -7049,6 +7057,14 @@ class Game {
         /** 나를 쫓고 있는가 — "몇 마리를 동시에 상대하는가"를 재려면 필요합니다. */
         aggro: Enemy.aggro[e] === 1,
         winding: attacking && Actor.phase[e] === AttackPhase.Windup,
+        /**
+         * 🎯 **지금 강타를 넣으면 «간파»인가.**
+         *
+         * ⚠️ 봇이 `punishFraction × windup` 을 계산하면 규칙이 두 벌이 됩니다.
+         *    바로 그 «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로 만든
+         *    자리입니다. 판정이 쓰는 함수를 그대로 부릅니다.
+         */
+        punishOpen: punishWindowOpen(e),
         timer:
           attacking && Actor.phase[e] === AttackPhase.Windup
             ? Number(Actor.timer[e].toFixed(3))
@@ -7871,6 +7887,8 @@ declare global {
         intent: number
         aggro: boolean
         winding: boolean
+        /** 🎯 지금 강타를 넣으면 «간파»인가 — 판정이 쓰는 그 함수를 그대로 부릅니다. */
+        punishOpen: boolean
         inFront: boolean
         /** ⏳ 남은 예고 시간(초). 예고 중이 아니면 0 — 화면의 투명도와 같은 값입니다. */
         timer: number
