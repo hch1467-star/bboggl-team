@@ -175,6 +175,9 @@ try {
      * 모아 쓰면 56% 손해입니다.
      */
     const HEAVY_BURN_AT = 1
+    /** 🎯 간파 시도 — **예고 하나당 한 번**만 셉니다(아래 설계 노트). */
+    const punishSeen = new Set()
+    let punishTries = 0
     /**
      * ⚠️ **시뮬레이션 시계**를 씁니다(`simElapsed`).
      *
@@ -2589,7 +2592,29 @@ try {
         const punish = threats.find(
           (t) => t.punishOpen === true && t.dist <= 3.2 && t.facing && t.intent !== 4,
         )
+        // 예고가 끝난 적은 장부에서 지웁니다 — 다음 예고를 새 시도로 세게.
+        for (const id of [...punishSeen]) {
+          if (!threats.some((t) => t.entity === id && t.winding)) punishSeen.delete(id)
+        }
         if (punish && G.focusInfo().focus >= HEAVY_BURN_AT) {
+          /**
+           * ⚠️ **예고 하나를 한 번만 셉니다 — 프레임 수가 아니라 시도로.**
+           *
+           * 처음엔 이 가지에 들어올 때마다 셌습니다. 그리고 벤치가
+           * **「누른 것 220회 → 성공 2회」** 를 찍었습니다. 220은 시도가
+           * 아닙니다 — 창은 0.3초인데 봇은 초당 148번 도니까 **창 하나에
+           * 44번**씩 들어옵니다. 220회는 사실 **창 다섯 개**입니다.
+           *
+           * 이 저장소가 가드에서 **똑같이** 데였습니다: *"한 판에 2530회가
+           * 찍혔고 그건 시도가 아니라 프레임 수였습니다. 성공 1회와 나란히
+           * 놓으면 0% 인데, 그 0% 는 아무 뜻이 없습니다."*
+           *
+           * 그때 쓴 처방을 그대로 씁니다 — **올라가는 순간에만** 셉니다.
+           */
+          if (!punishSeen.has(punish.entity)) {
+            punishSeen.add(punish.entity)
+            punishTries++
+          }
           markAct('간파')
           G.aimAtWorld(punish.x, punish.z)
           tap('Mouse2')
@@ -4363,7 +4388,7 @@ try {
        *    (`mikiri`)와 나란히 놓아야 「0회」의 원인이 갈립니다.
        *    시도 0 이면 봇 문제, 시도는 많은데 성공 0 이면 규칙 문제입니다.
        */
-      punishTries: actTotals.get('간파') ?? 0,
+      punishTries,
       mikiri: G.runStats().mikiri ?? {},
       /**
        * 🩸 출혈이 터진 횟수. **붕괴와 나란히** 놓아야 두 축이 실제로
