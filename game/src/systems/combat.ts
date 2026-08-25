@@ -680,6 +680,25 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
 
   Enemy.poiseIdleT[t] = 0
   Enemy.poise[t] -= dmg
+  /**
+   * ── 🏅 **누가 «일»을 했는가 — 최종타가 아니라 기여** ──────────────────
+   *
+   * 처음엔 붕괴를 **마지막에 때린 것**에게 돌렸습니다. 그랬더니 강타가
+   * 붕괴 112회 중 **1회**로 찍혔습니다. 그런데 계산해 보면 강타는 잡몹
+   * (강인도 30)을 **한 방에** 무너뜨립니다(0.62×40×2.2 = 54.6).
+   *
+   * 답은 보스에 있었습니다 — **강인도 105**. 강타 한 방으로는 못 넘고
+   * 두세 번 쌓아야 하는데, **넘기는 마지막 타격은 대개 평타**입니다.
+   * 그러면 강타가 54.6을 깎아 놓고 공은 평타 4.2가 가져갑니다.
+   *
+   * 100의 피해를 준 뒤 마지막 1 틱에게 처치를 돌리는 것과 같습니다.
+   * **강인도는 누적인데 최종타로 기록하면 정확히 거꾸로 읽힙니다.**
+   *
+   * 그래서 **깎은 만큼**을 출처별로 쌓습니다. 「이긴 이유가 나에게
+   * 있는가」는 *"누가 마지막을 쳤나"* 가 아니라 *"누가 일을 했나"* 입니다.
+   */
+  poiseWorkBySource[spec.source ?? '평타'] =
+    (poiseWorkBySource[spec.source ?? '평타'] ?? 0) + Math.max(0, dmg)
   if (Enemy.poise[t] > 0) return
 
   /**
@@ -1114,6 +1133,17 @@ export type BreakCause =
   | '기습'
   | '출혈'
   | '통'
+
+/** 🏅 강인도를 **깎은 양**의 출처별 누계 — 최종타가 아니라 기여. */
+const poiseWorkBySource: Record<string, number> = {}
+
+export function readPoiseWork(): Record<string, number> {
+  return { ...poiseWorkBySource }
+}
+
+export function resetPoiseWork(): void {
+  for (const k of Object.keys(poiseWorkBySource)) delete poiseWorkBySource[k]
+}
 
 export function breakPoise(t: number, by: BreakCause = '평타'): void {
   const cfg = enemyDef(Enemy.kind[t])

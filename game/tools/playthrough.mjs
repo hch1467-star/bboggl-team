@@ -4250,6 +4250,8 @@ try {
       poiseBreaks: G.runStats().poiseBreaks,
       /** 🏅 무엇이 무너뜨렸는가 — 「이긴 이유가 나에게 있는가」의 재료. */
       breakBy: G.runStats().breakBy ?? {},
+      /** 🏅 강인도를 깎은 «양» — 최종타가 아니라 기여. */
+      poiseWork: G.runStats().poiseWork ?? {},
       /**
        * 🩸 출혈이 터진 횟수. **붕괴와 나란히** 놓아야 두 축이 실제로
        * 갈리는지 보입니다 — 대검은 무너뜨리고 단검은 터뜨린다는 주장이

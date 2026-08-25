@@ -1006,6 +1006,32 @@ for (let i = 0; i < 3; i++) {
     console.log(
       `  🏅 내가 해서    붕괴 ${all}회 중 **골라서 낸 것 ${mine}회 (${Math.round((mine / all) * 100)}%)** — ${named}`,
     )
+    /**
+     * ── 🔨 **누가 «일»을 했는가 — 최종타가 아니라 기여** ────────────────
+     *
+     * 위 줄은 «마지막에 때린 것»을 셉니다. 그런데 강인도는 **누적**이라
+     * 그것만 보면 거꾸로 읽힙니다 — 실제로 강타가 붕괴 112회 중 **1회**로
+     * 찍혔는데, 계산해 보면 강타는 잡몹(강인도 30)을 **한 방에** 무너뜨립니다
+     * (0.62×40×2.2 = 54.6). 보스는 강인도가 105 라 강타가 54.6을 깎아 놓고
+     * **넘기는 마지막 한 대는 대개 평타**입니다. 공은 평타가 가져갑니다.
+     *
+     * 100의 피해를 준 뒤 마지막 1 틱에게 처치를 돌리는 것과 같습니다.
+     * 그래서 **깎은 양**을 나란히 냅니다.
+     */
+    const work = {}
+    for (const r of pick((l) => l.poiseWork ?? {}))
+      for (const [k, v] of Object.entries(r)) work[k] = (work[k] ?? 0) + v
+    const workAll = Object.values(work).reduce((a, b) => a + b, 0)
+    if (workAll > 0) {
+      const mineWork = DELIBERATE.reduce((a, k) => a + (work[k] ?? 0), 0)
+      const wNamed = Object.entries(work)
+        .sort((x, y) => y[1] - x[1])
+        .map(([k, v]) => `${k} ${Math.round((v / workAll) * 100)}%`)
+        .join(' · ')
+      console.log(
+        `  🔨 일한 몫      강인도를 깎은 양 기준 **골라서 낸 것 ${Math.round((mineWork / workAll) * 100)}%** — ${wNamed}`,
+      )
+    }
   } else {
     // 「빈 표본으로 통과하지 않게」 — 0회면 비율을 안 냅니다.
     console.log('  🏅 내가 해서    붕괴가 한 번도 없었습니다 — 비율을 낼 수 없습니다')

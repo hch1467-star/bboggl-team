@@ -167,6 +167,7 @@ import {
   swingRecords,
   flushSwingRecords,
   poiseDamage,
+  readPoiseWork,
   countInBlast,
   pickupBlownEvents,
 } from './systems/combat'
@@ -5962,6 +5963,7 @@ class Game {
     poiseBreaks: number
     /** 🏅 붕괴를 만든 것의 이름별 횟수 — 실력인지 우연인지 가르는 칸. */
     breakBy: Record<string, number>
+    poiseWork: Record<string, number>
     windupBreaks: number
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
@@ -6092,6 +6094,11 @@ class Game {
     return {
       poiseBreaks: this.poiseBreaks,
       breakBy: { ...this.breakBy },
+      /**
+       * 🏅 **강인도를 깎은 «양»** — 최종타가 아니라 기여.
+       * 붕괴는 누적인데 최종타로만 세면 거꾸로 읽힙니다(combat.ts 주석).
+       */
+      poiseWork: readPoiseWork(),
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
@@ -8322,6 +8329,7 @@ declare global {
         enemyHits: number
         poiseBreaks: number
         breakBy: Record<string, number>
+        poiseWork: Record<string, number>
         windupBreaks: number
         greenSwung: number
         greenDied: number
