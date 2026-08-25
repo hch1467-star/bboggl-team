@@ -637,6 +637,43 @@ export function punishWindowLen(t: number): number {
   return Math.max(POISE.punishFloor, Enemy.windupLen[t] * POISE.punishFraction)
 }
 
+/**
+ * ── 🎯 **«지금 누르면» 간파인가 — 사람이 보는 신호** ────────────────────
+ *
+ * ── 왜 «닿는 순간»과 «누르는 순간»을 갈라야 했나 (잰 숫자) ──────────
+ * 처음엔 판정도 신호도 **닿는 순간**의 창 하나로 봤습니다. 그리고 간파가
+ * **0회** 나왔습니다. 강타가 닿은 자리를 세 칸으로 갈라 세니 답이 나왔습니다:
+ *
+ *     강타섞기 손  — 창밖 2 · 4 · 6   · **성공 0**
+ *     간파노림 손  — 강타가 **아예 안 닿음**(창에서 눌렀는데도)
+ *
+ * 산수를 해 보면 당연했습니다:
+ *
+ *     강타의 준비  `FOCUS.heavy.windup` = **0.42초**
+ *     창의 길이    `punishWindowLen`    = **0.3초**
+ *
+ * 창이 열리는 순간에 눌러도 강타는 예고가 끝나고 **0.12초 뒤에** 닿습니다.
+ * **누구도 못 넘는 문턱이었습니다** — 이 저장소가 적어 둔 *"아무도 못 넘는
+ * 문턱은 눈금이 아니라 벽이다"* 그대로입니다.
+ *
+ * ── 그래서 신호를 «준비 시간만큼 앞으로» 옮깁니다 ─────────────────────
+ * 사람이 판단하는 시점은 **누를 때**입니다(세키로의 미키리도 오공의 識破도
+ * 입력을 봅니다). 그러니 신호는 *"지금 누르면 창 안에 닿는가"* 여야 합니다:
+ *
+ *     닿을 때 남을 예고 = 지금 남은 예고 − 강타의 준비
+ *     그 값이 (0, 창] 안이면 → **지금 누르면 간파**
+ *
+ * ⚠️ **판정은 여전히 «닿는 순간»입니다**(`punishWindowOpen`). 둘은 같은
+ *    창을 다른 시점에서 본 것이라 반드시 한 규칙에서 나와야 합니다 —
+ *    여기서 갈라지면 «신호는 켜졌는데 안 되는» 상태가 생기고, 그건
+ *    플레이어에게 **거짓말하는 화면**입니다.
+ */
+export function punishPressOpen(t: number, p: number): boolean {
+  if (!(Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup)) return false
+  const landsAt = Actor.timer[t] - stepFor(weaponOf(p), HEAVY_COMBO, Player.focus[p], 0).windup
+  return landsAt > 0 && landsAt <= punishWindowLen(t)
+}
+
 function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
   /**

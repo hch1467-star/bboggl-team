@@ -171,7 +171,7 @@ import {
   readPoiseWork,
   readPoiseLever,
   readPoiseHits,
-  punishWindowOpen,
+  punishPressOpen,
   readMikiri,
   punishWindowLen,
   countInBlast,
@@ -6928,7 +6928,7 @@ class Game {
     aggro: boolean
     winding: boolean
     /**
-     * 🎯 **지금 강타를 넣으면 «간파»인가** — 예고의 마지막 구간.
+     * 🎯 **지금 «누르면» 간파인가** — 강타의 준비(0.42초)를 이미 뺀 값입니다.
      *
      * 봇에게 숨은 정보를 주는 것이 아닙니다: 예고 도형은 안쪽이 차오르고
      * 다 차면 터집니다(`vfx.ts`). 즉 «예고의 끝»은 사람도 화면에서
@@ -7062,13 +7062,13 @@ class Game {
         aggro: Enemy.aggro[e] === 1,
         winding: attacking && Actor.phase[e] === AttackPhase.Windup,
         /**
-         * 🎯 **지금 강타를 넣으면 «간파»인가.**
+         * 🎯 **지금 «누르면» 간파인가** — 강타의 준비를 이미 뺀 값입니다.
          *
          * ⚠️ 봇이 `punishFraction × windup` 을 계산하면 규칙이 두 벌이 됩니다.
          *    바로 그 «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로 만든
          *    자리입니다. 판정이 쓰는 함수를 그대로 부릅니다.
          */
-        punishOpen: punishWindowOpen(e),
+        punishOpen: punishPressOpen(e, p),
         timer:
           attacking && Actor.phase[e] === AttackPhase.Windup
             ? Number(Actor.timer[e].toFixed(3))
@@ -7636,7 +7636,7 @@ declare global {
          */
         attacking: boolean
         winding: boolean
-        /** 🎯 지금 때리면 «간파»인가 — 예고의 마지막 구간. */
+        /** 🎯 지금 «누르면» 간파인가 — 강타의 준비를 이미 뺀 값. */
         punishOpen: boolean
         punishWindow: number
         /** 후딜(판정이 끝난 무방비 구간)인가 — 등 뒤로 돌 수 있는 진짜 창. */
@@ -7891,7 +7891,7 @@ declare global {
         intent: number
         aggro: boolean
         winding: boolean
-        /** 🎯 지금 강타를 넣으면 «간파»인가 — 판정이 쓰는 그 함수를 그대로 부릅니다. */
+        /** 🎯 지금 «누르면» 간파인가 — 판정이 쓰는 그 규칙에서 나옵니다. */
         punishOpen: boolean
         inFront: boolean
         /** ⏳ 남은 예고 시간(초). 예고 중이 아니면 0 — 화면의 투명도와 같은 값입니다. */
@@ -8758,13 +8758,18 @@ window.__game = {
       winding:
         Actor.state[entity] === ActorState.Attack && Actor.phase[entity] === AttackPhase.Windup,
       /**
-       * 🎯 **지금 때리면 «간파»인가** — 예고의 마지막 구간(`POISE.punishFraction`).
+       * 🎯 **지금 «누르면» 간파인가** — 강타의 준비(0.42초)를 이미 뺀 값입니다.
+       *
+       * ⚠️ 「닿는 순간의 창」을 그대로 내보냈다가 **아무도 못 넘는 문턱**을
+       *    만들었습니다 — 창(0.3초)보다 강타의 준비(0.42초)가 길어서,
+       *    신호가 켜졌을 때 눌러도 예고가 끝난 **뒤에** 닿았습니다.
+       *    화면이 켜지는데 안 되는 것은 **거짓말하는 화면**입니다.
        *
        * ⚠️ 프로브·봇이 `punishFraction × windup` 을 **베껴 계산하면 안 됩니다.**
        *    그 «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로 만든 자리입니다.
        *    판정이 쓰는 그 함수를 그대로 부릅니다(combat.ts `punishWindowOpen`).
        */
-      punishOpen: punishWindowOpen(entity),
+      punishOpen: punishPressOpen(entity, game.debugPlayerEntity()),
       /** 🎯 창이 열려 있는 길이(초) — «얼마나 어려운 창인가»를 재려면 분모가 필요합니다. */
       punishWindow: Number(punishWindowLen(entity).toFixed(3)),
       rotY: Number(Transform.rotY[entity].toFixed(3)),
