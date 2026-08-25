@@ -482,6 +482,8 @@ try {
        * 한 손실에 원인 하나 — 장부는 그래야 닫힙니다.
        */
       let transKilled = 0
+      /** 💀 죽는 순간 보스가 물고 있던 예고(0 또는 1). 아래 죽음 판정에서 셉니다. */
+      let deathKilled = 0
       let wasWinding = false
       /**
        * ── 🎓 **가르치느라 붙들려 있던 시간** ──────────────────────────
@@ -525,6 +527,25 @@ try {
         const dt = Math.max(0, now() - lastT)
         lastT = now()
         if (!be || be.hp <= 0) {
+          /**
+           * ── 💀 **장부의 넷째 칸 — 죽음이 지운 예고** ────────────────
+           *
+           * 세 판 모두 「설명못함 **1**」이 나왔습니다. 판마다 **정확히
+           * 하나씩**, 세 판 내리요. 그 정도로 규칙적이면 노이즈가 아니라
+           * **장부에 칸이 하나 없는 것**입니다.
+           *
+           * 후보는 하나뿐이었습니다: 보스가 **예고를 물고 있는 채로
+           * 죽으면** 그 예고는 판정에 못 갑니다. 마지막 타격이 예고
+           * 도중에 들어가는 것은 드문 일이 아니라 **거의 항상**입니다 —
+           * 붙어 서서 쉬지 않고 때리는 침대이므로 보스는 늘 뭔가를
+           * 걸고 있습니다.
+           *
+           * ⚠️ 붕괴와 겹치지 않습니다. 예고가 붕괴로 이미 끝났다면 그
+           *    프레임에 `wasWinding` 이 거짓이라 여기서 안 셉니다 —
+           *    「전환이 지운 예고」에서 세운 규칙과 같습니다:
+           *    **한 손실에 원인 하나.**
+           */
+          if (wasWinding) deathKilled = 1
           done = true
           break
         }
@@ -674,6 +695,7 @@ try {
         windupBreaks: (G.runStats?.().windupBreaks ?? 0) - wb0,
         transitions,
         transKilled,
+        deathKilled,
         heldT,
         raceT,
       }
@@ -685,9 +707,9 @@ try {
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
         ` · 1단계 깎기 ${r.raceT.toFixed(1)}초 + 붙듦 ${r.heldT.toFixed(1)}초` +
-        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled}` +
+        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled} + 죽음 ${r.deathKilled}` +
         (() => {
-          const rest = r.commits - r.swings - r.windupBreaks - r.transKilled
+          const rest = r.commits - r.swings - r.windupBreaks - r.transKilled - r.deathKilled
           return rest === 0 ? ' (장부 맞음)' : ` + 설명못함 **${rest}** ⚠️`
         })() +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
@@ -756,13 +778,15 @@ try {
     wb: s.windupBreaks,
     tr: s.transKilled,
     trAll: s.transitions,
+    dk: s.deathKilled,
   }))
-  const rest = led.reduce((a, r) => a + (r.lost - r.wb - r.tr), 0)
+  const rest = led.reduce((a, r) => a + (r.lost - r.wb - r.tr - r.dk), 0)
   check(
     rest === 0 && led.length > 0,
-    '🧾 잃은 예고가 **전부 설명된다** (붕괴 + 전환 = 잃은 예고 · 판정의 게이트)',
+    '🧾 잃은 예고가 **전부 설명된다** (붕괴 + 전환 + 죽음 = 잃은 예고 · 판정의 게이트)',
     led.length
-      ? led.map((r) => `${r.lost}=${r.wb}+${r.tr}`).join(' · ') + (rest ? ` ← 설명못함 ${rest}` : '')
+      ? led.map((r) => `${r.lost}=${r.wb}+${r.tr}+${r.dk}`).join(' · ') +
+        (rest ? ` ← 설명못함 ${rest}` : '')
       : '판이 없습니다',
   )
   /**
@@ -905,12 +929,35 @@ try {
      *    처형이 들어가면 더 짧아집니다. 그 정도는 설계대로입니다 —
      *    **배 이상 벌어질 때만** 구조를 의심합니다.
      */
-    const hi = Math.max(...per)
-    const lo = Math.min(...per.filter((v) => v > 0.05))
+    /**
+     * ── ⚖️ **바로 아래 검사와 «1단계»의 뜻을 맞춥니다** ──────────────
+     *
+     * 이 두 검사가 같은 판을 놓고 반대로 말한 적이 있습니다:
+     *
+     *     ❌ 한 구간만 유독 길지 않다 — 가장 김 **7.2초** · 배수 3.2
+     *     ✅ 🏁 마지막 구간이 가장 길다 — 1단계 **1.3초** · 3단계 4.5초
+     *
+     * 같은 1단계가 한 줄에서는 7.2초, 다음 줄에서는 1.3초입니다. 차이는
+     * **붙듦 5.9초** — 색을 다 보여줄 때까지 보스 체력을 붙들어 두는
+     * «가르치는 시간»입니다. 🏁 는 그걸 빼고, 이 검사는 안 뺐습니다.
+     *
+     * 어느 쪽이 옳은가: **빼는 쪽입니다.** 이 검사가 묻는 것은 *"체력을
+     * 고르게 나눴는데 한 구간만 오래 걸리는가"* 이고, 붙듦은 체력 배분과
+     * 아무 상관이 없습니다 — 플레이어가 때려도 안 깎이도록 **일부러**
+     * 멈춰 둔 시간입니다. 그걸 넣고 재면 「1단계가 길다」는 답이 항상
+     * 나오는데, 그건 구조 문제가 아니라 **설계대로**입니다.
+     *
+     * ⭐ 같은 화면의 두 검사가 같은 이름을 다르게 세면, 반드시 하나는
+     *    거짓말을 합니다. 정의는 한 곳에서 나와야 합니다.
+     */
+    const perNet = [mid(ok.map((s) => s.raceT)), per[1], per[2]]
+    const hi = Math.max(...perNet)
+    const lo = Math.min(...perNet.filter((v) => v > 0.05))
     check(
       hi <= lo * 2.5,
-      '한 구간만 유독 길지 않다 (가장 긴 구간 ≤ 가장 짧은 구간 × 2.5)',
-      `가장 김 ${hi.toFixed(1)}초 · 가장 짧음 ${lo.toFixed(1)}초 · 배수 ${(hi / lo).toFixed(1)}`,
+      '한 구간만 유독 길지 않다 (가장 긴 구간 ≤ 가장 짧은 구간 × 2.5 · **붙듦 제외** — 🏁 와 같은 자)',
+      `가장 김 ${hi.toFixed(1)}초 · 가장 짧음 ${lo.toFixed(1)}초 · 배수 ${(hi / lo).toFixed(1)}` +
+        ` [1단계는 깎던 시간 ${perNet[0].toFixed(1)}초 · 붙듦 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초 별도]`,
     )
 
     /**
