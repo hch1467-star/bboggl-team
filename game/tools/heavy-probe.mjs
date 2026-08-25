@@ -608,6 +608,7 @@ try {
           const t0 = now()
           let guard = 0
           let broke = 0
+          let wasBroken = false
           while (now() - t0 < capSeconds && guard++ < 200000) {
             const fi = G.enemyInfo(foe)
             if (!fi || fi.hp <= 0) break
@@ -616,7 +617,18 @@ try {
             /** 플레이어만 채웁니다 — 재려는 것은 «얼마나 걸리나»지 승패가 아닙니다. */
             G.setHp(G.playerEntity(), 100)
             G.setStamina(100)
-            if (fi.broken === true) broke++
+            /**
+             * ⚠️ **사건으로 셉니다 — 프레임이 아니라.**
+             *
+             * 처음엔 `if (fi.broken) broke++` 였습니다. 그러면 **무방비인
+             * 동안 매 프레임** 올라가서, 「붕괴 5」가 5회가 아니라
+             * **5프레임**이 됩니다. 이 세션에서 **세 번째**로 같은 실수를
+             * 했습니다 — 가드 시도(2530회) · 간파 시도(220회) · 여기.
+             *
+             * 처방도 세 번 다 같습니다: **올라가는 순간에만** 셉니다.
+             */
+            if (fi.broken === true && !wasBroken) broke++
+            wasBroken = fi.broken === true
             const canHeavy = (G.focusInfo?.().focus ?? 0) >= 1
             if (hand === 1 && canHeavy) {
               /** ② **무너뜨리고 치기** — 집중이 있으면 태웁니다(창이면 간파). */
