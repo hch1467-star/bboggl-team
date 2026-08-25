@@ -613,6 +613,30 @@ export function setPlayerInvulnerable(on: boolean): void {
  * 잡아 적이 적을 때리게 했다"* 입니다. 같은 것을 재는 값입니다.
  * 이제 잡몹은 **두 번** 스쳐야 무너집니다(21.8 × 2 > 30).
  */
+/**
+ * 🎯 **지금 때리면 «간파»인가** — 규칙은 여기 한 곳에만 있습니다.
+ *
+ * ⚠️ **함수로 뺀 이유가 전부입니다.** 이 판단이 필요한 곳이 셋입니다:
+ *    판정하는 자리(`applyPoise`) · **화면**(예고 도형이 이 순간을 알려야
+ *    합니다) · **프로브와 봇**(겨눌 수 있어야 합니다).
+ *
+ *    처음엔 `applyPoise` 안에 식을 그대로 써 뒀습니다. 그러면 프로브는
+ *    `punishFraction × windupLen` 을 **베껴 적어야** 하는데, 바로 그
+ *    «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로 만든 자리입니다.
+ *    규칙은 한 곳에, 나머지는 물어봅니다.
+ *
+ * 창을 «남은 시간»으로 재는 이유는 `POISE.punishFraction` 설계 노트에.
+ */
+export function punishWindowOpen(t: number): boolean {
+  if (!(Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup)) return false
+  return Actor.timer[t] <= punishWindowLen(t)
+}
+
+/** 이번 예고에서 창이 열려 있는 길이(초). 화면·프로브가 같이 씁니다. */
+export function punishWindowLen(t: number): number {
+  return Math.max(POISE.punishFloor, Enemy.windupLen[t] * POISE.punishFraction)
+}
+
 function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
   /**
@@ -626,9 +650,7 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
    * 길어지는데, 그때도 **터지기 직전**이 간파의 순간이어야 합니다.
    * 시작점에서 재면 뜸 들인 예고에서 창이 엉뚱한 데 열립니다.
    */
-  const punishing =
-    winding &&
-    Actor.timer[t] <= Math.max(POISE.punishFloor, Enemy.windupLen[t] * POISE.punishFraction)
+  const punishing = winding && punishWindowOpen(t)
 
   /**
    * 🟢 초록 예고 중에는 **강인도가 깎이지 않습니다.**

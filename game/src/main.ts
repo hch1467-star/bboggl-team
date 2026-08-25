@@ -171,6 +171,8 @@ import {
   readPoiseWork,
   readPoiseLever,
   readPoiseHits,
+  punishWindowOpen,
+  punishWindowLen,
   countInBlast,
   pickupBlownEvents,
 } from './systems/combat'
@@ -7614,6 +7616,9 @@ declare global {
          */
         attacking: boolean
         winding: boolean
+        /** 🎯 지금 때리면 «간파»인가 — 예고의 마지막 구간. */
+        punishOpen: boolean
+        punishWindow: number
         /** 후딜(판정이 끝난 무방비 구간)인가 — 등 뒤로 돌 수 있는 진짜 창. */
         recovering: boolean
         rotY: number
@@ -8729,6 +8734,16 @@ window.__game = {
       // 예고 중인가 — 반격 검증이 `attackPhase === 0` 을 베끼지 않도록 노출합니다.
       winding:
         Actor.state[entity] === ActorState.Attack && Actor.phase[entity] === AttackPhase.Windup,
+      /**
+       * 🎯 **지금 때리면 «간파»인가** — 예고의 마지막 구간(`POISE.punishFraction`).
+       *
+       * ⚠️ 프로브·봇이 `punishFraction × windup` 을 **베껴 계산하면 안 됩니다.**
+       *    그 «눈에 안 띄는 곱셈»이 `GUARD.poise` 를 560으로 만든 자리입니다.
+       *    판정이 쓰는 그 함수를 그대로 부릅니다(combat.ts `punishWindowOpen`).
+       */
+      punishOpen: punishWindowOpen(entity),
+      /** 🎯 창이 열려 있는 길이(초) — «얼마나 어려운 창인가»를 재려면 분모가 필요합니다. */
+      punishWindow: Number(punishWindowLen(entity).toFixed(3)),
       rotY: Number(Transform.rotY[entity].toFixed(3)),
       /** 현재 단계의 남은 시간(초) — 완벽 회피 타이밍을 재려면 필요합니다. */
       timer: Number(Actor.timer[entity].toFixed(3)),
