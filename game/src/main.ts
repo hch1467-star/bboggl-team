@@ -172,6 +172,7 @@ import {
   readPoiseLever,
   readPoiseHits,
   punishWindowOpen,
+  readMikiri,
   punishWindowLen,
   countInBlast,
   pickupBlownEvents,
@@ -6008,6 +6009,8 @@ class Game {
     poiseLever: Record<string, number>
     /** 🔢 지렛대별 **대수** — 일한 몫은 배수가 곱해진 값이라 이것 없이는 못 읽습니다. */
     poiseHits: Record<string, number>
+    /** 🎯 강타가 닿은 자리 — 「간파 0회」가 왜 0회인지 가르는 세 칸. */
+    mikiri: { 성공: number; 창밖: number; 평지: number }
     windupBreaks: number
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
@@ -6145,6 +6148,7 @@ class Game {
       poiseWork: readPoiseWork(),
       poiseLever: readPoiseLever(),
       poiseHits: readPoiseHits(),
+      mikiri: readMikiri(),
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
@@ -8400,6 +8404,7 @@ declare global {
         poiseWork: Record<string, number>
         poiseLever: Record<string, number>
         poiseHits: Record<string, number>
+        mikiri: { 성공: number; 창밖: number; 평지: number }
         windupBreaks: number
         greenSwung: number
         greenDied: number

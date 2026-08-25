@@ -700,6 +700,26 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
    *    팔려는 «잘하는 것처럼 보이는 순간»이 정확히 이 모양입니다.
    *    무너뜨릴수록 단단해지는 규칙(`breakResistStep`)이 뒤를 받칩니다.
    */
+  /**
+   * 🎯 **간파 장부** — 「0회」가 왜 0회인지 가르는 자리.
+   *
+   * 첫 판에서 간파가 **한 번도** 안 나왔습니다. 후보가 셋인데 처방이
+   * 전부 다릅니다:
+   *
+   *   ① 강타가 애초에 예고 중에 안 들어간다  → 봇/손을 고칠 것
+   *   ② 예고엔 들어가는데 **창을 놓친다**     → 창을 넓히거나 **누른
+   *      순간**으로 판정할 것 (강타의 준비 0.12초 뒤에 닿습니다)
+   *   ③ 규칙이 안 돈다                        → 코드를 고칠 것
+   *
+   * 값 없이는 어느 것도 못 고릅니다. 이 저장소가 「출혈 0회」에서 배운
+   * 그대로입니다 — *"죽어서인가 식어서인가는 처방이 정반대라 한 칸에
+   * 두면 안 됩니다."*
+   */
+  if (spec.heavyBlow && !crossfire) {
+    if (punishing) mikiriLog.성공++
+    else if (winding) mikiriLog.창밖++
+    else mikiriLog.평지++
+  }
   if (punishing && spec.heavyBlow && !crossfire) {
     // 남아 있던 만큼이 이 한 방이 «한 일»입니다(breakPoise 가 장부에 답니다).
     poiseDealt += Math.max(0, Enemy.poise[t])
@@ -1364,6 +1384,14 @@ const poiseWorkByLever: Record<string, number> = {}
  * 안 봤습니다」).
  */
 const poiseHitsByLever: Record<string, number> = {}
+/**
+ * 🎯 강타가 닿은 자리 — 「간파 0회」의 원인을 가르는 세 칸.
+ *   · 성공 = 창 안 · 창밖 = 예고 중인데 창을 놓침 · 평지 = 예고 자체가 아님
+ */
+const mikiriLog = { 성공: 0, 창밖: 0, 평지: 0 }
+export function readMikiri(): { 성공: number; 창밖: number; 평지: number } {
+  return { ...mikiriLog }
+}
 
 /**
  * 강인도 장부에 한 줄 적습니다. **쓰는 자리가 셋이라 함수로 뺍니다** —
@@ -1394,6 +1422,9 @@ export function resetPoiseWork(): void {
   for (const k of Object.keys(poiseWorkBySource)) delete poiseWorkBySource[k]
   for (const k of Object.keys(poiseWorkByLever)) delete poiseWorkByLever[k]
   for (const k of Object.keys(poiseHitsByLever)) delete poiseHitsByLever[k]
+  mikiriLog.성공 = 0
+  mikiriLog.창밖 = 0
+  mikiriLog.평지 = 0
 }
 
 /**

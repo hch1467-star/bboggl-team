@@ -152,6 +152,8 @@ try {
           const baseLever = { ...(before.poiseLever ?? {}) }
           /** 🔢 대수 — 「배수가 커서 커 보이는 것」과 「자주 걸려서 큰 것」을 가릅니다. */
           const baseHits = { ...(before.poiseHits ?? {}) }
+          /** 🎯 강타가 닿은 자리 — 「간파 0회」의 원인을 가르는 세 칸. */
+          const baseMik = { ...(before.mikiri ?? {}) }
 
           /**
            * ⚠️ **실험장을 먼저 비웁니다.**
@@ -256,8 +258,23 @@ try {
                *    `heavyBlow` 가 앞서므로, 강타를 섞으면 이 손은 ×2.5 가
                *    아니라 ×2.2 를 재게 됩니다. 평타만 씁니다.
                */
-              if (fi.punishOpen === true) {
+              /**
+               * ⚠️ **이 손은 «강타»를 넣어야 합니다.**
+               *
+               * 앞 판까지 이 손은 창에서 **평타**를 눌렀습니다. 그런데
+               * 간파는 `spec.heavyBlow` 를 요구하므로, **이름값을 할 수가
+               * 없는 손**이었습니다 — 「간파노림」이라 부르면서 간파를
+               * 낼 수 없게 만들어 놓고 «간파가 0회» 라고 적었습니다.
+               *
+               * 창이 아닐 때는 평타로 **집중을 법니다** — 자원 없이는
+               * 창이 열려도 못 태웁니다. 이것이 사람이 낼 수 있는 손입니다.
+               */
+              if (fi.punishOpen === true && canHeavy) {
                 windupSwings++
+                heavySwings++
+                G.press('Mouse2')
+                G.release('Mouse2')
+              } else if (fi.punishOpen !== true) {
                 G.press('Mouse0')
                 G.release('Mouse0')
               }
@@ -286,6 +303,7 @@ try {
             work: delta(after.poiseWork, baseWork),
             lever: delta(after.poiseLever, baseLever),
             hits: delta(after.poiseHits, baseHits),
+            mikiri: delta(after.mikiri, baseMik),
           }
         },
         [tgt.id, hand, WANT_BREAKS, CAP_SECONDS],
@@ -308,7 +326,8 @@ try {
           `            이름이 남은 것: ${fmt(r.by, byTot)}\n` +
           `            일한 몫(${Math.round(workTot)}): ${fmt(r.work, workTot)}\n` +
           `            지렛대(일한 몫): ${fmt(r.lever, Object.values(r.lever).reduce((a, v) => a + v, 0))}\n` +
-          `            지렛대(대수)   : ${fmt(r.hits, Object.values(r.hits).reduce((a, v) => a + v, 0))}`,
+          `            지렛대(대수)   : ${fmt(r.hits, Object.values(r.hits).reduce((a, v) => a + v, 0))}\n` +
+          `            강타가 닿은 자리: ${fmt(r.mikiri, 0)}`,
       )
     }
   }
