@@ -634,7 +634,36 @@ export function punishWindowOpen(t: number): boolean {
 
 /** 이번 예고에서 창이 열려 있는 길이(초). 화면·프로브가 같이 씁니다. */
 export function punishWindowLen(t: number): number {
-  return Math.max(POISE.punishFloor, Enemy.windupLen[t] * POISE.punishFraction)
+  return windowLenOf(Enemy.windupLen[t])
+}
+
+/**
+ * 창의 길이 — **예고 길이만 주면** 나옵니다.
+ *
+ * 엔티티가 아니라 «길이»를 받는 이유: 화면(`vfx`)은 예고를 띄울 때
+ * 엔티티가 아니라 **지속 시간**만 들고 있습니다. 여기서 갈라지면
+ * «화면이 표시한 창»과 «판정이 쓰는 창»이 다른 것이 됩니다.
+ */
+function windowLenOf(windupLen: number): number {
+  return Math.max(POISE.punishFloor, windupLen * POISE.punishFraction)
+}
+
+/** 강타를 눌러서 닿기까지 걸리는 시간(초). 무기·집중에 따라 다릅니다. */
+export function heavyLandDelay(p: number): number {
+  return stepFor(weaponOf(p), HEAVY_COMBO, Player.focus[p], 0).windup
+}
+
+/**
+ * 🎨 **화면이 «지금 누르면 간파» 구간을 칠하기 위한 범위**(남은 예고 초).
+ *
+ * ⚠️ 이 값을 화면이 스스로 계산하면 안 됩니다. 창을 두 벌로 만들면
+ *    «칠해졌는데 안 되는» 자리가 생기고, 그건 플레이어에게
+ *    **거짓말하는 화면**입니다 — 이 저장소가 이번 회차에 직접 겪은
+ *    실패(강타 준비 0.42초 > 창 0.3초)와 정확히 같은 모양입니다.
+ */
+export function punishPressRange(windupLen: number, p: number): { from: number; to: number } {
+  const from = heavyLandDelay(p)
+  return { from, to: from + windowLenOf(windupLen) }
 }
 
 /**
@@ -670,7 +699,7 @@ export function punishWindowLen(t: number): number {
  */
 export function punishPressOpen(t: number, p: number): boolean {
   if (!(Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup)) return false
-  const landsAt = Actor.timer[t] - stepFor(weaponOf(p), HEAVY_COMBO, Player.focus[p], 0).windup
+  const landsAt = Actor.timer[t] - heavyLandDelay(p)
   return landsAt > 0 && landsAt <= punishWindowLen(t)
 }
 

@@ -170,6 +170,9 @@ interface GroundItem {
   life: number
   maxLife: number
   mode: GroundMode
+  /** 🎯 «지금 누르면 간파» 구간(남은 예고 초). -1 이면 없음. */
+  punishFrom: number
+  punishTo: number
   radius: number
 }
 
@@ -375,7 +378,16 @@ export class Vfx {
       mesh.visible = false
       mesh.renderOrder = 12
       scene.add(mesh)
-      this.grounds.push({ mesh, material, life: 0, maxLife: 1, mode: 'fade', radius: 1 })
+      this.grounds.push({
+        mesh,
+        material,
+        life: 0,
+        maxLife: 1,
+        mode: 'fade',
+        punishFrom: -1,
+        punishTo: -1,
+        radius: 1,
+      })
     }
   }
 
@@ -432,6 +444,15 @@ export class Vfx {
     color: number,
     life: number,
     mode: GroundMode,
+    /**
+     * 🎯 **«지금 누르면 간파» 구간**(남은 예고 초). 없으면 안 칠합니다.
+     *
+     * ⚠️ **화면이 스스로 계산하지 않습니다.** 판정이 쓰는 그 규칙에서
+     *    받아옵니다(`combat.ts` `punishPressRange`). 창을 두 벌로 만들면
+     *    «칠해졌는데 안 되는» 자리가 생기고, 그건 플레이어에게
+     *    **거짓말하는 화면**입니다.
+     */
+    punish?: { from: number; to: number },
   ): void {
     const item = this.grounds[this.groundCursor]
     this.groundCursor = (this.groundCursor + 1) % GROUND_POOL
@@ -447,6 +468,8 @@ export class Vfx {
     item.life = Math.max(life, 0.05)
     item.maxLife = item.life
     item.mode = mode
+    item.punishFrom = punish ? punish.from : -1
+    item.punishTo = punish ? punish.to : -1
     item.radius = radius
   }
 
@@ -749,7 +772,22 @@ export class Vfx {
         // 안쪽이 차오르는 속도 = 남은 예고 시간. 다 차면 터집니다.
         const s2 = g.radius * (0.06 + t * 0.94)
         g.mesh.scale.set(s2, 1, s2)
-        g.material.opacity = 0.5
+        /**
+         * 🎯 **간파 창에서는 안쪽이 확 밝아집니다.**
+         *
+         * ── 왜 필요한가 ────────────────────────────────────────────
+         * 「간파」는 «예고의 끝을 읽고 강타를 넣는 것»인데, 그 순간이
+         * 화면에 **아무 표시도 없었습니다.** 프로브와 봇은 게임에게
+         * 물어볼 수 있지만(`punishOpen`) 사람은 차오르는 속도를 눈대중
+         * 해야 했습니다. 이 저장소가 스스로 적어 둔 규칙 그대로입니다 —
+         * **안 보이는 창은 읽기가 아니라 찍기입니다.**
+         *
+         * 새 색을 쓰지 않습니다. 4색 예고가 이미 «무엇으로 답하는가»를
+         * 말하고 있어서, 여기에 다섯 번째 색을 더하면 그 뜻이 흐려집니다.
+         * **같은 색이 밝아지는** 것으로 «지금»만 말합니다.
+         */
+        const open = g.punishTo > 0 && g.life <= g.punishTo && g.life > g.punishFrom
+        g.material.opacity = open ? 0.92 : 0.5
       } else if (g.mode === 'fade') {
         const s2 = g.radius * (1 + t * 0.14)
         g.mesh.scale.set(s2, 1, s2)

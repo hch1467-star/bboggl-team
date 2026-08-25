@@ -172,6 +172,8 @@ import {
   readPoiseLever,
   readPoiseHits,
   punishPressOpen,
+  punishPressRange,
+  heavyLandDelay,
   readMikiri,
   punishWindowLen,
   countInBlast,
@@ -832,7 +834,27 @@ class Game {
         if (v.phase === 'telegraph') {
           // 테두리(범위) + 차오르는 안쪽(남은 시간) 두 장을 겹칩니다.
           this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'outline')
-          this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'fill')
+          /**
+           * 🎯 **«지금 누르면 간파» 구간을 같이 넘깁니다.**
+           *
+           * 범위는 **판정이 쓰는 그 규칙**이 계산합니다(`punishPressRange`).
+           * 화면이 `punishFraction × duration` 을 다시 곱하면 창이 두 벌이
+           * 되고, «칠해졌는데 안 되는» 자리가 생깁니다 — 그게 거짓말하는
+           * 화면입니다. 이번 회차에 제가 정확히 그 벽을 세웠습니다
+           * (강타 준비 0.42초 > 창 0.3초).
+           */
+          this.vfx.spawnGroundShape(
+            v.x,
+            y,
+            v.z,
+            v.rotY,
+            v.range,
+            arc,
+            v.color,
+            v.duration,
+            'fill',
+            punishPressRange(v.duration, this.playerEntity),
+          )
         } else {
           this.vfx.spawnGroundShape(v.x, y, v.z, v.rotY, v.range, arc, v.color, v.duration, 'fade')
         }
@@ -3578,6 +3600,39 @@ class Game {
    *    붕괴 이름이 `'평타'` 로 기록되고 있어서(위 `breakPoise` 주석)
    *    장부에서도 안 보였습니다. **두 결함이 서로를 가려 주고 있었습니다.**
    */
+  /**
+   * 🎯 **간파할 수 있는 공격인가** — 공격마다 «창이 존재하는지» 자체를 냅니다.
+   *
+   * ⚠️ 이 훅이 없어서 이번 회차에 **아무도 못 넘는 문턱**을 만들었습니다.
+   *    창을 «닿는 순간»으로만 두는 바람에, 강타의 준비(0.42초)가 창(0.3초)
+   *    보다 길어서 **어떤 손으로도 낼 수 없는 규칙**이 됐습니다. 세 번을
+   *    재고 커밋까지 한 뒤에야 알았습니다.
+   *
+   * 이제는 산수 한 줄로 잡습니다: 예고가 **강타의 준비보다 길어야** 누를
+   * 자리가 생깁니다. 짧으면 그 공격은 **영영 간파 불가**인데, 그건 설계
+   * 결정일 수는 있어도 **모르고 있으면 안 되는** 것입니다.
+   */
+  debugPunishable(): { id: string; windup: number; need: number; ok: boolean }[] {
+    const p = this.playerEntity
+    const need = heavyLandDelay(p)
+    const out: { id: string; windup: number; need: number; ok: boolean }[] = []
+    for (const kindId of ['grunt', 'elite', 'boss', 'binder', 'dragger', 'archer', 'charger']) {
+      const kind = kindFromId(kindId)
+      if (kind === null || kind === undefined) continue
+      for (const a of attacksFor(kind)) {
+        if (out.some((r) => r.id === a.id)) continue
+        out.push({
+          id: a.id,
+          windup: Number(a.windup.toFixed(3)),
+          need: Number(need.toFixed(3)),
+          /** 누를 자리가 조금이라도 있으려면 예고가 준비보다 길어야 합니다. */
+          ok: a.windup > need,
+        })
+      }
+    }
+    return out
+  }
+
   debugGuardPoise(kindId: string): { dmg: number; poiseMax: number } {
     const kind = kindFromId(kindId)
     if (kind === null || kind === undefined) return { dmg: -1, poiseMax: -1 }
@@ -7427,6 +7482,7 @@ declare global {
       idleReasons: () => { token: number; cooldown: number; facing: number; noPattern: number; committed: number }
       poiseRule: (kindId: string, breaks: number) => number
       guardPoise: (kindId: string) => { dmg: number; poiseMax: number }
+      punishable: () => { id: string; windup: number; need: number; ok: boolean }[]
       swings: () => {
         attackId: string
         hit: boolean
@@ -8504,6 +8560,8 @@ window.__game = {
   poiseRule: (kindId, breaks) => game.debugPoiseRule(kindId, breaks),
   /** 🛡 저스트 가드 한 번이 깎는 양과 그 적의 그릇 — 검사가 식을 베끼지 않게. */
   guardPoise: (kindId) => game.debugGuardPoise(kindId),
+  /** 🎯 공격마다 «간파할 창이 존재하는가» — 게임이 산수를 합니다. */
+  punishable: () => game.debugPunishable(),
   /** 🔎 적이 안 때리고 서 있던 프레임의 이유 — 읽으면서 비웁니다. */
   idleReasons: () => readIdleReasons(),
   /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */

@@ -3024,12 +3024,29 @@ try {
            * ⚠️ **가까운 적이 아니라 «지금 창이 열린 적»을 봅니다.** 여럿이
            *    붙어 있을 때 창을 연 놈이 가장 가깝다는 보장이 없습니다.
            */
-          const punishTarget = G.threats(3.2).find((f) => f.punishOpen === true)
+          const around = G.threats(3.6)
+          const punishTarget = around.find((f) => f.punishOpen === true)
+          /**
+           * ⚠️ **예고 중인 적이 있으면 강타를 아껴 둡니다.**
+           *
+           * 첫 판에서 봇의 간파가 **0회**였습니다. 가지는 멀쩡했는데
+           * **집중이 늘 0**이었습니다 — 바로 아래 «있으면 태운다» 가지가
+           * 창이 열리기 전에 다 써 버립니다. 창이 열려도 태울 것이 없으면
+           * 그 가지는 **영영 안 도는 코드**입니다.
+           *
+           * 프로브가 이미 같은 것을 보여 줬습니다: 「아껴서 창에만 태우는
+           * 손」이 「있으면 태우는 손」을 세 그릇 모두에서 이겼습니다
+           * (13.7 vs 16.1 · 33.4 vs 35.6 · 48.9 vs 42.2 — 보스만 예외).
+           *
+           * 아끼는 조건을 «예고 중»으로 둔 이유: 창은 예고 안에서만 열리고,
+           * 예고가 없으면 아껴 봐야 쓸 데가 없습니다.
+           */
+          const someoneWinding = around.some((f) => f.winding === true)
           if (punishTarget && G.focusInfo().focus >= HEAVY_BURN_AT) {
             markAct('간파')
             G.aimAtWorld(punishTarget.x, punishTarget.z)
             tap('Mouse2')
-          } else if (G.focusInfo().focus >= HEAVY_BURN_AT) tap('Mouse2')
+          } else if (G.focusInfo().focus >= HEAVY_BURN_AT && !someoneWinding) tap('Mouse2')
           else if (ready.length > 0) tap(pickSkill(ready).key)
           else tap('Mouse0')
         }
