@@ -615,6 +615,20 @@ export function setPlayerInvulnerable(on: boolean): void {
  */
 function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = false): void {
   const winding = Actor.state[t] === ActorState.Attack && Actor.phase[t] === AttackPhase.Windup
+  /**
+   * ── 🎯 **예고의 «끝»을 때렸는가** (`POISE.punishFraction` 설계 노트) ────
+   *
+   * `Actor.timer[t]` 는 **터지기까지 남은 시간**이고 `Enemy.windupLen[t]`
+   * 는 이번 예고의 전체 길이입니다(enemyAI 가 걸 때 같이 적어 둡니다).
+   * 둘 다 게임이 이미 갖고 있는 값이라 여기서 시계를 새로 만들지 않습니다.
+   *
+   * 창을 «남은 시간»으로 재는 이유: 적이 뜸을 들이면(`heldT`) 예고가
+   * 길어지는데, 그때도 **터지기 직전**이 간파의 순간이어야 합니다.
+   * 시작점에서 재면 뜸 들인 예고에서 창이 엉뚱한 데 열립니다.
+   */
+  const punishing =
+    winding &&
+    Actor.timer[t] <= Math.max(POISE.punishFloor, Enemy.windupLen[t] * POISE.punishFraction)
 
   /**
    * 🟢 초록 예고 중에는 **강인도가 깎이지 않습니다.**
@@ -643,7 +657,7 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
     ? POISE.backMultiplier
     : spec.heavyBlow
       ? FOCUS.poiseMult
-      : winding
+      : punishing
         ? POISE.windupMultiplier
         : behind
           ? POISE.backMultiplier
@@ -719,7 +733,7 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
     ? '오사'
     : spec.heavyBlow
       ? '강타'
-      : winding
+      : punishing
         ? '예고중'
         : behind
           ? '백어택'
