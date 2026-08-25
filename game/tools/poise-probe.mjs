@@ -528,7 +528,13 @@ try {
   const wear = await page.evaluate(() => {
     const G = window.__game
     const row = (id) => [0, 1, 2, 3, 4].map((b) => G.poiseRule(id, b))
-    return { boss: row('boss'), elite: row('elite'), grunt: row('grunt') }
+    return {
+      boss: row('boss'),
+      elite: row('elite'),
+      grunt: row('grunt'),
+      /** 🛡 저스트 가드 한 번의 값 — **게임이 계산합니다**(식을 베끼지 않게). */
+      guard: { boss: G.guardPoise('boss'), elite: G.guardPoise('elite'), grunt: G.guardPoise('grunt') },
+    }
   })
   const say = (a) => a.map((v) => v.toFixed(2)).join(' → ')
   console.log(
@@ -565,6 +571,57 @@ try {
       `${row[0].toFixed(2)} → ${row[2].toFixed(2)} (${(row[0] / row[2]).toFixed(2)}배 단단해짐)`,
     )
   }
+  /**
+   * ── 🛡 **한 번 잘 막은 것이 «즉사»가 되면 안 됩니다** ────────────────
+   *
+   * 이 검사가 없어서 다음이 오래 안 보였습니다:
+   *
+   *     GUARD.poise: 14   ← *"강인도 14를 준다"* 로 읽힙니다
+   *     실제 판정  14 × POISE.fromTrauma(40) × 1 = **560**
+   *     보스의 강인도                                **105**
+   *
+   * `GUARD.poise` 가 들어가는 자리는 **trauma** 입니다. 견주자면 강타의
+   * trauma 는 0.62 — 40배 넘게 큽니다. 그래서 저스트 가드는 «무너뜨리는
+   * 수단»이 아니라 **«무엇이든 한 번에 부수는 것»** 이었습니다.
+   *
+   * 두 결함이 서로를 가려 주고 있었습니다 — 이 붕괴는 `breakPoise()` 를
+   * 이름 없이 불러서 장부에 **«평타»** 로 적혔고, 그래서 「가드가 붕괴의
+   * 42%를 낸다」가 아무 화면에도 안 나왔습니다.
+   *
+   * ⚠️ 값을 여기 베껴 적지 않습니다 — 그 곱셈이 눈에 안 띄었던 것이 원인인데
+   *    검사가 같은 곱셈을 다시 적으면 **같은 실수를 같이** 하게 됩니다.
+   *    게임에게 묻습니다(`guardPoise`).
+   */
+  const gp = wear.guard
+  check(
+    Object.values(gp).every((g) => g.dmg > 0 && g.poiseMax > 0),
+    '🚧 저스트 가드의 강인도 피해가 나왔다 (아래 비교의 게이트)',
+    Object.entries(gp)
+      .map(([k, g]) => `${k} ${g.dmg}/${g.poiseMax}`)
+      .join(' · '),
+  )
+  if (Object.values(gp).every((g) => g.dmg > 0 && g.poiseMax > 0)) {
+    console.log(
+      `\n  🛡 **저스트 가드 한 번이 깎는 몫** — ` +
+        Object.entries(gp)
+          .map(([k, g]) => `${k} ${g.dmg} / 그릇 ${g.poiseMax} (${(g.dmg / g.poiseMax).toFixed(1)}배)`)
+          .join(' · '),
+    )
+    /**
+     * 보스만 봅니다. 잡몹(30)은 강타(54.6)도 한 방에 무너뜨리므로
+     * «가드가 잡몹을 한 방에» 는 설계와 어긋나지 않습니다. 보스가 기준입니다 —
+     * 여기서 한 방이면 **읽기 한 번에 구간 하나가 끝납니다.**
+     */
+    check(
+      gp.boss.dmg < gp.boss.poiseMax,
+      '🛡 **저스트 가드 한 번으로 보스가 즉시 무너지지는 않는다** (막기는 «수단»이지 «정답»이 아닙니다)',
+      `가드 ${gp.boss.dmg} vs 보스 강인도 ${gp.boss.poiseMax}` +
+        (gp.boss.dmg >= gp.boss.poiseMax
+          ? ` — **${(gp.boss.dmg / gp.boss.poiseMax).toFixed(1)}배**. 단위가 뒤바뀐 값입니다(trauma 자리에 강인도 값)`
+          : ` — ${Math.ceil(gp.boss.poiseMax / gp.boss.dmg)}번 막아야 무너집니다`),
+    )
+  }
+
   /**
    * 💢 **잡몹은 그대로여야 합니다.** 연달아 무너뜨리는 것은 군중을 다루는
    *    재미 그 자체입니다(로스트아크가 파는 것이 그것입니다). 이 규칙은

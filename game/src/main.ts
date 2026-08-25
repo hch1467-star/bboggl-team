@@ -3561,6 +3561,28 @@ class Game {
     return Number(poiseDamage(def.trauma, 1, POISE.basicMultiplier, kind, 0, breaks).toFixed(4))
   }
 
+  /**
+   * 🛡 **저스트 가드 한 번이 깎는 강인도** — 그리고 그 적의 그릇 크기.
+   *
+   * ⚠️ 검사가 `GUARD.poise × POISE.fromTrauma × …` 를 **베껴 적으면 안 됩니다.**
+   *    바로 그 곱셈이 눈에 안 띄어서 이 값이 오래 잘못돼 있었습니다 —
+   *    `GUARD.poise: 14` 는 *"강인도 14를 준다"* 처럼 읽히지만 실제로는
+   *    **trauma** 자리라, 판정에서 14 × 40 = **560** 이 됩니다(보스 강인도 105).
+   *    비교하자면 강타의 trauma 는 0.62 입니다 — 40배 넘게 큽니다.
+   *
+   *    「막으면 무너진다」가 아니라 **「막으면 무엇이든 즉사한다」** 였고,
+   *    붕괴 이름이 `'평타'` 로 기록되고 있어서(위 `breakPoise` 주석)
+   *    장부에서도 안 보였습니다. **두 결함이 서로를 가려 주고 있었습니다.**
+   */
+  debugGuardPoise(kindId: string): { dmg: number; poiseMax: number } {
+    const kind = kindFromId(kindId)
+    if (kind === null || kind === undefined) return { dmg: -1, poiseMax: -1 }
+    return {
+      dmg: Number(poiseDamage(GUARD.poise, 1, 1, kind, 0, 0).toFixed(3)),
+      poiseMax: enemyDef(kind).poiseMax,
+    }
+  }
+
   debugShowProps(on: boolean): void {
     if (this.props) this.props.visible = on
   }
@@ -7378,6 +7400,7 @@ declare global {
       setPaused: (paused: boolean) => void
       idleReasons: () => { token: number; cooldown: number; facing: number; noPattern: number; committed: number }
       poiseRule: (kindId: string, breaks: number) => number
+      guardPoise: (kindId: string) => { dmg: number; poiseMax: number }
       swings: () => {
         attackId: string
         hit: boolean
@@ -8446,6 +8469,8 @@ window.__game = {
    *    **규칙만** 봅니다. 둘을 한 검사에 욱여넣지 않습니다.
    */
   poiseRule: (kindId, breaks) => game.debugPoiseRule(kindId, breaks),
+  /** 🛡 저스트 가드 한 번이 깎는 양과 그 적의 그릇 — 검사가 식을 베끼지 않게. */
+  guardPoise: (kindId) => game.debugGuardPoise(kindId),
   /** 🔎 적이 안 때리고 서 있던 프레임의 이유 — 읽으면서 비웁니다. */
   idleReasons: () => readIdleReasons(),
   /** 📒 적의 휘두름 장부 — 읽으면서 **비웁니다**(다음 판에 섞이지 않게). */

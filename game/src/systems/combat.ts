@@ -679,6 +679,8 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
   else poiseDealt += dmg
 
   Enemy.poiseIdleT[t] = 0
+  /** 넘친 몫을 빼려면 **깎기 전 값**이 필요합니다 — 아래 `notePoiseWork` 주석. */
+  const poiseBefore = Enemy.poise[t]
   Enemy.poise[t] -= dmg
   /**
    * ── 🏅 **누가 «일»을 했는가 — 최종타가 아니라 기여** ──────────────────
@@ -722,7 +724,18 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
         : behind
           ? '백어택'
           : '평타'
-  notePoiseWork(source, lever, dmg)
+  /**
+   * ⚠️ **넘치게 깎은 몫은 «일»이 아닙니다.**
+   *
+   * 처음엔 `dmg` 를 통째로 적었습니다. 그랬더니 첫 측정에서 저스트
+   * 가드가 **일한 몫의 84%** 를 가져갔는데, 그중 상당수가 **이미 0 아래로
+   * 내려간 강인도를 더 깎은 값**이었습니다. 강인도 105 짜리 보스에게
+   * 560을 넣으면 «일»은 105이고 나머지 455는 허공입니다.
+   *
+   * 체력 쪽에서 이미 같은 규칙을 씁니다 — 과잉 처치를 피해량에 안 넣습니다.
+   * 넘친 몫을 세면 **한 방이 센 것이 여러 번 일한 것처럼** 보입니다.
+   */
+  notePoiseWork(source, lever, Math.min(dmg, Math.max(0, poiseBefore)))
   if (Enemy.poise[t] > 0) return
 
   /**
@@ -812,9 +825,10 @@ function applyBleed(t: number, spec: AttackSpec): void {
     Enemy.phase[t],
     Enemy.breaks[t],
   )
+  const popBefore = Enemy.poise[t]
   Enemy.poise[t] -= popPoise
   // 🩸 이 몫도 `applyPoise` 를 안 지나갑니다 — 여기서 안 적으면 장부에 없습니다.
-  notePoiseWork('출혈', '출혈', popPoise)
+  notePoiseWork('출혈', '출혈', Math.min(popPoise, Math.max(0, popBefore)))
   if (Enemy.poise[t] <= 0) breakPoise(t, '출혈')
 }
 
@@ -2332,8 +2346,10 @@ function applyHit(a: number, spec: AttackSpec): boolean {
         Enemy.kind[a],
         Enemy.phase[a],
       )
+      const guardBefore = Enemy.poise[a]
       Enemy.poise[a] -= guardPoise
-      notePoiseWork('가드', '가드', guardPoise)
+      // 넘친 몫은 «일»이 아닙니다 — `applyPoise` 의 같은 주석 참고.
+      notePoiseWork('가드', '가드', Math.min(guardPoise, Math.max(0, guardBefore)))
       if (Enemy.poise[a] <= 0) breakPoise(a, '가드')
       justGuardEvents.push({ entity: a, x: Transform.x[a], y: Transform.y[a], z: Transform.z[a] })
       continue
