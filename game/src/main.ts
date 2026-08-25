@@ -112,7 +112,7 @@ import { sfx } from './core/audio'
 import { consumePress, debugInput, endFrame, initInput, mouse, wasPressed } from './core/input'
 import { combatRng, vfxRng } from './core/rng'
 import { requestHitstop, resetTime, tick, time, MAX_FRAME_DT } from './core/time'
-import { buildProps, type PropsInfo } from './render/props'
+import { buildProps, propCaps, type PropsInfo } from './render/props'
 import {
   CELL_SIZE,
   HEIGHT_STEP,
@@ -7585,6 +7585,7 @@ declare global {
         invuln: boolean
       }[]
       showProps: (on: boolean) => void
+      propCaps: () => { pillars: number; rubble: number }
       props: () => {
         pillars: number
         rubble: number
@@ -8666,6 +8667,8 @@ window.__game = {
   },
   /** 🏛 폐허 잔해 장부 — 몇 개가 어느 구역에 섰는가. */
   props: () => game.debugProps(),
+  /** 🏗 지물 상한 — 검사가 숫자를 베끼지 않게 게임이 냅니다(props.ts `MAX_PILLARS`). */
+  propCaps: () => propCaps(),
   /**
    * 🏛 잔해를 통째로 껐다 켭니다 — **"세어서 있다"와 "화면에 보인다"는
    * 다른 말**이라, 프로브가 끄고 한 장 더 찍어 견주려고 씁니다.

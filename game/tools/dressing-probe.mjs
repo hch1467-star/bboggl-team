@@ -93,18 +93,42 @@ try {
      * ① **상한에 잘렸는가.** 잘렸다면 뒤쪽 구역이 빈 이유가 «원래 없음»이
      *    아니라 «앞에서 다 써 버림»입니다 — 처방이 정반대입니다.
      */
-    const cutP = p.pillarSpots - p.pillars
-    const cutR = p.rubbleSpots - p.rubble
+    /**
+     * ── ⚠️ **`spots` 는 «후보»가 아니라 «자격 있는 칸»입니다** ──────────
+     *
+     * 첫 판에서 저는 `spots − 선 것` 을 **「상한에 잘린 수」**로 읽고
+     * *"잔해 2846개가 잘렸다"* 는 빨강을 냈습니다. **틀렸습니다.**
+     * `props.ts` 의 `pick` 을 읽으면 사이에 **밀도**가 한 겹 더 있습니다:
+     *
+     *     자격 있는 칸  2971
+     *       × RUBBLE_DENSITY 0.055   ← 여기서 걸러집니다
+     *     ≈ 후보 163            상한 170
+     *     실제 125              → **상한에 안 걸렸습니다**
+     *
+     * 즉 2846개는 «잘린 것»이 아니라 **«애초에 안 뽑힌 것»** 이고, 그건
+     * 설계입니다. 두 수 사이에 한 겹이 더 있는 줄 모르고 뺄셈을 했습니다.
+     *
+     * ⭐ **«A − B» 를 하기 전에 A 와 B 사이에 무엇이 있는지 봐야 합니다.**
+     *    이름이 비슷하면(`spots` vs 선 것) 그 사이가 없어 보입니다.
+     *
+     * 상한에 걸렸는지는 **상한과 직접** 견줍니다 — 그게 그 질문의 자입니다.
+     * (`PropsInfo` 의 *"상한에 걸려 잘렸는지 이걸로만 압니다"* 라는 주석도
+     *  그래서 정확하지 않습니다. 아래 검사가 그 자리를 대신합니다.)
+     */
+    const caps = await page.evaluate(() => window.__game.propCaps())
+    const hitP = p.pillars >= caps.pillars
+    const hitR = p.rubble >= caps.rubble
     console.log(
-      `  세울 수 있었던 칸 — 기둥 ${p.pillarSpots} · 잔해 ${p.rubbleSpots}` +
-        (cutP > 0 || cutR > 0 ? `  ⚠️ **잘림 — 기둥 ${cutP} · 잔해 ${cutR}**` : '  (안 잘림)'),
+      `  자격 있는 칸 — 기둥 ${p.pillarSpots} · 잔해 ${p.rubbleSpots}` +
+        `  (밀도로 걸러진 뒤 선 것: 기둥 ${p.pillars} · 잔해 ${p.rubble})\n` +
+        `  상한 — 기둥 ${caps.pillars} · 잔해 ${caps.rubble}`,
     )
     check(
-      cutP <= 0 && cutR <= 0,
-      '🏗 **지물이 상한에 잘리지 않았다** (잘리면 뒤쪽 구역이 «원래 빈 곳»으로 읽힙니다)',
-      cutP > 0 || cutR > 0
-        ? `기둥 ${p.pillars}/${p.pillarSpots} · 잔해 ${p.rubble}/${p.rubbleSpots} — 앞에서 다 써 버렸습니다`
-        : `기둥 ${p.pillars}/${p.pillarSpots} · 잔해 ${p.rubble}/${p.rubbleSpots}`,
+      !hitP && !hitR,
+      '🏗 **지물이 상한에 걸리지 않았다** (걸리면 뒤쪽 구역이 «원래 빈 곳»으로 읽힙니다)',
+      hitP || hitR
+        ? `기둥 ${p.pillars}/${caps.pillars} · 잔해 ${p.rubble}/${caps.rubble} — 상한이 자르고 있습니다`
+        : `기둥 ${p.pillars}/${caps.pillars} · 잔해 ${p.rubble}/${caps.rubble} — 성긴 것은 상한이 아니라 **밀도**의 결과입니다`,
     )
 
     /**

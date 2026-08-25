@@ -68,13 +68,32 @@ const RUBBLE_MAX_H = 0.4
 const MAX_PILLARS = 140
 const MAX_RUBBLE = 170
 
+/**
+ * 🏗 **상한을 검사에게 알려 줍니다.** 프로브가 140/170 을 베껴 적으면
+ *    값을 바꾸는 날 검사만 옛 세계에 삽니다 — 이 저장소가 이번 회차에만
+ *    다섯 번 겪은 모양입니다(`GUARD.poise` · 봇의 강타 문턱 · 간파 창 …).
+ */
+export function propCaps(): { pillars: number; rubble: number } {
+  return { pillars: MAX_PILLARS, rubble: MAX_RUBBLE }
+}
+
 /** 중요한 물건 곁은 비웁니다(칸). 화톳불·모루·보물이 잔해에 묻히면 안 됩니다. */
 const KEEP_CLEAR = 2
 
 export interface PropsInfo {
   pillars: number
   rubble: number
-  /** 세울 수 있었던 칸 수 — 상한에 걸려 잘렸는지 이걸로만 압니다. */
+  /**
+   * 세울 수 **있었던** 칸 수(자격).
+   *
+   * ⚠️ **«후보 수»가 아닙니다.** 이 수와 실제로 선 수 사이에는 `pick` 의
+   *    **밀도**가 한 겹 더 있습니다. 그래서 `spots − 선 것` 은 «상한에
+   *    잘린 수»가 **아닙니다** — 대부분은 «밀도가 안 뽑은 것»입니다.
+   *    (이 주석은 원래 *"상한에 걸려 잘렸는지 이걸로만 압니다"* 였고,
+   *     그 문장을 믿은 검사가 «잔해 2846개가 잘렸다»는 빨강을 냈습니다.)
+   *
+   *    상한에 걸렸는지는 **상한과 직접** 견주십시오(`propCaps`).
+   */
   pillarSpots: number
   rubbleSpots: number
   /** 갈 수 없는 바닥 칸 수. 위 ❌ 문단의 근거를 **게임이 직접** 셉니다. */
