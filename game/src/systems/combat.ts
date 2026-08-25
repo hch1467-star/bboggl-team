@@ -697,8 +697,32 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
    * 그래서 **깎은 만큼**을 출처별로 쌓습니다. 「이긴 이유가 나에게
    * 있는가」는 *"누가 마지막을 쳤나"* 가 아니라 *"누가 일을 했나"* 입니다.
    */
-  poiseWorkBySource[spec.source ?? '평타'] =
-    (poiseWorkBySource[spec.source ?? '평타'] ?? 0) + Math.max(0, dmg)
+  /**
+   * ── **이름을 한 번만 정합니다** ────────────────────────────────────
+   *
+   * 예전엔 여기서 두 번 정했습니다 — 일한 몫은 `spec.source` 를 날것으로
+   * 쓰고, 붕괴 이름은 아래에서 백어택을 갈라냈습니다. 그래서 두 장부가
+   * **다른 이름 집합**을 갖게 됐고, 벤치는 그 둘을 «골라서 낸 것 64%» ·
+   * «47%» 로 나란히 찍었습니다 — 서로 비교할 수 없는 두 값을요.
+   *
+   * ⚠️ **지렛대 이름은 배수를 고른 그 가지에서 그대로 가져옵니다.**
+   *    따로 판단하지 않습니다. 위 `multiplier` 의 가지와 순서가 **한 글자도
+   *    달라지면 안 되므로**, 베끼지 말고 같은 조건을 같은 순서로 씁니다.
+   *    (여기가 어긋나면 «×2.5를 받은 타격»과 «예고중으로 기록된 타격»이
+   *     조용히 다른 집합이 됩니다 — 아무도 안 알려 줍니다.)
+   */
+  const src: BreakCause = spec.source ?? '평타'
+  const source: BreakCause = crossfire ? '오사' : src
+  const lever: BreakCause = crossfire
+    ? '오사'
+    : spec.heavyBlow
+      ? '강타'
+      : winding
+        ? '예고중'
+        : behind
+          ? '백어택'
+          : '평타'
+  notePoiseWork(source, lever, dmg)
   if (Enemy.poise[t] > 0) return
 
   /**
@@ -711,8 +735,7 @@ function applyPoise(t: number, spec: AttackSpec, behind = false, crossfire = fal
    *    찍혔는데, 그중 얼마가 등 뒤였는지 알 수 없었습니다).
    *    같은 «평타»라도 앞에서 친 것과 등 뒤를 잡은 것은 다른 사건입니다.
    */
-  const src = spec.source ?? '평타'
-  breakPoise(t, (behind || crossfire) && src === '평타' ? '백어택' : src)
+  breakPoise(t, behind && src === '평타' ? '백어택' : source)
 }
 
 /**
@@ -781,7 +804,17 @@ function applyBleed(t: number, spec: AttackSpec): void {
    * 몫이고, 여기서 크게 주면 두 축이 같은 결과로 수렴합니다.
    */
   Enemy.poiseIdleT[t] = 0
-  Enemy.poise[t] -= poiseDamage(BLEED.popPoise, 1, 1, Enemy.kind[t], Enemy.phase[t], Enemy.breaks[t])
+  const popPoise = poiseDamage(
+    BLEED.popPoise,
+    1,
+    1,
+    Enemy.kind[t],
+    Enemy.phase[t],
+    Enemy.breaks[t],
+  )
+  Enemy.poise[t] -= popPoise
+  // 🩸 이 몫도 `applyPoise` 를 안 지나갑니다 — 여기서 안 적으면 장부에 없습니다.
+  notePoiseWork('출혈', '출혈', popPoise)
   if (Enemy.poise[t] <= 0) breakPoise(t, '출혈')
 }
 
@@ -1133,20 +1166,126 @@ export type BreakCause =
   | '기습'
   | '출혈'
   | '통'
+  /**
+   * ⚠️ 아래 셋은 **나중에 채운 구멍**입니다. 셋 다 `breakPoise()` 를
+   *    이름 없이 불러서 기본값 `'평타'` 로 기록되고 있었습니다:
+   *
+   *      · 저스트 가드로 무너뜨린 것   (combat.ts 가드 처리)
+   *      · 절벽에서 떨어뜨린 것        (main.ts FALL.breaksPoise)
+   *      · 계기가 강제로 부순 것       (main.ts breakEnemy 훅)
+   *
+   *    앞의 둘은 **가장 골라서 내는 축**입니다 — 패링 타이밍과 지형 유인.
+   *    그것이 «우연» 칸(평타)에 들어가 있었으니, 「골라서 낸 것 64%」는
+   *    실제보다 **낮게** 잡힌 값입니다. 백어택에서 이미 한 번 겪은 defect 를
+   *    (40% → 51%) 세 자리에서 그대로 반복하고 있었습니다.
+   *
+   *    셋째는 반대 방향의 오염입니다 — 계기가 부순 것이 «플레이어가 잘해서»
+   *    로 섞이면 **눈금이 자기 자신을 통과시킵니다.**
+   */
+  | '가드'
+  | '낙하'
+  | '오사'
+  | '계기'
+  /**
+   * 🔧 **이것만은 «출처»가 아니라 «지렛대»의 이름입니다.**
+   *
+   * 예고 중에 맞으면 배수가 ×2.5(`POISE.windupMultiplier`)인데, 그렇게
+   * 낸 평타의 출처 이름은 그냥 `평타` 입니다. 그래서 **설계가 가장 크게
+   * 밀어준 지렛대가 장부에 한 번도 안 나타났습니다.**
+   * 아래 `poiseWorkByLever` 에만 쓰입니다 — 「무엇으로 쳤나」와
+   * 「무엇 덕분에 깎였나」는 처방이 달라서 칸을 따로 씁니다.
+   */
+  | '예고중'
 
-/** 🏅 강인도를 **깎은 양**의 출처별 누계 — 최종타가 아니라 기여. */
+/**
+ * 🏅 강인도를 **깎은 양**의 누계 — 최종타가 아니라 기여.
+ *
+ * ── 왜 장부가 **둘**인가 ────────────────────────────────────────────
+ * 첫 측정이 이렇게 나왔습니다:
+ *
+ *     🏅 이름이 남은 것  붕괴 55회 — 평타 18 · 반격 13 · … · **강타 1**
+ *     🔨 일한 몫         평타 37% · 스킬 30% · **강타 18%** · 상황 15%
+ *
+ * 강타는 **일의 18%를 하고 이름은 1.8%** 를 가져갔습니다. 최종타 장부만
+ * 보면 «강타는 안 끊는다»가 되는데, 일한 몫을 보면 정반대입니다.
+ *
+ * 그런데 그 두 줄을 나란히 찍어 놓고 보니 **더 큰 결함**이 보였습니다.
+ * `balance.ts` 가 «끊는 수단에 몰아줬다»고 적은 셋은 이렇습니다:
+ *
+ *     강타 ×2.2  ·  **예고 중 타격 ×2.5**  ·  반격(즉시)
+ *
+ * 그런데 예고 중에 낸 **평타**는 ×2.5 를 받고도 이름이 그냥 `평타` 입니다.
+ * 즉 설계가 가장 크게 밀어준 지렛대 하나가 **장부에 아예 안 나타납니다.**
+ * 「셋 중 반격만 일한다」는 지난 회차의 결론은 그래서 **못 믿습니다** —
+ * 예고중 배수는 재 본 적이 없습니다.
+ *
+ * 원인은 한 칸에 **두 질문**을 담은 것입니다:
+ *
+ *     · 무엇으로 쳤는가   — 평타 · 강타 · 스킬 · 처형 …   (`bySource`)
+ *     · 무엇 덕분에 깎였는가 — 기본 ×0.35 · 예고중 ×2.5 …  (`byLever`)
+ *
+ * 처방이 다릅니다. 앞은 «무기·기술을 손볼 것», 뒤는 «배수를 손볼 것».
+ * 이 저장소가 `locked` 한 칸에 원인 셋을 담았다가 뜻이 뒤집힌 그 모양이라,
+ * **두 칸으로 나눕니다.**
+ */
 const poiseWorkBySource: Record<string, number> = {}
+/** 🔧 같은 일을 **어느 지렛대가** 했는가 — 배수를 고른 그 가지가 곧 이름. */
+const poiseWorkByLever: Record<string, number> = {}
+
+/**
+ * 강인도 장부에 한 줄 적습니다. **쓰는 자리가 셋이라 함수로 뺍니다** —
+ * 깎는 자리(`applyPoise`) · 가드로 깎는 자리 · 즉시 부수는 자리.
+ * 세 곳에 같은 식을 베끼면 언젠가 한 곳만 고쳐집니다.
+ */
+function notePoiseWork(source: BreakCause, lever: BreakCause, amount: number): void {
+  if (!(amount > 0)) return
+  poiseWorkBySource[source] = (poiseWorkBySource[source] ?? 0) + amount
+  poiseWorkByLever[lever] = (poiseWorkByLever[lever] ?? 0) + amount
+}
 
 export function readPoiseWork(): Record<string, number> {
   return { ...poiseWorkBySource }
 }
 
-export function resetPoiseWork(): void {
-  for (const k of Object.keys(poiseWorkBySource)) delete poiseWorkBySource[k]
+export function readPoiseLever(): Record<string, number> {
+  return { ...poiseWorkByLever }
 }
 
-export function breakPoise(t: number, by: BreakCause = '평타'): void {
+export function resetPoiseWork(): void {
+  for (const k of Object.keys(poiseWorkBySource)) delete poiseWorkBySource[k]
+  for (const k of Object.keys(poiseWorkByLever)) delete poiseWorkByLever[k]
+}
+
+/**
+ * ⚠️ **`by` 에 기본값을 두지 않습니다.**
+ *
+ * 예전엔 `by: BreakCause = '평타'` 였습니다. 그 한 글자 때문에 **세 자리가
+ * 조용히 «평타»로 기록**됐습니다 — 저스트 가드 · 절벽 낙하 · 계기의 강제
+ * 붕괴. 앞의 둘은 가장 골라서 내는 축이라 「실력 비율」이 실제보다 낮게
+ * 나왔고, 셋째는 반대로 **계기가 부순 것을 실력에 섞고** 있었습니다.
+ *
+ * 기본값을 없애면 새 호출자가 이름을 안 달았을 때 **컴파일이 막습니다.**
+ * 주석으로 *"이름을 꼭 다세요"* 라고 적어 두는 것과 다릅니다 —
+ * 이 저장소의 규칙: **주석의 약속은 지켜지지 않는다, 검사로 굳혀라.**
+ */
+export function breakPoise(t: number, by: BreakCause): void {
   const cfg = enemyDef(Enemy.kind[t])
+  /**
+   * ── 🔨 **즉시 부수는 것들의 «일한 몫»** ────────────────────────────
+   *
+   * 반격 · 기습 · 폭발통은 강인도를 **깎지 않고 통째로 부숩니다.** 그래서
+   * 일한 몫 장부에서 이 셋은 **정의상 0** 이었습니다. 그런데 같은 판의
+   * 최종타 장부에서 반격은 **13회** 로 2위였습니다.
+   *
+   * 그 상태로 두 줄을 나란히 찍으면 «골라서 낸 것 47%» 가 나오는데,
+   * 그 47%는 **반격 13회를 한 번도 안 센 값**입니다. 실력을 재겠다는
+   * 눈금이 가장 실력에 가까운 것을 빼고 재고 있었습니다.
+   *
+   * 남아 있던 강인도를 그대로 이 원인에게 답니다 — **부순 것은 남아 있던
+   * 전부를 부순 것**이 맞습니다. 누적으로 넘긴 경우에는 이 값이 이미
+   * 0 이하라 아무것도 안 더해집니다(`notePoiseWork` 가 걸러 냅니다).
+   */
+  notePoiseWork(by, by, Enemy.poise[t])
   /**
    * 💢 **몇 번째 붕괴인지 셉니다** — 다음 붕괴를 어렵게 만드는 근거입니다
    * (balance.ts `POISE.breakResistStep`). 세는 자리를 여기 두는 이유는
@@ -2179,14 +2318,23 @@ function applyHit(a: number, spec: AttackSpec): boolean {
        * 무기의 `poiseScale` 을 그대로 태워, 무엇을 들었는지가 남습니다.
        */
       Enemy.poiseIdleT[a] = 0
-      Enemy.poise[a] -= poiseDamage(
+      /**
+       * 🛡 **이 몫은 장부에 없었습니다.** 저스트 가드가 깎는 강인도는
+       *    `applyPoise` 를 안 지나가서 일한 몫에 안 잡혔고, 아래
+       *    `breakPoise(a)` 도 이름 없이 불려서 **«평타»로 기록**됐습니다.
+       *    패링 타이밍은 이 게임에서 가장 골라서 내는 축인데, 그것이
+       *    통째로 «우연» 칸에 들어가 있었습니다.
+       */
+      const guardPoise = poiseDamage(
         GUARD.poise,
         weaponOf(t).poiseScale ?? 1,
         1,
         Enemy.kind[a],
         Enemy.phase[a],
       )
-      if (Enemy.poise[a] <= 0) breakPoise(a)
+      Enemy.poise[a] -= guardPoise
+      notePoiseWork('가드', '가드', guardPoise)
+      if (Enemy.poise[a] <= 0) breakPoise(a, '가드')
       justGuardEvents.push({ entity: a, x: Transform.x[a], y: Transform.y[a], z: Transform.z[a] })
       continue
     }

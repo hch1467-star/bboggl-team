@@ -143,6 +143,7 @@ import {
   readCrossfireHits,
   readPoiseDealt,
   resetPoiseDealt,
+  resetPoiseWork,
   resetBleedPeak,
   breakPoise,
   finisherEvents,
@@ -168,6 +169,7 @@ import {
   flushSwingRecords,
   poiseDamage,
   readPoiseWork,
+  readPoiseLever,
   countInBlast,
   pickupBlownEvents,
 } from './systems/combat'
@@ -982,6 +984,13 @@ class Game {
     }
     resetBleedPeak()
     resetPoiseDealt()
+    /**
+     * 🔨 **이 줄이 빠져 있었습니다.** `resetPoiseWork` 는 만들어 놓고
+     *    아무 데서도 안 불렀습니다. 판을 다시 시작해도 앞 판의 일한 몫이
+     *    그대로 남아, 두 번째 판부터는 **두 판을 합친 비율**을 보게 됩니다.
+     *    옆의 셋과 같은 자리에 둡니다 — 같이 지워져야 하는 것은 같이.
+     */
+    resetPoiseWork()
     resetFocusFlow()
     resetHealPunish()
     this.regions = []
@@ -1946,7 +1955,13 @@ class Game {
         Player.plungeT[p] = PLAYER_CFG.contextAttack.plungeWindow
         Player.plungeSteps[p] = f.steps
       } else if (FALL.breaksPoise && hasComponent(Enemy, f.entity)) {
-        breakPoise(f.entity)
+        /**
+         * ⛰ **이름을 답니다.** 여기는 오래 이름 없이 불려서 기본값
+         *    `'평타'` 로 기록됐습니다. 적을 절벽으로 유인해 떨어뜨리는 것은
+         *    이 게임에서 «지형을 읽는» 축인데, 그 공이 통째로 «우연» 칸에
+         *    들어가 있었습니다(백어택에서 이미 겪은 그 defect 입니다).
+         */
+        breakPoise(f.entity, '낙하')
       }
       // 사건이 일어난 자리에서 셉니다 — 상태가 덮이기 전에.
       if (f.entity === p) this.fallLog.player++
@@ -5964,6 +5979,8 @@ class Game {
     /** 🏅 붕괴를 만든 것의 이름별 횟수 — 실력인지 우연인지 가르는 칸. */
     breakBy: Record<string, number>
     poiseWork: Record<string, number>
+    /** 🔧 같은 일을 **어느 지렛대가** 했는가 — 설계가 몰아준 배수가 실제로 도는지. */
+    poiseLever: Record<string, number>
     windupBreaks: number
     /** 🟢 예고가 끝난 방식 — 휘두름까지 / 적이 죽음 / 무너져 끊김 */
     greenSwung: number
@@ -6099,6 +6116,7 @@ class Game {
        * 붕괴는 누적인데 최종타로만 세면 거꾸로 읽힙니다(combat.ts 주석).
        */
       poiseWork: readPoiseWork(),
+      poiseLever: readPoiseLever(),
       windupBreaks: this.windupBreaks,
       greenSwung: readGreenOutcome().swung,
       greenDied: readGreenOutcome().died,
@@ -8330,6 +8348,7 @@ declare global {
         poiseBreaks: number
         breakBy: Record<string, number>
         poiseWork: Record<string, number>
+        poiseLever: Record<string, number>
         windupBreaks: number
         greenSwung: number
         greenDied: number
@@ -9144,9 +9163,16 @@ window.__game = {
     staminaCost: FINISHER.staminaCost,
     count: game.debugRunStats().finishers,
   }),
-  /** 강인도를 즉시 부숩니다 — 무방비 상태를 만들어 놓고 재기 위한 훅. */
+  /**
+   * 강인도를 즉시 부숩니다 — 무방비 상태를 만들어 놓고 재기 위한 훅.
+   *
+   * ⚠️ **`'계기'` 라고 이름을 답니다.** 이름 없이 부르면 기본값 `'평타'` 로
+   *    기록돼서, **계기가 부순 것이 «플레이어가 잘해서» 칸에 섞입니다.**
+   *    그러면 눈금이 자기 자신을 통과시킵니다 — 이 저장소에서 가장
+   *    비싼 종류의 고장입니다(「초록도 잘못 잰 초록일 수 있다」).
+   */
   breakEnemy: (entity: number) => {
-    breakPoise(entity)
+    breakPoise(entity, '계기')
   },
   /**
    * 무기 3종의 제원 — **게임 데이터에서** 읽습니다.

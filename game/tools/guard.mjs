@@ -1159,5 +1159,105 @@ check(
   )
 }
 
+/**
+ * ── 🔧 **「배수를 고른 가지」와 「이름을 붙인 가지」가 같은가** ────────────
+ *
+ * `applyPoise` 안에 삼항 사슬이 **둘** 있습니다:
+ *
+ *   · `multiplier` — 이 타격이 강인도를 **얼마나** 깎는가 (게임의 규칙)
+ *   · `lever`      — 그 깎임을 **무엇의 공으로** 적는가 (장부의 이름)
+ *
+ * 둘의 조건과 **순서**가 한 글자라도 달라지면, «×2.5 를 받은 타격»과
+ * «예고중으로 기록된 타격»이 조용히 다른 집합이 됩니다. 그러면 장부는
+ * 여전히 초록인 채로 **거짓을 말합니다** — 아무도 안 알려 줍니다.
+ *
+ * 이 저장소가 정확히 그 모양으로 데였습니다: 예고중 배수(×2.5)는 6개월
+ * 넘게 돌고 있었는데 장부에는 한 번도 안 나타났고, 그 위에서 「설계가
+ * 몰아준 셋 중 반격만 일한다」는 결론까지 냈습니다.
+ *
+ * 그래서 **두 사슬의 조건 목록을 뽑아 그대로 견줍니다.** 배수를 하나
+ * 더하면서 이름을 안 더하면 여기서 빨강이 납니다.
+ */
+{
+  const src = readFileSync(path.join(HERE, '..', 'src/systems/combat.ts'), 'utf8')
+  /** 삼항 사슬 하나를 통째로 집어 **조건들만** 순서대로 뽑습니다. */
+  /**
+   * ⚠️ **처음엔 «`?` 로 끝나는 줄»을 찾았습니다 — 0개가 나왔습니다.**
+   *    포매터가 삼항을 이렇게 씁니다:
+   *
+   *        const multiplier = crossfire
+   *          ? POISE.backMultiplier
+   *          : spec.heavyBlow
+   *          ? ...
+   *
+   *    조건은 줄 **끝**이 아니라, **다음 줄이 `?` 로 시작하는** 줄입니다.
+   *    (게이트를 같이 넣어 뒀기 때문에 0개가 초록이 아니라 빨강이 됐습니다 —
+   *     「빈 표본으로 통과하지 않게」가 자기 자신을 잡은 자리입니다.)
+   */
+  const chainConds = (declName) => {
+    const at = src.indexOf(`const ${declName}`)
+    if (at < 0) return null
+    const lines = src.slice(at).split('\n').map((l) => l.trim())
+    // 첫 줄 다음부터는 `?` 또는 `:` 로 시작하는 동안이 사슬입니다.
+    const body = [lines[0]]
+    for (let i = 1; i < lines.length && i < 40; i++) {
+      if (!/^[?:]/.test(lines[i])) break
+      body.push(lines[i])
+    }
+    const out = []
+    for (let i = 0; i < body.length - 1; i++) {
+      if (!/^\?/.test(body[i + 1])) continue
+      out.push(
+        body[i]
+          .replace(/^:\s*/, '')
+          .replace(/^const\s+\w+(\s*:\s*[\w.<>[\]| ]+)?\s*=\s*/, '')
+          .trim(),
+      )
+    }
+    return out
+  }
+  const mul = chainConds('multiplier')
+  const lev = chainConds('lever')
+  check(
+    mul !== null && lev !== null && mul.length > 0,
+    '🔧 `applyPoise` 의 배수 사슬과 이름 사슬을 둘 다 찾았다 (비교의 게이트)',
+    mul === null || lev === null ? '못 찾음' : `조건 ${mul.length}개 vs ${lev.length}개`,
+  )
+  if (mul !== null && lev !== null && mul.length > 0) {
+    /**
+     * `lever` 사슬의 마지막 가지는 조건이 없는 기본값(`'평타'`)이라
+     * 조건 수가 `multiplier` 와 같아야 합니다 — 둘 다 같은 모양입니다.
+     */
+    const same = mul.length === lev.length && mul.every((c, i) => c === lev[i])
+    check(
+      same,
+      '🔧 **배수를 고른 조건과 이름을 붙인 조건이 글자까지 같다**',
+      same
+        ? `${mul.length}개 일치 — ${mul.join(' → ')}`
+        : `어긋남\n        배수: ${mul.join(' → ')}\n        이름: ${lev.join(' → ')}`,
+    )
+  }
+}
+
+/**
+ * ── 🏅 **붕괴에 이름을 안 달고 부르는 자리가 없는가** ────────────────────
+ *
+ * `breakPoise(t)` 처럼 이름 없이 부르면 예전엔 «평타»로 기록됐습니다.
+ * 지금은 타입이 막지만(`by: BreakCause` — 기본값 없음), 누군가 다시
+ * 기본값을 붙이면 **컴파일은 통과하면서 장부만 조용히 거짓**이 됩니다.
+ * 기본값이 되살아나는 것 자체를 막습니다.
+ */
+{
+  const src = readFileSync(path.join(HERE, '..', 'src/systems/combat.ts'), 'utf8')
+  const sig = /export function breakPoise\(([^)]*)\)/.exec(src)
+  check(sig !== null, '🏅 `breakPoise` 선언을 찾았다 (검사의 게이트)', sig ? sig[1] : '못 찾음')
+  if (sig)
+    check(
+      !sig[1].includes('='),
+      '🏅 **`breakPoise` 의 원인 인자에 기본값이 없다** (기본값이 세 자리를 «평타»로 만들었습니다)',
+      sig[1].trim(),
+    )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)
