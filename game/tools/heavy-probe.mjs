@@ -477,10 +477,41 @@ try {
       const lSec = lightRows.reduce((a, r) => a + r.elapsed, 0)
       const wRate = wSec > 0 ? wBreaks / wSec : null
       const lRate = lSec > 0 ? lBreaks / lSec : null
+      /**
+       * ── ⚠️ **합계 한 줄이 «상대마다 정반대인 것»을 덮었습니다** ────────
+       *
+       * 한 판에서 「간파노림 0.250 vs 평타만 0.198」이 나와, 저는
+       * *"처음으로 읽는 손이 이깁니다"* 라고 두 커밋에 걸쳐 적었습니다.
+       * 그 뒤 두 판은 **비겼습니다**(0.203 vs 0.202 · 0.230 vs 0.229) —
+       * 그 판의 격차는 **재현되지 않았습니다.**
+       *
+       * 그런데 상대별로 가르면 합계가 덮고 있던 것이 보입니다:
+       *
+       *     잡몹  간파노림 23.6초 vs 평타만 18.2초  ← **집니다**
+       *     정예           33.8       vs      32.6   ← 비깁니다
+       *     보스           46.9       vs      54.0   ← **이깁니다**(13%)
+       *
+       * 간파는 **보스에서만 값어치가 납니다.** 잡몹은 창을 기다리는 동안
+       * 그냥 죽일 수 있는 상대라, 기다림이 곧 손해입니다. 참고 게임도
+       * 같습니다 — 미키리·識破 는 **보스의 도구**입니다.
+       *
+       * 합계만 찍으면 이 셋이 하나로 뭉개집니다. **줄을 상대별로 냅니다.**
+       */
+      for (const t of TARGETS) {
+        const w = windRows.find((r) => r.target === t.id)
+        const l = lightRows.find((r) => r.target === t.id)
+        if (!w || !l || !(w.elapsed > 0) || !(l.elapsed > 0)) continue
+        const wr = Object.values(w.by).reduce((a, v) => a + v, 0) / w.elapsed
+        const lr = Object.values(l.by).reduce((a, v) => a + v, 0) / l.elapsed
+        console.log(
+          `     ${t.label}간파노림 ${wr.toFixed(3)}/초 vs 평타만 ${lr.toFixed(3)}/초 — ` +
+            (wr >= lr * 1.1 ? '**간파가 이깁니다**' : lr >= wr * 1.1 ? '평타가 이깁니다' : '비깁니다'),
+        )
+      }
       console.log(
         `  🎯 **예고 중 타격(×2.5)이 도는가** — 휘두름 ${wSwings}번당 붕괴 ${wBreaks}회` +
           (wRate !== null && lRate !== null
-            ? `\n     초당 붕괴: 간파노림 ${wRate.toFixed(3)} vs 평타만 ${lRate.toFixed(3)}` +
+            ? `\n     초당 붕괴(전체 합계 — 위 줄들이 더 정확합니다): 간파노림 ${wRate.toFixed(3)} vs 평타만 ${lRate.toFixed(3)}` +
               `\n     ${
                 lRate > 0 && wRate >= lRate * 1.5
                   ? '→ **돕니다.** 훨씬 적게 휘두르고도 더 자주 끊습니다.'
