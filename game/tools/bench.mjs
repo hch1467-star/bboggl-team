@@ -1139,9 +1139,46 @@ for (let i = 0; i < 3; i++) {
       for (const [k, v] of Object.entries(r)) lever[k] = (lever[k] ?? 0) + v
     const leverAll = Object.values(lever).reduce((a, b) => a + b, 0)
     if (leverAll > 0) {
+      /**
+       * ── ⚠️ **합치면 흔들림이 사라집니다 (제가 두 번 속았습니다)** ─────
+       *
+       * 이 줄은 여러 판을 **하나로 합쳐** 퍼센트 하나만 냈습니다. 그래서
+       * 읽는 사람은 그 값이 얼마나 흔들리는지 볼 방법이 없습니다.
+       *
+       * 실제로 일어난 일: 기력을 뗀 뒤 판마다 가드가 이렇게 나왔습니다.
+       *
+       *     뗀 뒤 ① 가드 **9%**  ② 가드 21%  ③ 가드 25%   (기력 있을 때 22%)
+       *
+       * 저는 ①만 보고 *"예측이 틀렸다 — 가드가 반토막 났다"* 고 사용자께
+       * 말했습니다. 세 판을 모으면 가운데값 21%, 즉 **사실상 안 변했습니다.**
+       * 제 원래 예측(가드가 오른다)도, 그것을 뒤집은 정정도 둘 다 한 판짜리
+       * 표본 위에 있었습니다.
+       *
+       * ⭐ **이 저장소는 「한 판은 표본이 아니다」를 여러 번 적어 뒀는데,
+       *    그 규칙을 «벤치의 가운데값»에는 적용하지 않고 있었습니다.**
+       *    3판 벤치의 지렛대 퍼센트도 한 판처럼 흔들립니다. 흔들림을
+       *    안 찍으면 안정된 값처럼 보입니다.
+       *
+       * 그래서 **판별 최소~최대**를 같이 냅니다. 좁으면 신호, 넓으면 잡음
+       * — 판정은 여전히 안 답니다(어느 지렛대가 «옳은가»는 설계 결정).
+       */
+      const perRun = pick((l) => l.poiseLever ?? {})
+      const spread = (k) => {
+        const xs = perRun
+          .map((r) => {
+            const tot = Object.values(r).reduce((a2, b2) => a2 + b2, 0)
+            return tot > 0 ? Math.round(((r[k] ?? 0) / tot) * 100) : null
+          })
+          .filter((v) => v !== null)
+        return xs.length > 1 ? ` (${Math.min(...xs)}~${Math.max(...xs)})` : ''
+      }
       const lNamed = Object.entries(lever)
         .sort((x, y) => y[1] - x[1])
-        .map(([k, v]) => `${k} ${Math.round((v / leverAll) * 100)}%`)
+        .map(([k, v]) => {
+          const pct = Math.round((v / leverAll) * 100)
+          // 흔들림은 **큰 것에만** 붙입니다 — 1% 짜리에 폭을 달면 줄이 못 읽게 됩니다.
+          return `${k} ${pct}%${pct >= 10 ? spread(k) : ''}`
+        })
         .join(' · ')
       console.log(`  🔧 지렛대       무엇 덕분에 깎였는가 — ${lNamed}`)
       /**

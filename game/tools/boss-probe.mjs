@@ -343,7 +343,14 @@ try {
   const RUNS = 3
   const shapes = []
   for (let run = 0; run < RUNS; run++) {
-    const r = await page.evaluate(async (PRESSURE_FULL) => {
+    /**
+     * ⚠️ 안쪽 이름을 **바깥 상수와 다르게** 둡니다. 같은 이름이면
+     *    「인자로 넘어온 것」인지 「모듈 상수를 참조한 것」인지 눈으로도
+     *    검사로도 안 갈립니다 — `npm run guard` 가 실제로 여기서 빨강을
+     *    냈습니다. 브라우저 안에서 모듈 상수를 보면 ReferenceError 로
+     *    그 자리에서 죽는데, 이 저장소는 그 사고를 이미 두 번 겪었습니다.
+     */
+    const r = await page.evaluate(async (fullPressure) => {
       const G = window.__game
       const sleep = () => new Promise((res) => setTimeout(res, 6))
       const now = () => G.state().simElapsed
@@ -761,7 +768,7 @@ try {
          *    예고를 보고 쉬는 모양과 비슷해집니다.
          */
         const inSwingWindow =
-          PRESSURE_FULL || pressFrames === 0 || swingFrames / pressFrames < SWING_DUTY
+          fullPressure || pressFrames === 0 || swingFrames / pressFrames < SWING_DUTY
         if (inSwingWindow) {
           G.press('Mouse0')
           G.release('Mouse0')
@@ -814,7 +821,10 @@ try {
         raceT,
         swingPct: pressFrames ? Math.round((swingFrames / pressFrames) * 100) : 0,
       }
-    })
+      // ⚠️ **인자를 여기서 넘깁니다.** 안 넘기면 안에서 `undefined` 가 되고,
+      //    falsy 라 기본 경로는 «우연히» 맞게 돌면서 스위치만 조용히 죽습니다.
+      //    실제로 그 상태로 두 판을 돌렸고, `npm run guard` 가 잡아 줬습니다.
+    }, PRESSURE_FULL)
     shapes.push(r)
     console.log(
       `     ${run + 1}판 — 인트로 ${r.intro.toFixed(1)} · 전환 ${r.trans.toFixed(1)} · 1단계 ${r.phase[0].toFixed(1)} · 2단계 ${r.phase[1].toFixed(1)} · 3단계 ${r.phase[2].toFixed(1)}초` +
