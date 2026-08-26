@@ -1397,5 +1397,44 @@ check(
   )
 }
 
+/**
+ * ── 📏 **같은 약속을 재는 자리가 같은 눈금을 쓰는가** ─────────────────
+ *
+ * 「마지막 구간이 가장 길다」를 재는 자리가 셋인데 눈금이 셋 다
+ * 달랐습니다:
+ *
+ *     벤치 🏁      허용 1.0 ~ 2.5배
+ *     침대 🏁      상한 **없음** — 1배만 넘으면 통과
+ *     침대 배수    모든 구간 쌍이 ≤ 2.5배
+ *
+ * 그래서 3.28배가 한 검사에서 ✅, 두 검사에서 ❌ 로 **동시에** 나왔고,
+ * 침대의 두 검사는 서로 **반대를 요구**했습니다 — 🏁 는 "가장 길어라",
+ * 배수는 "2.5배 넘지 마라". 값이 흩어져서가 아니라 **약속이 흩어져서**
+ * 생긴 모순입니다.
+ *
+ * 눈금을 약속이 적힌 곳(bossPhases.ts `PHASE_LEN_BAND`)에 두고 셋이
+ * 읽게 했습니다. 이 검사는 **네 번째 자리가 다시 상수를 적는 것**을
+ * 막습니다 — 재는 쪽이 규칙을 베끼면 규칙을 옮기는 날 재는 쪽만 옛
+ * 값을 씁니다. 이 저장소가 `lungeSpeed` · 무적 창 · 공격 비용에서
+ * 이미 세 번 겪은 자리입니다.
+ */
+{
+  const wired = [
+    ['src/main.ts', 'lenBand'],
+    ['tools/playthrough.mjs', 'lenBand'],
+    ['tools/bench.mjs', 'l.lenBand'],
+    ['tools/boss-probe.mjs', 'lenBand'],
+  ]
+  const missing = wired.filter(([f, needle]) => {
+    const full = path.join(HERE, '..', f)
+    return !existsSync(full) || !readFileSync(full, 'utf8').includes(needle)
+  })
+  check(
+    missing.length === 0,
+    '📏 **「마지막 구간」의 눈금을 재는 쪽이 전부 게임에서 읽는다** (검사끼리 반대를 요구하지 않게)',
+    missing.length ? `상수를 따로 든 곳: ${missing.map(([f]) => f).join(' · ')}` : '네 칸 전부 이어짐',
+  )
+}
+
 console.log(`\n${fail === 0 ? '✅' : '❌'} ${pass}개 통과 / ${fail}개 실패\n`)
 process.exit(fail === 0 ? 0 : 1)

@@ -1326,8 +1326,20 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
         '죽지 않는 침대는 `npm run boss` 입니다 — 판정은 거기 있습니다.',
     )
   } else {
-    const longest = t1 > 0 && t3 >= t1
-    const notSponge = t1 > 0 && t3 <= t1 * 2.5
+    /**
+     * 📏 **눈금은 게임에서 옵니다** — bossPhases.ts `PHASE_LEN_BAND`.
+     *
+     * 여기 1.0/2.5 를 다시 적고 있었습니다. 그래서 같은 약속을 재는
+     * 자리가 셋인데 눈금이 셋 다 달랐고(벤치 1.0~2.5 · 침대 상한 없음 ·
+     * 침대 배수 2.5), 같은 배수가 한 검사에서 ✅, 두 검사에서 ❌ 로
+     * 동시에 나왔습니다. 약속이 흩어지면 검사끼리 싸웁니다.
+     *
+     * ⚠️ 눈금이 안 실려 온 로그(예전 판)면 **판정하지 않습니다.**
+     *    기본값을 여기 적어 두면 그 기본값이 곧 네 번째 눈금이 됩니다.
+     */
+    const band = logs.find((l) => l.lenBand)?.lenBand
+    const longest = band && t1 > 0 && t3 >= t1 * band.min
+    const notSponge = band && t1 > 0 && t3 <= t1 * band.max
     const ok = longest && notSponge
     /**
      * ── 📉 **판마다 흔들리면 판정하지 않습니다** ──────────────────────
@@ -1401,7 +1413,8 @@ console.log(`  보스 붕괴      ${fmt(boss.map((l) => l.boss.breaks ?? 0), 1)}
       console.log(
         `  ${ok ? '✅' : '❌'} 마지막 구간이 가장 길다 — **그리고 스펀지는 아니다** (bossPhases.ts 의 약속) — ` +
           `1단계 ${t1.toFixed(1)}초 · 3단계 ${t3.toFixed(1)}초` +
-          (t1 > 0 ? ` (${(t3 / t1).toFixed(1)}배 · 허용 1.0~2.5배)` : '') +
+          (t1 > 0 && band ? ` (${(t3 / t1).toFixed(1)}배 · 허용 ${band.min}~${band.max}배)` : '') +
+          (band ? '' : ' ⏸ **눈금이 로그에 없습니다 — 판정 보류**(다시 돌리십시오)') +
           (cleanBoss.length < boss.length ? ` [초기화 없는 ${cleanBoss.length}판만]` : '') +
           (longest ? '' : ' ← 마지막이 짧습니다') +
           (notSponge ? '' : ' ← **너무 깁니다**: 단단한 게 아니라 안 죽는 것입니다'),

@@ -4362,6 +4362,12 @@ try {
        * 이걸 보고 그 줄들을 판정에서 뺍니다.
        */
       staminaOn: G.runStats().staminaOn,
+      /**
+       * 📏 「마지막 구간이 가장 길다」의 눈금 — bossPhases.ts `PHASE_LEN_BAND`.
+       * 벤치가 1.0~2.5 를 다시 적으면, 침대와 벤치가 각자 다른 값을 들고
+       * 있던 그 상태로 돌아갑니다(그 상수의 주석 참고).
+       */
+      lenBand: G.bossTuning()[0].lenBand,
       minStamina: Number(minStamina.toFixed(0)),
       dodgeCost,
       lowStaminaRatio: staminaSamples ? Math.round((lowStaminaSamples / staminaSamples) * 100) : 0,
