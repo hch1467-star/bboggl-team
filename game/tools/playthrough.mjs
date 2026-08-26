@@ -690,6 +690,23 @@ try {
      * 그 갈래를 여기서 냅니다.
      */
     let bossClampT = 0
+    /**
+     * ⚔️ **보스전 시간 중 실제로 «휘두르고 있던» 비율.**
+     *
+     * 침대(`npm run boss`)와 실제 판이 갈리는 축이 여기입니다. 총 화력은
+     * 자릿수가 비슷한데(침대 ~33/초 vs 실제 ~24/초, 보스전 전체 기준),
+     * **1단계에서 갈립니다** — 침대는 피해를 앞 1.3초에 몰아넣고 실제
+     * 판은 9.9초에 흩습니다. 「일정한 압력」이란 말이 실제로 뜻하는 것은
+     * *"쉬지 않는다"* 이고, 사람은 예고를 보고 **쉽니다.**
+     *
+     * 그 «쉬는 비율»을 아무도 안 재고 있었습니다. 이걸 알아야 침대에
+     * 실제와 자릿수가 맞는 압력을 줄 수 있습니다 — 제가 짐작해서
+     * 고르지 않도록.
+     *
+     * ⚠️ 상태 «번호»가 아니라 게임이 낸 **뜻**(`player.swinging`)을 씁니다.
+     */
+    let bossFrames = 0
+    let bossSwingFrames = 0
     let bossPhaseSeen = 0
     let bossDamageTaken = 0
     let bossDamageDealt = 0
@@ -1953,6 +1970,8 @@ try {
         bossFightTime = now() - bossStart
         // 🎓 누적값이라 **가장 큰 것**을 들고 갑니다(보스가 죽으면 못 읽습니다).
         if ((be.teachHold?.clampT ?? 0) > bossClampT) bossClampT = be.teachHold.clampT
+        bossFrames++
+        if (st.player.swinging) bossSwingFrames++
         if (be.phase + 1 > bossPhaseSeen) bossPhaseSeen = be.phase + 1
         /**
          * **페이즈마다 몇 초를 보냈는가.**
@@ -4291,6 +4310,8 @@ try {
         minHp: Math.round(bossMinHp),
         /** 🎓 잠금이 실제로 체력을 되돌린 시간(초) — 게임이 셉니다. */
         clampT: Number(bossClampT.toFixed(1)),
+        /** ⚔️ 보스전 프레임 중 실제로 휘두르던 비율(%) — 침대의 압력을 맞추는 데 씁니다. */
+        swingPct: bossFrames ? Math.round((bossSwingFrames / bossFrames) * 100) : 0,
         killed: bossKilled,
         samples: bossSamples,
         inRangePct: bossRangeSamples

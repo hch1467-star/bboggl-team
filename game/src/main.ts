@@ -7510,6 +7510,20 @@ class Game {
         stamina: Number(Stamina.value[p].toFixed(1)),
         state: Actor.state[p],
         /**
+         * ⚔️ **지금 휘두르고 있는가** — 상태 «번호»가 아니라 **뜻**을 냅니다.
+         *
+         * 프로브가 `state === 3` 같이 비교하면, 열거형 순서를 바꾸는 날
+         * 재는 쪽만 조용히 다른 것을 셉니다(이 저장소가 `enemyInfo.attacking`
+         * 에서 이미 겪었습니다). 판단은 게임에서 한 번만 합니다.
+         *
+         * 이 칸이 왜 생겼는가: 침대(`npm run boss`)와 실제 판의 차이가
+         * «총 화력»이 아니라 **«때리는 몰아침»** 이었습니다. 침대는 1단계
+         * 피해를 앞 1.3초에 몰아넣고, 실제 판은 9.9초에 흩습니다. 그
+         * 차이를 재려면 *"보스전 시간 중 몇 %를 실제로 휘둘렀나"* 가
+         * 필요한데, 아무도 안 재고 있었습니다.
+         */
+        swinging: Actor.state[p] === ActorState.Attack || Actor.state[p] === ActorState.Skill,
+        /**
          * 📏 **내 몸 굵기.** 판정이 `range + Body.radius[대상]` 으로 관대하게
          * 잡기 때문에(combat.ts `shapeDist`), *"그린 선 밖 어디까지 맞는가"*
          * 를 재려면 이 값이 필요합니다. 프로브가 0.45 를 베껴 적지 않게
