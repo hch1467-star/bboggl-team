@@ -13,6 +13,13 @@ import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 import { createServer } from 'vite'
 
+/**
+ * ⚔️ **옛 압력(쉬지 않고 때리기)으로 돌리는 스위치.**
+ * 기본은 사람만큼(벤치 실측 51%)입니다 — 근거는 때리는 자리의 주석에.
+ * 옛 판의 숫자와 직접 견줘야 할 때만 켜십시오: `BOSS_PRESSURE=full npm run boss`
+ */
+const PRESSURE_FULL = process.env.BOSS_PRESSURE === 'full'
+
 const PORT = 5185
 const execPath = ['/opt/pw-browsers/chromium'].find((p) => existsSync(p))
 
@@ -336,7 +343,7 @@ try {
   const RUNS = 3
   const shapes = []
   for (let run = 0; run < RUNS; run++) {
-    const r = await page.evaluate(async () => {
+    const r = await page.evaluate(async (PRESSURE_FULL) => {
       const G = window.__game
       const sleep = () => new Promise((res) => setTimeout(res, 6))
       const now = () => G.state().simElapsed
@@ -549,6 +556,15 @@ try {
       /** 1→2 경계 체력 비율. 게임에게 물어봅니다 — 베껴 적지 않습니다. */
       const p1Edge = G.bossTuning()[1]?.enterBelow ?? 0.75
       let done = false
+      /**
+       * ⚔️ 압력 상수 — 근거는 아래 때리는 자리의 주석에 있습니다.
+       * `SWING_DUTY` 벤치 실측 51% · `SWING_CYCLE` 이 침대의 안전창 1.87초 ×2.
+       */
+      const SWING_DUTY = 0.51
+      const SWING_CYCLE = 3.74
+      const runT0 = now()
+      let pressFrames = 0
+      let swingFrames = 0
       const deadline = Date.now() + 200000
       while (!done && Date.now() < deadline) {
         const be = G.bossEncounter()
@@ -701,8 +717,40 @@ try {
         }
         G.setStamina(100)
         G.setHp(G.playerEntity(), 100)
-        G.press('Mouse0')
-        G.release('Mouse0')
+        /**
+         * ── ⚔️ **사람만큼만 때립니다** (쉬지 않고 때리던 것을 고칩니다) ──
+         *
+         * ── 왜 바꾸는가 ────────────────────────────────────────────────
+         * 이 자리는 오래 *"붙어 서서 쉬지 않고 평타"* 였습니다. 그래야
+         * 판끼리 견줄 수 있으니까요. 그런데 그 압력이 실제와 너무 달라서
+         * **여기서만 생기는 현상**을 냈습니다:
+         *
+         *     학습 잠금이 문 시간 — 침대 1단계의 **81%** vs 실제 판 **0~1%**
+         *
+         * 저는 그 81% 를 보고 *"보스가 자기를 소개할 시간이 없다"* 는
+         * 결론을 커밋했다가 되돌렸습니다. 잠금은 **빨리 깎을수록 더 뭅니다.**
+         *
+         * ── 무엇에 맞추는가 (짐작이 아니라 잰 값) ────────────────────
+         * 벤치가 실제 판에서 잰 값(게임의 `player.swinging`):
+         *
+         *     보스전 시간 중 실제로 휘두른 비율 — **51% (45~55)**
+         *
+         * 주기는 **이 침대가 스스로 잰 값**을 씁니다 — 1단계 안전창
+         * 1.87초(아래 🪟 절). 한 창 때리고 한 창 쉬면 약 50% 가 됩니다.
+         *
+         * ⚠️ **이 변경으로 침대의 구간 «길이»가 전부 달라집니다.** 예전
+         *    판과 직접 견주면 안 됩니다. 옛 압력이 필요하면
+         *    `BOSS_PRESSURE=full` 로 돌립니다 — 다만 그 값은 사람 쪽으로
+         *    안 옮겨진다는 것이 이제 측정으로 확인됐습니다.
+         */
+        const inSwingWindow =
+          PRESSURE_FULL || (now() - runT0) % SWING_CYCLE < SWING_CYCLE * SWING_DUTY
+        if (inSwingWindow) {
+          G.press('Mouse0')
+          G.release('Mouse0')
+        }
+        pressFrames++
+        if (G.state().player.swinging) swingFrames++
 
         // 무너짐·처형은 **일어난 자리에서** 셉니다(상태가 덮이기 전에).
         const st = G.runStats?.() ?? {}
@@ -747,6 +795,7 @@ try {
         lostBy,
         heldT,
         raceT,
+        swingPct: pressFrames ? Math.round((swingFrames / pressFrames) * 100) : 0,
       }
     })
     shapes.push(r)
