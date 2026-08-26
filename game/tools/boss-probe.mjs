@@ -1025,13 +1025,36 @@ try {
      *    거짓말을 합니다. 정의는 한 곳에서 나와야 합니다.
      */
     const perNet = [mid(ok.map((s) => s.raceT)), per[1], per[2]]
-    const hi = Math.max(...perNet)
-    const lo = Math.min(...perNet.filter((v) => v > 0.05))
+    const band = await page.evaluate(() => window.__game.bossTuning()[0].lenBand)
+    /**
+     * ── ⚖️ **이 검사가 🏁 와 반대를 요구하고 있었습니다** ────────────
+     *
+     * 붙듦을 빼고 나니 모순이 드러났습니다:
+     *
+     *     ✅ 🏁 마지막 구간이 가장 길다  — 3단계/1단계 3.28배
+     *     ❌ 한 구간만 유독 길지 않다     — 3.28배 (상한 2.5)
+     *
+     * 3.28배는 위 약속을 **지킨 결과**인데 아래가 그걸 금지합니다.
+     * 설계가 «길어라»라고 이름 댄 구간을, 이름 없는 상한이 자릅니다.
+     *
+     * ── 그래서 역할을 가릅니다 ──────────────────────────────────────
+     * · **마지막 구간**은 🏁 가 봅니다 — 아래·위 눈금 둘 다
+     *   (`PHASE_LEN_BAND`, bossPhases.ts 한 곳).
+     * · **여기**는 설계가 아무 말도 안 한 구간들끼리만 봅니다
+     *   (1단계 vs 2단계). 원래 잡으려던 것 — *"체력을 고르게 나눴는데
+     *   한 구간만 유독 길다"* — 은 그대로 잡힙니다.
+     *
+     * ⚠️ 빨강을 없애려고 문턱을 무르게 한 것이 **아닙니다.** 상한 자체는
+     *    🏁 로 옮겨 갔고, 거기서 지금 실제로 판정합니다.
+     */
+    const midPer = [perNet[0], perNet[1]]
+    const hi = Math.max(...midPer)
+    const lo = Math.min(...midPer.filter((v) => v > 0.05))
     check(
-      hi <= lo * 2.5,
-      '한 구간만 유독 길지 않다 (가장 긴 구간 ≤ 가장 짧은 구간 × 2.5 · **붙듦 제외** — 🏁 와 같은 자)',
-      `가장 김 ${hi.toFixed(1)}초 · 가장 짧음 ${lo.toFixed(1)}초 · 배수 ${(hi / lo).toFixed(1)}` +
-        ` [1단계는 깎던 시간 ${perNet[0].toFixed(1)}초 · 붙듦 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초 별도]`,
+      hi <= lo * band.max,
+      `설계가 «길어라»라고 안 한 구간끼리 유독 벌어지지 않는다 (1·2단계 · ≤ ${band.max}배 · 마지막 구간은 🏁 가 봅니다)`,
+      `1단계 ${perNet[0].toFixed(1)}초(깎던 시간) · 2단계 ${perNet[1].toFixed(1)}초 · 배수 ${(hi / lo).toFixed(1)}` +
+        ` [붙듦 ${mid(ok.map((s) => s.heldT)).toFixed(1)}초 별도]`,
     )
 
     /**
@@ -1098,14 +1121,29 @@ try {
           `1단계 ${per[0].toFixed(1)}초에서 붙듦 ${hold.toFixed(1)}초를 빼면 ` +
           `${p1Fight.toFixed(1)}초입니다. 분모가 성하지 않으면 배수는 아무 값이나 됩니다.`,
       )
-    } else
+    } else {
+    /**
+     * 📏 **눈금은 게임이 줍니다** — bossPhases.ts `PHASE_LEN_BAND`.
+     * 여기 상수를 다시 적으면, 벤치·침대·배수 검사가 각자 다른 값을
+     * 들고 있던 그 상태로 돌아갑니다(그 상수의 주석 참고).
+     *
+     * ⚠️ **위 눈금이 새로 생겼습니다.** 전에는 «1배만 넘으면 통과»라
+     *    3단계가 아무리 길어도 안 잡혔습니다. 「가장 길다」는 약속이지
+     *    「길수록 좋다」가 아닙니다 — 스펀지가 되는 선이 있어야 합니다.
+     */
+    const lb = await page.evaluate(() => window.__game.bossTuning()[0].lenBand)
+    const ratio = per[2] / Math.max(0.01, p1Fight)
     check(
-      per[2] >= p1Fight,
-      '🏁 **마지막 구간이 가장 길다** (bossPhases.ts 의 약속 — 죽음 없는 자리에서 · **가르치느라 붙든 시간 제외**)',
+      ratio >= lb.min && ratio <= lb.max,
+      `🏁 **마지막 구간이 가장 길다 — 그리고 스펀지는 아니다** (bossPhases.ts 의 약속 · 허용 ${lb.min}~${lb.max}배 · 죽음 없는 자리에서 · **붙듦 제외**)`,
       `1단계 ${p1Fight.toFixed(1)}초(깎던 시간 · 붙듦 ${hold.toFixed(1)}초 별도 · 합 ${per[0].toFixed(1)}초) · ` +
         `2단계 ${per[1].toFixed(1)}초 · 3단계 ${per[2].toFixed(1)}초` +
-        ` (3단계/1단계 ${(per[2] / Math.max(0.01, p1Fight)).toFixed(2)}배)`,
+        ` (3단계/1단계 **${ratio.toFixed(2)}배**)` +
+        (ratio > lb.max
+          ? ' ← ⚠️ 분모(1단계 깎던 시간)가 붙듦에 눌린 값입니다. 이 배수로 밸런스를 움직이기 전에 그것부터 가르십시오.'
+          : ''),
     )
+    }
   }
 
   /**

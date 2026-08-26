@@ -84,7 +84,12 @@ import {
   longestReach,
   telegraphRadius,
 } from './config/enemyAttacks'
-import { BOSS_PHASES, NO_CHAIN, PHASE_TRANSITION_TIME } from './config/bossPhases'
+import {
+  BOSS_PHASES,
+  NO_CHAIN,
+  PHASE_LEN_BAND,
+  PHASE_TRANSITION_TIME,
+} from './config/bossPhases'
 import { GEAR_TIERS, rollAffixes, rollTier, tierDef } from './config/gear'
 import { punishTable, sidestepTable, type PunishRow, type SidestepRow } from './config/punish'
 import { ENEMY_DEFS, bleedMaxOf, enemyDef, kindFromId } from './config/enemies'
@@ -7673,6 +7678,8 @@ declare global {
         firstAttack: string
         /** ⏸ 전환 연출의 길이(초) — 이 동안 보스는 무적입니다. 프로브가 1.25 를 베끼지 않게. */
         transitionTime: number
+        /** 📏 「마지막 구간이 가장 길다」의 허용 배수 — bossPhases.ts `PHASE_LEN_BAND`. */
+        lenBand: { min: number; max: number }
       }[]
       /** 적 종류 검증용 — 표를 그대로 내보냅니다(스크립트가 수치를 베끼지 않도록). */
       enemyRoster: () => {
@@ -8907,6 +8914,8 @@ window.__game = {
       cooldownScale: ph.cooldownScale,
       /** ⏸ 전환 연출 = 무적 구간의 길이. 페이즈마다 같지만 읽는 자리에서 바로 쓰이게 함께 냅니다. */
       transitionTime: PHASE_TRANSITION_TIME,
+      /** 📏 「마지막 구간이 가장 길다」의 눈금 — 재는 쪽 셋이 각자 다른 값을 들고 있었습니다. */
+      lenBand: PHASE_LEN_BAND,
       /** 🛡 받는 피해 배율 — 프로브가 0.7 을 **베껴 적지 않도록** 내보냅니다. */
       damageTakenScale: ph.damageTakenScale ?? 1,
       windups: attacksFor(EnemyKind.Boss).map((a) => ({ id: a.id, seconds: a.windup * ph.windupScale })),
