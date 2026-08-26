@@ -484,6 +484,34 @@ try {
       let transKilled = 0
       /** 💀 죽는 순간 보스가 물고 있던 예고(0 또는 1). 아래 죽음 판정에서 셉니다. */
       let deathKilled = 0
+      /**
+       * ── 🏷 **잃은 예고에 «이름»을 받아 적습니다** ─────────────────────
+       *
+       * ── 왜 칸을 하나 더 추측하지 않는가 ──────────────────────────
+       * 이 장부는 「잃은 것 − 아는 원인들」이라는 **뺄셈**이었습니다.
+       * 남는 몫이 생길 때마다 저는 원인을 하나 **짐작해서** 칸을
+       * 붙였습니다 — 전환, 그다음 죽음. 두 번 다 맞았지만, 세 번째로
+       * 남은 1개 앞에서 같은 짓을 또 하려던 참이었습니다.
+       *
+       * 뺄셈의 나머지는 **아무 이름이 없습니다.** 그래서 볼 때마다
+       * 그럴듯한 이름을 붙이게 되고, 그게 이번 회차에서 세 번 나온
+       * 「축이 틀린 채로 답처럼 생긴 숫자」의 만드는 법입니다.
+       *
+       * ── 대신 «사건»에서 이름을 받습니다 ──────────────────────────
+       * 예고가 판정으로 안 가고 끝나는 **그 프레임**에 보스가 무엇을
+       * 하고 있었는지 물어봅니다. 그러면 나머지가 0이 아니라 **「기타
+       * (state=n)」라는 이름 붙은 칸**이 되고, 다음 판이 그 이름을
+       * 직접 알려 줍니다. 짐작할 자리가 사라집니다.
+       *
+       * ⚠️ 원인은 **위에서부터 하나만** 고릅니다. 전환과 붕괴가 겹치는
+       *    프레임이 실제로 있었기 때문입니다(전환 칸 주석 참고).
+       *    한 손실에 원인 하나 — 그래야 장부가 닫힙니다.
+       */
+      const lostBy = {}
+      const noteLost = (why) => {
+        lostBy[why] = (lostBy[why] ?? 0) + 1
+      }
+      let swPrev = swing0.sw
       let wasWinding = false
       /**
        * ── 🎓 **가르치느라 붙들려 있던 시간** ──────────────────────────
@@ -545,7 +573,10 @@ try {
            *    「전환이 지운 예고」에서 세운 규칙과 같습니다:
            *    **한 손실에 원인 하나.**
            */
-          if (wasWinding) deathKilled = 1
+          if (wasWinding) {
+            deathKilled = 1
+            noteLost('죽음')
+          }
           done = true
           break
         }
@@ -592,7 +623,24 @@ try {
           if (wasWinding) transKilled++
         }
         wasTrans = bt > 0
-        wasWinding = bt <= 0 && bInfo?.attacking === true && bInfo?.attackPhase === 0
+        const nowWinding = bt <= 0 && bInfo?.attacking === true && bInfo?.attackPhase === 0
+        /**
+         * 🏷 **예고가 판정으로 안 가고 끝난 프레임**을 잡습니다.
+         * 「휘두름이 나왔는가」는 게임의 장부(`bossSwingLog`)로 판단합니다 —
+         * 프로브가 판정 조건을 다시 쓰면 규칙이 두 곳이 됩니다.
+         */
+        const swNow = Object.values(G.bossSwingLog()).reduce((a2, v) => a2 + v.swings, 0)
+        if (wasWinding && !nowWinding && swNow === swPrev) {
+          noteLost(
+            bt > 0
+              ? '전환'
+              : (bInfo?.brokenT ?? 0) > 0
+                ? '붕괴'
+                : `기타(state=${bInfo?.state ?? '없음'})`,
+          )
+        }
+        swPrev = swNow
+        wasWinding = nowWinding
         if (be.encounter === 1) intro[0] += dt
         else if (bt > 0) trans[0] += dt
         else if (be.encounter === 2) {
@@ -696,6 +744,7 @@ try {
         transitions,
         transKilled,
         deathKilled,
+        lostBy,
         heldT,
         raceT,
       }
@@ -707,10 +756,21 @@ try {
         ` · 예고 ${r.commits}→판정 ${r.swings}` +
         (r.commits > 0 ? `(끊김 ${Math.round(((r.commits - r.swings) / r.commits) * 100)}%)` : '') +
         ` · 1단계 깎기 ${r.raceT.toFixed(1)}초 + 붙듦 ${r.heldT.toFixed(1)}초` +
-        ` · 잃은예고 ${r.commits - r.swings} = 붕괴 ${r.windupBreaks} + 전환 ${r.transKilled} + 죽음 ${r.deathKilled}` +
+        ` · 잃은예고 ${r.commits - r.swings} = ` +
         (() => {
-          const rest = r.commits - r.swings - r.windupBreaks - r.transKilled - r.deathKilled
-          return rest === 0 ? ' (장부 맞음)' : ` + 설명못함 **${rest}** ⚠️`
+          /**
+           * 🏷 뺄셈이 아니라 **이름 붙은 칸들의 합**입니다. 나머지가
+           * 남으면 그건 «설명 못 함»이 아니라 «관측이 놓친 것»이고,
+           * 그 구분이 중요합니다 — 앞의 것은 게임의 수수께끼이고
+           * 뒤의 것은 **제 계기의 구멍**입니다.
+           */
+          const named = Object.entries(r.lostBy ?? {})
+          const sum = named.reduce((a2, [, v]) => a2 + v, 0)
+          const gap = r.commits - r.swings - sum
+          return (
+            (named.length ? named.map(([k, v]) => `${k} ${v}`).join(' + ') : '없음') +
+            (gap === 0 ? ' (장부 맞음)' : ` + **관측이 놓침 ${gap}** ⚠️`)
+          )
         })() +
         ` · 연계 예약 ${r.armed.join('/')} 발동 ${r.fired.join('/')}${r.killed ? '' : ' ⚠️ 못 잡음'}`,
     )
@@ -779,16 +839,30 @@ try {
     tr: s.transKilled,
     trAll: s.transitions,
     dk: s.deathKilled,
+    named: Object.values(s.lostBy ?? {}).reduce((a2, v) => a2 + v, 0),
   }))
-  const rest = led.reduce((a, r) => a + (r.lost - r.wb - r.tr - r.dk), 0)
+  const rest = led.reduce((a, r) => a + (r.lost - r.named), 0)
   check(
     rest === 0 && led.length > 0,
-    '🧾 잃은 예고가 **전부 설명된다** (붕괴 + 전환 + 죽음 = 잃은 예고 · 판정의 게이트)',
+    '🧾 잃은 예고에 **전부 이름이 붙었다** (관측이 놓친 것이 없다 · 판정의 게이트)',
     led.length
-      ? led.map((r) => `${r.lost}=${r.wb}+${r.tr}+${r.dk}`).join(' · ') +
-        (rest ? ` ← 설명못함 ${rest}` : '')
+      ? led.map((r) => `${r.lost}=${r.named}`).join(' · ') + (rest ? ` ← 놓침 ${rest}` : '')
       : '판이 없습니다',
   )
+  {
+    /**
+     * 🏷 **무엇이 예고를 지웠는가 — 이름별 합계.** 판정은 안 답니다.
+     * 여기 「기타(state=n)」 가 뜨면 그게 다음에 볼 자리입니다 —
+     * 뺄셈의 나머지와 달리 **어디를 볼지 알려 주는** 나머지입니다.
+     */
+    const roll = {}
+    for (const sh of shapes)
+      for (const [k, v] of Object.entries(sh.lostBy ?? {})) roll[k] = (roll[k] ?? 0) + v
+    const rows = Object.entries(roll).sort((a2, b2) => b2[1] - a2[1])
+    console.log(
+      `     🏷 예고를 지운 것 — ${rows.length ? rows.map(([k, v]) => `${k} ${v}회`).join(' · ') : '없음'}`,
+    )
+  }
   /**
    * ⚠️ **장부가 안 닫히면 이 아래는 판정하지 않습니다.** 설명 못 하는
    *    몫이 남아 있는데 비율을 판정하면, 그 몫이 나중에 계기 고장으로
