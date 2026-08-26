@@ -489,11 +489,27 @@ const PHASE1_TEACH_COLORS = 3
 /** 다 못 가르쳤어도 이만큼 지나면 넘어갑니다 — 확률이 나쁠 때의 탈출구. */
 const PHASE1_TEACH_CAP = 12
 const phase1HeldT = new Map<number, number>()
+/**
+ * 🎓 **클램프가 실제로 체력을 되돌린 시간**(초). 위 `phase1HeldT` 와 다릅니다.
+ *
+ * `phase1HeldT` 는 *"체력이 경계 아래로 내려가 있는 동안"* 을 세고, 색을 다
+ * 본 뒤에도 계속 셉니다(상한 `PHASE1_TEACH_CAP` 의 시계니까요). 여기는
+ * **되돌리기가 실제로 일어난 프레임만** 셉니다 — 곧 플레이어가 때렸는데
+ * 체력이 안 줄어든 시간입니다.
+ *
+ * ⚠️ 왜 게임이 내보내야 하는가: `npm run boss` 가 이 값을 **체력 비율로
+ *    다시 유도**하고 있었습니다(`hp/max <= 0.75+0.01` 인 프레임을 셈).
+ *    그 유도값으로 「1단계의 81%가 붙듦」이라는 숫자가 나왔고, 저는 그걸
+ *    설계 문제로 읽었습니다. 규칙을 아는 것은 이 파일이고, 재는 쪽이
+ *    규칙을 베끼면 **베낀 쪽만 틀립니다.**
+ */
+const phase1ClampT = new Map<number, number>()
 
 /** 판 시작에만 지웁니다(장부 설계 노트와 같은 규칙). */
 export function resetPhaseTeaching(): void {
   taughtInPhase1.clear()
   phase1HeldT.clear()
+  phase1ClampT.clear()
   chainShownPhase.clear()
 }
 
@@ -523,13 +539,20 @@ export function resetPhaseTeaching(): void {
  * 이 저장소가 가장 비싸게 여기는 실패가 **아무 말도 안 하는 계측기**인데,
  * 여기서는 **아무 말도 안 하는 게임**이었습니다.
  */
-export function phaseTeachHold(e: number): { holding: boolean; seen: number; need: number } {
+export function phaseTeachHold(e: number): {
+  holding: boolean
+  seen: number
+  need: number
+  clampT: number
+} {
   const seen = taughtInPhase1.get(e)?.size ?? 0
   const held = phase1HeldT.get(e) ?? 0
   return {
     holding: phaseTeachingOn && Enemy.phase[e] === 0 && seen < PHASE1_TEACH_COLORS && held < PHASE1_TEACH_CAP,
     seen,
     need: PHASE1_TEACH_COLORS,
+    /** 🎓 되돌리기가 실제로 일어난 누적 시간(초) — 재는 쪽이 유도하지 않게. */
+    clampT: Number((phase1ClampT.get(e) ?? 0).toFixed(2)),
   }
 }
 
@@ -1224,10 +1247,10 @@ export function enemyAiSystem(
         phase1HeldT.set(e, held)
         const seen = taughtInPhase1.get(e)?.size ?? 0
         if (seen < PHASE1_TEACH_COLORS && held < PHASE1_TEACH_CAP) {
-          Health.hp[e] = Math.max(
-            Health.hp[e],
-            Health.max[e] * BOSS_PHASES[1].enterBelow + 0.5,
-          )
+          const floor = Health.max[e] * BOSS_PHASES[1].enterBelow + 0.5
+          // 🎓 **되돌리기가 실제로 일어난 프레임만** 셉니다(위 상수 주석).
+          if (Health.hp[e] < floor) phase1ClampT.set(e, (phase1ClampT.get(e) ?? 0) + dt)
+          Health.hp[e] = Math.max(Health.hp[e], floor)
           want = phaseForHp(Health.hp[e] / Health.max[e])
         }
       }

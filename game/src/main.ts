@@ -6619,7 +6619,7 @@ class Game {
      * 체력을 깎아도 페이즈가 안 올라가는데 **이유를 아무도 말해 주지
      * 않았습니다.**
      */
-    teachHold: { holding: boolean; seen: number; need: number }
+    teachHold: { holding: boolean; seen: number; need: number; clampT: number }
   } | null {
     const ids = enemyQuery.run()
     for (let i = 0; i < enemyQuery.count; i++) {
@@ -8125,7 +8125,7 @@ declare global {
          * 게임이 말해 줍니다. 이게 없어서 아레나 프로브의 검사 셋이 아주
          * 오래 빨간 채로 있었습니다.
          */
-        teachHold: { holding: boolean; seen: number; need: number }
+        teachHold: { holding: boolean; seen: number; need: number; clampT: number }
       } | null
       /** 불티 검증용 */
       emberInfo: () => {

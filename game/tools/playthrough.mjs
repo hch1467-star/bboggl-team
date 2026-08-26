@@ -676,6 +676,20 @@ try {
     /** ── 보스전 계측 — 존의 절정 60초를 처음으로 재 봅니다 ── */
     let bossStart = 0
     let bossFightTime = 0
+    /**
+     * 🎓 **잠금이 실제로 체력을 되돌린 시간(초).** 게임이 직접 셉니다
+     * (enemyAI `phase1ClampT`) — 여기서 체력 비율로 유도하지 않습니다.
+     *
+     * 이 칸이 왜 생겼는가: 침대(`npm run boss`)가 이 값을 «체력이 경계
+     * 아래인 프레임»으로 다시 유도해서 **1단계의 81%가 붙듦**이라는
+     * 숫자를 냈고, 저는 그걸 설계 문제로 읽었습니다. 그런데 그 침대는
+     * 기력 무한으로 쉬지 않고 때리는 극단값(화력 118/초)이고, 실제 판은
+     * 훨씬 느립니다(보스 620을 22.6초 → 약 27/초). **4배 넘게 다릅니다.**
+     *
+     * 사람 쪽 값이 작으면 81%는 침대가 만든 값이고, 고칠 것이 없습니다.
+     * 그 갈래를 여기서 냅니다.
+     */
+    let bossClampT = 0
     let bossPhaseSeen = 0
     let bossDamageTaken = 0
     let bossDamageDealt = 0
@@ -1937,6 +1951,8 @@ try {
        */
       if (bossSeen && be && be.hp > 0) {
         bossFightTime = now() - bossStart
+        // 🎓 누적값이라 **가장 큰 것**을 들고 갑니다(보스가 죽으면 못 읽습니다).
+        if ((be.teachHold?.clampT ?? 0) > bossClampT) bossClampT = be.teachHold.clampT
         if (be.phase + 1 > bossPhaseSeen) bossPhaseSeen = be.phase + 1
         /**
          * **페이즈마다 몇 초를 보냈는가.**
@@ -4273,6 +4289,8 @@ try {
         damageDealt: Math.round(bossDamageDealt),
         maxHp: Math.round(bossMaxHp),
         minHp: Math.round(bossMinHp),
+        /** 🎓 잠금이 실제로 체력을 되돌린 시간(초) — 게임이 셉니다. */
+        clampT: Number(bossClampT.toFixed(1)),
         killed: bossKilled,
         samples: bossSamples,
         inRangePct: bossRangeSamples
