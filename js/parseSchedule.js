@@ -99,24 +99,45 @@ function buildEntryFromBase(base, statusField, parenMemo, freeMemo, travelers) {
   return [{ ...base, seatClass: only.seatClass, status: only.status, memo, travelers: [...travelers] }];
 }
 
-// 카톡 텍스트에는 연도가 없어서 기준 연도를 붙이는데, 12/28~1/1처럼 해를 넘기는 일정은
-// 그대로 두면 12/28과 1/1이 같은 해가 되어 체류 기간이 1년짜리로 잡힌다(캘린더에 막대가 통째로 그려짐).
-// 그래서 두 가지를 함께 본다.
-//  1) 시작 월이 보고 있는 달보다 한참 뒤면(1월 달력에서 12/28 입력) 지난해 일정으로 본다.
-//  2) 한 블록의 일정은 시간순으로 적히므로, 월이 크게 되돌아가면(12월 다음에 1월) 다음 해로 넘긴다.
-// baseMonth는 1~12 (달력에서 보고 있는 달). 없으면 1번은 건너뛴다.
+// 카톡 텍스트에는 연도가 없어서 앱이 연도를 정해줘야 한다. 그냥 같은 해를 붙이면
+// 12/28~1/1 예약이 12/28과 1/1 모두 같은 해가 되어, 체류 기간이 1/1~12/28 즉
+// 그 해 전체로 잡혀 달력에 통째로 표시된다.
+//
+// 그래서 첫 일정을 기준점으로 잡고, 나머지 날짜는 기준점에서 가장 가까운 해를 고른다.
+// 한 번에 붙여넣는 건 보통 한 번의 여행이라 며칠 안에 몰려 있기 때문에 이 방식이 안전하다.
+// (빈 줄로 나뉘어 있어도, 출국편이 먼저 적혀 있어도 같은 결과가 나온다)
+// baseMonth는 1~12 (달력에서 보고 있는 달). 첫 일정의 해를 정하는 데만 쓰인다.
 function createDateBuilder(baseYear, baseMonth) {
-  let year = baseYear;
-  let prevMonth = null;
+  let anchor = null; // 첫 일정 (기준점)
+
+  const pad = (monthStr, dayStr, year) =>
+    `${year}-${monthStr.padStart(2, "0")}-${dayStr.padStart(2, "0")}`;
+
   return (monthStr, dayStr) => {
     const month = parseInt(monthStr, 10);
-    if (prevMonth === null) {
+    const day = parseInt(dayStr, 10);
+
+    if (anchor === null) {
+      let year = baseYear;
+      // 보고 있는 달보다 한참 뒤의 달이면 지난해 일정 (1월 달력에서 12/28 입력)
       if (baseMonth && month - baseMonth >= 6) year -= 1;
-    } else if (prevMonth - month >= 6) {
-      year += 1;
+      // 보고 있는 달보다 한참 앞의 달이면 다음해 일정 (12월 달력에서 1/2 입력)
+      else if (baseMonth && baseMonth - month >= 6) year += 1;
+      anchor = { year, time: Date.UTC(year, month - 1, day) };
+      return pad(monthStr, dayStr, year);
     }
-    prevMonth = month;
-    return `${year}-${monthStr.padStart(2, "0")}-${dayStr.padStart(2, "0")}`;
+
+    // 앞해·같은해·다음해 중 첫 일정과 날짜 차이가 가장 작은 해를 고른다
+    let bestYear = anchor.year;
+    let bestDiff = Infinity;
+    for (const y of [anchor.year - 1, anchor.year, anchor.year + 1]) {
+      const diff = Math.abs(Date.UTC(y, month - 1, day) - anchor.time);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestYear = y;
+      }
+    }
+    return pad(monthStr, dayStr, bestYear);
   };
 }
 
@@ -169,14 +190,12 @@ function buildNoFlightEntry(match, makeDate, travelers) {
 }
 
 // 빈 줄로 구분된 하나의 블록(동행자 N명 + 그들의 항공편) 파싱
-function parseBlock(lines, year, baseMonth) {
+function parseBlock(lines, makeDate) {
   const travelers = [];
   const entries = [];
   const invalidLines = [];
   const assignees = [];
   let flightsStarted = false;
-  // 해를 넘기는 일정(12/28~1/1)을 처리하려고 블록마다 따로 둔다 — 블록이 바뀌면 다시 기준 연도부터 시작
-  const makeDate = createDateBuilder(year, baseMonth);
 
   lines.forEach((line) => {
     if (line.startsWith(">")) return; // 카톡 인용/답장 줄 — 일정 데이터가 아니므로 무시
@@ -248,8 +267,11 @@ function parseSchedule(rawText, year = new Date().getFullYear(), baseMonth = nul
   const entries = [];
   const invalidLines = [];
   const assigneeSet = new Set();
+  // 한 번에 붙여넣은 건 한 번의 여행이므로 연도 계산은 블록 전체가 같이 쓴다
+  // (빈 줄로 나뉘어 있어도 12/28~1/1이 이어진 일정으로 잡히도록)
+  const makeDate = createDateBuilder(year, baseMonth);
   blocks.forEach((blockLines) => {
-    const result = parseBlock(blockLines, year, baseMonth);
+    const result = parseBlock(blockLines, makeDate);
     travelers.push(...result.travelers);
     entries.push(...result.entries);
     invalidLines.push(...result.invalidLines);
