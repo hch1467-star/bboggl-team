@@ -67,7 +67,7 @@ const ScheduleModal = {
       return;
     }
 
-    const parsed = parseSchedule(raw, this.currentYear());
+    const parsed = parseSchedule(raw, this.currentYear(), this.currentMonth());
     this.lastParsed = parsed;
 
     if (parsed.travelers.length === 0 || parsed.entries.length === 0) {
@@ -119,6 +119,12 @@ const ScheduleModal = {
 
   currentYear() {
     return CalendarView.viewYear || new Date().getFullYear();
+  },
+
+  // 보고 있는 달(1~12) — 해를 넘기는 일정의 연도를 판단하는 데 쓰임 (js/parseSchedule.js 참고)
+  currentMonth() {
+    const m = typeof CalendarView !== "undefined" ? CalendarView.viewMonth : null;
+    return typeof m === "number" ? m + 1 : new Date().getMonth() + 1; // viewMonth는 0부터 시작
   },
 
   async commit() {
