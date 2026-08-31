@@ -12,6 +12,13 @@ on:
     branches:
       - main
       - claude/quarter-view-game-dev-iva3y8
+  # 항공편 시간표 자동 갱신이 끝나면 이어서 배포한다.
+  # 봇(github-actions)이 올린 커밋은 위 push 트리거를 발동시키지 않아서
+  # (무한 루프를 막는 GitHub 규칙) 이게 없으면 갱신된 시간표가 배포되지 않는다.
+  workflow_run:
+    workflows: ["Update flight schedule"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
