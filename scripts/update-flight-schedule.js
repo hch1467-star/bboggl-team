@@ -261,10 +261,30 @@ function pickAirportCode(item) {
   return null;
 }
 
+// data.go.kr이 해외(GitHub 서버)에서 가끔 응답을 안 해서 몇 번 다시 시도한다.
+// 평문(http)보다 https가 잘 통해서 https를 먼저 쓰고, 안 되면 http로도 시도.
+async function fetchWithRetry(paths, { attempts = 3, timeoutMs = 30000 } = {}) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    for (const url of paths) {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        lastErr = err;
+        console.warn(`  조회 실패(${i + 1}/${attempts}) ${url.split("?")[0]}: ${err.message || err}`);
+      }
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
+  }
+  throw lastErr || new Error("조회 실패");
+}
+
 async function fetchFlights(operation) {
-  const url = `http://apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp/${operation}?serviceKey=${SERVICE_KEY}&type=json&numOfRows=9999&pageNo=1`;
-  const res = await fetch(url);
-  const data = await res.json();
+  const query = `${operation}?serviceKey=${SERVICE_KEY}&type=json&numOfRows=9999&pageNo=1`;
+  const base = "apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp";
+  const data = await fetchWithRetry([`https://${base}/${query}`, `http://${base}/${query}`]);
   const items = data?.response?.body?.items || [];
   const byFlight = {};
   for (const item of items) {
@@ -288,14 +308,30 @@ function resolveGroupTime(codes, lookup) {
 async function main() {
   const existingMap = readExistingMap();
   const existingRouteMap = readExistingRouteMap();
+  // 한쪽 API가 안 되더라도 나머지는 갱신하고, 안 된 쪽은 기존 값을 그대로 둔다.
+  // (예전에는 인천이 실패하면 스크립트가 통째로 멈춰서 김포까지 갱신이 안 됐음)
   const [arrByFlight, depByFlight, gimpoTimeMap] = await Promise.all([
-    fetchFlights("getPassengerArrivalsDSOdp"),
-    fetchFlights("getPassengerDeparturesDSOdp"),
+    fetchFlights("getPassengerArrivalsDSOdp").catch((err) => {
+      console.error("인천 도착편 조회 실패, 기존 값 유지:", err.message || err);
+      return {};
+    }),
+    fetchFlights("getPassengerDeparturesDSOdp").catch((err) => {
+      console.error("인천 출발편 조회 실패, 기존 값 유지:", err.message || err);
+      return {};
+    }),
     fetchGimpoTimeLookup(SERVICE_KEY).catch((err) => {
       console.error("김포 노선 API 조회 실패, 기존 값 유지:", err.message || err);
       return {};
     }),
   ]);
+
+  const icnOk = Object.keys(arrByFlight).length > 0 || Object.keys(depByFlight).length > 0;
+  const gmpOk = Object.keys(gimpoTimeMap).length > 0;
+  console.log(`조회 결과 — 인천 ${icnOk ? "성공" : "실패"} / 김포 ${gmpOk ? "성공" : "실패"}`);
+  if (!icnOk && !gmpOk) {
+    console.error("양쪽 API 모두 실패했습니다. 시간표를 그대로 두고 종료합니다.");
+    process.exit(1);
+  }
 
   const finalMap = {};
   // 편명 -> { korea, japan, direction } — 리무진 텍스트(공항)·캘린더(입출국)·항공검색에서 같이 씀
