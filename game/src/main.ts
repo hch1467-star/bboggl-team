@@ -134,7 +134,7 @@ import {
 import { DEFAULT_LEVEL_ID, loadBundledLevel } from './levels'
 import { Terrain } from './level/terrain'
 import { QuarterViewCamera } from './render/camera'
-import { createScene } from './render/scene'
+import { createLookComposer, createScene } from './render/scene'
 import { Vfx } from './render/vfx'
 import { KIND_TREASURE, Visuals, backZoneOuter } from './render/visuals'
 import {
@@ -326,6 +326,8 @@ const treasureQuery = defineQuery(Transform, Pickup)
 
 class Game {
   private readonly renderer: THREE.WebGLRenderer
+  /** ✨ `?look=1` 일 때만 있는 후처리 사슬. null 이면 예전 경로로 그립니다. */
+  private readonly lookComposer: ReturnType<typeof createLookComposer>
   private readonly scene: THREE.Scene
   private readonly cursorRing: THREE.Mesh
   private readonly sunTarget: THREE.Object3D
@@ -805,6 +807,8 @@ class Game {
     this.guideMaterials = bundle.guideMaterials
 
     this.cam = new QuarterViewCamera(window.innerWidth / window.innerHeight)
+    // ✨ 카메라가 생긴 뒤에 만듭니다(사슬의 첫 패스가 카메라를 씁니다).
+    this.lookComposer = createLookComposer(this.renderer, this.scene, this.cam.camera)
     this.visuals = new Visuals(this.scene, this.cam.camera)
     this.vfx = new Vfx(this.scene)
     this.hud = new Hud()
@@ -898,6 +902,8 @@ class Game {
     const w = window.innerWidth
     const h = window.innerHeight
     this.renderer.setSize(w, h, false)
+    // ✨ 사슬의 렌더 타깃도 같이 키웁니다 — 안 하면 창을 줄일 때만 맞습니다.
+    this.lookComposer?.setSize(w, h)
     this.cam.resize(w / h)
   }
 
@@ -2741,7 +2747,13 @@ class Game {
 
     this.visuals.sync(px, pz, p)
     this.vfx.update(this.cam.camera)
-    this.renderer.render(this.scene, this.cam.camera)
+    /**
+     * ✨ `?look=1` 이면 후처리 사슬로, 아니면 예전 그대로 그립니다.
+     * 기본 게임의 그림은 **한 픽셀도 안 바뀝니다** — 룩은 눈으로 골라야
+     * 하는 값이라, 고르기 전까지 기본값을 건드리지 않습니다.
+     */
+    if (this.lookComposer) this.lookComposer.render()
+    else this.renderer.render(this.scene, this.cam.camera)
     if (this.sampleRequested) {
       this.sampleRequested = false
       this.lastSample = this.readFramebuffer()
@@ -4458,6 +4470,11 @@ class Game {
   /** 실험대 전용 — 강타 눈금이 실제로 그려진 자리(visuals.ts 설계 노트). */
   debugPoiseBars(): ReturnType<Visuals['debugPoiseBars']> {
     return this.visuals.debugPoiseBars()
+  }
+
+  /** ✨ 시안 도구가 씬을 훑을 수 있게 내보냅니다(읽기 전용 용도). */
+  debugScene(): THREE.Scene {
+    return this.scene
   }
 
   debugPlayerEntity(): number {
@@ -7633,6 +7650,11 @@ declare global {
       }[]
       showProps: (on: boolean) => void
       propCaps: () => { pillars: number; rubble: number }
+      /**
+       * ✨ **시안 전용** — 씬을 한 번 훑어 평면 셰이딩을 겁니다.
+       * 게임 루프에는 안 들어갑니다(프레임마다 훑을 값어치가 없습니다).
+       */
+      applyLook: () => number
       screenArea: () => number
       props: () => {
         pillars: number
@@ -8719,6 +8741,40 @@ window.__game = {
   props: () => game.debugProps(),
   /** 🏗 지물 상한 — 검사가 숫자를 베끼지 않게 게임이 냅니다(props.ts `MAX_PILLARS`). */
   propCaps: () => propCaps(),
+  /**
+   * ── ✨ **평면 셰이딩을 한 번에 겁니다 (시안 전용)** ─────────────────
+   *
+   * 재질이 열아홉 군데에 흩어져 있어서 하나씩 안 고칩니다. 어차피 이건
+   * «고를 값»이지 «정한 값»이 아니라, **고르기 전에는 게임 파일을 안
+   * 건드리는 쪽**이 맞습니다.
+   *
+   * 평면 셰이딩이 무엇을 바꾸는가: 꼭짓점마다 부드럽게 섞던 법선을
+   * **면 단위**로 바꿉니다. 그러면 원기둥·캡슐의 각 면이 딱 갈려서,
+   * 같은 도형이 «대충 만든 임시»가 아니라 **로우폴리 스타일**로 읽힙니다.
+   * 로우폴리를 쓰는 게임들이 도형 수를 줄이고도 좋아 보이는 이유의 절반이
+   * 여기입니다 — 디테일이 아니라 **면의 경계**가 형태를 읽게 해 줍니다.
+   */
+  applyLook: () => {
+    let n = 0
+    const seen = new Set<THREE.Material>()
+    game.debugScene().traverse((o) => {
+      const m = (o as THREE.Mesh).material
+      const list = Array.isArray(m) ? m : m ? [m] : []
+      for (const mat of list) {
+        if (seen.has(mat)) continue
+        seen.add(mat)
+        if ((mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+          const sm = mat as THREE.MeshStandardMaterial
+          sm.flatShading = true
+          // 거칠기를 조금 올려 «플라스틱» 느낌을 뺍니다(돌·나무·가죽 쪽으로).
+          sm.roughness = Math.min(1, sm.roughness * 1.12 + 0.06)
+          sm.needsUpdate = true
+          n++
+        }
+      }
+    })
+    return n
+  },
   /** 🖥 화면 한 장이 담는 넓이(m²) — 「성기다」에 단위를 붙이려면 분모가 필요합니다. */
   screenArea: () => game.debugScreenArea(),
   /**
