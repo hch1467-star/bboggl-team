@@ -286,6 +286,8 @@ async function fetchFlights(operation) {
   const base = "apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp";
   const data = await fetchWithRetry([`https://${base}/${query}`, `http://${base}/${query}`]);
   const items = data?.response?.body?.items || [];
+  // 응답에 어떤 항목이 들어오는지 한 번 남겨둔다 (기종·좌석등급 정보가 있는지 확인용)
+  if (items[0]) console.log(`인천 응답 항목(${operation}): ${Object.keys(items[0]).join(", ")}`);
   const byFlight = {};
   for (const item of items) {
     const code = String(item.flightId || "").trim().toUpperCase();
