@@ -74,6 +74,20 @@ function formatMD(dateStr) {
   return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
 }
 
+// "2026-09-12" 에서 하루 빼기 -> "2026-09-11" (월·연도 바뀌는 것도 알아서 처리)
+function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+// 자정~새벽 6시 사이에 도착하는 편 (예: KE752 02:05-04:35)
+// 이런 편은 도착 당일이 아니라 그 전날 밤부터 객실이 있어야 바로 들어갈 수 있다.
+const OVERNIGHT_ARRIVAL_BEFORE = "06:00";
+function isOvernightArrival(entry) {
+  return !entry.noFlight && !!entry.arrTime && entry.arrTime < OVERNIGHT_ARRIVAL_BEFORE;
+}
+
 // "20:40" - 2시간 -> "18:40" (자정 넘어가도 시각만 계산, 날짜는 안 바꿈)
 function subtractHours(timeStr, hours) {
   const [h, m] = timeStr.split(":").map(Number);
@@ -163,16 +177,26 @@ function buildRoomReservationText(parsed) {
     const holder = room.members[0];
     const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(holder.name);
 
+    // 새벽 도착편(00시~06시)은 전날 밤부터 객실이 있어야 도착하자마자 들어갈 수 있어서
+    // 체크인 날짜를 하루 앞당긴다. 이미 전날 방을 잡았으니 얼리체크인(ECI) 요청은 필요 없다.
+    const arrivesOvernight =
+      directionMap.get(arrivalEntry)?.direction === "입국" && isOvernightArrival(arrivalEntry);
+    const ciDate = arrivesOvernight ? addDays(arrivalEntry.date, -1) : arrivalEntry.date;
+
     // 리무진 픽업/샌딩 시간 기준 얼리체크인(ECI)/레이트체크아웃(LCO) 자동 안내
     // 입국편 도착이 13시 이전이면 ECI, 출국편 리무진 출발(항공편 출발 2시간 전)이 12시 이후면 LCO
     return {
       // 합방하는 동행자(MS 등)는 적지 않고 방 주인 이름만
       nameLabel: travelerLabel(room.members[0]),
       mmidValue: mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : ""),
-      ci: formatMD(arrivalEntry.date),
+      ci: formatMD(ciDate),
       co: formatMD(departureEntry.date),
       hasEarlyArrival: roomEntries.some(
-        (e) => !e.noFlight && directionMap.get(e)?.direction === "입국" && e.arrTime < "13:00"
+        (e) =>
+          !e.noFlight &&
+          directionMap.get(e)?.direction === "입국" &&
+          !isOvernightArrival(e) && // 전날부터 방을 잡았으므로 ECI 불필요
+          e.arrTime < "13:00"
       ),
       hasLateDeparture: roomEntries.some(
         (e) => !e.noFlight && directionMap.get(e)?.direction === "출국" && subtractHours(e.depTime, 2) >= "12:00"
