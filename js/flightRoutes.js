@@ -24,12 +24,32 @@ function airlineCodeOfFlight(flightNo) {
   return (flightNo || "").toUpperCase().slice(0, 2);
 }
 
-// 저비용항공사(LCC) — 자동으로 새로 발견된 편은 목록에 넣지 않는다.
-// 위 FLIGHT_ROUTES에 손으로 적어둔 LCC 편명은 그대로 표시된다(실제 취급하는 노선이라 넣어둔 것).
-const LCC_AIRLINES = new Set([
+// 한국-일본 노선을 실제로 비행기를 띄워 운항하는 항공사.
+// 여기 없는 항공사(DL·KL·AF·VS·EY·OM·TK·AM·UA 등)는 남의 비행기에 자기 편명만 붙여 파는
+// 코드셰어라, 목록에 넣으면 같은 비행기가 여러 줄로 보인다.
+const OPERATING_AIRLINES = new Set([
+  "KE", "OZ", "JL", "NH", // 대형
   "7C", "TW", "ZE", "RS", "BX", "LJ", "YP", "RF", "WE", // 국내 LCC
-  "MM", "IT", "ZG", "GK", "JW", "TR", "JD", "9C", "AK", "D7", "VJ", // 해외 LCC
+  "ET", // 인천 경유 노선
 ]);
+
+// 위 항공사라도 아래 번호대는 남의 비행기에 붙인 판매용(코드셰어) 번호다.
+// 예: KE5079는 진에어 LJ345에 붙은 대한항공 판매 번호 — 같은 비행기라 따로 넣으면 안 된다.
+const CODESHARE_NUMBER_PATTERNS = {
+  KE: /^5\d{3}$/,
+  OZ: /^9\d{3}$/,
+  JL: /^5\d{3}$/,
+  NH: /^[356]\d{3}$/,
+};
+
+// 실제 운항편인지 (자동 추가 대상인지) 판단
+function isOperatingFlight(flightNo) {
+  const code = (flightNo || "").toUpperCase();
+  const airline = airlineCodeOfFlight(code);
+  if (!OPERATING_AIRLINES.has(airline)) return false;
+  const pattern = CODESHARE_NUMBER_PATTERNS[airline];
+  return !(pattern && pattern.test(code.slice(2)));
+}
 
 // "JL090"과 "JL90"은 같은 편 — 편명 숫자의 앞자리 0을 떼서 비교용 키를 만든다
 function flightKey(flightNo) {
@@ -70,6 +90,9 @@ const FLIGHT_ROUTES = [
   {
     korea: "인천",
     japan: "나고야",
+    // autoFill: 매달 시간표가 갱신될 때 이 노선에 새로 생긴 실제 운항편(LCC 포함)을 자동으로 목록에 더한다.
+    // 아래 손으로 적은 목록은 그대로 두고, 거기 없는 편만 추가된다.
+    autoFill: true,
     inbound: ["KE744/JL5217", "OZ121/NH6963", "KE742/JL5219", "OZ123/NH6965"],
     outbound: ["OZ122/NH6964", "KE741/JL5216", "OZ124/NH6966", "KE743/JL5218"],
   },
@@ -124,6 +147,30 @@ const FLIGHT_ROUTES = [
 ];
 
 /**
+ * autoFill을 켠 노선에서, 손으로 적은 목록에 없는 실제 운항편을 찾아 돌려준다.
+ * 자동 갱신되는 FLIGHT_ROUTE_INFO(js/flightSchedule.js)를 보기 때문에
+ * 매달 시간표가 갱신되면 새로 생긴 편도 자동으로 목록에 들어온다.
+ */
+function autoFilledFlights(route, direction, groups) {
+  if (!route.autoFill || typeof FLIGHT_ROUTE_INFO === "undefined") return [];
+
+  const listed = new Set();
+  groups.forEach((entry) => entry.split("/").forEach((c) => listed.add(flightKey(c))));
+
+  const added = [];
+  for (const [code, info] of Object.entries(FLIGHT_ROUTE_INFO)) {
+    if (info.korea !== route.korea || info.japan !== route.japan || info.direction !== direction) continue;
+    if (listed.has(flightKey(code))) continue;
+    if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue; // "JL95A"처럼 문자가 붙은 건 전세기·페리
+    if (!isOperatingFlight(code)) continue; // 코드셰어 판매용 번호 제외
+    if (typeof timeRangeForFlight === "function" && !timeRangeForFlight(code)) continue; // 시간 모르면 표시 못 함
+    listed.add(flightKey(code));
+    added.push(code);
+  }
+  return added;
+}
+
+/**
  * @param {string} fromAirport 출발공항
  * @param {string} toAirport 도착공항
  * @returns {Array|null} 편명 목록(시간순), 한국↔일본 조합이 아니면 null, 지원 안 하는 노선이면 빈 배열
@@ -138,15 +185,13 @@ function findFlightsForRoute(fromAirport, toAirport) {
   const route = FLIGHT_ROUTES.find((r) => r.korea === korea && r.japan === japan);
   if (!route) return [];
 
-  // 목록은 위 FLIGHT_ROUTES만 쓴다.
-  // 전에는 API에서 찾은 편을 자동으로 덧붙였는데, 코드셰어 판매용 편명과 전세기가 섞여 들어오고
-  // 한쪽 방향만 추가돼서 출국/입국 편수가 어긋나는 문제가 있었다.
-  // (인천-오사카는 왕복 노선이라 양방향 편수가 항상 같아야 함)
-  // API 자료는 편명 -> 공항/입출국을 찾는 데만 쓰고(js/flightAirports.js·flightDirections.js),
-  // 검색 목록에 새 편을 넣을 때는 실제 운항을 확인한 뒤 위 표에 직접 적는다.
+  // 기본은 위 FLIGHT_ROUTES에 손으로 적은 목록만 쓴다.
+  // 예전에 모든 노선을 자동으로 채웠더니 코드셰어 판매용 편명과 전세기가 섞여 들어와서,
+  // 노선에 autoFill을 켠 경우에만 "실제 운항편"을 추가하도록 바꿨다.
   const groups = isFromKorea ? route.outbound : route.inbound;
+  const direction = isFromKorea ? "출국" : "입국";
 
-  return groups
+  return [...groups, ...autoFilledFlights(route, direction, groups)]
     .map((entry) => {
       const primary = entry.split("/")[0];
       const range = typeof timeRangeForFlight === "function" ? timeRangeForFlight(primary) : null;
