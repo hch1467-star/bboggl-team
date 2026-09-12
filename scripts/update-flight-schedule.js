@@ -238,13 +238,14 @@ function readExistingRouteMap() {
   const section = content.split("const FLIGHT_ROUTE_INFO = {")[1];
   if (!section) return {};
   const map = {};
-  const re = /"([A-Z0-9]+)":\s*\{\s*korea:\s*"([^"]*)",\s*japan:\s*(null|"[^"]*"),\s*direction:\s*"([^"]*)"\s*\}/g;
+  const re = /"([A-Z0-9]+)":\s*\{\s*korea:\s*"([^"]*)",\s*japan:\s*(null|"[^"]*"),\s*direction:\s*"([^"]*)"(?:,\s*codeshare:\s*(true|false))?\s*\}/g;
   let match;
   while ((match = re.exec(section))) {
     map[match[1]] = {
       korea: match[2],
       japan: match[3] === "null" ? null : match[3].slice(1, -1),
       direction: match[4],
+      codeshare: match[5] === "true",
     };
   }
   return map;
@@ -286,15 +287,22 @@ async function fetchFlights(operation) {
   const base = "apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp";
   const data = await fetchWithRetry([`https://${base}/${query}`, `http://${base}/${query}`]);
   const items = data?.response?.body?.items || [];
-  // 응답에 어떤 항목이 들어오는지 한 번 남겨둔다 (기종·좌석등급 정보가 있는지 확인용)
-  if (items[0]) console.log(`인천 응답 항목(${operation}): ${Object.keys(items[0]).join(", ")}`);
   const byFlight = {};
   for (const item of items) {
     const code = String(item.flightId || "").trim().toUpperCase();
     if (!code || !item.scheduleDateTime) continue;
     if (!byFlight[code]) {
       const t = String(item.scheduleDateTime).slice(8, 12);
-      byFlight[code] = { time: `${t.slice(0, 2)}:${t.slice(2)}`, airport: pickAirportCode(item) };
+      // codeshare/masterflightid: 이 편이 남의 비행기에 자기 편명만 붙여 파는 것인지 API가 직접 알려준다.
+      // (예전엔 편명 번호대로 짐작했는데, 이 값이 훨씬 정확하다)
+      const master = String(item.masterflightid || "").trim().toUpperCase();
+      const isCodeshare =
+        /^Y$/i.test(String(item.codeshare || "").trim()) || (!!master && master !== code);
+      byFlight[code] = {
+        time: `${t.slice(0, 2)}:${t.slice(2)}`,
+        airport: pickAirportCode(item),
+        codeshare: isCodeshare,
+      };
     }
   }
   return byFlight;
@@ -339,8 +347,8 @@ async function main() {
   // 편명 -> { korea, japan, direction } — 리무진 텍스트(공항)·캘린더(입출국)·항공검색에서 같이 씀
   const routeMap = {};
   const warnings = [];
-  const setRoute = (code, korea, japan, direction) => {
-    routeMap[code] = { korea, japan: japan || null, direction };
+  const setRoute = (code, korea, japan, direction, codeshare) => {
+    routeMap[code] = { korea, japan: japan || null, direction, codeshare: !!codeshare };
   };
 
   for (const routeInfo of INCHEON_ROUTES) {
@@ -396,7 +404,7 @@ async function main() {
       if (!dur) continue;
       const other = addMinutesToTime(info.time, sign * dur);
       finalMap[code] = sign < 0 ? `${other}-${info.time}` : `${info.time}-${other}`;
-      setRoute(code, "인천", AIRPORT_NAME[info.airport], sign < 0 ? "입국" : "출국");
+      setRoute(code, "인천", AIRPORT_NAME[info.airport], sign < 0 ? "입국" : "출국", info.codeshare);
       icnAutoAdded++;
     }
   }
@@ -471,7 +479,7 @@ async function main() {
       .map((key) => {
         const r = routeMap[key];
         const japan = r.japan ? `"${r.japan}"` : "null";
-        return `  "${key}": { korea: "${r.korea}", japan: ${japan}, direction: "${r.direction}" },`;
+        return `  "${key}": { korea: "${r.korea}", japan: ${japan}, direction: "${r.direction}", codeshare: ${!!r.codeshare} },`;
       }),
     "};",
     "",
@@ -486,7 +494,7 @@ async function main() {
 
   // 시간표가 실제로 바뀌었으면 HTML의 ?v=숫자도 올려준다.
   // 이걸 안 올리면 브라우저가 예전에 받아둔 시간표를 계속 써서, 새로 채운 편이 앱에 안 보인다.
-  const sameRoute = (a, b) => a && b && a.korea === b.korea && a.japan === b.japan && a.direction === b.direction;
+  const sameRoute = (a, b) => a && b && a.korea === b.korea && a.japan === b.japan && a.direction === b.direction && !!a.codeshare === !!b.codeshare;
   const changed =
     Object.keys(finalMap).length !== Object.keys(existingMap).length ||
     Object.keys(finalMap).some((code) => finalMap[code] !== existingMap[code]) ||

@@ -57,9 +57,19 @@ function flightKey(flightNo) {
   return code.replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2");
 }
 
-// 코드셰어 그룹(예: "KE738/JL5269") 중 하나라도 대형항공사면 비즈니스 좌석 있음으로 판단
-function hasBusinessClass(entryLabel) {
-  return entryLabel.split("/").some((code) => BUSINESS_CLASS_AIRLINES.has(airlineCodeOfFlight(code)));
+// 같은 항공사라도 노선에 따라 비즈니스석 유무가 갈린다(투입 기종이 달라서).
+// 그런 노선은 FLIGHT_ROUTES에 businessOverride로 항공사별 예외를 적어둔다.
+//   예) businessOverride: { LJ: false }  -> 이 노선의 진에어 편은 이코노미 전용으로 표시
+function airlineHasBusiness(code, route) {
+  const airline = airlineCodeOfFlight(code);
+  const override = route && route.businessOverride;
+  if (override && Object.prototype.hasOwnProperty.call(override, airline)) return override[airline];
+  return BUSINESS_CLASS_AIRLINES.has(airline);
+}
+
+// 코드셰어 그룹(예: "KE738/JL5269") 중 하나라도 비즈니스석 운영 항공사면 비즈니스 있음으로 판단
+function hasBusinessClass(entryLabel, route) {
+  return entryLabel.split("/").some((code) => airlineHasBusiness(code, route));
 }
 
 const FLIGHT_ROUTES = [
@@ -162,7 +172,8 @@ function autoFilledFlights(route, direction, groups) {
     if (info.korea !== route.korea || info.japan !== route.japan || info.direction !== direction) continue;
     if (listed.has(flightKey(code))) continue;
     if (!/^[A-Z0-9]{2}\d+$/.test(code)) continue; // "JL95A"처럼 문자가 붙은 건 전세기·페리
-    if (!isOperatingFlight(code)) continue; // 코드셰어 판매용 번호 제외
+    if (info.codeshare) continue; // API가 "코드셰어"라고 알려준 편 — 남의 비행기에 붙인 판매용 번호
+    if (!isOperatingFlight(code)) continue; // API가 표시 안 해준 경우를 위한 보조 판단
     if (typeof timeRangeForFlight === "function" && !timeRangeForFlight(code)) continue; // 시간 모르면 표시 못 함
     listed.add(flightKey(code));
     added.push(code);
@@ -195,7 +206,7 @@ function findFlightsForRoute(fromAirport, toAirport) {
     .map((entry) => {
       const primary = entry.split("/")[0];
       const range = typeof timeRangeForFlight === "function" ? timeRangeForFlight(primary) : null;
-      const classLabel = hasBusinessClass(entry) ? "CY" : "Y";
+      const classLabel = hasBusinessClass(entry, route) ? "CY" : "Y";
       return { label: entry, range, classLabel };
     })
     .filter((r) => r.range)
