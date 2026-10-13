@@ -27,6 +27,24 @@ const ScheduleModal = {
     document
       .getElementById("copy-reservation-btn")
       .addEventListener("click", () => this.copyText(this.reservationTextEl));
+
+    // 폰에서는 공유 버튼으로 카톡 등 앱을 바로 골라 보낼 수 있다 (복사 -> 앱 전환 -> 붙여넣기 대신)
+    // 공유 기능은 https 주소에서만 켜져서, 지원 안 되는 환경에서는 버튼을 숨긴 채로 둔다
+    const shareBtn = document.getElementById("share-reservation-btn");
+    if (shareBtn && navigator.share) {
+      shareBtn.style.display = "";
+      shareBtn.addEventListener("click", () => this.shareText(this.reservationTextEl));
+    }
+  },
+
+  async shareText(textareaEl) {
+    try {
+      await navigator.share({ text: textareaEl.value });
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // 공유창을 그냥 닫은 경우
+      this.copyText(textareaEl);
+      alert("공유가 안 돼서 대신 복사해뒀어요. 보낼 곳에 붙여넣기 해주세요.");
+    }
   },
 
   copyText(textareaEl) {

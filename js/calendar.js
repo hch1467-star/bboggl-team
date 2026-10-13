@@ -336,6 +336,32 @@ const CalendarView = {
             }
           });
         });
+
+        item.querySelectorAll(".limo-booked-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            try {
+              await Store.toggleLimoBooked(group.id);
+              this.render();
+            } catch (err) {
+              alert("리무진 예약 상태를 저장하지 못했어요: " + (err.message || err));
+            }
+          });
+        });
+
+        item.querySelectorAll(".confirm-entry-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const entry = group.entries.find((e) => String(e.id) === btn.dataset.entryId);
+            if (!entry) return;
+            const [, m, d] = entry.date.split("-");
+            if (!confirm(`${parseInt(m, 10)}/${parseInt(d, 10)} ${entry.flightNo} 대기를 확약(OK)으로 바꿀까요?`)) return;
+            try {
+              await Store.confirmEntry(group.id, entry.id);
+              this.render();
+            } catch (err) {
+              alert("확약으로 바꾸지 못했어요: " + (err.message || err));
+            }
+          });
+        });
       }
 
       panel.appendChild(item);
@@ -485,14 +511,29 @@ function groupLabel(group) {
 // readOnly면(관리자 화면) 버튼을 비활성화해서 상태만 보이고 못 바꾸게 함
 function renderEntryRowHtml(entry, showTravelerLabel, directionInfo, group, readOnly) {
   const classLabel = entry.seatClass === "C" ? "비즈니스" : "이코노미";
+  // 대기(WT)인데 날짜가 코앞이면 빨간색 + D-n 으로 강조 (data.js의 waitlistUrgency)
+  const urgency = typeof waitlistUrgency === "function" ? waitlistUrgency(entry) : null;
   const statusBadge =
     entry.status === "OK"
       ? `<span class="badge badge-ok">확약 OK</span>`
-      : `<span class="badge badge-wt">대기 WT</span>`;
+      : `<span class="badge badge-wt${urgency ? (urgency.past ? " badge-wt-stale" : " badge-wt-urgent") : ""}">대기 WT${
+          urgency ? ` · ${urgency.label}` : ""
+        }</span>`;
+  // 대기편을 카톡 재입력 없이 버튼 한 번으로 확약 처리
+  const confirmBtn =
+    group && entry.status === "WT" && !readOnly && entry.id != null
+      ? `<button type="button" class="confirm-entry-btn" data-entry-id="${entry.id}">확약으로</button>`
+      : "";
   const roomBookedBtn = group
     ? `<button type="button" class="room-booked-btn${group.roomBooked ? " active" : ""}" data-group-id="${group.id}"${
         readOnly ? " disabled" : ""
       }>방 예약</button>`
+    : "";
+  // 리무진도 방 예약처럼 잡았는지 표시 (항공편이 없는 셀인/셀아웃은 리무진이 없어서 안 보임)
+  const limoBookedBtn = group
+    ? `<button type="button" class="limo-booked-btn${group.limoBooked ? " active" : ""}" data-group-id="${group.id}"${
+        readOnly ? " disabled" : ""
+      }>리무진</button>`
     : "";
   const [, m, d] = entry.date.split("-");
   const travelerLabel =
@@ -546,7 +587,9 @@ function renderEntryRowHtml(entry, showTravelerLabel, directionInfo, group, read
         </span>
         <span class="header-badges">
           ${roomBookedBtn}
+          ${limoBookedBtn}
           ${statusBadge}
+          ${confirmBtn}
         </span>
       </div>
       <div class="detail-flight-row">

@@ -198,3 +198,9 @@
 .month-group-body:not([hidden]){
   display:flex;
 }
+
+/* 출발이 3일 안이거나 지난 대기(WT)가 있으면 탭 옆 숫자를 빨갛게 */
+.mypage-tab-count.mypage-tab-count-urgent{
+  background:var(--wt);
+  color:#fff;
+}

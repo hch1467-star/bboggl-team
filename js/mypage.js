@@ -66,10 +66,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 function updateWtCounts() {
   const directionCache = new Map();
   const wtPairs = Store.flatEntries().filter((p) => p.entry.status === "WT");
-  document.getElementById("tab-arrival-wt-count").textContent =
-    wtPairs.filter((p) => directionForPair(p, directionCache) === "입국").length;
-  document.getElementById("tab-departure-wt-count").textContent =
-    wtPairs.filter((p) => directionForPair(p, directionCache) === "출국").length;
+  // 3일 안에 출발하는 대기가 하나라도 있으면 탭 숫자를 빨갛게 — 탭을 안 열어도 보이게
+  // (이미 지난 대기는 급한 일이 아니라 탭을 빨갛게 만들지 않음)
+  [
+    ["입국", "tab-arrival-wt-count"],
+    ["출국", "tab-departure-wt-count"],
+  ].forEach(([direction, elId]) => {
+    const pairs = wtPairs.filter((p) => directionForPair(p, directionCache) === direction);
+    const el = document.getElementById(elId);
+    el.textContent = pairs.length;
+    const hasUrgent =
+      typeof waitlistUrgency === "function" &&
+      pairs.some((p) => {
+        const u = waitlistUrgency(p.entry);
+        return u && !u.past;
+      });
+    el.classList.toggle("mypage-tab-count-urgent", hasUrgent);
+  });
 }
 
 // 입국편 / 출국편 / 입국대기 / 출국대기 탭 상태에 따라 활동 목록을 다시 그림
@@ -193,6 +206,12 @@ function renderMypageRowHtml({ group, entry }) {
     : "";
   // 캘린더 상세패널에서 "방 예약" 버튼을 눌러 활성화한 경우에만 표시 (예약/그룹 전체가 공유하는 상태)
   const roomBookedBadge = group.roomBooked ? `<span class="badge badge-room">방예약</span>` : "";
+  const limoBookedBadge = group.limoBooked ? `<span class="badge badge-limo">리무진</span>` : "";
+  // 대기(WT)인데 출발이 3일 안이거나 지났으면 D-n 빨간 배지 (data.js의 waitlistUrgency)
+  const urgency = typeof waitlistUrgency === "function" ? waitlistUrgency(entry) : null;
+  const urgentBadge = urgency
+    ? `<span class="badge badge-wt ${urgency.past ? "badge-wt-stale" : "badge-wt-urgent"}">${urgency.label}</span>`
+    : "";
 
   // 항공편 없이 셀인/셀아웃만 등록한 일정 — 편명/좌석/확약 정보 없이 날짜+방향만 표시
   if (entry.noFlight) {
@@ -203,6 +222,7 @@ function renderMypageRowHtml({ group, entry }) {
           <span class="activity-name">${escapeHtml(nameLabel)}</span>
           <span class="activity-row-meta">
             ${roomBookedBadge}
+            ${limoBookedBadge}
             <span class="activity-meta">${m}/${d} · ${noFlightLabel}</span>
             <span class="activity-chevron">${Icons.chevronRight}</span>
           </span>
@@ -226,6 +246,8 @@ function renderMypageRowHtml({ group, entry }) {
         <span class="activity-name">${escapeHtml(nameLabel)}</span>
         <span class="activity-row-meta">
           ${roomBookedBadge}
+          ${limoBookedBadge}
+          ${urgentBadge}
           <span class="activity-meta">${m}/${d} · ${escapeHtml(entry.flightNo)} · ${classLabel} · ${entry.status === "OK" ? "확약" : "대기"}</span>
           <span class="activity-chevron">${Icons.chevronRight}</span>
         </span>

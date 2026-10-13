@@ -74,6 +74,7 @@ const Store = {
       assignee: g.assignee || "",
       memo: g.memo || "",
       roomBooked: !!g.room_booked,
+      limoBooked: !!g.limo_booked,
     }));
   },
 
@@ -145,6 +146,7 @@ const Store = {
       assignee: groupRow.assignee || "",
       memo: groupRow.memo || "",
       roomBooked: !!groupRow.room_booked,
+      limoBooked: !!groupRow.limo_booked,
     };
     this.groups.push(group);
     return { group, added: group.entries };
@@ -173,6 +175,26 @@ const Store = {
     const { error } = await supabaseClient.from("groups").update({ room_booked: newValue }).eq("id", groupId);
     if (error) throw error;
     group.roomBooked = newValue;
+  },
+
+  // 리무진 예약 완료 여부 토글 — 방 예약과 같은 방식으로 예약(그룹) 단위로 관리
+  async toggleLimoBooked(groupId) {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const newValue = !group.limoBooked;
+    const { error } = await supabaseClient.from("groups").update({ limo_booked: newValue }).eq("id", groupId);
+    if (error) throw error;
+    group.limoBooked = newValue;
+  },
+
+  // 대기(WT)였던 항공편을 확약(OK)으로 바꿈 — 카톡을 다시 붙여넣지 않고 버튼 한 번으로
+  async confirmEntry(groupId, entryId) {
+    const group = this.groups.find((g) => g.id === groupId);
+    const entry = group && group.entries.find((e) => e.id === entryId);
+    if (!entry) return;
+    const { error } = await supabaseClient.from("entries").update({ status: "OK" }).eq("id", entryId);
+    if (error) throw error;
+    entry.status = "OK";
   },
 
   // 이벤트(주말 행사 등) — 직원 전체 공통, 매달 수동으로 등록
@@ -317,6 +339,7 @@ async function loadGroupsForUsers(userIds, emailById) {
     assignee: g.assignee || "",
     memo: g.memo || "",
     roomBooked: !!g.room_booked,
+    limoBooked: !!g.limo_booked,
     ownerEmail: emailById.get(g.user_id) || "",
   }));
 }
@@ -368,4 +391,19 @@ async function maybeImportLocalData() {
   } catch (e) {
     /* 무시 */
   }
+}
+
+// 대기(WT)인데 날짜가 코앞이면 확약을 서둘러야 한다 — 며칠 남았는지와 표시 문구를 돌려준다.
+// past: 날짜가 이미 지났는데 WT로 남은 것. 급한 일이 아니라 정리할 일이라 빨간색 대신 회색으로 구분한다.
+// (지난 것까지 빨갛게 하면 대기 탭이 늘 빨간색이라 정작 급한 게 안 보이게 됨)
+const WAITLIST_URGENT_DAYS = 3;
+function waitlistUrgency(entry) {
+  if (!entry || entry.status !== "WT" || !entry.date) return null;
+  const now = new Date();
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const [y, m, d] = entry.date.split("-").map(Number);
+  const days = Math.round((Date.UTC(y, m - 1, d) - today) / 86400000);
+  if (days > WAITLIST_URGENT_DAYS) return null;
+  const label = days < 0 ? "날짜 지남" : days === 0 ? "D-DAY" : `D-${days}`;
+  return { days, label, past: days < 0 };
 }
