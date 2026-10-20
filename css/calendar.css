@@ -552,6 +552,49 @@
   margin-top:8px;
 }
 
+/* 고객번호 확인 — 동명이인 후보 고르기 */
+.mmid-check{
+  margin-top:10px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface);
+  font-size:12px;
+}
+.mmid-check-title{font-weight:700; margin-bottom:6px}
+.mmid-row{padding:4px 0; line-height:1.6}
+.mmid-row + .mmid-row{border-top:1px dashed var(--border)}
+.mmid-no{font-family:'Menlo','Consolas',monospace; font-weight:700}
+.mmid-why{color:var(--sub)}
+.mmid-why.is-warn{color:var(--wt); display:block}
+.mmid-change{
+  padding:1px 10px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:var(--surface);
+  color:var(--primary);
+  font-size:11px;
+  cursor:pointer;
+}
+.mmid-cands{display:flex; flex-direction:column; gap:6px; margin-top:6px}
+.mmid-cand{
+  display:flex;
+  flex-wrap:wrap;
+  gap:2px 10px;
+  align-items:baseline;
+  text-align:left;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--bg);
+  color:var(--text);
+  font:inherit;
+  cursor:pointer;
+}
+.mmid-cand:hover{border-color:var(--primary)}
+.mmid-cand.is-suggested{border-color:var(--ok); background:var(--ok-bg)}
+.mmid-meta{color:var(--sub); font-size:11px}
+
 .modal-actions{
   display:flex;
   justify-content:flex-end;

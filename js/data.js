@@ -30,7 +30,7 @@ const Store = {
   events: [], // 직원 전체가 공통으로 보는 이벤트(주말 행사 등) — user_id로 분리하지 않음
   eventNotes: new Map(), // 이벤트에 남기는 계정별 개인 메모(eventId -> memo) — RLS로 내 것만 불러와짐
   staffDirectory: [], // 담당자 사번/전화번호 — 개인정보라 DB(staff_directory 테이블)에서만 불러옴, git에는 저장 안 함
-  customerMmid: [], // 고객명 ↔ MMID(고객번호) — 개인정보라 DB(customer_mmid 테이블)에서만 불러옴, git에는 저장 안 함
+  customerCache: new Map(), // 고객명(정규화) -> 후보 고객 목록 — 개인정보라 DB(customer_mmid 테이블)에서 필요한 이름만 조회, git에는 저장 안 함
 
   // 로그인 직후 이 사용자의 데이터를 전부 불러와 메모리에 재구성
   async init(userId) {
@@ -250,37 +250,49 @@ const Store = {
     }));
   },
 
-  // 고객이 1만 명이 넘어 한 번에 받으면 1000건씩 열 번 넘게 왕복해야 한다.
-  // 이 목록은 예약 텍스트를 만들 때(붙여넣기 모달)만 쓰이므로 앱을 켤 때가 아니라
-  // 모달을 처음 열 때 딱 한 번 불러온다. 두 번째부터는 받아둔 걸 그대로 쓴다.
-  _customerMmidPromise: null,
-
-  ensureCustomerMmid() {
-    if (!this._customerMmidPromise) {
-      this._customerMmidPromise = this.loadCustomerMmid().catch((err) => {
-        this._customerMmidPromise = null; // 실패하면 다음에 다시 시도할 수 있게
-        throw err;
-      });
-    }
-    return this._customerMmidPromise;
+  // 고객이 1만 4천 명이 넘어 전부 받으면 열 몇 번을 왕복해야 한다.
+  // 예약 텍스트에 필요한 건 방 주인 몇 명뿐이라, 그 이름만 골라서 묻고 받은 결과는 기억해둔다.
+  // (DB에 없는 이름도 "없음"으로 기억해서 같은 이름을 또 묻지 않음)
+  customerCandidates(name) {
+    return this.customerCache.get(normalizeCustomerName(name)); // 아직 안 물어봤으면 undefined
   },
 
-  // 고객명 ↔ MMID(고객번호) — 개인정보라 DB에서만 불러옴 (예약 텍스트의 MMID에 사용). 건수가 많아 1000건씩 나눠서 전부 가져옴
-  async loadCustomerMmid() {
-    const rows = [];
-    const batchSize = 1000;
-    let offset = 0;
-    while (true) {
-      const { data, error } = await supabaseClient
-        .from("customer_mmid")
-        .select("name, mmid")
-        .range(offset, offset + batchSize - 1);
-      if (error) throw error;
-      rows.push(...data);
-      if (data.length < batchSize) break;
-      offset += batchSize;
+  _customerInflight: new Set(), // 지금 묻는 중인 이름 — 글자 칠 때마다 같은 이름을 또 묻지 않게
+
+  async lookupCustomers(names) {
+    const missing = [...new Set(names.map(normalizeCustomerName))].filter(
+      (k) => k && !this.customerCache.has(k) && !this._customerInflight.has(k)
+    );
+    if (missing.length === 0) return false;
+    missing.forEach((k) => this._customerInflight.add(k));
+    try {
+      return await this._fetchCustomers(missing);
+    } finally {
+      missing.forEach((k) => this._customerInflight.delete(k));
     }
-    this.customerMmid = rows;
+  },
+
+  async _fetchCustomers(missing) {
+    let res = await supabaseClient
+      .from("customer_mmid")
+      .select("name, mmid, flights, last_ride, is_primary")
+      .in("name", missing);
+    // 동명이인 구분용 칸(flights 등)을 추가하기 전 DB여도 번호만큼은 채울 수 있게
+    if (res.error) res = await supabaseClient.from("customer_mmid").select("name, mmid").in("name", missing);
+    if (res.error) throw res.error;
+
+    missing.forEach((k) => this.customerCache.set(k, []));
+    res.data.forEach((row) => {
+      const list = this.customerCache.get(normalizeCustomerName(row.name));
+      if (!list || list.some((c) => c.mmid === row.mmid)) return;
+      list.push({
+        mmid: row.mmid,
+        flights: (row.flights || "").split(",").filter(Boolean),
+        lastRide: row.last_ride || "",
+        isPrimary: !!row.is_primary,
+      });
+    });
+    return true;
   },
 
   // {group, entry} 쌍으로 평탄화한 목록 — 캘린더/검색에서 공통으로 사용

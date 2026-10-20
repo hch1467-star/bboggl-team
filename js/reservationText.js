@@ -46,27 +46,79 @@ function findStaff(assigneeRaw) {
 }
 
 // 고객명은 개인정보라 이 저장소(공개 GitHub)에는 저장하지 않고
-// Supabase의 customer_mmid 테이블에서 불러와 Store.customerMmid에 담아 씀 (js/data.js의 loadCustomerMmid 참고)
+// Supabase의 customer_mmid 테이블에서 필요한 이름만 조회해 씀 (js/data.js의 lookupCustomers 참고)
 
-// "NAKATANI/KAZUHIRO" -> "NAKATANI KAZUHIRO" (엑셀 쪽 "성 이름" 표기와 비교하기 위해 통일)
+const CUSTOMER_TITLES = new Set(["MR", "MRS", "MS", "MISS", "CHD", "INF"]);
+
+// "NAKATANI/KAZUHIRO MR" -> "NAKATANI KAZUHIRO" (엑셀 쪽 "성 이름" 표기와 비교하기 위해 통일)
+// DB에 넣을 때(build_customer_mmid_from_master.py의 norm)와 같은 규칙이어야 이름이 맞는다
 function normalizeCustomerName(name) {
-  return (name || "")
+  const parts = (name || "")
+    .replace(/\([^)]*\)?/g, " ") // "이름 (메모)" 같은 괄호 부분
+    .replace(/[()]/g, " ")
     .replace(/[/\-]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .toUpperCase();
+    .toUpperCase()
+    .split(" ");
+  if (parts.length > 1 && CUSTOMER_TITLES.has(parts[parts.length - 1].replace(/\.$/, ""))) parts.pop();
+  return parts.join(" ");
 }
 
-// 동명 고객이 있으면(같은 이름, 다른 MMID) 잘못 채우지 않고 "동명 고객" 표시로 남김
-function findCustomerMmid(rawName) {
-  const directory = (typeof Store !== "undefined" && Store.customerMmid) || [];
-  const target = normalizeCustomerName(rawName);
-  if (!target || directory.length === 0) return { mmid: null, ambiguous: false };
+// 동명이인일 때 사람이 직접 고른 번호 (붙여넣기 모달을 열 때마다 비움). 이름(정규화) -> MMID, 또는 "목록 다시 보기" 표시
+const customerMmidChoices = new Map();
 
-  const matches = directory.filter((c) => normalizeCustomerName(c.name) === target);
-  if (matches.length === 1) return { mmid: matches[0].mmid, ambiguous: false };
-  if (matches.length > 1) return { mmid: null, ambiguous: true };
-  return { mmid: null, ambiguous: false };
+// "KE0724"와 "KE724"는 같은 편 — 숫자 앞자리 0을 떼서 비교 (flights.html의 flightKey와 같은 규칙, 메인 화면은 그 파일을 안 불러옴)
+function mmidFlightKey(flightNo) {
+  const code = (flightNo || "").replace(/\([^)]*\)/g, "").trim().toUpperCase();
+  return code.replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2");
+}
+const MMID_REPICK = "__repick__";
+
+// 이름으로 고객번호 찾기. 같은 이름이 여러 명이면 근거 없이 아무나 채우지 않는다.
+// 근거로 쓰는 건 "이번 예약 편명을 탄 적 있는 사람이 딱 한 명"일 때뿐 (대표 이름 우선 같은 규칙은 시험해보니 12%가 틀림)
+//   state: loading(조회 중) / none(없음) / unique(한 명) / auto(편명으로 자동 선택) / chosen(직접 고름) / ambiguous(골라야 함)
+function findCustomerMmid(rawName, bookingFlights = []) {
+  const key = normalizeCustomerName(rawName);
+  const candidates = typeof Store !== "undefined" && Store.customerCandidates ? Store.customerCandidates(rawName) : [];
+  if (!key || candidates === undefined) return { key, state: "loading", mmid: null, candidates: [] };
+  if (candidates.length === 0) return { key, state: "none", mmid: null, candidates };
+
+  const sorted = [...candidates].sort(
+    (a, b) => Number(b.isPrimary) - Number(a.isPrimary) || b.lastRide.localeCompare(a.lastRide)
+  );
+  if (sorted.length === 1) return { key, state: "unique", mmid: sorted[0].mmid, candidates: sorted };
+
+  const choice = customerMmidChoices.get(key);
+  if (choice && choice !== MMID_REPICK && sorted.some((c) => c.mmid === choice)) {
+    return { key, state: "chosen", mmid: choice, candidates: sorted };
+  }
+
+  const wanted = new Set(bookingFlights.map(mmidFlightKey));
+  const flown = sorted
+    .map((c) => ({ c, hit: c.flights.find((f) => wanted.has(mmidFlightKey(f))) }))
+    .filter((x) => x.hit);
+  const auto = flown.length === 1 ? { mmid: flown[0].c.mmid, evidence: flown[0].hit } : null;
+  if (auto && choice !== MMID_REPICK) return { key, state: "auto", ...auto, candidates: sorted };
+  return { key, state: "ambiguous", mmid: null, suggested: auto && auto.mmid, candidates: sorted };
+}
+
+function mmidTextValue(found) {
+  if (found.mmid) return found.mmid;
+  if (found.state === "ambiguous") return `(동명 고객 ${found.candidates.length}명-선택필요)`;
+  if (found.state === "loading") return "(고객번호 조회중)";
+  return "";
+}
+
+// 방 주인마다 고객번호 조회 결과 — 예약 텍스트와 모달의 "고객번호 확인" 칸이 같이 씀
+function roomHolderMmids(parsed) {
+  return groupTravelersIntoRooms(parsed.travelers).map((room) => {
+    const holder = room.members[0];
+    const flights = entriesForRoom(room, parsed.entries)
+      .filter((e) => !e.noFlight && e.flightNo)
+      .map((e) => e.flightNo);
+    return { holder, found: findCustomerMmid(holder.name, flights) };
+  });
 }
 
 function formatMD(dateStr) {
@@ -166,7 +218,9 @@ function buildRoomReservationText(parsed) {
     ? `${staff.name}(${staff.nickname}) ${staff.phone}`
     : `${assignee}(전화번호 미등록)`;
 
-  const roomInfos = rooms.map((room) => {
+  const holderMmids = roomHolderMmids(parsed);
+
+  const roomInfos = rooms.map((room, roomIndex) => {
     const roomEntries = entriesForRoom(room, parsed.entries);
     const sorted = [...roomEntries].sort((a, b) => a.date.localeCompare(b.date));
     const arrivalEntry = sorted.find((e) => directionMap.get(e)?.direction === "입국") || sorted[0];
@@ -174,8 +228,7 @@ function buildRoomReservationText(parsed) {
       [...sorted].reverse().find((e) => directionMap.get(e)?.direction === "출국") || sorted[sorted.length - 1];
 
     // MMID는 방 주인(첫 사람) 기준으로 조회 — 방마다 투숙객이 달라 각각 다른 값이 나올 수 있음
-    const holder = room.members[0];
-    const { mmid, ambiguous: mmidAmbiguous } = findCustomerMmid(holder.name);
+    const { found } = holderMmids[roomIndex];
 
     // 새벽 도착편(00시~06시)은 전날 밤부터 객실이 있어야 도착하자마자 들어갈 수 있어서
     // 체크인 날짜를 하루 앞당긴다. 이미 전날 방을 잡았으니 얼리체크인(ECI) 요청은 필요 없다.
@@ -188,7 +241,7 @@ function buildRoomReservationText(parsed) {
     return {
       // 합방하는 동행자(MS 등)는 적지 않고 방 주인 이름만
       nameLabel: travelerLabel(room.members[0]),
-      mmidValue: mmid || (mmidAmbiguous ? "(동명 고객 있음-확인필요)" : ""),
+      mmidValue: mmidTextValue(found),
       ci: formatMD(ciDate),
       co: formatMD(departureEntry.date),
       hasEarlyArrival: roomEntries.some(
