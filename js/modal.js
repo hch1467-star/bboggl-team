@@ -216,7 +216,7 @@ const ScheduleModal = {
     const duplicate = findDuplicateGroup(this.lastParsed);
     if (duplicate) {
       const ok = confirm(
-        `${groupLabel(duplicate)}님의 기존 일정이 있어요. 최신 내용으로 갱신할까요?\n(일정은 새로 입력한 내용으로 바뀌고, 적어둔 메모는 그대로 옮겨져요)`
+        `${groupLabel(duplicate)}님의 기존 일정이 있어요. 최신 내용으로 갱신할까요?\n(일정은 새로 입력한 내용으로 바뀌고, 메모·방 예약·리무진 체크는 그대로 옮겨져요)`
       );
       if (!ok) return;
     }
@@ -225,7 +225,7 @@ const ScheduleModal = {
     this.addBtn.textContent = "저장 중...";
     try {
       // 새 일정을 먼저 저장하고 나서 기존 일정을 지운다 — 저장이 실패해도 기존 일정과 메모가 남도록
-      const { added } = await Store.addFromParsed(this.lastParsed, { memo: duplicate ? duplicate.memo || "" : "" });
+      const { added } = await Store.addFromParsed(this.lastParsed, carryOverFrom(duplicate));
       if (duplicate) {
         await Store.removeGroup(duplicate.id);
       }
@@ -244,6 +244,18 @@ const ScheduleModal = {
     }
   },
 };
+
+// 최신 카톡으로 덮어쓸 때 기존 예약에서 그대로 가져갈 것 — 앱에서 직접 적거나 눌러둔 것들
+// (담당자는 새 카톡에 @담당자 줄이 없을 때만 기존 값을 씀)
+function carryOverFrom(group) {
+  if (!group) return {};
+  return {
+    memo: group.memo || "",
+    roomBooked: !!group.roomBooked,
+    limoBooked: !!group.limoBooked,
+    assignee: group.assignee || "",
+  };
+}
 
 // 같은 대표 고객 + 같은 날짜(1건 이상 겹침)의 기존 예약을 찾음 — WT->OK 확정 등으로 재입력할 때 중복 대신 갱신 여부를 물어보기 위함
 function findDuplicateGroup(parsed) {
