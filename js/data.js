@@ -79,12 +79,13 @@ const Store = {
   },
 
   // 파싱된 카톡 텍스트 → 그룹(예약 단위) 생성 후 Supabase에 저장
-  async addFromParsed(parsed) {
+  // memo: 기존 일정을 최신 카톡으로 덮어쓸 때 예전에 적어둔 메모를 그대로 옮겨 담기 위함
+  async addFromParsed(parsed, { memo = "" } = {}) {
     const userId = CurrentUser.id;
 
     const { data: groupRow, error: gErr } = await supabaseClient
       .from("groups")
-      .insert({ user_id: userId, assignee: parsed.assignee || "" })
+      .insert({ user_id: userId, assignee: parsed.assignee || "", memo })
       .select()
       .single();
     if (gErr) throw gErr;

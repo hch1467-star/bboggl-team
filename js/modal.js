@@ -216,7 +216,7 @@ const ScheduleModal = {
     const duplicate = findDuplicateGroup(this.lastParsed);
     if (duplicate) {
       const ok = confirm(
-        `${groupLabel(duplicate)}님의 기존 일정이 있어요. 최신 내용으로 갱신할까요?\n(기존 일정은 삭제되고 새로 입력한 내용으로 바뀌어요)`
+        `${groupLabel(duplicate)}님의 기존 일정이 있어요. 최신 내용으로 갱신할까요?\n(일정은 새로 입력한 내용으로 바뀌고, 적어둔 메모는 그대로 옮겨져요)`
       );
       if (!ok) return;
     }
@@ -224,10 +224,11 @@ const ScheduleModal = {
     this.addBtn.disabled = true;
     this.addBtn.textContent = "저장 중...";
     try {
+      // 새 일정을 먼저 저장하고 나서 기존 일정을 지운다 — 저장이 실패해도 기존 일정과 메모가 남도록
+      const { added } = await Store.addFromParsed(this.lastParsed, { memo: duplicate ? duplicate.memo || "" : "" });
       if (duplicate) {
         await Store.removeGroup(duplicate.id);
       }
-      const { added } = await Store.addFromParsed(this.lastParsed);
       this.close();
       if (added.length > 0) {
         const earliest = [...added].sort((a, b) => a.date.localeCompare(b.date))[0];
