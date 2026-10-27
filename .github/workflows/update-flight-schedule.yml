@@ -2,7 +2,7 @@ name: Update flight schedule
 
 on:
   schedule:
-    - cron: "0 0 1 * *" # 매달 1일 00:00 UTC(오전 9시 KST)
+    - cron: "0 0 * * 1" # 매주 월요일 00:00 UTC(오전 9시 KST)
   workflow_dispatch: {} # 저장소 Actions 탭에서 수동으로도 실행 가능
 
 permissions:

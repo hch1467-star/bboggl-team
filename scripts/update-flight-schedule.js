@@ -1,6 +1,6 @@
 /* ============================================
    인천 노선 항공편 시간표(js/flightSchedule.js) 자동 갱신 스크립트
-   GitHub Actions(.github/workflows/update-flight-schedule.yml)에서 매달 1일 자동 실행됨.
+   GitHub Actions(.github/workflows/update-flight-schedule.yml)에서 매주 월요일 자동 실행됨.
    수동 실행: DATA_GO_KR_SERVICE_KEY=... node scripts/update-flight-schedule.js
    ============================================ */
 
@@ -456,11 +456,11 @@ async function main() {
   const lines = [
     "/* ============================================",
     "   항공편 번호 -> 출발-도착 시간 (자동 생성 파일 — 직접 수정하지 마세요)",
-    "   인천 노선: 인천국제공항공사 공공데이터(여객편 운항현황)에서 인천 쪽 실제 시간을 매달 자동으로 가져오고,",
+    "   인천 노선: 인천국제공항공사 공공데이터(여객편 운항현황)에서 인천 쪽 실제 시간을 매주 자동으로 가져오고,",
     "   반대편(일본 공항) 시간은 노선별 평균 비행시간으로 계산해서 채움.",
     "   김포 노선: 한국공항공사_국제선 항공기스케줄(공공데이터활용지원센터)에서 출발-도착 시간을 그대로 가져옴.",
-    "   둘 다 scripts/update-flight-schedule.js에서 GitHub Actions로 매달 1일 자동 실행.",
-    `   마지막 갱신: ${today}`,
+    "   둘 다 scripts/update-flight-schedule.js에서 GitHub Actions로 매주 월요일 자동 실행.",
+    `   마지막 변경: ${today}`,
     "   ============================================ */",
     "",
     "const FLIGHT_TIME_MAP = {",
@@ -489,9 +489,6 @@ async function main() {
     "",
   ];
 
-  fs.writeFileSync(OUT_PATH, lines.join("\n"), "utf8");
-  console.log(`Saved: ${OUT_PATH}`);
-
   // 시간표가 실제로 바뀌었으면 HTML의 ?v=숫자도 올려준다.
   // 이걸 안 올리면 브라우저가 예전에 받아둔 시간표를 계속 써서, 새로 채운 편이 앱에 안 보인다.
   const sameRoute = (a, b) => a && b && a.korea === b.korea && a.japan === b.japan && a.direction === b.direction && !!a.codeshare === !!b.codeshare;
@@ -500,8 +497,14 @@ async function main() {
     Object.keys(finalMap).some((code) => finalMap[code] !== existingMap[code]) ||
     Object.keys(routeMap).length !== Object.keys(existingRouteMap).length ||
     Object.keys(routeMap).some((code) => !sameRoute(routeMap[code], existingRouteMap[code]));
-  if (changed) bumpAssetVersion();
-  else console.log("시간표 내용 그대로 — 캐시 버전은 올리지 않음");
+  // 매주 돌기 때문에, 내용이 그대로면 파일을 아예 다시 쓰지 않는다 (날짜 한 줄만 바뀐 커밋이 매주 쌓이지 않게)
+  if (!changed) {
+    console.log("시간표 내용 그대로 — 파일·캐시 버전 그대로 둠");
+    return;
+  }
+  fs.writeFileSync(OUT_PATH, lines.join("\n"), "utf8");
+  console.log(`Saved: ${OUT_PATH}`);
+  bumpAssetVersion();
 }
 
 // index.html 등에 박혀 있는 ?v=숫자를 전부 찾아 가장 큰 값 +1로 맞춘다
