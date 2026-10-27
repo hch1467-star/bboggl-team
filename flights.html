@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>항공검색 · JM 비밀노트</title>
-<link rel="manifest" href="manifest.json?v=70">
-<link rel="icon" href="icons/favicon.png?v=70">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=70">
+<link rel="manifest" href="manifest.json?v=71">
+<link rel="icon" href="icons/favicon.png?v=71">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=71">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FOR BD">
 <meta name="theme-color" content="#8134AF">
-<link rel="stylesheet" href="css/design-system.css?v=70">
-<link rel="stylesheet" href="css/layout.css?v=70">
-<link rel="stylesheet" href="css/flights.css?v=70">
+<link rel="stylesheet" href="css/design-system.css?v=71">
+<link rel="stylesheet" href="css/layout.css?v=71">
+<link rel="stylesheet" href="css/flights.css?v=71">
 </head>
 <body>
 
@@ -55,6 +55,16 @@
     <div id="flight-results"></div>
   </section>
 
+  <!-- 매달 1일 GitHub Actions가 만드는 지역별 입출국 스케줄표 이미지 (scripts/build-flight-tables.js) -->
+  <section class="card flight-tables-card">
+    <div class="flight-tables-head">
+      <span class="flight-results-title">이달의 항공 스케줄표</span>
+      <span class="flight-tables-updated" id="flight-tables-updated"></span>
+    </div>
+    <p class="flight-tables-desc">매달 1일 자동 갱신 · LCC 제외(비즈니스석 운항편만)</p>
+    <div id="flight-tables-list"></div>
+  </section>
+
 </main>
 
 <nav class="bottom-tabbar">
@@ -64,10 +74,11 @@
 </nav>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="js/supabaseClient.js?v=70"></script>
-<script src="js/auth.js?v=70"></script>
-<script src="js/flightSchedule.js?v=70"></script>
-<script src="js/flightRoutes.js?v=70"></script>
-<script src="js/flights.js?v=70"></script>
+<script src="js/supabaseClient.js?v=71"></script>
+<script src="js/auth.js?v=71"></script>
+<script src="js/flightSchedule.js?v=71"></script>
+<script src="js/flightRoutes.js?v=71"></script>
+<script src="js/flights.js?v=71"></script>
+<script src="js/flightTables.js?v=71"></script>
 </body>
 </html>

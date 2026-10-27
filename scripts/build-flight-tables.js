@@ -21,8 +21,8 @@ const GIMPO_ODCLOUD_NAMESPACE = "15003087"; // 한국공항공사_국제선 항�
 
 // 비즈니스석이 있는 대형항공사(운항사 기준). 여기 없는 항공사(LCC 등)는 표에서 뺀다.
 const FULL_SERVICE = new Set(["KE", "OZ", "JL", "NH", "ET"]);
-// 코드셰어 상대 편명으로 적어줄 항공사 (표에 "KE744/JL5217"처럼 하나만 붙임)
-const PARTNER_PREFERENCE = ["JL", "NH", "KE", "OZ"];
+// 코드셰어 상대 편명으로 적어줄 항공사 (표에 "KE744/JL5217"처럼 하나만 붙임) — 여행사 표와 같은 규칙
+const PARTNER_PREFERENCE = { KE: ["JL", "NH"], OZ: ["NH", "JL"], JL: ["KE", "OZ"], NH: ["OZ", "KE"] };
 
 const JAPAN = {
   NRT: { ja: "成田" },
@@ -60,15 +60,19 @@ const FLIGHT_DURATION_MIN = {
 
 // 표 이미지 3장 — 첨부받은 여행사 표와 같은 묶음
 const PAGES = [
-  { file: "table-1", blocks: [["ICN", "NGO"], ["ICN", "FUK"]] },
-  { file: "table-2", blocks: [["ICN", "NRT"], ["ICN", "HND"], ["GMP", "HND"]] },
-  { file: "table-3", blocks: [["ICN", "KIX"], ["GMP", "KIX"], ["ICN", "UKB"]] },
+  { file: "table-1", name: "나고야 · 후쿠오카", blocks: [["ICN", "NGO"], ["ICN", "FUK"]] },
+  { file: "table-2", name: "나리타 · 하네다", blocks: [["ICN", "NRT"], ["ICN", "HND"], ["GMP", "HND"]] },
+  { file: "table-3", name: "오사카 · 고베", blocks: [["ICN", "KIX"], ["GMP", "KIX"], ["ICN", "UKB"]] },
 ];
 
 const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"]; // Date.getDay() 순서
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]; // 표기 순서: 월~일
 
 const airlineOf = (code) => code.slice(0, 2);
+// "JL090"과 "JL90"은 같은 편 — 비교용 키
+const flightKey = (code) => code.toUpperCase().replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2");
+// 표에는 여행사 표처럼 편명 숫자를 3자리 이상으로 ("JL91" -> "JL091")
+const displayCode = (code) => code.replace(/^([A-Z0-9]{2})(\d+)$/, (_, al, n) => al + n.padStart(3, "0"));
 const isRegularCode = (code) => /^[A-Z0-9]{2}\d+$/.test(code); // "JL95A" 같은 부정기편 제외
 const toMin = (hhmm) => {
   const [h, m] = hhmm.split(":").map(Number);
@@ -94,12 +98,31 @@ function dayNote(days) {
   return `(${ordered.map((d) => WEEKDAY_JA[d]).join("/")})`;
 }
 
+// API가 코드셰어 편명을 안 주는 경우(김포 데이터셋 등) 손으로 적어둔 항공검색 목록(js/flightRoutes.js)에서 찾는다
+const MANUAL_PARTNERS = (() => {
+  const map = {};
+  try {
+    const vm = require("vm");
+    const ctx = {};
+    vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "js", "flightRoutes.js"), "utf8") + ";this.R = FLIGHT_ROUTES;", ctx);
+    ctx.R.forEach((r) =>
+      [...r.inbound, ...r.outbound].forEach((entry) => {
+        const codes = entry.replace(/\([^)]*\)/g, "").split("/").map((c) => c.trim().toUpperCase());
+        if (codes.length > 1) map[flightKey(codes[0])] = codes.slice(1);
+      })
+    );
+  } catch (err) {
+    console.warn("flightRoutes.js 코드셰어 목록을 못 읽음:", err.message);
+  }
+  return map;
+})();
+
 function pickPartner(code, partners) {
-  const own = airlineOf(code);
-  for (const al of PARTNER_PREFERENCE) {
-    if (al === own) continue;
-    const p = [...partners].filter((c) => airlineOf(c) === al).sort()[0];
-    if (p) return p;
+  const candidates = [...partners, ...(MANUAL_PARTNERS[flightKey(code)] || [])];
+  for (const al of PARTNER_PREFERENCE[airlineOf(code)] || []) {
+    const p = candidates.filter((c) => airlineOf(c) === al).sort()[0];
+    if (p) return displayCode(p);
   }
   return null;
 }
@@ -201,14 +224,20 @@ function buildIncheon(arrivals, departures) {
       const partner = pickPartner(code, partners.get(code) || []);
       let dur = FLIGHT_DURATION_MIN[code];
       if (!dur) {
-        dur = ROUTE_DURATION_MIN[apt];
-        unknownDuration.add(code);
+        // 처음 보는 편은 같은 항공사·같은 노선·같은 방향 편들의 평균 비행시간, 그것도 없으면 노선 평균
+        const peers = [...operating.keys()].filter(
+          (c) => c !== code && airlineOf(c) === airlineOf(code) && airportOf.get(c) === apt && FLIGHT_DURATION_MIN[c]
+        );
+        dur = peers.length
+          ? Math.round(peers.reduce((s, c) => s + FLIGHT_DURATION_MIN[c], 0) / peers.length / 5) * 5
+          : ROUTE_DURATION_MIN[apt];
+        unknownDuration.add(`${code}(${dur}분)`);
       }
       for (const [time, days] of byTime) {
         const icn = toMin(time);
         const [dep, arr] = dir === "in" ? [icn - dur, icn] : [icn, icn + dur];
         result[key][dir].push({
-          label: `${code}${partner ? "/" + partner : ""}${dayNote(days)}`,
+          label: `${displayCode(code)}${partner ? "/" + partner : ""}${dayNote(days)}`,
           dep: fromMin(dep),
           arr: fromMin(arr),
           sortKey: dir === "in" ? (dep + 1440) % 1440 : dep,
@@ -242,20 +271,38 @@ function parseGimpoDays(raw) {
 
 const ymd = (s) => String(s || "").replace(/\D/g, "").slice(0, 8);
 
-function buildGimpo(rows, windowStart, windowEnd) {
-  const sample = [...new Set(rows.slice(0, 2000).map((r) => String(r.운항요일)))].slice(0, 15);
-  console.log(`김포 운항요일 값 예시: ${JSON.stringify(sample)}`);
+const daysBetween = (a, b) =>
+  (Date.UTC(+b.slice(0, 4), +b.slice(4, 6) - 1, +b.slice(6, 8)) - Date.UTC(+a.slice(0, 4), +a.slice(4, 6) - 1, +a.slice(6, 8))) / 86400000;
 
-  const groups = new Map(); // from|to|dep|arr -> { codes:Set, days:Set }
-  for (const r of rows) {
+function buildGimpo(rows, windowStart, windowEnd) {
+  const japanRows = rows.filter((r) => {
     const from = String(r.출발공항 || "").trim().toUpperCase();
     const to = String(r.도착공항 || "").trim().toUpperCase();
-    if (!((from === "GMP" && JAPAN[to]) || (to === "GMP" && JAPAN[from]))) continue;
+    return (from === "GMP" && JAPAN[to]) || (to === "GMP" && JAPAN[from]);
+  });
+  const overlaps = (r) => !(ymd(r.시작일자) > windowEnd || ymd(r.종료일자) < windowStart);
+
+  // 이 데이터셋은 시즌(하계/동계)마다 새 파일이 올라오는데, 새 시즌 파일이 늦게 나오는 경우가 있다.
+  // 이번 기간에 해당하는 줄이 하나도 없으면 가장 최근 시즌의 정기편(30일 넘게 운항)으로 대신 만들고 표에 그렇게 적는다.
+  let picked = japanRows.filter(overlaps);
+  let season = null;
+  if (picked.length === 0) {
+    const regular = japanRows.filter((r) => ymd(r.시작일자) && ymd(r.종료일자) && daysBetween(ymd(r.시작일자), ymd(r.종료일자)) >= 30);
+    const lastEnd = regular.map((r) => ymd(r.종료일자)).sort().pop();
+    if (lastEnd) {
+      picked = regular.filter((r) => daysBetween(ymd(r.종료일자), lastEnd) <= 7); // 같은 시즌 (끝나는 날이 하루 이틀 다른 편 포함)
+      const start = picked.map((r) => ymd(r.시작일자)).sort()[0];
+      season = { start, end: lastEnd };
+      console.log(`김포: 이번 기간 스케줄이 아직 없어 ${start}~${lastEnd} 시즌 기준으로 만듦 (${picked.length}줄)`);
+    }
+  }
+
+  const groups = new Map(); // from|to|dep|arr -> { codes:Set, days:Set }
+  for (const r of picked) {
+    const from = String(r.출발공항 || "").trim().toUpperCase();
+    const to = String(r.도착공항 || "").trim().toUpperCase();
     const code = String(r.운항편명 || "").trim().toUpperCase();
     if (!isRegularCode(code) || !r.출발시간 || !r.도착시간) continue;
-    const start = ymd(r.시작일자);
-    const end = ymd(r.종료일자);
-    if ((start && start > windowEnd) || (end && end < windowStart)) continue; // 이번 달에 안 다니는 편
     const k = [from, to, normTime(String(r.출발시간)), normTime(String(r.도착시간))].join("|");
     if (!groups.has(k)) groups.set(k, { codes: new Set(), days: new Set() });
     const g = groups.get(k);
@@ -277,13 +324,13 @@ function buildGimpo(rows, windowStart, windowEnd) {
     if (!result[key]) result[key] = { in: [], out: [] };
     const partner = pickPartner(operatingCode, codes.filter((c) => c !== operatingCode));
     result[key][dir].push({
-      label: `${operatingCode}${partner ? "/" + partner : ""}${g.days.size ? dayNote(g.days) : ""}`,
+      label: `${displayCode(operatingCode)}${partner ? "/" + partner : ""}${g.days.size ? dayNote(g.days) : ""}`,
       dep,
       arr,
       sortKey: toMin(dep),
     });
   }
-  return result;
+  return { routes: result, season };
 }
 
 /* ---------------- 실행 ---------------- */
@@ -317,10 +364,11 @@ async function main() {
 
   const incheon = buildIncheon(raw.arrivals, raw.departures);
   const gimpo = buildGimpo(raw.gimpo, fmt(now), fmt(plus6));
-  const routes = { ...incheon, ...gimpo };
+  const routes = { ...incheon, ...gimpo.routes };
 
   const pages = PAGES.map((p) => ({
     file: p.file,
+    name: p.name,
     blocks: p.blocks
       .map(([korea, japan]) => {
         const r = routes[`${korea}-${japan}`] || { in: [], out: [] };
@@ -337,7 +385,9 @@ async function main() {
 
   const updated = `${now.getUTCMonth() + 1}/${now.getUTCDate()}`;
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  const out = { updated, generatedAt: raw.fetchedAt, pages };
+  const md = (s) => `${+s.slice(4, 6)}/${+s.slice(6, 8)}`;
+  const gimpoSeason = gimpo.season ? `${md(gimpo.season.start)}~${md(gimpo.season.end)}` : null;
+  const out = { updated, generatedAt: raw.fetchedAt, gimpoSeason, pages };
   fs.writeFileSync(path.join(OUT_DIR, "tables.json"), JSON.stringify(out, null, 2));
   pages.forEach((p) =>
     p.blocks.forEach((b) => console.log(`${p.file} ${b.inTitle} ${b.inRows.length}편 / ${b.outTitle} ${b.outRows.length}편`))
