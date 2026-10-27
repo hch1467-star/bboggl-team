@@ -1,0 +1,62 @@
+name: Build flight tables
+
+# 매달 1일, 지역별 입출국 항공 스케줄표(LCC 제외) 이미지를 만들어 flight-tables/ 에 올린다.
+# 팀판 항공검색 화면 아래 "이달의 항공 스케줄표"에서 보고 공유·저장한다.
+on:
+  schedule:
+    - cron: "0 1 1 * *" # 매달 1일 01:00 UTC(오전 10시 KST)
+  workflow_dispatch:
+    inputs:
+      save_raw:
+        description: "받은 원본 데이터를 아티팩트로 남기기 (개발용)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install Japanese fonts and headless browser
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          npm install --no-save --no-package-lock playwright@1.48.2
+          npx playwright install --with-deps chromium
+
+      - name: Build table data
+        env:
+          DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+        run: node scripts/build-flight-tables.js ${{ inputs.save_raw && '--save-raw raw.json' || '' }}
+
+      - name: Render images
+        run: node scripts/render-flight-tables.js
+
+      - name: Upload raw data (dev)
+        if: ${{ inputs.save_raw }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: flight-tables-raw
+          path: raw.json
+          retention-days: 3
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add flight-tables
+          if git diff --cached --quiet; then
+            echo "변경 사항 없음 — 커밋 생략"
+          else
+            git commit -m "월간 항공 스케줄표 갱신 ($(date +%Y-%m-%d))"
+            git pull --rebase
+            git push
+          fi
