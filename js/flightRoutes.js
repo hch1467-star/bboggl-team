@@ -76,6 +76,8 @@ const FLIGHT_ROUTES = [
   {
     korea: "인천",
     japan: "오사카",
+    // 겨울 스케줄로 LCC 신규편이 많이 생겨서 자동 추가를 켬 (2026-10-27) — 손으로 적은 목록에 없는 실제 운항편이 더해진다
+    autoFill: true,
     inbound: [
       "OZ117", "KE738/JL5269", "RF315", "7C1396", "KE722/JL5211", "OZ115/NH6955",
       "RS712", "7C1302", "OZ111/NH6951", "7C1392", "BX171/OZ9567", "LJ242",
@@ -94,13 +96,14 @@ const FLIGHT_ROUTES = [
   {
     korea: "인천",
     japan: "고베",
+    autoFill: true, // 아시아나(OZ1153/1163)·진에어 고베편이 새로 생겨서 자동 추가를 켬 (2026-10-27)
     inbound: ["KE2172", "7C1622", "KE2174"],
     outbound: ["KE2171", "7C1621", "KE2173"],
   },
   {
     korea: "인천",
     japan: "나고야",
-    // autoFill: 매달 시간표가 갱신될 때 이 노선에 새로 생긴 실제 운항편(LCC 포함)을 자동으로 목록에 더한다.
+    // autoFill: 매주 시간표가 갱신될 때 이 노선에 새로 생긴 실제 운항편(LCC 포함)을 자동으로 목록에 더한다.
     // 아래 손으로 적은 목록은 그대로 두고, 거기 없는 편만 추가된다.
     autoFill: true,
     inbound: ["KE744/JL5217", "OZ121/NH6963", "KE742/JL5219", "OZ123/NH6965"],
@@ -159,7 +162,7 @@ const FLIGHT_ROUTES = [
 /**
  * autoFill을 켠 노선에서, 손으로 적은 목록에 없는 실제 운항편을 찾아 돌려준다.
  * 자동 갱신되는 FLIGHT_ROUTE_INFO(js/flightSchedule.js)를 보기 때문에
- * 매달 시간표가 갱신되면 새로 생긴 편도 자동으로 목록에 들어온다.
+ * 매주 시간표가 갱신되면 새로 생긴 편도 자동으로 목록에 들어온다.
  */
 function autoFilledFlights(route, direction, groups) {
   if (!route.autoFill || typeof FLIGHT_ROUTE_INFO === "undefined") return [];
