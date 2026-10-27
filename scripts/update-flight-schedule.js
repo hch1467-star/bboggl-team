@@ -287,6 +287,14 @@ async function fetchFlights(operation) {
   const base = "apis.data.go.kr/B551177/StatusOfPassengerFlightsDSOdp";
   const data = await fetchWithRetry([`https://${base}/${query}`, `http://${base}/${query}`]);
   const items = data?.response?.body?.items || [];
+  // 이 API가 며칠치 운항을 주는지 기록 (월간 항공표에서 단항편을 걸러낼 수 있는지 판단용)
+  const perDay = {};
+  items.forEach((it) => {
+    const d = String(it.scheduleDateTime || "").slice(0, 8);
+    perDay[d] = (perDay[d] || 0) + 1;
+  });
+  console.log(`인천 ${operation} 날짜별 건수: ${JSON.stringify(perDay)}`);
+  if (items[0]) console.log(`인천 응답 항목: ${Object.keys(items[0]).join(", ")}`);
   const byFlight = {};
   for (const item of items) {
     const code = String(item.flightId || "").trim().toUpperCase();
