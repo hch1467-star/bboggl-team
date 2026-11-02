@@ -185,6 +185,37 @@ async function fetchGimpo() {
   return rows;
 }
 
+// 한국공항공사_항공기 운항 스케줄 정보_GW (국제선) — 지금 시즌의 김포 쪽 시간·운항요일·운항기간.
+// 공공데이터포털에서 활용신청을 해야 쓸 수 있다. 안 되면 null을 돌려주고 예전 방식(연 1회 데이터셋)으로 만든다.
+async function fetchKacSchedule() {
+  const base = "https://apis.data.go.kr/B551178/flight-schedule/int";
+  for (const fmt of ["type=json", "_type=json", "resultType=json"]) {
+    try {
+      const res = await fetch(`${base}?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=3000&${fmt}`, {
+        signal: AbortSignal.timeout(30000),
+      });
+      const text = await res.text();
+      let json = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        /* XML이나 오류 문구 */
+      }
+      const body = json && (json.response?.body || json.body);
+      let items = body?.items?.item ?? body?.items;
+      if (items && !Array.isArray(items)) items = [items];
+      if (Array.isArray(items) && items.length) {
+        console.log(`한국공항공사 국제선 스케줄 ${items.length}건 (${fmt}, 전체 ${body.totalCount})`);
+        return items;
+      }
+      console.log(`한국공항공사 국제선 스케줄 응답(${fmt}, HTTP ${res.status}): ${text.slice(0, 200).replace(SERVICE_KEY, "***")}`);
+    } catch (err) {
+      console.log(`한국공항공사 국제선 스케줄 조회 실패(${fmt}): ${err.message || err}`);
+    }
+  }
+  return null;
+}
+
 /* ---------------- 인천: 7일치 운항현황 → 표 ---------------- */
 
 function buildIncheon(arrivals, departures) {
@@ -369,15 +400,16 @@ async function main() {
     raw = JSON.parse(fs.readFileSync(fromRaw, "utf8"));
   } else {
     if (!SERVICE_KEY) throw new Error("DATA_GO_KR_SERVICE_KEY 가 없어요");
-    const [arrivals, departures, gimpo] = await Promise.all([
+    const [arrivals, departures, gimpo, kac] = await Promise.all([
       fetchIncheon("getPassengerArrivalsDSOdp"),
       fetchIncheon("getPassengerDeparturesDSOdp"),
       fetchGimpo().catch((err) => {
         console.error("김포 조회 실패:", err.message || err);
         return [];
       }),
+      fetchKacSchedule(),
     ]);
-    raw = { fetchedAt: new Date().toISOString(), arrivals, departures, gimpo };
+    raw = { fetchedAt: new Date().toISOString(), arrivals, departures, gimpo, kac };
     if (saveRaw) fs.writeFileSync(saveRaw, JSON.stringify(raw));
   }
 
