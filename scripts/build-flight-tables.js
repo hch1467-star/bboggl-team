@@ -307,10 +307,14 @@ function buildGimpo(rows, windowStart, windowEnd) {
   let picked = japanRows.filter((r) => overlaps(r) && longEnough(r));
   let season = null;
   if (picked.length === 0) {
-    const regular = japanRows.filter((r) => ymd(r.시작일자) && ymd(r.종료일자) && daysBetween(ymd(r.시작일자), ymd(r.종료일자)) >= 30);
+    // 항공사에 따라 한 시즌을 한 달 단위 등으로 쪼개 올리기도 해서(JAL: 10/1~10/24 등) 줄 길이로 거르면 편이 빠진다.
+    // 시즌 마지막 주의 하루(기준일)에 운항하는 정기 줄만 고른다.
+    const regular = japanRows.filter(longEnough);
     const lastEnd = regular.map((r) => ymd(r.종료일자)).sort().pop();
     if (lastEnd) {
-      picked = regular.filter((r) => daysBetween(ymd(r.종료일자), lastEnd) <= 7); // 같은 시즌 (끝나는 날이 하루 이틀 다른 편 포함)
+      const d = new Date(Date.UTC(+lastEnd.slice(0, 4), +lastEnd.slice(4, 6) - 1, +lastEnd.slice(6, 8) - 3));
+      const ref = d.toISOString().slice(0, 10).replace(/-/g, "");
+      picked = regular.filter((r) => ymd(r.시작일자) <= ref && ymd(r.종료일자) >= ref);
       const start = picked.map((r) => ymd(r.시작일자)).sort()[0];
       season = { start, end: lastEnd };
       console.log(`김포: 이번 기간 스케줄이 아직 없어 ${start}~${lastEnd} 시즌 기준으로 만듦 (${picked.length}줄)`);
