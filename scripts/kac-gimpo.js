@@ -48,17 +48,18 @@ async function fetchKacGimpoJapan(serviceKey) {
   let ok = 0;
   for (const apt of JAPAN_CODES) {
     for (const [dep, arr] of [["GMP", apt], [apt, "GMP"]]) {
-      for (let page = 1; page <= 20; page++) {
+      for (let page = 1; page <= 30; page++) {
+        // 한 번에 100줄까지만 받아준다 (1000줄로 요청하면 오류)
         const body = await fetchJson(
           "https://apis.data.go.kr/B551178/flight-schedule/int" +
-            `?serviceKey=${serviceKey}&pageNo=${page}&numOfRows=1000&type=json&schDeptCityCode=${dep}&schArrvCityCode=${arr}`
+            `?serviceKey=${serviceKey}&pageNo=${page}&numOfRows=100&type=json&schDeptCityCode=${dep}&schArrvCityCode=${arr}`
         );
         if (!body) break;
         if (page === 1) ok++;
         let list = body.items?.item ?? [];
         if (!Array.isArray(list)) list = list ? [list] : [];
         list.forEach((it) => items.push({ ...it, _apt: apt, _dir: dep === "GMP" ? "out" : "in" }));
-        if (list.length < 1000) break;
+        if (list.length < 100) break;
       }
     }
   }
