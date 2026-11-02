@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { fetchKacGimpoJapan, durationsFromDataset, buildGimpoFlights } = require("./kac-gimpo");
 
 const SERVICE_KEY = process.env.DATA_GO_KR_SERVICE_KEY;
 if (!SERVICE_KEY) {
@@ -202,6 +203,29 @@ async function fetchGimpoTimeLookup(serviceKey) {
     };
   }
   if (skippedIrregular) console.log(`김포 부정기편(전세기/페리 등) ${skippedIrregular}건 제외`);
+
+  // 위 데이터셋은 1년에 한 번(여름 시즌만) 올라와서 겨울엔 시간이 어긋난다.
+  // 김포↔일본은 한국공항공사 운항 스케줄 API로 지금 시즌 시간을 받아 덮어쓴다 (scripts/kac-gimpo.js).
+  const kac = await fetchKacGimpoJapan(serviceKey).catch(() => null);
+  if (kac) {
+    const kst = (days) => new Date(Date.now() + (9 * 3600 + days * 86400) * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+    const flights = buildGimpoFlights(kac, { windowStart: kst(0), windowEnd: kst(6), durations: durationsFromDataset(records) });
+    let n = 0;
+    for (const f of flights) {
+      for (const code of [f.code, ...f.partners]) {
+        map[code] = {
+          range: `${f.dep}-${f.arr}`,
+          korea: "김포",
+          japan: AIRPORT_NAME[f.apt] || null,
+          direction: f.dir === "in" ? "입국" : "출국",
+        };
+        n++;
+      }
+    }
+    console.log(`김포↔일본 ${n}개 편명을 한국공항공사 운항 스케줄(이번 시즌) 시간으로 반영`);
+  } else {
+    console.log("한국공항공사 운항 스케줄을 못 받아 김포는 연간 데이터셋 시간 그대로 사용");
+  }
   return map;
 }
 
