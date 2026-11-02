@@ -22,6 +22,13 @@ const GIMPO_ODCLOUD_NAMESPACE = "15003087"; // 한국공항공사_국제선 항�
 // 비즈니스석이 있는 대형항공사(운항사 기준). 여기 없는 항공사(LCC 등)는 표에서 뺀다.
 // 에티오피아항공(ET672/673, 나리타 경유편)은 실제 업무에 안 써서 표에서 뺌 (2026-11 요청)
 const FULL_SERVICE = new Set(["KE", "OZ", "JL", "NH"]);
+
+// 임시 증편은 표에서 뺀다 (2026-11 요청). 자동 판단(아래 TEMP_MAX_DAYS)으로 못 거르는 편은 여기에 직접 적는다.
+const EXCLUDE_FLIGHTS = new Set(["KE2441", "KE2442"]); // 하네다-인천 목요일 임시편
+// 손으로 적은 항공검색 목록(js/flightRoutes.js)에 없는 편이 일주일에 이 날수 이하로만 다니면 임시 증편으로 본다
+const TEMP_MAX_DAYS = 2;
+// 김포 데이터셋에서 운항 기간이 이보다 짧은 줄은 전세기·임시편으로 본다
+const GIMPO_MIN_PERIOD_DAYS = 14;
 // 코드셰어 상대 편명으로 적어줄 항공사 (표에 "KE744/JL5217"처럼 하나만 붙임) — 여행사 표와 같은 규칙
 const PARTNER_PREFERENCE = { KE: ["JL", "NH"], OZ: ["NH", "JL"], JL: ["KE", "OZ"], NH: ["OZ", "KE"] };
 
@@ -101,6 +108,7 @@ function dayNote(days) {
 }
 
 // API가 코드셰어 편명을 안 주는 경우(김포 데이터셋 등) 손으로 적어둔 항공검색 목록(js/flightRoutes.js)에서 찾는다
+const MANUAL_KNOWN = new Set(); // 항공검색 목록에 손으로 적어둔 편 (정기편으로 확인된 것)
 const MANUAL_PARTNERS = (() => {
   const map = {};
   try {
@@ -111,6 +119,7 @@ const MANUAL_PARTNERS = (() => {
     ctx.R.forEach((r) =>
       [...r.inbound, ...r.outbound].forEach((entry) => {
         const codes = entry.replace(/\([^)]*\)/g, "").split("/").map((c) => c.trim().toUpperCase());
+        MANUAL_KNOWN.add(flightKey(codes[0]));
         if (codes.length > 1) map[flightKey(codes[0])] = codes.slice(1);
       })
     );
@@ -191,6 +200,7 @@ function buildIncheon(arrivals, departures) {
 
   const result = {}; // "ICN-NGO" -> { in: rows, out: rows }
   const unknownDuration = new Set();
+  const tempExcluded = new Set();
 
   for (const [items, dir] of [[arrivals, "in"], [departures, "out"]]) {
     const operating = new Map(); // code -> Map(time -> Set(weekday))
@@ -221,6 +231,11 @@ function buildIncheon(arrivals, departures) {
 
     for (const [code, byTime] of operating) {
       const apt = airportOf.get(code);
+      const allDays = new Set([...byTime.values()].flatMap((d) => [...d]));
+      if (EXCLUDE_FLIGHTS.has(code) || (!MANUAL_KNOWN.has(flightKey(code)) && allDays.size <= TEMP_MAX_DAYS)) {
+        tempExcluded.add(`${code}(${dayNote(allDays) || "매일"})`);
+        continue;
+      }
       const key = `ICN-${apt}`;
       if (!result[key]) result[key] = { in: [], out: [] };
       const partner = pickPartner(code, partners.get(code) || []);
@@ -247,6 +262,7 @@ function buildIncheon(arrivals, departures) {
       }
     }
   }
+  if (tempExcluded.size) console.log(`임시 증편으로 보고 제외: ${[...tempExcluded].sort().join(", ")}`);
   if (unknownDuration.size) console.log(`비행시간 미등록(노선 평균 사용): ${[...unknownDuration].sort().join(", ")}`);
   return result;
 }
@@ -286,7 +302,9 @@ function buildGimpo(rows, windowStart, windowEnd) {
 
   // 이 데이터셋은 시즌(하계/동계)마다 새 파일이 올라오는데, 새 시즌 파일이 늦게 나오는 경우가 있다.
   // 이번 기간에 해당하는 줄이 하나도 없으면 가장 최근 시즌의 정기편(30일 넘게 운항)으로 대신 만들고 표에 그렇게 적는다.
-  let picked = japanRows.filter(overlaps);
+  const longEnough = (r) =>
+    ymd(r.시작일자) && ymd(r.종료일자) && daysBetween(ymd(r.시작일자), ymd(r.종료일자)) >= GIMPO_MIN_PERIOD_DAYS;
+  let picked = japanRows.filter((r) => overlaps(r) && longEnough(r));
   let season = null;
   if (picked.length === 0) {
     const regular = japanRows.filter((r) => ymd(r.시작일자) && ymd(r.종료일자) && daysBetween(ymd(r.시작일자), ymd(r.종료일자)) >= 30);
@@ -304,7 +322,7 @@ function buildGimpo(rows, windowStart, windowEnd) {
     const from = String(r.출발공항 || "").trim().toUpperCase();
     const to = String(r.도착공항 || "").trim().toUpperCase();
     const code = String(r.운항편명 || "").trim().toUpperCase();
-    if (!isRegularCode(code) || !r.출발시간 || !r.도착시간) continue;
+    if (!isRegularCode(code) || !r.출발시간 || !r.도착시간 || EXCLUDE_FLIGHTS.has(code)) continue;
     const k = [from, to, normTime(String(r.출발시간)), normTime(String(r.도착시간))].join("|");
     if (!groups.has(k)) groups.set(k, { codes: new Set(), days: new Set() });
     const g = groups.get(k);
