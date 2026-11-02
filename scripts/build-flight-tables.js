@@ -187,40 +187,64 @@ async function fetchGimpo() {
 
 // 한국공항공사_항공기 운항 스케줄 정보_GW (국제선) — 지금 시즌의 김포 쪽 시간·운항요일·운항기간.
 // 공공데이터포털에서 활용신청을 해야 쓸 수 있다. 안 되면 null을 돌려주고 예전 방식(연 1회 데이터셋)으로 만든다.
+// 응답이 XML로 올 때를 대비한 간단한 변환 (<item><a>1</a>...</item> -> [{a:"1"}])
+function parseXmlItems(xml) {
+  return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
+    const o = {};
+    for (const f of m[1].matchAll(/<(\w+)>([^<]*)<\/>/g)) o[f[1]] = f[2];
+    return o;
+  });
+}
+
 async function fetchKacSchedule() {
-  // 전체가 7만 건이 넘어 한 번에 받으면 오류가 난다 — 김포↔일본 노선만, 오늘 날짜 기준으로 골라 받는다
+  // 전체가 7만 건이 넘어 한 번에 받으면 오류가 난다 — 김포↔일본 노선만 골라 받는다
   const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+  const variants = [`&type=json&schDate=${today}`, "&type=json", `&schDate=${today}`, ""];
   const items = [];
+  let okRoutes = 0;
   for (const apt of Object.keys(JAPAN)) {
     for (const [dep, arr] of [["GMP", apt], [apt, "GMP"]]) {
-      const url =
-        "https://apis.data.go.kr/B551178/flight-schedule/int" +
-        `?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=500&type=json&schDate=${today}` +
-        `&schDeptCityCode=${dep}&schArrvCityCode=${arr}`;
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        const text = await res.text();
-        let json = null;
+      let got = null;
+      for (const v of variants) {
+        const url =
+          "https://apis.data.go.kr/B551178/flight-schedule/int" +
+          `?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=500&schDeptCityCode=${dep}&schArrvCityCode=${arr}${v}`;
         try {
-          json = JSON.parse(text);
-        } catch {
-          /* XML이나 오류 문구 */
+          const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+          const text = await res.text();
+          if (/<resultCode>00<\/resultCode>/.test(text)) {
+            got = parseXmlItems(text);
+          } else {
+            let json = null;
+            try {
+              json = JSON.parse(text);
+            } catch {
+              /* 오류 문구 */
+            }
+            const body = json && (json.response?.body || json.body);
+            if (body) {
+              let list = body.items?.item ?? body.items ?? [];
+              got = Array.isArray(list) ? list : list ? [list] : [];
+            }
+          }
+          if (got) {
+            console.log(`한국공항공사 스케줄 ${dep}→${arr}: ${got.length}건 (요청형식 "${v || "기본"}")`);
+            break;
+          }
+        } catch (err) {
+          /* 다음 형식으로 */
         }
-        const body = json && (json.response?.body || json.body);
-        if (!body) {
-          console.log(`한국공항공사 스케줄 ${dep}→${arr} 응답 이상(HTTP ${res.status}): ${text.slice(0, 300).replace(SERVICE_KEY, "***")}`);
-          return null; // 하나라도 이상하면 이번 달은 예전 방식으로
-        }
-        let list = body.items?.item ?? body.items ?? [];
-        if (!Array.isArray(list)) list = [list];
-        list.forEach((it) => items.push({ ...it, _dep: dep, _arr: arr }));
-      } catch (err) {
-        console.log(`한국공항공사 스케줄 ${dep}→${arr} 조회 실패: ${err.message || err}`);
-        return null;
+      }
+      if (got) {
+        okRoutes++;
+        got.forEach((it) => items.push({ ...it, _dep: dep, _arr: arr }));
+      } else {
+        console.log(`한국공항공사 스케줄 ${dep}→${arr}: 응답 없음/오류 (운항 없는 노선일 수 있음)`);
       }
     }
   }
-  console.log(`한국공항공사 국제선 스케줄(김포↔일본, ${today} 기준) ${items.length}건`);
+  if (!okRoutes) return null;
+  console.log(`한국공항공사 국제선 스케줄(김포↔일본) ${items.length}건`);
   if (items[0]) console.log(`예시: ${JSON.stringify(items[0])}`);
   return items;
 }
