@@ -57,7 +57,7 @@ function pageHtml(page) {
   </style></head><body><div class="sheet" id="sheet">
   <div class="top"><span class="badge">※Only business class</span><span class="upd">*${esc(data.updated)} UPDATE</span></div>
   ${blocks}
-  <div class="note">※LCC除く。仁川発着時刻は仁川空港データ、日本側の時刻は所要時間からの目安です。${
+  <div class="note">※LCC除く。仁川・金浦の時刻は空港公式データ、日本側の時刻は所要時間からの目安です。${
     data.gimpoSeason && page.blocks.some((b) => b.inTitle.includes("金浦"))
       ? `<br>※金浦路線は新スケジュール未公開のため ${esc(data.gimpoSeason)} スケジュール基準です。`
       : ""
