@@ -188,32 +188,41 @@ async function fetchGimpo() {
 // 한국공항공사_항공기 운항 스케줄 정보_GW (국제선) — 지금 시즌의 김포 쪽 시간·운항요일·운항기간.
 // 공공데이터포털에서 활용신청을 해야 쓸 수 있다. 안 되면 null을 돌려주고 예전 방식(연 1회 데이터셋)으로 만든다.
 async function fetchKacSchedule() {
-  const base = "https://apis.data.go.kr/B551178/flight-schedule/int";
-  for (const fmt of ["type=json", "_type=json", "resultType=json"]) {
-    try {
-      const res = await fetch(`${base}?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=3000&${fmt}`, {
-        signal: AbortSignal.timeout(30000),
-      });
-      const text = await res.text();
-      let json = null;
+  // 전체가 7만 건이 넘어 한 번에 받으면 오류가 난다 — 김포↔일본 노선만, 오늘 날짜 기준으로 골라 받는다
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
+  const items = [];
+  for (const apt of Object.keys(JAPAN)) {
+    for (const [dep, arr] of [["GMP", apt], [apt, "GMP"]]) {
+      const url =
+        "https://apis.data.go.kr/B551178/flight-schedule/int" +
+        `?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=500&type=json&schDate=${today}` +
+        `&schDeptCityCode=${dep}&schArrvCityCode=${arr}`;
       try {
-        json = JSON.parse(text);
-      } catch {
-        /* XML이나 오류 문구 */
+        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        const text = await res.text();
+        let json = null;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          /* XML이나 오류 문구 */
+        }
+        const body = json && (json.response?.body || json.body);
+        if (!body) {
+          console.log(`한국공항공사 스케줄 ${dep}→${arr} 응답 이상(HTTP ${res.status}): ${text.slice(0, 300).replace(SERVICE_KEY, "***")}`);
+          return null; // 하나라도 이상하면 이번 달은 예전 방식으로
+        }
+        let list = body.items?.item ?? body.items ?? [];
+        if (!Array.isArray(list)) list = [list];
+        list.forEach((it) => items.push({ ...it, _dep: dep, _arr: arr }));
+      } catch (err) {
+        console.log(`한국공항공사 스케줄 ${dep}→${arr} 조회 실패: ${err.message || err}`);
+        return null;
       }
-      const body = json && (json.response?.body || json.body);
-      let items = body?.items?.item ?? body?.items;
-      if (items && !Array.isArray(items)) items = [items];
-      if (Array.isArray(items) && items.length) {
-        console.log(`한국공항공사 국제선 스케줄 ${items.length}건 (${fmt}, 전체 ${body.totalCount})`);
-        return items;
-      }
-      console.log(`한국공항공사 국제선 스케줄 응답(${fmt}, HTTP ${res.status}): ${text.slice(0, 200).replace(SERVICE_KEY, "***")}`);
-    } catch (err) {
-      console.log(`한국공항공사 국제선 스케줄 조회 실패(${fmt}): ${err.message || err}`);
     }
   }
-  return null;
+  console.log(`한국공항공사 국제선 스케줄(김포↔일본, ${today} 기준) ${items.length}건`);
+  if (items[0]) console.log(`예시: ${JSON.stringify(items[0])}`);
+  return items;
 }
 
 /* ---------------- 인천: 7일치 운항현황 → 표 ---------------- */
