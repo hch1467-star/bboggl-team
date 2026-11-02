@@ -708,17 +708,17 @@ const FLIGHT_TIME_MAP = {
   "TW652": "13:45-17:40",
   "TW667": "11:20-13:00",
   "TW668": "14:00-17:25",
-  "JL091": "08:20-10:40",
+  "JL091": "08:25-10:45",
   "KE5708": "08:20-10:40",
-  "JL093": "12:05-14:25",
+  "JL093": "16:00-18:20",
   "KE5710": "12:05-14:25",
-  "JL095": "18:55-21:15",
+  "JL095": "19:45-22:05",
   "KE5712": "18:55-21:15",
-  "JL090": "08:00-10:15",
+  "JL090": "08:15-10:30",
   "KE5711": "08:00-10:15",
   "JL092": "12:05-14:20",
   "KE5707": "12:05-14:20",
-  "JL094": "16:20-18:35",
+  "JL094": "19:40-21:55",
   "KE5709": "16:20-18:35",
   "TK8095": "15:55-17:20",
   "TK8093": "18:30-20:30",
@@ -878,7 +878,8 @@ const FLIGHT_TIME_MAP = {
 };
 
 function timeRangeForFlight(flightNo) {
-  return FLIGHT_TIME_MAP[(flightNo || "").toUpperCase()] || null;
+  const code = (flightNo || "").toUpperCase();
+  return FLIGHT_TIME_MAP[code] || FLIGHT_TIME_MAP[code.replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2")] || null;
 }
 
 // 편명 -> 어느 한국 공항인지 / 상대 일본 공항 / 입국·출국. API 응답에서 같이 받아온 값.
@@ -1091,6 +1092,12 @@ const FLIGHT_ROUTE_INFO = {
   "IT662": { korea: "김포", japan: null, direction: "입국", codeshare: false },
   "IT663": { korea: "김포", japan: null, direction: "출국", codeshare: false },
   "JD633A": { korea: "김포", japan: null, direction: "출국", codeshare: false },
+  "JL090": { korea: "김포", japan: "하네다", direction: "출국", codeshare: false },
+  "JL091": { korea: "김포", japan: "하네다", direction: "입국", codeshare: false },
+  "JL092": { korea: "김포", japan: "하네다", direction: "출국", codeshare: false },
+  "JL093": { korea: "김포", japan: "하네다", direction: "입국", codeshare: false },
+  "JL094": { korea: "김포", japan: "하네다", direction: "출국", codeshare: false },
+  "JL095": { korea: "김포", japan: "하네다", direction: "입국", codeshare: false },
   "JL5152": { korea: "인천", japan: "삿포로", direction: "출국", codeshare: true },
   "JL5153": { korea: "인천", japan: "삿포로", direction: "입국", codeshare: true },
   "JL5201": { korea: "인천", japan: "나리타", direction: "입국", codeshare: false },
