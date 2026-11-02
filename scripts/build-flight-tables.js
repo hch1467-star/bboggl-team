@@ -14,6 +14,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { fetchKacGimpoJapan, durationsFromDataset, buildGimpoFlights } = require("./kac-gimpo");
 
 const SERVICE_KEY = process.env.DATA_GO_KR_SERVICE_KEY;
 const OUT_DIR = path.join(__dirname, "..", "flight-tables");
@@ -187,68 +188,6 @@ async function fetchGimpo() {
 
 // 한국공항공사_항공기 운항 스케줄 정보_GW (국제선) — 지금 시즌의 김포 쪽 시간·운항요일·운항기간.
 // 공공데이터포털에서 활용신청을 해야 쓸 수 있다. 안 되면 null을 돌려주고 예전 방식(연 1회 데이터셋)으로 만든다.
-// 응답이 XML로 올 때를 대비한 간단한 변환 (<item><a>1</a>...</item> -> [{a:"1"}])
-function parseXmlItems(xml) {
-  return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
-    const o = {};
-    for (const f of m[1].matchAll(/<(\w+)>([^<]*)<\/>/g)) o[f[1]] = f[2];
-    return o;
-  });
-}
-
-async function fetchKacSchedule() {
-  // 전체가 7만 건이 넘어 한 번에 받으면 오류가 난다 — 김포↔일본 노선만 골라 받는다
-  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, "");
-  const variants = [`&type=json&schDate=${today}`, "&type=json", `&schDate=${today}`, ""];
-  const items = [];
-  let okRoutes = 0;
-  for (const apt of Object.keys(JAPAN)) {
-    for (const [dep, arr] of [["GMP", apt], [apt, "GMP"]]) {
-      let got = null;
-      for (const v of variants) {
-        const url =
-          "https://apis.data.go.kr/B551178/flight-schedule/int" +
-          `?serviceKey=${SERVICE_KEY}&pageNo=1&numOfRows=500&schDeptCityCode=${dep}&schArrvCityCode=${arr}${v}`;
-        try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-          const text = await res.text();
-          if (/<resultCode>00<\/resultCode>/.test(text)) {
-            got = parseXmlItems(text);
-          } else {
-            let json = null;
-            try {
-              json = JSON.parse(text);
-            } catch {
-              /* 오류 문구 */
-            }
-            const body = json && (json.response?.body || json.body);
-            if (body) {
-              let list = body.items?.item ?? body.items ?? [];
-              got = Array.isArray(list) ? list : list ? [list] : [];
-            }
-          }
-          if (got) {
-            console.log(`한국공항공사 스케줄 ${dep}→${arr}: ${got.length}건 (요청형식 "${v || "기본"}")`);
-            break;
-          }
-        } catch (err) {
-          /* 다음 형식으로 */
-        }
-      }
-      if (got) {
-        okRoutes++;
-        got.forEach((it) => items.push({ ...it, _dep: dep, _arr: arr }));
-      } else {
-        console.log(`한국공항공사 스케줄 ${dep}→${arr}: 응답 없음/오류 (운항 없는 노선일 수 있음)`);
-      }
-    }
-  }
-  if (!okRoutes) return null;
-  console.log(`한국공항공사 국제선 스케줄(김포↔일본) ${items.length}건`);
-  if (items[0]) console.log(`예시: ${JSON.stringify(items[0])}`);
-  return items;
-}
-
 /* ---------------- 인천: 7일치 운항현황 → 표 ---------------- */
 
 function buildIncheon(arrivals, departures) {
@@ -421,6 +360,41 @@ function buildGimpo(rows, windowStart, windowEnd) {
   return { routes: result, season };
 }
 
+/* ---------------- 김포: 한국공항공사 운항 스케줄 → 표 ---------------- */
+
+function buildGimpoFromKac(kac, datasetRows, windowStart, windowEnd) {
+  const flights = buildGimpoFlights(kac, {
+    windowStart,
+    windowEnd,
+    durations: durationsFromDataset(datasetRows),
+    minPeriodDays: GIMPO_MIN_PERIOD_DAYS,
+    exclude: EXCLUDE_FLIGHTS,
+  });
+  const result = {};
+  const tempExcluded = [];
+  for (const f of flights) {
+    if (!FULL_SERVICE.has(airlineOf(f.code))) continue;
+    if (!MANUAL_KNOWN.has(flightKey(f.code)) && f.days.size && f.days.size <= TEMP_MAX_DAYS) {
+      tempExcluded.push(`${f.code}${dayNote(f.days)}`);
+      continue;
+    }
+    const key = `GMP-${f.apt}`;
+    if (!result[key]) result[key] = { in: [], out: [] };
+    const partner = pickPartner(f.code, f.partners);
+    result[key][f.dir].push({
+      label: `${displayCode(f.code)}${partner ? "/" + partner : ""}${f.days.size ? dayNote(f.days) : ""}`,
+      dep: normTime(f.dep),
+      arr: normTime(f.arr),
+      sortKey: toMin(f.dep),
+    });
+  }
+  if (tempExcluded.length) console.log(`김포 임시 증편으로 보고 제외: ${tempExcluded.join(", ")}`);
+  const n = Object.values(result).reduce((s, r) => s + r.in.length + r.out.length, 0);
+  if (!n) return null;
+  console.log(`김포: 한국공항공사 운항 스케줄(이번 시즌) 기준 ${n}편`);
+  return { routes: result, season: null };
+}
+
 /* ---------------- 실행 ---------------- */
 
 async function main() {
@@ -440,7 +414,10 @@ async function main() {
         console.error("김포 조회 실패:", err.message || err);
         return [];
       }),
-      fetchKacSchedule(),
+      fetchKacGimpoJapan(SERVICE_KEY).catch((err) => {
+        console.error("한국공항공사 스케줄 조회 실패:", err.message || err);
+        return null;
+      }),
     ]);
     raw = { fetchedAt: new Date().toISOString(), arrivals, departures, gimpo, kac };
     if (saveRaw) fs.writeFileSync(saveRaw, JSON.stringify(raw));
@@ -452,7 +429,10 @@ async function main() {
   const fmt = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
 
   const incheon = buildIncheon(raw.arrivals, raw.departures);
-  const gimpo = buildGimpo(raw.gimpo, fmt(now), fmt(plus6));
+  // 김포: 한국공항공사 운항 스케줄(지금 시즌)을 우선 쓰고, 못 받았으면 연 1회 데이터셋으로
+  const gimpo =
+    (raw.kac && raw.kac.length && buildGimpoFromKac(raw.kac, raw.gimpo, fmt(now), fmt(plus6))) ||
+    buildGimpo(raw.gimpo, fmt(now), fmt(plus6));
   const routes = { ...incheon, ...gimpo.routes };
 
   const pages = PAGES.map((p) => ({
