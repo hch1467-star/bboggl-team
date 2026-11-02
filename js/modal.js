@@ -186,7 +186,7 @@ const ScheduleModal = {
     if (parsed.invalidLines.length > 0) {
       warning = `<div class="modal-preview-warning">인식하지 못한 줄 ${parsed.invalidLines.length}개는 제외됐어요: ${parsed.invalidLines
         .map(escapeHtml)
-        .join(" / ")}</div>`;
+        .join(" / ")}<br>날짜·편명·시간·상태 형식을 확인해주세요 (시간은 4자리, 예: 7/24 KE724 1235-1425 COK)</div>`;
     }
 
     const holderMmids = roomHolderMmids(parsed);

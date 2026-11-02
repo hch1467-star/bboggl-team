@@ -231,6 +231,13 @@ function parseBlock(lines, makeDate) {
       return;
     }
 
+    // "11/21 LJ456 1440-16610 YOK"처럼 날짜로 시작하는데 위 형식에 안 맞는 줄은 오타 난 항공편 줄이다.
+    // 예전엔 첫 항공편 줄보다 앞에 있으면 동행자 이름으로 들어가 버려서, 입국편이 통째로 빠져도 경고가 안 떴다.
+    if (/^\d{1,2}\/\d{1,2}(\s|$)/.test(line)) {
+      invalidLines.push(line);
+      return;
+    }
+
     if (!flightsStarted) {
       travelers.push(parseTravelerLine(line));
     } else {
