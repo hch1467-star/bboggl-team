@@ -20,7 +20,8 @@ const OUT_DIR = path.join(__dirname, "..", "flight-tables");
 const GIMPO_ODCLOUD_NAMESPACE = "15003087"; // 한국공항공사_국제선 항공기스케줄 (update-flight-schedule.js와 같은 데이터셋)
 
 // 비즈니스석이 있는 대형항공사(운항사 기준). 여기 없는 항공사(LCC 등)는 표에서 뺀다.
-const FULL_SERVICE = new Set(["KE", "OZ", "JL", "NH", "ET"]);
+// 에티오피아항공(ET672/673, 나리타 경유편)은 실제 업무에 안 써서 표에서 뺌 (2026-11 요청)
+const FULL_SERVICE = new Set(["KE", "OZ", "JL", "NH"]);
 // 코드셰어 상대 편명으로 적어줄 항공사 (표에 "KE744/JL5217"처럼 하나만 붙임) — 여행사 표와 같은 규칙
 const PARTNER_PREFERENCE = { KE: ["JL", "NH"], OZ: ["NH", "JL"], JL: ["KE", "OZ"], NH: ["OZ", "KE"] };
 
@@ -61,7 +62,8 @@ const FLIGHT_DURATION_MIN = {
 // 표 이미지 3장 — 첨부받은 여행사 표와 같은 묶음
 const PAGES = [
   { file: "table-1", name: "나고야 · 후쿠오카", blocks: [["ICN", "NGO"], ["ICN", "FUK"]] },
-  { file: "table-2", name: "나리타 · 하네다", blocks: [["ICN", "NRT"], ["ICN", "HND"], ["GMP", "HND"]] },
+  // 도쿄 노선은 하네다-김포 → 하네다-인천 → 나리타-인천 순서 (2026-11 요청)
+  { file: "table-2", name: "하네다 · 나리타", blocks: [["GMP", "HND"], ["ICN", "HND"], ["ICN", "NRT"]] },
   { file: "table-3", name: "오사카 · 고베", blocks: [["ICN", "KIX"], ["GMP", "KIX"], ["ICN", "UKB"]] },
 ];
 
