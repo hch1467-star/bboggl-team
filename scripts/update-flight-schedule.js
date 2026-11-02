@@ -474,6 +474,20 @@ async function main() {
     if (!routeMap[code]) routeMap[code] = info;
   }
 
+  // "JL091"과 "JL91"은 같은 편인데 예전 표기로 남은 값이 따로 놀면(여름 시간 등) 붙여넣기 때 틀린 시간이 들어간다.
+  // 앞자리 0을 뗀 편명에 이번 값이 있으면 0 붙은 표기도 같은 값으로 맞춘다.
+  const unpadded = (c) => c.replace(/^([A-Z0-9]{2})0+(\d)/, "$1$2");
+  let aligned = 0;
+  for (const code of Object.keys(finalMap)) {
+    const plain = unpadded(code);
+    if (plain !== code && finalMap[plain] && finalMap[code] !== finalMap[plain]) {
+      finalMap[code] = finalMap[plain];
+      aligned++;
+    }
+    if (plain !== code && routeMap[plain]) routeMap[code] = routeMap[plain];
+  }
+  if (aligned) console.log(`0 붙은 편명 표기 ${aligned}개를 최신 값으로 맞춤`);
+
   console.log(
     `인천 자동 추가 ${icnAutoAdded}편 / 김포 신규 ${gimpoAdded}편 / 기존 값 유지 ${keptFromExisting}편 / 전체 ${Object.keys(finalMap).length}편`
   );
@@ -500,7 +514,8 @@ async function main() {
     "};",
     "",
     "function timeRangeForFlight(flightNo) {",
-    '  return FLIGHT_TIME_MAP[(flightNo || "").toUpperCase()] || null;',
+    '  const code = (flightNo || "").toUpperCase();',
+    '  return FLIGHT_TIME_MAP[code] || FLIGHT_TIME_MAP[code.replace(/^([A-Z0-9]{2})0+(\\d)/, "$1$2")] || null;',
     "}",
     "",
     "// 편명 -> 어느 한국 공항인지 / 상대 일본 공항 / 입국·출국. API 응답에서 같이 받아온 값.",
